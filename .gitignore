@@ -1,0 +1,20 @@
+# Python stuff
+__pycache__/
+*.pyc
+venv/
+env/
+.idea/
+.vscode/
+
+# Local Data (Don't upload these huge files!)
+Transcriptions.txt
+AllGenizah_OLD.txt
+Results/
+Genizah_Tantivy_Index/
+*.pkl
+config.pkl
+
+# Build artifacts
+dist/
+build/
+*.spec

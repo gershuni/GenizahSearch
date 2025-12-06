@@ -1,0 +1,6 @@
+PyQt6
+tantivy
+requests
+google-generativeai
+tqdm
+colorama
