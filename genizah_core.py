@@ -216,7 +216,7 @@ class MetadataManager:
     def __init__(self):
         self.meta_map = {} 
         self.nli_cache = {}
-        self.nli_executor = ThreadPoolExecutor(max_workers=5)
+        self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
         
         # Ensure index dir exists for caches
@@ -296,40 +296,73 @@ class MetadataManager:
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
         meta = {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
-        try:
-            resp = requests.get(url, timeout=5)
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                c_942 = None; c_907 = None; c_090 = None; c_avd = None
+        
+        # כותרות כדי להיראות כמו דפדפן
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        
+        import time 
 
-                for df in root.findall('marc:datafield', self.ns):
-                    tag = df.get('tag')
-                    def get_val(code):
-                        sf = df.find(f"marc:subfield[@code='{code}']", self.ns)
-                        return sf.text if sf is not None else None
+        # נסה פעמיים
+        for attempt in range(2):
+            try:
+                # המתנה קלה כדי לא להעמיס
+                time.sleep(0.3)
+                
+                resp = requests.get(url, headers=headers, timeout=5)
+                
+                if resp.status_code == 200:
+                    try:
+                        root = ET.fromstring(resp.content)
+                        # ... הלוגיקה הרגילה של ה-XML ...
+                        c_942 = None; c_907 = None; c_090 = None; c_avd = None
 
-                    if tag == '942':
-                        val = get_val('z')
-                        if val and not c_942: c_942 = val
-                        elif val and c_942 and c_942.isdigit() and not val.isdigit(): c_942 = val
-                    elif tag == '907':
-                        val = get_val('e')
-                        if val: c_907 = val
-                    elif tag == '090':
-                        val = get_val('a')
-                        if val and "MSS" not in val: c_090 = val
-                    elif tag == 'AVD':
-                        val = get_val('e')
-                        if val: c_avd = val
-                    elif tag == '245':
-                        val = get_val('a')
-                        if val: meta['title'] = val.rstrip('./,:;')
+                        for df in root.findall('marc:datafield', self.ns):
+                            tag = df.get('tag')
+                            def get_val(code):
+                                sf = df.find(f"marc:subfield[@code='{code}']", self.ns)
+                                return sf.text if sf is not None else None
 
-                final = c_942 or c_907 or c_090 or c_avd
-                if final: meta['shelfmark'] = final
-        except: pass
+                            if tag == '942':
+                                val = get_val('z')
+                                if val and not c_942: c_942 = val
+                                elif val and c_942 and c_942.isdigit() and not val.isdigit(): c_942 = val
+                                    
+                            elif tag == '907':
+                                val = get_val('e')
+                                if val: c_907 = val
+                            elif tag == '090':
+                                val = get_val('a')
+                                if val and "MSS" not in val: c_090 = val
+                            elif tag == 'AVD':
+                                val = get_val('e')
+                                if val: c_avd = val
+                            elif tag == '245':
+                                val = get_val('a')
+                                if val: meta['title'] = val.rstrip('./,:;')
+
+                        final = c_942 or c_907 or c_090 or c_avd
+                        if final: meta['shelfmark'] = final
+                        
+                        # הצלחה - צא מהלולאה והחזר תוצאה
+                        return system_id, meta
+                    except ET.ParseError:
+                        pass # XML שבור, אין טעם לנסות שוב
+                        break
+                
+                elif resp.status_code >= 500:
+                    print(f"[DEBUG] Server Error {resp.status_code} for {system_id}. Retry {attempt+1}...")
+                    time.sleep(1) # חכה שניה לפני ניסיון הבא
+                else:
+                    break # שגיאה אחרת (404 וכו'), לא לנסות שוב
+
+            except Exception as e:
+                print(f"[DEBUG] Network Error: {e}")
+                time.sleep(1)
+        
         return system_id, meta
-
+        
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
         to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
         if not to_fetch: return
@@ -620,14 +653,16 @@ class SearchEngine:
                 ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
 
             # Combined regex for highlighting
-            combined_pattern = "|".join(list(data['patterns'])) if data['patterns'] else ""
+            combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
             final_items.append({
                 'score': score, 'uid': uid, 
                 'raw_header': data['head'], 'src_lbl': data['src'],
-                'source_ctx': "\n".join(src_snippets), 'text': "\n...\n".join(ms_snips),
-                'highlight_pattern': combined_pattern
+                'source_ctx': "\n".join(src_snippets), 
+                'text': "\n...\n".join(ms_snips),
+                'highlight_pattern': combined_pattern # <--- קריטי להדגשה
             })
+
         final_items.sort(key=lambda x: x['score'], reverse=True)
         return final_items
 

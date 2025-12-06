@@ -37,27 +37,23 @@ class SearchThread(QThread):
 class CompositionThread(QThread):
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(list, dict, dict)
+    finished_signal = pyqtSignal(list) # מחזיר רק רשימה שטוחה
     error_signal = pyqtSignal(str)
 
-    def __init__(self, searcher, text, chunk, freq, mode, threshold):
+    def __init__(self, searcher, text, chunk, freq, mode): # הסרנו את threshold
         super().__init__()
         self.searcher = searcher; self.text = text; self.chunk = chunk
-        self.freq = freq; self.mode = mode; self.threshold = threshold
+        self.freq = freq; self.mode = mode
 
     def run(self):
         try:
             self.status_signal.emit("Scanning chunks...")
             def cb(curr, total): self.progress_signal.emit(curr, total)
+            
             items = self.searcher.search_composition_logic(
                 self.text, self.chunk, self.freq, self.mode, progress_callback=cb
             )
-            if not items:
-                self.finished_signal.emit([], {}, {})
-                return
-            self.status_signal.emit(f"Found {len(items)} matches. Grouping...")
-            main, appendix, summary = self.searcher.group_composition_results(items, self.threshold)
-            self.finished_signal.emit(main, appendix, summary)
+            self.finished_signal.emit(items if items else [])
         except Exception as e: self.error_signal.emit(str(e))
 
 class ShelfmarkLoaderThread(QThread):
