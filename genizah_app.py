@@ -1138,6 +1138,15 @@ class GenizahGUI(QMainWindow):
             else:
                 detail_lines.append("No known manuscripts supplied for exclusion.")
 
+            if self.comp_known:
+                lines.extend([
+                    sep,
+                    "KNOWN MANUSCRIPTS (Excluded)",
+                    sep,
+                ])
+                for item in self.comp_known:
+                    lines.extend(_fmt_item(item))
+
             if self.comp_appendix:
                 detail_lines.extend([
                     sep,
