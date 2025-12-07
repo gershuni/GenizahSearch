@@ -244,7 +244,16 @@ class MetadataManager:
     def _normalize_shelfmark(self, raw):
         if not raw: return None
         cleaned = str(raw).strip().strip('-').strip()
-        return cleaned if cleaned else None
+        cleaned = cleaned if cleaned else None
+        if not cleaned: return None
+
+        # Ignore optional "MS"/"Ms" prefix (with optional punctuation/spacing like "M.S." or "Ms.")
+        cleaned = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", cleaned, flags=re.IGNORECASE)
+
+        no_spaces = re.sub(r"[^\w]", "", cleaned).lower()
+        if no_spaces.startswith("ms"):
+            cleaned = cleaned[2:].lstrip()
+        return cleaned
 
     def _load_metadata_bank(self):
         if not os.path.exists(Config.METADATA_BANK): return
