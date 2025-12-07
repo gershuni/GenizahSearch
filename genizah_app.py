@@ -1047,6 +1047,7 @@ class GenizahGUI(QMainWindow):
             sep = "=" * 80
             appendix_count = sum(len(v) for v in self.comp_appendix.values())
             known_count = len(self.comp_known)
+            total_count = len(self.comp_main) + appendix_count + known_count
 
             def _fmt_item(item):
                 sid, p_num = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
@@ -1069,39 +1070,73 @@ class GenizahGUI(QMainWindow):
                 ]
                 return lines
 
-            lines = [
+            def _append_group_summary_lines(target):
+                if self.comp_appendix:
+                    for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                        fallback_summary = []
+                        summary_entries = self.comp_summary.get(sig, [])
+                        for idx, itm in enumerate(items):
+                            shelf_val = summary_entries[idx] if idx < len(summary_entries) else ""
+                            if not shelf_val or shelf_val.lower() == 'unknown':
+                                sid, _ = self.meta_mgr.parse_header_smart(itm.get('raw_header', ''))
+                                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
+                                shelf_val = meta.get('shelfmark') or sid or "Unknown"
+                            fallback_summary.append(shelf_val)
+                        target.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
+                else:
+                    target.append("No filtered compositions moved to Appendix.")
+
+            def _append_known_summary_lines(target):
+                target.extend([
+                    sep,
+                    "KNOWN MANUSCRIPTS SUMMARY",
+                    sep,
+                ])
+                if self.comp_known:
+                    for item in self.comp_known:
+                        sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+                        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+                        shelfmark = meta.get('shelfmark') or sys_id or "Unknown"
+                        target.append(f"- {shelfmark}")
+                else:
+                    target.append("No known manuscripts were excluded.")
+
+            summary_lines = [
+                sep,
+                "COMPOSITION REPORT SUMMARY",
                 sep,
                 f"Composition Search: {title}",
+                f"Total Results: {total_count}",
+                f"Main Manuscripts: {len(self.comp_main)}",
+                f"Grouped Manuscripts (Appendix): {appendix_count}",
+                f"Known Manuscripts (Excluded): {known_count}",
                 sep,
-                f"Total Main Manuscripts: {len(self.comp_main)} (Appendix: {appendix_count}, Known: {known_count})",
-                sep,
-                "FILTERED SUMMARY",
+                "GROUPED MANUSCRIPTS SUMMARY",
                 sep,
             ]
 
-            if self.comp_appendix:
-                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                    fallback_summary = []
-                    summary_entries = self.comp_summary.get(sig, [])
-                    for idx, itm in enumerate(items):
-                        shelf_val = summary_entries[idx] if idx < len(summary_entries) else ""
-                        if not shelf_val or shelf_val.lower() == 'unknown':
-                            sid, _ = self.meta_mgr.parse_header_smart(itm.get('raw_header', ''))
-                            meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
-                            shelf_val = meta.get('shelfmark') or sid or "Unknown"
-                        fallback_summary.append(shelf_val)
-                    lines.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
-            else:
-                lines.append("No filtered compositions moved to Appendix.")
+            _append_group_summary_lines(summary_lines)
+            _append_known_summary_lines(summary_lines)
 
-            lines.extend([
+            detail_lines = [
                 sep,
                 "MAIN MANUSCRIPTS",
                 sep,
-            ])
+            ]
 
             for item in self.comp_main:
-                lines.extend(_fmt_item(item))
+                detail_lines.extend(_fmt_item(item))
+
+            detail_lines.extend([
+                sep,
+                "KNOWN MANUSCRIPTS (Excluded)",
+                sep,
+            ])
+            if self.comp_known:
+                for item in self.comp_known:
+                    detail_lines.extend(_fmt_item(item))
+            else:
+                detail_lines.append("No known manuscripts supplied for exclusion.")
 
             if self.comp_known:
                 lines.extend([
@@ -1113,42 +1148,19 @@ class GenizahGUI(QMainWindow):
                     lines.extend(_fmt_item(item))
 
             if self.comp_appendix:
-                lines.extend([
+                detail_lines.extend([
                     sep,
                     "APPENDIX (Filtered Groups)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                    lines.append(f"{sig} ({len(items)} items)")
+                    detail_lines.append(f"{sig} ({len(items)} items)")
                     for item in items:
-                        lines.extend(_fmt_item(item))
+                        detail_lines.extend(_fmt_item(item))
 
             with open(path, 'w', encoding='utf-8') as f:
-                report_lines = [
-                    "Composition Report",
-                    f"Main ({len(self.comp_main)})",
-                    ""
-                ]
-
-                for item in self.comp_main:
-                    report_lines.append(self._format_comp_entry(item))
-                    report_lines.append("")
-
-                if self.comp_known:
-                    report_lines.append(f"Known Manuscripts ({len(self.comp_known)})")
-                    for item in self.comp_known:
-                        report_lines.append(self._format_comp_entry(item))
-                        report_lines.append("")
-
-                if self.comp_appendix:
-                    report_lines.append(f"Appendix ({sum(len(v) for v in self.comp_appendix.values())})")
-                    for group, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                        report_lines.append(f"-- {group} ({len(items)}) --")
-                        for item in items:
-                            report_lines.append(self._format_comp_entry(item))
-                            report_lines.append("")
-
-                f.write("\n".join(report_lines).strip() + "\n")
+                all_lines = summary_lines + detail_lines
+                f.write("\n".join(all_lines).strip() + "\n")
             QMessageBox.information(self, "Saved", f"Saved to {path}")
 
     def _format_comp_entry(self, item):
