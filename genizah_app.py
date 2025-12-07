@@ -2,6 +2,7 @@
 import sys
 import os
 import re
+import threading
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget, 
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox, 
@@ -638,7 +639,18 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition"); self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False); self.btn_comp_export.setEnabled(True)
         self.comp_main = main; self.comp_appendix = appx; self.comp_summary = summ
-        
+
+        # Ensure metadata is loaded so shelfmarks/titles appear immediately
+        all_ids = []
+        for item in main:
+            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sid: all_ids.append(sid)
+        for group_items in appx.values():
+            for item in group_items:
+                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+                if sid: all_ids.append(sid)
+        self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
+
         root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(main)})"]); root.setExpanded(True)
         for i in main:
             sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
@@ -720,6 +732,17 @@ class GenizahGUI(QMainWindow):
         if not self.comp_main:
             QMessageBox.warning(self, "Save", "No composition data to export.")
             return
+
+        # Proactively load missing metadata so shelfmarks and pages are populated
+        all_ids = []
+        for item in self.comp_main:
+            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sid: all_ids.append(sid)
+        for group_items in self.comp_appendix.values():
+            for item in group_items:
+                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+                if sid: all_ids.append(sid)
+        self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
 
         missing_ids = []
         for item in self.comp_main:
@@ -854,6 +877,35 @@ class GenizahGUI(QMainWindow):
             f"MS [{sys_id} | Img {page or 'N/A'}]:",
             ms_ctx
         ])
+
+    def _fetch_metadata_with_dialog(self, system_ids, title="Loading metadata..."):
+        to_fetch = [sid for sid in system_ids if sid and sid not in self.meta_mgr.nli_cache]
+        if not to_fetch:
+            return
+
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(title)
+        dialog.setText("Please wait while shelfmarks and titles are loaded...\nThis may take a few seconds.")
+        dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        dialog.show()
+
+        progress = {'count': 0}
+
+        def progress_cb(count, total, sid):
+            progress['count'] = count
+            dialog.setInformativeText(f"Loaded {count}/{total} (ID: {sid})")
+            QApplication.processEvents()
+
+        def run_fetch():
+            self.meta_mgr.batch_fetch_shelfmarks(to_fetch, progress_callback=progress_cb)
+
+        thread = threading.Thread(target=run_fetch, daemon=True)
+        thread.start()
+
+        while thread.is_alive():
+            QApplication.processEvents()
+        thread.join()
+        dialog.hide()
 
     def _resolve_meta_labels(self, raw_header):
         sid, page = self.meta_mgr.parse_header_smart(raw_header)
