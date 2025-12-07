@@ -755,9 +755,10 @@ class SearchEngine:
             sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
             meta = self.meta_mgr.nli_cache.get(sid, {})
             t = meta.get('title', '').strip()
+            shelfmark = self.meta_mgr.get_shelfmark_from_header(item['raw_header']) or meta.get('shelfmark', 'Unknown')
             wrapped.append({
-                'item': item, 'title': t, 'clean': " ".join(_get_clean_words(t)), 
-                'grouped': False, 'shelfmark': meta.get('shelfmark', 'Unknown')
+                'item': item, 'title': t, 'clean': " ".join(_get_clean_words(t)),
+                'grouped': False, 'shelfmark': shelfmark
             })
 
         wrapped.sort(key=lambda x: len(x['title']))

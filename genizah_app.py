@@ -321,9 +321,10 @@ class ResultDialog(QDialog):
         
         html = page_data['text'].replace("\n", "<br>")
         self.text_browser.setHtml(f"<div dir='rtl'>{html}</div>")
-        
+
         meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
-        self.lbl_shelf.setText(meta.get('shelfmark', 'Unknown Shelf'))
+        shelf = self.meta_mgr.get_shelfmark_from_header(page_data.get('full_header', '')) or meta.get('shelfmark', 'Unknown Shelf')
+        self.lbl_shelf.setText(shelf)
         self.lbl_title.setText(meta.get('title', ''))
 
     def open_catalog(self):
@@ -659,13 +660,13 @@ class GenizahGUI(QMainWindow):
 
     def on_meta_progress(self, curr, total, sid):
         self.status_label.setText(f"Metadata {curr}/{total}")
-        meta = self.meta_mgr.nli_cache.get(sid, {})
         for r in range(self.results_table.rowCount()):
             if self.results_table.item(r, 0).text() == sid:
-                self.results_table.setItem(r, 1, QTableWidgetItem(meta.get('shelfmark', '')))
-                self.results_table.setItem(r, 2, QTableWidgetItem(meta.get('title', '')))
-                self.last_results[r]['display']['shelfmark'] = meta.get('shelfmark', '')
-                self.last_results[r]['display']['title'] = meta.get('title', '')
+                _, _, shelf, title = self._get_meta_for_header(self.last_results[r]['raw_header'])
+                self.results_table.setItem(r, 1, QTableWidgetItem(shelf))
+                self.results_table.setItem(r, 2, QTableWidgetItem(title))
+                self.last_results[r]['display']['shelfmark'] = shelf
+                self.last_results[r]['display']['title'] = title
 
     def show_full_text(self):
         row = self.results_table.currentRow()
@@ -716,6 +717,15 @@ class GenizahGUI(QMainWindow):
             return ""
         return re.sub(r"[^\w]", "", shelf).lower()
 
+    def _get_meta_for_header(self, raw_header):
+        """Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks."""
+        sys_id, p_num = self.meta_mgr.parse_header_smart(raw_header)
+        shelf = self.meta_mgr.get_shelfmark_from_header(raw_header)
+        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+        shelf = shelf or meta.get('shelfmark', '')
+        title = meta.get('title', '')
+        return sys_id, p_num, shelf, title
+
     def _item_matches_exclusion(self, item):
         sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
         if sys_id and sys_id in self.excluded_sys_ids:
@@ -724,8 +734,7 @@ class GenizahGUI(QMainWindow):
         if sys_id and sys_id not in self.meta_mgr.nli_cache:
             self.meta_mgr.fetch_nli_data(sys_id)
 
-        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
-        shelf = meta.get('shelfmark', '')
+        _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
         norm_shelf = self.normalize_shelfmark(shelf)
         if norm_shelf and norm_shelf in self.excluded_shelfmarks:
             return True
@@ -826,7 +835,8 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run.setText("Stop")
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True)
-        self.comp_progress.setRange(0, 0)
+        total_items = len(items) if items else 0
+        self.comp_progress.setRange(0, total_items)
         self.comp_progress.setValue(0)
         self.comp_progress.setFormat("Grouping compositions...")
 
@@ -878,12 +888,11 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.clear()
         root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(filtered_main)})"]); root.setExpanded(True)
         for i in filtered_main:
-            sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
-            meta = self.meta_mgr.nli_cache.get(sid, {})
+            sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
             node = QTreeWidgetItem(root)
             node.setText(0, str(i.get('score', '')));
-            node.setText(1, meta.get('shelfmark',''))
-            node.setText(2, meta.get('title',''));
+            node.setText(1, shelf)
+            node.setText(2, title);
             node.setText(3, sid)
             node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
             node.setData(0, Qt.ItemDataRole.UserRole, i)
@@ -893,24 +902,22 @@ class GenizahGUI(QMainWindow):
             for g, items in sorted(filtered_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                 for i in items:
-                    sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
-                    meta = self.meta_mgr.nli_cache.get(sid, {})
+                    sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
                     ch = QTreeWidgetItem(gn)
                     ch.setText(0, str(i.get('score', '')));
-                    ch.setText(1, meta.get('shelfmark',''))
-                    ch.setText(2, meta.get('title',''))
+                    ch.setText(1, shelf)
+                    ch.setText(2, title)
                     ch.setText(3, sid)
                     ch.setData(0, Qt.ItemDataRole.UserRole, i)
 
         if known:
             root_k = QTreeWidgetItem(self.comp_tree, [f"Known Manuscripts ({len(known)})"])
             for i in known:
-                sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
-                meta = self.meta_mgr.nli_cache.get(sid, {})
+                sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
                 node = QTreeWidgetItem(root_k)
                 node.setText(0, str(i.get('score', '')));
-                node.setText(1, meta.get('shelfmark',''))
-                node.setText(2, meta.get('title',''))
+                node.setText(1, shelf)
+                node.setText(2, title)
                 node.setText(3, sid or '')
                 node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
                 node.setData(0, Qt.ItemDataRole.UserRole, i)
@@ -928,9 +935,8 @@ class GenizahGUI(QMainWindow):
         def process_node(node):
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
             if node_data: # It's a leaf item
-                sid, p = self.meta_mgr.parse_header_smart(node_data['raw_header'])
-                meta = self.meta_mgr.nli_cache.get(sid, {})
-                
+                sid, p, shelf, title = self._get_meta_for_header(node_data['raw_header'])
+
                 ready_data = {
                     'uid': node_data['uid'],
                     'raw_header': node_data['raw_header'],
@@ -938,8 +944,8 @@ class GenizahGUI(QMainWindow):
                     'full_text': None, # Will be fetched by Dialog on load
                     'source_ctx': node_data.get('source_ctx', ''),
                     'display': {
-                        'shelfmark': meta.get('shelfmark', ''),
-                        'title': meta.get('title', ''),
+                        'shelfmark': shelf,
+                        'title': title,
                         'img': p,
                         'source': node_data['src_lbl']
                     }
@@ -980,11 +986,10 @@ class GenizahGUI(QMainWindow):
             if not node_data:
                 return
 
-            sys_id, _ = self.meta_mgr.parse_header_smart(node_data.get('raw_header', ''))
-            meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+            sys_id, _, shelf, title = self._get_meta_for_header(node_data.get('raw_header', ''))
 
-            node.setText(1, meta.get('shelfmark', ''))
-            node.setText(2, meta.get('title', ''))
+            node.setText(1, shelf)
+            node.setText(2, title)
             node.setText(3, sys_id or '')
 
         root = self.comp_tree.invisibleRootItem()
@@ -1019,10 +1024,7 @@ class GenizahGUI(QMainWindow):
 
         missing_ids = []
         for item in self.comp_main + self.comp_known:
-            sys_id, p_num = self.meta_mgr.parse_header_smart(item['raw_header'])
-            meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
-            shelf = meta.get('shelfmark', '')
-            title = meta.get('title', '')
+            sys_id, p_num, shelf, title = self._get_meta_for_header(item['raw_header'])
             if not shelf or shelf == 'Unknown' or not title or not p_num or p_num == 'Unknown':
                 if sys_id:
                     missing_ids.append(sys_id)
@@ -1051,10 +1053,9 @@ class GenizahGUI(QMainWindow):
             total_count = len(self.comp_main) + appendix_count + known_count
 
             def _fmt_item(item):
-                sid, p_num = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
-                shelfmark = meta.get('shelfmark') or sid or "Unknown"
-                title_txt = meta.get('title', '') or "Untitled"
+                sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+                shelfmark = shelf or sid or "Unknown"
+                title_txt = title or "Untitled"
                 version = item.get('src_lbl', '') or "Unknown"
                 page = p_num or "?"
                 uid = item.get('uid', sid) or sid or "Unknown"
@@ -1079,9 +1080,8 @@ class GenizahGUI(QMainWindow):
                         for idx, itm in enumerate(items):
                             shelf_val = summary_entries[idx] if idx < len(summary_entries) else ""
                             if not shelf_val or shelf_val.lower() == 'unknown':
-                                sid, _ = self.meta_mgr.parse_header_smart(itm.get('raw_header', ''))
-                                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
-                                shelf_val = meta.get('shelfmark') or sid or "Unknown"
+                                sid, _, shelf, _ = self._get_meta_for_header(itm.get('raw_header', ''))
+                                shelf_val = shelf or sid or "Unknown"
                             fallback_summary.append(shelf_val)
                         target.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
                 else:
@@ -1095,9 +1095,8 @@ class GenizahGUI(QMainWindow):
                 ])
                 if self.comp_known:
                     for item in self.comp_known:
-                        sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-                        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
-                        shelfmark = meta.get('shelfmark') or sys_id or "Unknown"
+                        sys_id, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
+                        shelfmark = shelf or sys_id or "Unknown"
                         target.append(f"- {shelfmark}")
                 else:
                     target.append("No known manuscripts were excluded.")
@@ -1219,12 +1218,12 @@ class GenizahGUI(QMainWindow):
         dialog.hide()
 
     def _resolve_meta_labels(self, raw_header):
-        sid, page = self.meta_mgr.parse_header_smart(raw_header)
+        sid, page, shelf, title = self._get_meta_for_header(raw_header)
         sys_id = sid or "Unknown System ID"
 
-        meta = self.meta_mgr.fetch_nli_data(sid) if sid else {}
-        shelf = meta.get('shelfmark') if meta else None
-        title = meta.get('title') if meta else None
+        if sid and sid not in self.meta_mgr.nli_cache:
+            meta = self.meta_mgr.fetch_nli_data(sid)
+            title = title or (meta.get('title') if meta else None)
 
         shelf_lbl = shelf or f"[Shelfmark missing for {sys_id}]"
         title_lbl = title or "[Title missing]"
@@ -1244,8 +1243,13 @@ class GenizahGUI(QMainWindow):
         if not pd: QMessageBox.warning(self, "Nav", "Not found or end."); return
         self.current_browse_p = pd['p_num']
         self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace(chr(10), '<br>')}</div>")
-        meta = self.meta_mgr.fetch_nli_data(self.current_browse_sid)
-        self.browse_info_lbl.setText(f"{meta.get('shelfmark','')} | Img: {pd['p_num']}")
+        _, _, shelf, title = self._get_meta_for_header(pd.get('full_header', ''))
+        if self.current_browse_sid and self.current_browse_sid not in self.meta_mgr.nli_cache:
+            meta = self.meta_mgr.fetch_nli_data(self.current_browse_sid)
+            title = title or meta.get('title', '')
+            shelf = shelf or meta.get('shelfmark', '')
+
+        self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
