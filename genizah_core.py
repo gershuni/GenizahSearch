@@ -40,6 +40,7 @@ class Config:
     INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
     RESULTS_DIR = os.path.join(BASE_DIR, "Results")
     REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
+    METADATA_BANK = os.path.join(BASE_DIR, "metadata_bank.pkl")
 
     # 3. User Data Directory (Index, Caches)
     INDEX_DIR = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
@@ -215,8 +216,9 @@ class VariantManager:
 # ==============================================================================
 class MetadataManager:
     def __init__(self):
-        self.meta_map = {} 
+        self.meta_map = {}
         self.nli_cache = {}
+        self.shelf_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
         
@@ -229,6 +231,7 @@ class MetadataManager:
         threading.Thread(target=self._build_file_map_background, daemon=True).start()
 
     def _load_caches(self):
+        self._load_metadata_bank()
         if os.path.exists(Config.CACHE_NLI):
             try:
                 with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
@@ -237,6 +240,61 @@ class MetadataManager:
             try:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
             except: pass
+
+    def _normalize_shelfmark(self, raw):
+        if not raw: return None
+        cleaned = str(raw).strip().strip('-').strip()
+        return cleaned if cleaned else None
+
+    def _load_metadata_bank(self):
+        if not os.path.exists(Config.METADATA_BANK): return
+        try:
+            with open(Config.METADATA_BANK, 'rb') as f:
+                data = pickle.load(f)
+        except Exception:
+            return
+
+        parsed = {}
+
+        def add_entry(ie_id, shelf):
+            shelfmark = self._normalize_shelfmark(shelf)
+            if ie_id and shelfmark:
+                parsed[ie_id] = shelfmark
+
+        if isinstance(data, dict):
+            for key, val in data.items():
+                ie_match = re.search(r'(IE\d+)', str(key)) or re.search(r'(IE\d+)', str(val))
+                add_entry(ie_match.group(1) if ie_match else None, val)
+        elif isinstance(data, (list, tuple)):
+            for item in data:
+                ie_match = re.search(r'(IE\d+)', str(item))
+                shelf_match = re.split(r'"', str(item).replace('”', '"').replace('“', '"'))
+                shelf = shelf_match[-1] if shelf_match else None
+                add_entry(ie_match.group(1) if ie_match else None, shelf)
+        elif isinstance(data, str):
+            chunks = data.replace('\n', ' ').replace('”', '"').replace('“', '"').split(' - ')
+            for chunk in chunks:
+                parts = [p for p in chunk.split('"') if p]
+                ie_match = None
+                shelf = None
+                for p in parts:
+                    if not ie_match:
+                        m = re.search(r'(IE\d+)', p)
+                        if m: ie_match = m.group(1)
+                    if not shelf and re.search(r'[A-Za-z]{1,3}\.?[A-Za-z0-9\.\- ]+', p):
+                        shelf = p
+                add_entry(ie_match, shelf)
+
+        self.shelf_bank = parsed
+
+    def get_shelfmark_from_header(self, full_header):
+        parsed = self.parse_full_id_components(full_header)
+        if parsed.get('ie_id') and parsed['ie_id'] in self.shelf_bank:
+            return self.shelf_bank.get(parsed['ie_id'], '')
+        sys_id = parsed.get('sys_id')
+        if sys_id and sys_id in self.nli_cache:
+            return self.nli_cache[sys_id].get('shelfmark', '')
+        return ''
 
     def save_caches(self):
         try:
@@ -380,9 +438,15 @@ class MetadataManager:
 
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
+        parsed = self.parse_full_id_components(full_header)
+
+        shelfmark = None
+        if parsed.get('ie_id') and parsed['ie_id'] in self.shelf_bank:
+            shelfmark = self.shelf_bank.get(parsed['ie_id'])
         meta = self.nli_cache.get(sys_id, {'shelfmark': '', 'title': ''})
+        shelfmark = shelfmark or meta.get('shelfmark')
         return {
-            'shelfmark': meta.get('shelfmark') or f"ID: {sys_id}",
+            'shelfmark': shelfmark or f"ID: {sys_id}",
             'title': meta.get('title', ''),
             'img': p_num,
             'source': src_label,
@@ -443,9 +507,10 @@ class Indexer:
                     
                     if is_sep:
                         if cid and ctext:
+                            shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid), content=" ".join(ctext), source=str(label),
-                                full_header=str(chead), shelfmark=str(self.meta_mgr.meta_map.get(cid, ""))
+                                full_header=str(chead), shelfmark=str(shelfmark)
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
                             if parsed['sys_id'] and parsed['p_num']:
@@ -459,9 +524,10 @@ class Indexer:
                         progress_callback(processed_lines, total_lines)
                 
                 if cid and ctext:
+                    shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid), content=" ".join(ctext), source=str(label),
-                        full_header=str(chead), shelfmark=""
+                        full_header=str(chead), shelfmark=str(shelfmark)
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
                     if parsed['sys_id'] and parsed['p_num']:
