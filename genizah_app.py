@@ -715,7 +715,8 @@ class GenizahGUI(QMainWindow):
     def normalize_shelfmark(self, shelf: str):
         if not shelf:
             return ""
-        cleaned = re.sub(r"[^\w]", "", shelf).lower()
+        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", shelf, flags=re.IGNORECASE)
+        cleaned = re.sub(r"[^\w]", "", without_prefix).lower()
         # Treat optional "ms" prefix as non-significant for comparisons
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]

@@ -247,7 +247,9 @@ class MetadataManager:
         cleaned = cleaned if cleaned else None
         if not cleaned: return None
 
-        # Ignore optional "MS" prefix when comparing shelfmarks
+        # Ignore optional "MS"/"Ms" prefix (with optional punctuation/spacing like "M.S." or "Ms.")
+        cleaned = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", cleaned, flags=re.IGNORECASE)
+
         no_spaces = re.sub(r"[^\w]", "", cleaned).lower()
         if no_spaces.startswith("ms"):
             cleaned = cleaned[2:].lstrip()
