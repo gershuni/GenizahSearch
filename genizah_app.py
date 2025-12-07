@@ -715,7 +715,11 @@ class GenizahGUI(QMainWindow):
     def normalize_shelfmark(self, shelf: str):
         if not shelf:
             return ""
-        return re.sub(r"[^\w]", "", shelf).lower()
+        cleaned = re.sub(r"[^\w]", "", shelf).lower()
+        # Treat optional "ms" prefix as non-significant for comparisons
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
 
     def _get_meta_for_header(self, raw_header):
         """Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks."""
