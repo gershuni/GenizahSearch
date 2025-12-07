@@ -818,23 +818,55 @@ class GenizahGUI(QMainWindow):
                         lines.extend(_fmt_item(item))
 
             with open(path, 'w', encoding='utf-8') as f:
-                f.write("\n".join(lines))
+                report_lines = [
+                    "Composition Report",
+                    f"Main ({len(self.comp_main)})",
+                    ""
+                ]
 
+                for item in self.comp_main:
+                    report_lines.append(self._format_comp_entry(item))
+                    report_lines.append("")
+
+                if self.comp_appendix:
+                    report_lines.append(f"Appendix ({sum(len(v) for v in self.comp_appendix.values())})")
+                    for group, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                        report_lines.append(f"-- {group} ({len(items)}) --")
+                        for item in items:
+                            report_lines.append(self._format_comp_entry(item))
+                            report_lines.append("")
+
+                f.write("\n".join(report_lines).strip() + "\n")
             QMessageBox.information(self, "Saved", f"Saved to {path}")
 
-    def _refresh_comp_tree_metadata(self):
-        root = self.comp_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            group = root.child(i)
-            for j in range(group.childCount()):
-                node = group.child(j)
-                item = node.data(0, Qt.ItemDataRole.UserRole)
-                if not item:
-                    continue
-                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
-                node.setText(1, meta.get('shelfmark',''))
-                node.setText(2, meta.get('title',''))
+    def _format_comp_entry(self, item):
+        sys_id, page, shelfmark, title = self._resolve_meta_labels(item['raw_header'])
+
+        header = f"{shelfmark} | {title} (System ID: {sys_id}, Img: {page or 'N/A'})"
+        source_ctx = (item.get('source_ctx', '') or '').strip() or "[No source excerpt available]"
+        ms_ctx = (item.get('text', '') or '').strip() or "[No manuscript excerpt available]"
+        src_label = item.get('src_lbl', 'Source')
+
+        return "\n".join([
+            header,
+            f"Source [{sys_id} | {src_label}]:",
+            source_ctx,
+            f"MS [{sys_id} | Img {page or 'N/A'}]:",
+            ms_ctx
+        ])
+
+    def _resolve_meta_labels(self, raw_header):
+        sid, page = self.meta_mgr.parse_header_smart(raw_header)
+        sys_id = sid or "Unknown System ID"
+
+        meta = self.meta_mgr.fetch_nli_data(sid) if sid else {}
+        shelf = meta.get('shelfmark') if meta else None
+        title = meta.get('title') if meta else None
+
+        shelf_lbl = shelf or f"[Shelfmark missing for {sys_id}]"
+        title_lbl = title or "[Title missing]"
+
+        return sys_id, page, shelf_lbl, title_lbl
 
     def browse_load(self):
         sid = self.browse_sys_input.text().strip()
