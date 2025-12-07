@@ -3,11 +3,11 @@ import sys
 import os
 import re
 import threading
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget, 
-                             QTableWidgetItem, QHeaderView, QComboBox, QCheckBox, 
-                             QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog, 
-                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
+                             QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
+                             QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
+                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
@@ -97,6 +97,51 @@ class AIDialog(QDialog):
         self.lbl_preview.setText(regex)
         self.generated_regex = regex
         self.btn_use.setEnabled(True)
+
+# ==============================================================================
+#  EXCLUDE MANUSCRIPTS DIALOG
+# ==============================================================================
+class ExcludeDialog(QDialog):
+    def __init__(self, parent, existing_entries=None):
+        super().__init__(parent)
+        self.setWindowTitle("Exclude Manuscripts")
+        self.resize(500, 400)
+        layout = QVBoxLayout()
+
+        help_lbl = QLabel("Enter system IDs or shelfmarks to exclude (one per line).")
+        help_lbl.setWordWrap(True)
+        layout.addWidget(help_lbl)
+
+        self.text_area = QPlainTextEdit()
+        self.text_area.setPlaceholderText("123456\nT-S NS 123.45\nJer 123")
+        if existing_entries:
+            self.text_area.setPlainText("\n".join(existing_entries))
+        layout.addWidget(self.text_area)
+
+        btn_row = QHBoxLayout()
+        self.btn_load = QPushButton("Load from File")
+        self.btn_load.clicked.connect(self.load_file)
+        btn_row.addWidget(self.btn_load)
+
+        btn_row.addStretch()
+        btn_apply = QPushButton("Apply")
+        btn_apply.clicked.connect(self.accept)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_apply)
+        layout.addLayout(btn_row)
+
+        self.setLayout(layout)
+
+    def load_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text (*.txt)")
+        if path:
+            with open(path, 'r', encoding='utf-8') as f:
+                self.text_area.setPlainText(f.read())
+
+    def get_entries_text(self):
+        return self.text_area.toPlainText()
 
 # ==============================================================================
 #  RESULT DIALOG
@@ -320,6 +365,10 @@ class GenizahGUI(QMainWindow):
             self.comp_appendix = {}
             self.comp_summary = {}
             self.comp_raw_items = []
+            self.comp_known = []
+            self.excluded_raw_entries = []
+            self.excluded_sys_ids = set()
+            self.excluded_shelfmarks = set()
             self.group_thread = None
             self.is_searching = False
             self.is_comp_running = False
@@ -426,10 +475,16 @@ class GenizahGUI(QMainWindow):
         in_l.addLayout(tr)
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText("Paste source text...")
         in_l.addWidget(self.comp_text_area)
-        
+
         cr = QHBoxLayout()
         btn_load = QPushButton("Load Text File"); btn_load.clicked.connect(self.load_comp_file)
-        
+
+        btn_exclude = QPushButton("Exclude Manuscripts")
+        btn_exclude.clicked.connect(self.open_exclude_dialog)
+
+        self.lbl_exclude_status = QLabel("Excluded: 0")
+        self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
+
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix("Chunk: ")
         self.spin_chunk.setToolTip("Words per search block (Rec: 5-7)")
         
@@ -445,11 +500,12 @@ class GenizahGUI(QMainWindow):
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix("Filter > ")
         self.spin_filter.setToolTip("Move titles appearing > X times to Appendix")
-        
+
         self.btn_comp_run = QPushButton("Analyze Composition"); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
-        
-        cr.addWidget(btn_load); cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
+
+        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(self.lbl_exclude_status)
+        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.btn_comp_run)
         in_l.addLayout(cr)
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
@@ -629,6 +685,76 @@ class GenizahGUI(QMainWindow):
         if path:
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
+    def open_exclude_dialog(self):
+        dlg = ExcludeDialog(self, existing_entries=self.excluded_raw_entries)
+        if dlg.exec():
+            self.set_excluded_entries(dlg.get_entries_text())
+
+    def set_excluded_entries(self, entries_text: str):
+        entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
+        self.excluded_raw_entries = entries
+
+        sys_ids = set()
+        shelves = set()
+        for e in entries:
+            cleaned = re.sub(r"\s+", "", e)
+            digits_only = re.sub(r"\D", "", cleaned)
+            if digits_only and digits_only == cleaned:
+                sys_ids.add(cleaned)
+            else:
+                norm = self.normalize_shelfmark(e)
+                if norm:
+                    shelves.add(norm)
+
+        self.excluded_sys_ids = sys_ids
+        self.excluded_shelfmarks = shelves
+        self.lbl_exclude_status.setText(f"Excluded: {len(entries)}")
+
+    def normalize_shelfmark(self, shelf: str):
+        if not shelf:
+            return ""
+        return re.sub(r"[^\w]", "", shelf).lower()
+
+    def _item_matches_exclusion(self, item):
+        sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+        if sys_id and sys_id in self.excluded_sys_ids:
+            return True
+
+        if sys_id and sys_id not in self.meta_mgr.nli_cache:
+            self.meta_mgr.fetch_nli_data(sys_id)
+
+        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+        shelf = meta.get('shelfmark', '')
+        norm_shelf = self.normalize_shelfmark(shelf)
+        if norm_shelf and norm_shelf in self.excluded_shelfmarks:
+            return True
+        return False
+
+    def _apply_manual_exclusions(self, main, appx):
+        if not (self.excluded_sys_ids or self.excluded_shelfmarks):
+            return main, appx, []
+
+        known = []
+        filtered_main = []
+        for item in main:
+            if self._item_matches_exclusion(item):
+                known.append(item)
+            else:
+                filtered_main.append(item)
+
+        filtered_appx = {}
+        for key, items in appx.items():
+            kept = []
+            for item in items:
+                if self._item_matches_exclusion(item):
+                    known.append(item)
+                else:
+                    kept.append(item)
+            if kept:
+                filtered_appx[key] = kept
+
+        return filtered_main, filtered_appx, known
+
     def toggle_composition(self):
         if self.is_comp_running:
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
@@ -654,6 +780,7 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
         self.comp_progress.setFormat("Scanning chunks...")
         self.comp_raw_items = []
+        self.comp_known = []
         self.btn_comp_export.setEnabled(False)
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
 
@@ -724,25 +851,32 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_export.setEnabled(True)
         self.group_thread = None
         self.comp_raw_items = main
-        self.comp_main = main
-        self.comp_appendix = appx
+
+        filtered_main, filtered_appx, known = self._apply_manual_exclusions(main, appx)
+
+        self.comp_main = filtered_main
+        self.comp_appendix = filtered_appx
         self.comp_summary = summ
+        self.comp_known = known
 
         # Ensure metadata is loaded so shelfmarks/titles appear immediately
         all_ids = []
-        for item in main:
+        for item in filtered_main:
             sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
             if sid: all_ids.append(sid)
-        for group_items in appx.values():
+        for group_items in filtered_appx.values():
             for item in group_items:
                 sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
                 if sid: all_ids.append(sid)
+        for item in known:
+            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sid: all_ids.append(sid)
         if all_ids:
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
         self.comp_tree.clear()
-        root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(main)})"]); root.setExpanded(True)
-        for i in main:
+        root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(filtered_main)})"]); root.setExpanded(True)
+        for i in filtered_main:
             sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
             meta = self.meta_mgr.nli_cache.get(sid, {})
             node = QTreeWidgetItem(root)
@@ -753,9 +887,9 @@ class GenizahGUI(QMainWindow):
             node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
             node.setData(0, Qt.ItemDataRole.UserRole, i)
 
-        if appx:
-            root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(appx)})"])
-            for g, items in sorted(appx.items(), key=lambda x: len(x[1]), reverse=True):
+        if filtered_appx:
+            root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(filtered_appx)})"])
+            for g, items in sorted(filtered_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                 for i in items:
                     sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
@@ -766,6 +900,19 @@ class GenizahGUI(QMainWindow):
                     ch.setText(2, meta.get('title',''))
                     ch.setText(3, sid)
                     ch.setData(0, Qt.ItemDataRole.UserRole, i)
+
+        if known:
+            root_k = QTreeWidgetItem(self.comp_tree, [f"Known Manuscripts ({len(known)})"])
+            for i in known:
+                sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
+                meta = self.meta_mgr.nli_cache.get(sid, {})
+                node = QTreeWidgetItem(root_k)
+                node.setText(0, str(i.get('score', '')));
+                node.setText(1, meta.get('shelfmark',''))
+                node.setText(2, meta.get('title',''))
+                node.setText(3, sid or '')
+                node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
+                node.setData(0, Qt.ItemDataRole.UserRole, i)
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
@@ -851,7 +998,7 @@ class GenizahGUI(QMainWindow):
                     update_node(child)
 
     def export_comp_report(self):
-        if not self.comp_main:
+        if not (self.comp_main or self.comp_appendix or self.comp_known):
             QMessageBox.warning(self, "Save", "No composition data to export.")
             return
 
@@ -864,10 +1011,13 @@ class GenizahGUI(QMainWindow):
             for item in group_items:
                 sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
                 if sid: all_ids.append(sid)
+        for item in self.comp_known:
+            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sid: all_ids.append(sid)
         self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
 
         missing_ids = []
-        for item in self.comp_main:
+        for item in self.comp_main + self.comp_known:
             sys_id, p_num = self.meta_mgr.parse_header_smart(item['raw_header'])
             meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
             shelf = meta.get('shelfmark', '')
@@ -896,6 +1046,7 @@ class GenizahGUI(QMainWindow):
         if path:
             sep = "=" * 80
             appendix_count = sum(len(v) for v in self.comp_appendix.values())
+            known_count = len(self.comp_known)
 
             def _fmt_item(item):
                 sid, p_num = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
@@ -922,7 +1073,7 @@ class GenizahGUI(QMainWindow):
                 sep,
                 f"Composition Search: {title}",
                 sep,
-                f"Total Main Manuscripts: {len(self.comp_main)} (Appendix: {appendix_count})",
+                f"Total Main Manuscripts: {len(self.comp_main)} (Appendix: {appendix_count}, Known: {known_count})",
                 sep,
                 "FILTERED SUMMARY",
                 sep,
@@ -952,6 +1103,15 @@ class GenizahGUI(QMainWindow):
             for item in self.comp_main:
                 lines.extend(_fmt_item(item))
 
+            if self.comp_known:
+                lines.extend([
+                    sep,
+                    "KNOWN MANUSCRIPTS (Excluded)",
+                    sep,
+                ])
+                for item in self.comp_known:
+                    lines.extend(_fmt_item(item))
+
             if self.comp_appendix:
                 lines.extend([
                     sep,
@@ -973,6 +1133,12 @@ class GenizahGUI(QMainWindow):
                 for item in self.comp_main:
                     report_lines.append(self._format_comp_entry(item))
                     report_lines.append("")
+
+                if self.comp_known:
+                    report_lines.append(f"Known Manuscripts ({len(self.comp_known)})")
+                    for item in self.comp_known:
+                        report_lines.append(self._format_comp_entry(item))
+                        report_lines.append("")
 
                 if self.comp_appendix:
                     report_lines.append(f"Appendix ({sum(len(v) for v in self.comp_appendix.values())})")
