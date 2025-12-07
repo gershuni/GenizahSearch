@@ -717,13 +717,63 @@ class GenizahGUI(QMainWindow):
         ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
 
     def export_comp_report(self):
+        if not self.comp_main:
+            QMessageBox.warning(self, "Save", "No composition data to export.")
+            return
+
+        missing_ids = []
+        for item in self.comp_main:
+            sys_id, p_num = self.meta_mgr.parse_header_smart(item['raw_header'])
+            meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+            shelf = meta.get('shelfmark', '')
+            title = meta.get('title', '')
+            if not shelf or shelf == 'Unknown' or not title or not p_num or p_num == 'Unknown':
+                if sys_id:
+                    missing_ids.append(sys_id)
+
+        if missing_ids:
+            prompt = (
+                "Shelfmark/Title/Page info missing for some items.\n"
+                "Continue using system IDs? Choose No to load metadata first."
+            )
+            choice = QMessageBox.question(
+                self, "Metadata Missing", prompt,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if choice == QMessageBox.StandardButton.No:
+                self.meta_mgr.batch_fetch_shelfmarks(list(set(missing_ids)))
+                self._refresh_comp_tree_metadata()
+
         path, _ = QFileDialog.getSaveFileName(self, "Report", "", "Text (*.txt)")
         if path:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(f"Report\nMain: {len(self.comp_main)}\n\n")
                 for i in self.comp_main:
-                    f.write(f"=== {i['raw_header']} ===\n{i['text']}\n\n")
+                    sys_id, p_num = self.meta_mgr.parse_header_smart(i['raw_header'])
+                    meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+                    shelf = meta.get('shelfmark', '') or (f"ID: {sys_id}" if sys_id else "")
+                    title = meta.get('title', '')
+                    page = p_num if p_num and p_num != 'Unknown' else ''
+
+                    parts = [p for p in [shelf, title, f"Page: {page}" if page else ""] if p]
+                    header = " | ".join(parts) if parts else i['raw_header']
+                    f.write(f"=== {header} ===\n{i['text']}\n\n")
             QMessageBox.information(self, "Saved", f"Saved to {path}")
+
+    def _refresh_comp_tree_metadata(self):
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            for j in range(group.childCount()):
+                node = group.child(j)
+                item = node.data(0, Qt.ItemDataRole.UserRole)
+                if not item:
+                    continue
+                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
+                node.setText(1, meta.get('shelfmark',''))
+                node.setText(2, meta.get('title',''))
 
     def browse_load(self):
         sid = self.browse_sys_input.text().strip()
