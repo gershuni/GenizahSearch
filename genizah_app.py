@@ -292,7 +292,7 @@ class ResultDialog(QDialog):
 class GenizahGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Genizah Search Pro V2.0")
+        self.setWindowTitle("Genizah Search Pro V2.11")
         self.resize(1300, 850)
         
         # שלב 1: הצג חלון "ריק" עם הודעת טעינה
@@ -511,7 +511,7 @@ class GenizahGUI(QMainWindow):
         
         gb_about = QGroupBox("About")
         abl = QVBoxLayout()
-        about_txt = """<div style='text-align:center;'><h2>Genizah Search Pro 2.0</h2><p>Developed by Hillel Gershuni (with Gemini AI), gershuni@gmail.com</p><hr><p><b>Data Source:</b> Stoekl Ben Ezra et al. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. https://doi.org/10.5281/zenodo.17734473</p></div>"""
+        about_txt = """<div style='text-align:center;'><h2>Genizah Search Pro 2.11</h2><p>Developed by Hillel Gershuni (with Gemini AI), gershuni@gmail.com</p><hr><p><b>Data Source:</b> Stoekl Ben Ezra et al. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. https://doi.org/10.5281/zenodo.17734473</p></div>"""
         lbl_about = QLabel(about_txt); lbl_about.setOpenExternalLinks(True); lbl_about.setAlignment(Qt.AlignmentFlag.AlignCenter)
         abl.addWidget(lbl_about); gb_about.setLayout(abl); layout.addWidget(gb_about)
         
@@ -981,7 +981,7 @@ def resource_path(relative_path):
 if __name__ == "__main__":
     try:
         import ctypes
-        myappid = 'genizah.search.pro.2.0' 
+        myappid = 'genizah.search.pro.2.11' 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except ImportError:
         pass
