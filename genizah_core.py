@@ -39,6 +39,7 @@ class Config:
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
     INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
     RESULTS_DIR = os.path.join(BASE_DIR, "Results")
+    REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
 
     # 3. User Data Directory (Index, Caches)
     INDEX_DIR = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")

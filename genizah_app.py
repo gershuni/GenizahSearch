@@ -311,9 +311,11 @@ class GenizahGUI(QMainWindow):
             self.searcher = SearchEngine(self.meta_mgr, self.var_mgr)
             self.indexer = Indexer(self.meta_mgr)
             self.ai_mgr = AIManager()
+            os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             
             # אתחול הממשק המלא
             self.last_results = []
+            self.last_search_query = ""
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
@@ -523,6 +525,16 @@ class GenizahGUI(QMainWindow):
     def get_comp_help_text(self):
         return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases appearing > X times.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
 
+    def _sanitize_filename(self, text, fallback):
+        clean = re.sub(r"[^\w\u0590-\u05FF\s-]", "", text or "")
+        clean = re.sub(r"\s+", "_", clean).strip("_")
+        return clean or fallback
+
+    def _default_report_path(self, hint, fallback):
+        filename = self._sanitize_filename(hint, fallback)
+        os.makedirs(Config.REPORTS_DIR, exist_ok=True)
+        return os.path.join(Config.REPORTS_DIR, f"{filename}.txt")
+
     # --- LOGIC ---
     def open_ai(self):
         if not self.ai_mgr.api_key:
@@ -539,7 +551,9 @@ class GenizahGUI(QMainWindow):
         if not query: return
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex'][self.mode_combo.currentIndex()]
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
-        
+
+        self.last_search_query = query
+
         self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
         self.results_table.setRowCount(0); self.btn_export.setEnabled(False)
@@ -599,7 +613,8 @@ class GenizahGUI(QMainWindow):
         if row >= 0: ResultDialog(self, self.last_results, row, self.meta_mgr, self.searcher).exec()
 
     def export_results(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export", "", "Text (*.txt)")
+        default_path = self._default_report_path(self.last_search_query, "Search_Results")
+        path, _ = QFileDialog.getSaveFileName(self, "Export", default_path, "Text (*.txt)")
         if path:
             with open(path, 'w', encoding='utf-8') as f:
                 for r in self.last_results:
@@ -768,10 +783,11 @@ class GenizahGUI(QMainWindow):
                 self.meta_mgr.batch_fetch_shelfmarks(list(set(missing_ids)))
                 self._refresh_comp_tree_metadata()
 
-        path, _ = QFileDialog.getSaveFileName(self, "Report", "", "Text (*.txt)")
+        title = self.comp_title_input.text().strip() or "Untitled Composition"
+        default_path = self._default_report_path(title, "Composition_Report")
+        path, _ = QFileDialog.getSaveFileName(self, "Report", default_path, "Text (*.txt)")
         if path:
             sep = "=" * 80
-            title = self.comp_title_input.text().strip() or "Untitled Composition"
             appendix_count = sum(len(v) for v in self.comp_appendix.values())
 
             def _fmt_item(item):
