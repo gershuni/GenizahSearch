@@ -40,7 +40,7 @@ class CompositionThread(QThread):
     finished_signal = pyqtSignal(list, dict, dict)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, searcher, text, chunk, freq, mode, threshold):
+    def __init__(self, searcher, text, chunk, freq, mode, threshold=5):
         super().__init__()
         self.searcher = searcher; self.text = text; self.chunk = chunk
         self.freq = freq; self.mode = mode; self.threshold = threshold
