@@ -638,17 +638,24 @@ class GenizahGUI(QMainWindow):
         txt = self.comp_text_area.toPlainText().strip(); 
         if not txt: return
         self.is_comp_running = True; self.btn_comp_run.setText("Stop"); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
-        self.comp_progress.setVisible(True); self.comp_tree.clear()
+        self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
         
         self.comp_thread = CompositionThread(
             self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode, self.spin_filter.value()
         )
-        self.comp_thread.progress_signal.connect(self.comp_progress.setValue)
+        self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
         self.comp_thread.finished_signal.connect(self.on_comp_finished)
         self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, "Error", e))
         self.comp_thread.start()
+
+    def on_comp_progress(self, curr, total):
+        if total:
+            self.comp_progress.setRange(0, total)
+        else:
+            self.comp_progress.setRange(0, 0)
+        self.comp_progress.setValue(curr)
 
     def on_comp_finished(self, main, appx, summ):
         self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition"); self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
