@@ -37,7 +37,7 @@ class SearchThread(QThread):
 class CompositionThread(QThread):
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(list, dict, dict)
+    scan_finished_signal = pyqtSignal(list)
     error_signal = pyqtSignal(str)
 
     def __init__(self, searcher, text, chunk, freq, mode, threshold=5):
@@ -52,11 +52,27 @@ class CompositionThread(QThread):
             items = self.searcher.search_composition_logic(
                 self.text, self.chunk, self.freq, self.mode, progress_callback=cb
             )
-            if not items:
-                self.finished_signal.emit([], {}, {})
-                return
-            self.status_signal.emit(f"Found {len(items)} matches. Grouping...")
-            main, appendix, summary = self.searcher.group_composition_results(items, self.threshold)
+            self.scan_finished_signal.emit(items if items else [])
+        except Exception as e: self.error_signal.emit(str(e))
+
+
+class GroupingThread(QThread):
+    progress_signal = pyqtSignal(int, int)
+    status_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(list, dict, dict)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, searcher, items, threshold=5):
+        super().__init__()
+        self.searcher = searcher; self.items = items; self.threshold = threshold
+
+    def run(self):
+        try:
+            def cb(curr, total): self.progress_signal.emit(curr, total)
+            self.status_signal.emit("Grouping compositions...")
+            main, appendix, summary = self.searcher.group_composition_results(
+                self.items, self.threshold, progress_callback=cb
+            )
             self.finished_signal.emit(main, appendix, summary)
         except Exception as e: self.error_signal.emit(str(e))
 

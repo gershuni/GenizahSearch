@@ -667,7 +667,7 @@ class SearchEngine:
         final_items.sort(key=lambda x: x['score'], reverse=True)
         return final_items
 
-    def group_composition_results(self, items, threshold=5):
+    def group_composition_results(self, items, threshold=5, progress_callback=None):
         ids = [self.meta_mgr.parse_header_smart(i['raw_header'])[0] for i in items]
         self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x])
 
@@ -697,8 +697,11 @@ class SearchEngine:
         wrapped.sort(key=lambda x: len(x['title']))
         appendix = defaultdict(list)
         summary = defaultdict(list)
+        total = len(wrapped)
 
         for i, root in enumerate(wrapped):
+            if progress_callback and total:
+                progress_callback(i, total)
             if root['grouped']: continue
             sig = _get_signature(root['title'])
             if not sig: continue
@@ -712,6 +715,9 @@ class SearchEngine:
                     appendix[sig].append(m['item'])
                     summary[sig].append(m['shelfmark'])
         
+        if progress_callback and total:
+            progress_callback(total, total)
+
         main_list = [w['item'] for w in wrapped if not w['grouped']]
         main_list.sort(key=lambda x: x['score'], reverse=True)
         return main_list, appendix, summary

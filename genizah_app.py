@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QSize
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
-from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, AIWorkerThread
+from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
 
 # ==============================================================================
 #  HELP DIALOG (NEW)
@@ -319,6 +319,8 @@ class GenizahGUI(QMainWindow):
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
+            self.comp_raw_items = []
+            self.group_thread = None
             self.is_searching = False
             self.is_comp_running = False
             self.current_browse_sid = None
@@ -628,25 +630,39 @@ class GenizahGUI(QMainWindow):
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
     def toggle_composition(self):
-        if self.is_comp_running: self.comp_thread.terminate(); self.is_comp_running = False; self.reset_comp_ui()
-        else: self.run_composition()
+        if self.is_comp_running:
+            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
+                self.group_thread.terminate()
+                QMessageBox.information(self, "Stopped", "Grouping stopped. Showing ungrouped results.")
+                self.display_comp_results(self.comp_raw_items or [], {}, {})
+            elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+                self.comp_thread.terminate()
+            self.is_comp_running = False
+            self.reset_comp_ui()
+        else:
+            self.run_composition()
         
     def reset_comp_ui(self):
-        self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition"); self.comp_progress.setVisible(False)
+        self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition")
+        self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
+        self.comp_progress.setVisible(False)
 
     def run_composition(self):
-        txt = self.comp_text_area.toPlainText().strip(); 
+        txt = self.comp_text_area.toPlainText().strip();
         if not txt: return
         self.is_comp_running = True; self.btn_comp_run.setText("Stop"); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
+        self.comp_progress.setFormat("Scanning chunks...")
+        self.comp_raw_items = []
+        self.btn_comp_export.setEnabled(False)
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
-        
+
         self.comp_thread = CompositionThread(
             self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode, self.spin_filter.value()
         )
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
-        self.comp_thread.finished_signal.connect(self.on_comp_finished)
+        self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
         self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, "Error", e))
         self.comp_thread.start()
 
@@ -657,10 +673,60 @@ class GenizahGUI(QMainWindow):
             self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(curr)
 
+    def on_comp_scan_finished(self, items):
+        self.is_comp_running = False
+        self.reset_comp_ui()
+        self.comp_raw_items = items or []
+        if not items:
+            QMessageBox.information(self, "No Results", "No composition matches found.")
+            return
+
+        msg = QMessageBox.question(
+            self,
+            "Group Results?",
+            "Grouping may take longer and relies on NLI metadata. Group now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if msg == QMessageBox.StandardButton.Yes:
+            self.start_grouping(items)
+        else:
+            self.display_comp_results(items, {}, {})
+
+    def start_grouping(self, items):
+        self.is_comp_running = True
+        self.btn_comp_run.setText("Stop")
+        self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
+        self.comp_progress.setVisible(True)
+        self.comp_progress.setRange(0, 0)
+        self.comp_progress.setValue(0)
+        self.comp_progress.setFormat("Grouping compositions...")
+
+        self.group_thread = GroupingThread(self.searcher, items, self.spin_filter.value())
+        self.group_thread.progress_signal.connect(self.on_comp_progress)
+        self.group_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
+        self.group_thread.finished_signal.connect(self.on_comp_finished)
+        self.group_thread.error_signal.connect(self.on_grouping_error)
+        self.group_thread.start()
+
+    def on_grouping_error(self, err):
+        QMessageBox.critical(self, "Grouping Error", err)
+        self.display_comp_results(self.comp_raw_items or [], {}, {})
+
     def on_comp_finished(self, main, appx, summ):
-        self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition"); self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
-        self.comp_progress.setVisible(False); self.btn_comp_export.setEnabled(True)
-        self.comp_main = main; self.comp_appendix = appx; self.comp_summary = summ
+        self.display_comp_results(main, appx, summ)
+
+    def display_comp_results(self, main, appx, summ):
+        self.is_comp_running = False
+        self.btn_comp_run.setText("Analyze Composition")
+        self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
+        self.comp_progress.setVisible(False)
+        self.btn_comp_export.setEnabled(True)
+        self.group_thread = None
+        self.comp_raw_items = main
+        self.comp_main = main
+        self.comp_appendix = appx
+        self.comp_summary = summ
 
         # Ensure metadata is loaded so shelfmarks/titles appear immediately
         all_ids = []
@@ -671,17 +737,22 @@ class GenizahGUI(QMainWindow):
             for item in group_items:
                 sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
                 if sid: all_ids.append(sid)
-        self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
+        if all_ids:
+            self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
+        self.comp_tree.clear()
         root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(main)})"]); root.setExpanded(True)
         for i in main:
             sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
             meta = self.meta_mgr.nli_cache.get(sid, {})
             node = QTreeWidgetItem(root)
-            node.setText(0, str(i['score'])); node.setText(1, meta.get('shelfmark','')); node.setText(2, meta.get('title','')); node.setText(3, sid)
-            node.setText(4, i['text'].split('\n')[0])
+            node.setText(0, str(i.get('score', '')));
+            node.setText(1, meta.get('shelfmark',''))
+            node.setText(2, meta.get('title',''));
+            node.setText(3, sid)
+            node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
             node.setData(0, Qt.ItemDataRole.UserRole, i)
-            
+
         if appx:
             root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(appx)})"])
             for g, items in sorted(appx.items(), key=lambda x: len(x[1]), reverse=True):
@@ -690,7 +761,10 @@ class GenizahGUI(QMainWindow):
                     sid, _ = self.meta_mgr.parse_header_smart(i['raw_header'])
                     meta = self.meta_mgr.nli_cache.get(sid, {})
                     ch = QTreeWidgetItem(gn)
-                    ch.setText(0, str(i['score'])); ch.setText(1, meta.get('shelfmark','')); ch.setText(2, meta.get('title','')); ch.setText(3, sid)
+                    ch.setText(0, str(i.get('score', '')));
+                    ch.setText(1, meta.get('shelfmark',''))
+                    ch.setText(2, meta.get('title',''))
+                    ch.setText(3, sid)
                     ch.setData(0, Qt.ItemDataRole.UserRole, i)
 
     def show_comp_detail(self, item, col):
