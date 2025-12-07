@@ -747,8 +747,34 @@ class GenizahGUI(QMainWindow):
         # 3. Open Dialog with List
         current_data = flat_list[clicked_index]
         current_data['full_text'] = self.searcher.get_full_text_by_id(current_data['uid']) or current_data['text']
-        
+
         ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
+
+    def _refresh_comp_tree_metadata(self):
+        """Refresh shelfmark/title columns after metadata is (re)fetched."""
+
+        def update_node(node):
+            node_data = node.data(0, Qt.ItemDataRole.UserRole)
+            if not node_data:
+                return
+
+            sys_id, _ = self.meta_mgr.parse_header_smart(node_data.get('raw_header', ''))
+            meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
+
+            node.setText(1, meta.get('shelfmark', ''))
+            node.setText(2, meta.get('title', ''))
+            node.setText(3, sys_id or '')
+
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            for j in range(group.childCount()):
+                child = group.child(j)
+                if child.childCount() > 0:
+                    for k in range(child.childCount()):
+                        update_node(child.child(k))
+                else:
+                    update_node(child)
 
     def export_comp_report(self):
         if not self.comp_main:
