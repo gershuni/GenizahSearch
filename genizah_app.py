@@ -719,10 +719,79 @@ class GenizahGUI(QMainWindow):
     def export_comp_report(self):
         path, _ = QFileDialog.getSaveFileName(self, "Report", "", "Text (*.txt)")
         if path:
+            sep = "=" * 80
+            title = self.comp_title_input.text().strip() or "Untitled Composition"
+            appendix_count = sum(len(v) for v in self.comp_appendix.values())
+
+            def _fmt_item(item):
+                sid, p_num = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+                meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
+                shelfmark = meta.get('shelfmark') or sid or "Unknown"
+                title_txt = meta.get('title', '') or "Untitled"
+                version = item.get('src_lbl', '') or "Unknown"
+                page = p_num or "?"
+                uid = item.get('uid', sid) or sid or "Unknown"
+
+                lines = [
+                    sep,
+                    f"{shelfmark} | {title_txt} | Img: {page} | Version: {version} | ID: {uid} (Score: {item.get('score', 0)})",
+                    "Source Context:",
+                    (item.get('source_ctx', '') or "[No source context available]").strip(),
+                    "",
+                    "Manuscript:",
+                    (item.get('text', '') or "[No manuscript text available]").strip(),
+                    "",
+                ]
+                return lines
+
+            lines = [
+                sep,
+                f"Composition Search: {title}",
+                sep,
+                f"Total Main Manuscripts: {len(self.comp_main)} (Appendix: {appendix_count})",
+                sep,
+                "FILTERED SUMMARY",
+                sep,
+            ]
+
+            if self.comp_appendix:
+                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                    fallback_summary = []
+                    summary_entries = self.comp_summary.get(sig, [])
+                    for idx, itm in enumerate(items):
+                        shelf_val = summary_entries[idx] if idx < len(summary_entries) else ""
+                        if not shelf_val or shelf_val.lower() == 'unknown':
+                            sid, _ = self.meta_mgr.parse_header_smart(itm.get('raw_header', ''))
+                            meta = self.meta_mgr.nli_cache.get(sid, {}) if sid else {}
+                            shelf_val = meta.get('shelfmark') or sid or "Unknown"
+                        fallback_summary.append(shelf_val)
+                    lines.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
+            else:
+                lines.append("No filtered compositions moved to Appendix.")
+
+            lines.extend([
+                sep,
+                "MAIN MANUSCRIPTS",
+                sep,
+            ])
+
+            for item in self.comp_main:
+                lines.extend(_fmt_item(item))
+
+            if self.comp_appendix:
+                lines.extend([
+                    sep,
+                    "APPENDIX (Filtered Groups)",
+                    sep,
+                ])
+                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                    lines.append(f"{sig} ({len(items)} items)")
+                    for item in items:
+                        lines.extend(_fmt_item(item))
+
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(f"Report\nMain: {len(self.comp_main)}\n\n")
-                for i in self.comp_main:
-                    f.write(f"=== {i['raw_header']} ===\n{i['text']}\n\n")
+                f.write("\n".join(lines))
+
             QMessageBox.information(self, "Saved", f"Saved to {path}")
 
     def browse_load(self):
