@@ -18,3 +18,4 @@ config.pkl
 dist/
 build/
 *.spec
+/Reports
