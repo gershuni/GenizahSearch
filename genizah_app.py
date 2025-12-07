@@ -3,6 +3,7 @@ import sys
 import os
 import re
 import threading
+import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
@@ -1037,7 +1038,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.StandardButton.No
             )
             if choice == QMessageBox.StandardButton.No:
-                self.meta_mgr.batch_fetch_shelfmarks(list(set(missing_ids)))
+                self._fetch_metadata_with_dialog(list(set(missing_ids)), title="Loading missing metadata...")
                 self._refresh_comp_tree_metadata()
 
         title = self.comp_title_input.text().strip() or "Untitled Composition"
@@ -1182,6 +1183,8 @@ class GenizahGUI(QMainWindow):
         dialog.show()
 
         progress = {'count': 0}
+        start_time = time.time()
+        long_wait_prompted = False
 
         def progress_cb(count, total, sid):
             progress['count'] = count
@@ -1196,6 +1199,22 @@ class GenizahGUI(QMainWindow):
 
         while thread.is_alive():
             QApplication.processEvents()
+
+            elapsed = time.time() - start_time
+            if not long_wait_prompted and elapsed > 12:
+                long_wait_prompted = True
+                choice = QMessageBox.question(
+                    self,
+                    "Still Loading...",
+                    "Metadata fetching is taking longer than expected.\n"
+                    "Do you want to keep waiting?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                if choice == QMessageBox.StandardButton.No:
+                    dialog.hide()
+                    return
+
         thread.join()
         dialog.hide()
 
