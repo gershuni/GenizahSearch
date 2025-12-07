@@ -1255,11 +1255,29 @@ class GenizahGUI(QMainWindow):
 
     def run_indexing(self):
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self.index_progress.setRange(0, 1)
+            self.index_progress.setValue(0)
+            self.index_progress.setFormat("Indexing... %p%")
             self.ithread = IndexerThread(self.meta_mgr)
-            self.ithread.progress_signal.connect(self.index_progress.setValue)
-            self.ithread.progress_signal.connect(lambda c,t: self.index_progress.setMaximum(t))
-            self.ithread.finished_signal.connect(lambda: QMessageBox.information(self, "Done", "Complete"))
+            self.ithread.progress_signal.connect(self.on_index_progress)
+            self.ithread.finished_signal.connect(self.on_index_finished)
+            self.ithread.error_signal.connect(self.on_index_error)
             self.ithread.start()
+
+    def on_index_progress(self, current, total):
+        self.index_progress.setRange(0, max(total, 1))
+        self.index_progress.setValue(current)
+        self.index_progress.setFormat(f"{current}/{total} lines")
+
+    def on_index_finished(self, total_docs):
+        self.index_progress.setValue(self.index_progress.maximum())
+        self.index_progress.setFormat("Indexing complete")
+        self.searcher.reload_index()
+        QMessageBox.information(self, "Done", f"Indexing complete. Documents indexed: {total_docs}")
+
+    def on_index_error(self, err):
+        self.index_progress.setFormat("Indexing failed")
+        QMessageBox.critical(self, "Indexing Error", str(err))
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
