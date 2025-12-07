@@ -720,10 +720,55 @@ class GenizahGUI(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Report", "", "Text (*.txt)")
         if path:
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(f"Report\nMain: {len(self.comp_main)}\n\n")
-                for i in self.comp_main:
-                    f.write(f"=== {i['raw_header']} ===\n{i['text']}\n\n")
+                report_lines = [
+                    "Composition Report",
+                    f"Main ({len(self.comp_main)})",
+                    ""
+                ]
+
+                for item in self.comp_main:
+                    report_lines.append(self._format_comp_entry(item))
+                    report_lines.append("")
+
+                if self.comp_appendix:
+                    report_lines.append(f"Appendix ({sum(len(v) for v in self.comp_appendix.values())})")
+                    for group, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                        report_lines.append(f"-- {group} ({len(items)}) --")
+                        for item in items:
+                            report_lines.append(self._format_comp_entry(item))
+                            report_lines.append("")
+
+                f.write("\n".join(report_lines).strip() + "\n")
             QMessageBox.information(self, "Saved", f"Saved to {path}")
+
+    def _format_comp_entry(self, item):
+        sys_id, page, shelfmark, title = self._resolve_meta_labels(item['raw_header'])
+
+        header = f"{shelfmark} | {title} (System ID: {sys_id}, Img: {page or 'N/A'})"
+        source_ctx = (item.get('source_ctx', '') or '').strip() or "[No source excerpt available]"
+        ms_ctx = (item.get('text', '') or '').strip() or "[No manuscript excerpt available]"
+        src_label = item.get('src_lbl', 'Source')
+
+        return "\n".join([
+            header,
+            f"Source [{sys_id} | {src_label}]:",
+            source_ctx,
+            f"MS [{sys_id} | Img {page or 'N/A'}]:",
+            ms_ctx
+        ])
+
+    def _resolve_meta_labels(self, raw_header):
+        sid, page = self.meta_mgr.parse_header_smart(raw_header)
+        sys_id = sid or "Unknown System ID"
+
+        meta = self.meta_mgr.fetch_nli_data(sid) if sid else {}
+        shelf = meta.get('shelfmark') if meta else None
+        title = meta.get('title') if meta else None
+
+        shelf_lbl = shelf or f"[Shelfmark missing for {sys_id}]"
+        title_lbl = title or "[Title missing]"
+
+        return sys_id, page, shelf_lbl, title_lbl
 
     def browse_load(self):
         sid = self.browse_sys_input.text().strip()
