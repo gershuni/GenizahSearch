@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QProgressDialog)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, QEventLoop
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit)
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
@@ -146,6 +146,8 @@ class ExcludeDialog(QDialog):
 #  RESULT DIALOG
 # ==============================================================================
 class ResultDialog(QDialog):
+    metadata_loaded = pyqtSignal(int, dict)
+
     # Updated Init Signature
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
@@ -160,7 +162,10 @@ class ResultDialog(QDialog):
         self.current_p_num = None
         self.current_fl_id = None
         
+        self.current_meta_request = 0
+
         self.init_ui()
+        self.metadata_loaded.connect(self.on_metadata_loaded)
         self.load_result_by_index(self.current_result_idx)
 
     def init_ui(self):
@@ -205,9 +210,14 @@ class ResultDialog(QDialog):
         self.lbl_title.setFont(QFont("Arial", 12))
         self.lbl_title.setWordWrap(True)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
+
+        self.lbl_meta_loading = QLabel("Loading metadata…")
+        self.lbl_meta_loading.setStyleSheet("color: #7f8c8d; font-size: 10pt; font-style: italic;")
+        self.lbl_meta_loading.setVisible(False)
+
         tb_layout.addWidget(self.lbl_shelf)
         tb_layout.addWidget(self.lbl_title)
+        tb_layout.addWidget(self.lbl_meta_loading)
         title_box.setLayout(tb_layout)
         header_layout.addWidget(title_box, 2)
         
@@ -310,20 +320,43 @@ class ResultDialog(QDialog):
         self.current_p_num = page_data['p_num']
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
-        
+        self.current_full_header = page_data.get('full_header', '')
+
         info_html = f"<b>System ID:</b> {self.current_sys_id}<br><b>File ID (FL):</b> {self.current_fl_id or 'N/A'}"
         self.lbl_info.setText(info_html)
         
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
-        
+
         html = page_data['text'].replace("\n", "<br>")
         self.text_browser.setHtml(f"<div dir='rtl'>{html}</div>")
+        self.lbl_meta_loading.setVisible(False)
+        self.lbl_title.setText('')
 
-        meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
-        shelf = self.meta_mgr.get_shelfmark_from_header(page_data.get('full_header', '')) or meta.get('shelfmark', 'Unknown Shelf')
+        cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
+        if cached_meta:
+            self.apply_metadata(cached_meta)
+        else:
+            self.lbl_meta_loading.setVisible(True)
+            self.current_meta_request += 1
+            request_id = self.current_meta_request
+
+            def worker():
+                meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
+                self.metadata_loaded.emit(request_id, meta or {})
+
+            threading.Thread(target=worker, daemon=True).start()
+
+    def apply_metadata(self, meta):
+        shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
         self.lbl_shelf.setText(shelf)
         self.lbl_title.setText(meta.get('title', ''))
+        self.lbl_meta_loading.setVisible(False)
+
+    def on_metadata_loaded(self, request_id, meta):
+        if request_id != self.current_meta_request:
+            return
+        self.apply_metadata(meta or {})
 
     def open_catalog(self):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
