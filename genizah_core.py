@@ -236,6 +236,12 @@ class MetadataManager:
         self._load_caches()
         threading.Thread(target=self._build_file_map_background, daemon=True).start()
 
+    def _make_session(self):
+        session = requests.Session()
+        session.trust_env = False
+        session.proxies = {}
+        return session
+
     def _load_caches(self):
         self._load_metadata_bank()
         if os.path.exists(Config.CACHE_NLI):
@@ -390,7 +396,8 @@ class MetadataManager:
                 # המתנה קלה כדי לא להעמיס
                 time.sleep(0.3)
                 
-                resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
+                session = self._make_session()
+                resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
                 
                 if resp.status_code == 200:
                     try:
@@ -428,7 +435,7 @@ class MetadataManager:
                         if final: meta['shelfmark'] = final
 
                         meta['fl_ids'] = fl_ids
-                        meta['thumb_url'] = self._resolve_thumbnail(fl_ids)
+                        meta['thumb_url'] = self._resolve_thumbnail(fl_ids, session=session)
                         meta['thumb_checked'] = True
                         
                         # הצלחה - צא מהלולאה והחזר תוצאה
@@ -458,11 +465,12 @@ class MetadataManager:
                     fl_ids.append(val)
         return fl_ids
 
-    def _resolve_thumbnail(self, fl_ids, size=320):
+    def _resolve_thumbnail(self, fl_ids, size=320, session=None):
+        session = session or self._make_session()
         for fl_id in fl_ids:
             base = f"https://iiif.nli.org.il/IIIFv21/{fl_id}"
             try:
-                info = requests.get(f"{base}/info.json", timeout=5, proxies={}, allow_redirects=True, trust_env=False)
+                info = session.get(f"{base}/info.json", timeout=5, allow_redirects=True)
                 if info.status_code == 200:
                     return f"{base}/full/!{size},{size}/0/default.jpg"
             except Exception:
@@ -475,7 +483,8 @@ class MetadataManager:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.content)
                 return self._extract_fl_ids(root)

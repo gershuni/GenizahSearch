@@ -1579,7 +1579,10 @@ def load_thumbnail_to_label(label, thumb_url):
 
     def worker():
         try:
-            resp = requests.get(thumb_url, timeout=10, proxies={}, allow_redirects=True, trust_env=False)
+            session = requests.Session()
+            session.trust_env = False
+            session.proxies = {}
+            resp = session.get(thumb_url, timeout=10, allow_redirects=True)
             if resp.status_code != 200:
                 raise ValueError(f"Unexpected status: {resp.status_code}")
 
