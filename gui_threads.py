@@ -1,12 +1,15 @@
+"""Worker threads used by the PyQt GUI for long-running operations."""
+
 # gui_threads.py
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager
 
 class IndexerThread(QThread):
+    """Build or refresh the index without blocking the UI."""
+
     progress_signal = pyqtSignal(int, int)
     finished_signal = pyqtSignal(int)
     error_signal = pyqtSignal(str)
-
     def __init__(self, meta_mgr):
         super().__init__()
         self.indexer = Indexer(meta_mgr)
@@ -19,10 +22,11 @@ class IndexerThread(QThread):
         except Exception as e: self.error_signal.emit(str(e))
 
 class SearchThread(QThread):
+    """Execute a search query asynchronously."""
+
     results_signal = pyqtSignal(list)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
-
     def __init__(self, searcher, query, mode, gap):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
@@ -35,11 +39,12 @@ class SearchThread(QThread):
         except Exception as e: self.error_signal.emit(str(e))
 
 class CompositionThread(QThread):
+    """Scan compositions in background to keep UI responsive."""
+
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
     scan_finished_signal = pyqtSignal(list)
     error_signal = pyqtSignal(str)
-
     def __init__(self, searcher, text, chunk, freq, mode, threshold=5):
         super().__init__()
         self.searcher = searcher; self.text = text; self.chunk = chunk
@@ -57,11 +62,12 @@ class CompositionThread(QThread):
 
 
 class GroupingThread(QThread):
+    """Group composition results while reporting progress to the UI."""
+
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(list, dict, dict)
     error_signal = pyqtSignal(str)
-
     def __init__(self, searcher, items, threshold=5):
         super().__init__()
         self.searcher = searcher; self.items = items; self.threshold = threshold
@@ -77,10 +83,11 @@ class GroupingThread(QThread):
         except Exception as e: self.error_signal.emit(str(e))
 
 class ShelfmarkLoaderThread(QThread):
+    """Preload metadata for shelfmarks without blocking the main thread."""
+
     progress_signal = pyqtSignal(int, int, str)
     finished_signal = pyqtSignal(bool)
     error_signal = pyqtSignal(str)
-
     def __init__(self, meta_mgr, id_list):
         super().__init__()
         self.meta_mgr = meta_mgr
@@ -106,6 +113,8 @@ class ShelfmarkLoaderThread(QThread):
             self.error_signal.emit(str(e))
 
 class AIWorkerThread(QThread):
+    """Send a prompt to the AI manager in the background."""
+
     finished_signal = pyqtSignal(dict, str)
     def __init__(self, ai_mgr, prompt):
         super().__init__()

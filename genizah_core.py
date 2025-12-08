@@ -1,3 +1,5 @@
+"""Core search, indexing, metadata, and AI helpers for the Genizah project."""
+
 # -*- coding: utf-8 -*-
 # genizah_core.py
 import os
@@ -28,6 +30,7 @@ except ImportError:
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
 class Config:
+    """Static paths and limits used by the application and by bundled binaries."""
     # 1. Base Directory (Where the EXE/Script is)
     if getattr(sys, 'frozen', False):
         BASE_DIR = os.path.dirname(sys.executable)
@@ -62,6 +65,7 @@ class Config:
 #  AI MANAGER
 # ==============================================================================
 class AIManager:
+    """Manage Gemini configuration, key persistence, and prompt sessions."""
     def __init__(self):
         self.api_key = ""
         self.chat_history = []
@@ -130,6 +134,7 @@ class AIManager:
 #  VARIANTS LOGIC
 # ==============================================================================
 class VariantManager:
+    """Generate spelling variants for Hebrew search terms using multiple maps."""
     def __init__(self):
         self.basic_map = self._build_basic()
         self.extended_map = self._build_extended()
@@ -215,6 +220,7 @@ class VariantManager:
 #  METADATA MANAGER
 # ==============================================================================
 class MetadataManager:
+    """Handle metadata parsing, remote retrieval, and persistent caching."""
     def __init__(self):
         self.meta_map = {}
         self.nli_cache = {}
@@ -466,6 +472,7 @@ class MetadataManager:
 #  INDEXER
 # ==============================================================================
 class Indexer:
+    """Create or update the Tantivy index and keep browse maps in sync."""
     def __init__(self, meta_mgr):
         self.meta_mgr = meta_mgr
 
@@ -552,6 +559,7 @@ class Indexer:
 #  SEARCH ENGINE
 # ==============================================================================
 class SearchEngine:
+    """Run searches, build queries, and provide browsing utilities."""
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
