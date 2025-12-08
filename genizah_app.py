@@ -12,33 +12,56 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction, QPixmap, QImage
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
 
 
-class _ThumbnailDispatcher(QObject):
-    """Relay thumbnail UI updates onto the main Qt thread."""
+class ImageLoaderThread(QThread):
+    """Download an image on a worker thread and emit the loaded QImage."""
 
-    apply = pyqtSignal(object)
+    image_loaded = pyqtSignal(QImage)
+    load_failed = pyqtSignal()
 
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+        self._cancelled = False
 
-_thumbnail_dispatcher = None
+    def cancel(self):
+        self._cancelled = True
 
+    def run(self):
+        if not self.url:
+            self.load_failed.emit()
+            return
 
-def _get_thumbnail_dispatcher():
-    """Return a singleton dispatcher bound to the QApplication thread."""
-    global _thumbnail_dispatcher
-    if _thumbnail_dispatcher is None:
-        app = QApplication.instance()
-        if app is None:
-            return None
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
 
-        _thumbnail_dispatcher = _ThumbnailDispatcher()
-        _thumbnail_dispatcher.apply.connect(lambda fn: fn())
-    return _thumbnail_dispatcher
+        try:
+            resp = requests.get(self.url, headers=headers, timeout=10)
+            if self._cancelled:
+                return
+
+            if resp.status_code != 200:
+                self.load_failed.emit()
+                return
+
+            img = QImage.fromData(resp.content)
+            if self._cancelled:
+                return
+
+            if img.isNull():
+                self.load_failed.emit()
+            else:
+                self.image_loaded.emit(img)
+        except Exception:
+            if not self._cancelled:
+                self.load_failed.emit()
 
 class HelpDialog(QDialog):
     """Display static HTML help content inside a simple dialog."""
@@ -179,6 +202,7 @@ class ResultDialog(QDialog):
         self.current_p_num = None
         self.current_fl_id = None
         self.current_thumb_url = None
+        self.img_thread = None
         
         self.current_meta_request = 0
 
@@ -189,106 +213,110 @@ class ResultDialog(QDialog):
     def init_ui(self):
         self.setWindowTitle(f"Manuscript Viewer")
         self.resize(1200, 850)
-        
+
         main_layout = QVBoxLayout()
-        
+
         # --- Top Bar: Result Navigation ---
         top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton("◀ Previous Result")
         self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
-        
+
         self.lbl_res_count = QLabel()
         self.lbl_res_count.setStyleSheet("font-weight: bold; color: #555;")
         self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         self.btn_res_next = QPushButton("Next Result ▶")
         self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
-        
+
         top_bar.addWidget(self.btn_res_prev)
         top_bar.addWidget(self.lbl_res_count, 1) # Expand middle
         top_bar.addWidget(self.btn_res_next)
-        
+
         main_layout.addLayout(top_bar)
-        
+
         # --- Separator ---
         line = QSplitter(); line.setFrameShape(QSplitter.Shape.HLine); main_layout.addWidget(line)
-        
-        # --- Header Info (Shelf/Title) ---
-        header_layout = QHBoxLayout()
-        title_box = QWidget()
-        tb_layout = QVBoxLayout()
-        tb_layout.setContentsMargins(0,0,0,0)
-        
+
+        # --- Header (compact) ---
+        header_widget = QWidget()
+        header_widget.setFixedHeight(160)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        meta_col = QVBoxLayout()
+        meta_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         self.lbl_shelf = QLabel()
         self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         self.lbl_shelf.setStyleSheet("color: #2c3e50;")
         self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
+
         self.lbl_title = QLabel()
         self.lbl_title.setFont(QFont("Arial", 12))
         self.lbl_title.setWordWrap(True)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self.lbl_meta_loading = QLabel("Loading metadata…")
-        self.lbl_meta_loading.setStyleSheet("color: #7f8c8d; font-size: 10pt; font-style: italic;")
-        self.lbl_meta_loading.setVisible(False)
-
-        tb_layout.addWidget(self.lbl_shelf)
-        tb_layout.addWidget(self.lbl_title)
-        tb_layout.addWidget(self.lbl_meta_loading)
-        title_box.setLayout(tb_layout)
-        header_layout.addWidget(title_box, 2)
-        
         self.lbl_info = QLabel()
         self.lbl_info.setTextFormat(Qt.TextFormat.RichText)
         self.lbl_info.setStyleSheet("background-color: #ecf0f1; color: #2c3e50; border-radius: 6px; padding: 8px;")
         self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header_layout.addWidget(self.lbl_info, 1)
 
-        self.lbl_thumb = QLabel("No preview available")
-        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_thumb.setFixedSize(220, 220)
+        self.lbl_meta_loading = QLabel("Loading metadata…")
+        self.lbl_meta_loading.setStyleSheet("color: #7f8c8d; font-size: 10pt; font-style: italic;")
+        self.lbl_meta_loading.setVisible(False)
+
+        meta_col.addWidget(self.lbl_shelf)
+        meta_col.addWidget(self.lbl_title)
+        meta_col.addWidget(self.lbl_info)
+        meta_col.addWidget(self.lbl_meta_loading)
+        header_layout.addLayout(meta_col, 1)
+
+        self.lbl_thumb = QLabel("No Preview")
+        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        self.lbl_thumb.setFixedSize(160, 160)
         self.lbl_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #f8f9fa; color: #7f8c8d;")
         self.lbl_thumb.setScaledContents(True)
         header_layout.addWidget(self.lbl_thumb)
-        
-        # --- Page Controls ---
-        ctrl_layout = QVBoxLayout()
+
+        main_layout.addWidget(header_widget)
+
+        # --- Controls Row ---
+        ctrl_row = QHBoxLayout()
         nav_layout = QHBoxLayout()
-        
+
         btn_pg_prev = QPushButton("Pg <"); btn_pg_prev.setFixedWidth(40)
         btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
-        
+
         self.spin_page = QSpinBox(); self.spin_page.setPrefix("Img: "); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(90)
         self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        
+
         btn_pg_next = QPushButton("> Pg"); btn_pg_next.setFixedWidth(40)
         btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
-        
+
         self.lbl_total = QLabel("/ ?")
-        
+
         nav_layout.addWidget(btn_pg_prev); nav_layout.addWidget(self.spin_page); nav_layout.addWidget(self.lbl_total); nav_layout.addWidget(btn_pg_next)
-        ctrl_layout.addLayout(nav_layout)
-        
+        ctrl_row.addLayout(nav_layout)
+
         self.btn_cat = QPushButton("📄 Catalog"); self.btn_cat.clicked.connect(self.open_catalog)
         self.btn_img = QPushButton("🖼️ Ktiv Viewer"); self.btn_img.clicked.connect(self.open_viewer)
-        ctrl_layout.addWidget(self.btn_cat); ctrl_layout.addWidget(self.btn_img)
-        header_layout.addLayout(ctrl_layout, 1)
-        
-        main_layout.addLayout(header_layout)
-        
+        ctrl_row.addWidget(self.btn_cat)
+        ctrl_row.addWidget(self.btn_img)
+
+        main_layout.addLayout(ctrl_row)
+
         # --- Text Area ---
         self.text_browser = QTextBrowser()
         self.text_browser.setReadOnly(True)
         self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.text_browser.setFont(QFont("SBL Hebrew", 16))
-        main_layout.addWidget(self.text_browser)
-        
+        main_layout.addWidget(self.text_browser, 1)
+
         # Footer
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.close)
         main_layout.addWidget(btn_close)
-        
+
         self.setLayout(main_layout)
 
     def navigate_results(self, direction):
@@ -335,6 +363,7 @@ class ResultDialog(QDialog):
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
+        self.cancel_image_thread()
         if target is not None:
             p = target
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
@@ -349,10 +378,10 @@ class ResultDialog(QDialog):
 
         info_html = f"<b>System ID:</b> {self.current_sys_id}<br><b>File ID (FL):</b> {self.current_fl_id or 'N/A'}"
         self.lbl_info.setText(info_html)
-        self.lbl_thumb.setText("Loading preview…")
+        self.lbl_thumb.setText("Loading...")
         self.lbl_thumb.setPixmap(QPixmap())
         self.current_thumb_url = None
-        
+
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
@@ -381,31 +410,77 @@ class ResultDialog(QDialog):
         self.lbl_title.setText(meta.get('title', ''))
         self.lbl_meta_loading.setVisible(False)
 
-        self.update_thumbnail(meta)
+        self.fetch_image(self.current_sys_id, meta)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
             return
         self.apply_metadata(meta or {})
 
-    def update_thumbnail(self, meta):
+    def cancel_image_thread(self):
+        if self.img_thread and self.img_thread.isRunning():
+            self.img_thread.cancel()
+            self.img_thread.wait()
+
+    def fetch_image(self, sys_id, meta=None):
+        self.cancel_image_thread()
+        self.lbl_thumb.setText("Loading...")
+        self.lbl_thumb.setPixmap(QPixmap())
+
+        meta = meta or self.meta_mgr.nli_cache.get(sys_id)
         thumb_url = meta.get('thumb_url') if meta else None
 
-        if meta and not meta.get('thumb_checked'):
-            def worker():
-                url = self.meta_mgr.get_thumbnail(self.current_sys_id)
-                QTimer.singleShot(0, lambda: self._apply_thumbnail(url))
-
-            threading.Thread(target=worker, daemon=True).start()
+        if thumb_url:
+            self.start_download(sys_id, thumb_url)
             return
 
-        self._apply_thumbnail(thumb_url)
+        self.lbl_thumb.setText("Resolving...")
 
-    def _apply_thumbnail(self, thumb_url):
-        if thumb_url == self.current_thumb_url:
+        def worker(target_sid=sys_id):
+            url = self.meta_mgr.get_thumbnail(target_sid)
+            QTimer.singleShot(0, lambda: self._on_thumb_resolved(target_sid, url))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_thumb_resolved(self, sid, thumb_url):
+        if sid != self.current_sys_id:
             return
+        if thumb_url:
+            self.start_download(sid, thumb_url)
+        else:
+            self.on_img_failed()
+
+    def start_download(self, sid, thumb_url):
+        if sid != self.current_sys_id:
+            return
+
         self.current_thumb_url = thumb_url
-        load_thumbnail_to_label(self.lbl_thumb, thumb_url)
+        self.cancel_image_thread()
+
+        if not thumb_url:
+            self.on_img_failed()
+            return
+
+        self.img_thread = ImageLoaderThread(thumb_url)
+        self.img_thread.image_loaded.connect(self.on_img_loaded)
+        self.img_thread.load_failed.connect(self.on_img_failed)
+        self.img_thread.start()
+
+    def on_img_loaded(self, image):
+        pix = QPixmap.fromImage(image)
+        scaled = pix.scaled(self.lbl_thumb.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.lbl_thumb.setPixmap(scaled)
+        self.lbl_thumb.setText("")
+
+    def on_img_failed(self):
+        self.lbl_thumb.setPixmap(QPixmap())
+        self.lbl_thumb.setText("No Preview")
+
+    def closeEvent(self, event):
+        try:
+            self.cancel_image_thread()
+        finally:
+            super().closeEvent(event)
 
     def open_catalog(self):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
@@ -460,6 +535,7 @@ class GenizahGUI(QMainWindow):
             self.meta_to_fetch_count = 0
             self.meta_progress_current = 0
             self.browse_thumb_url = None
+            self.browse_img_thread = None
 
             self.init_ui() # בונה את self.tabs
             
@@ -1450,7 +1526,8 @@ class GenizahGUI(QMainWindow):
         if not sid: return
         self.current_browse_sid = sid; self.current_browse_p = None
         self.btn_b_catalog.setEnabled(True)
-        self.browse_thumb.setText("Loading preview…")
+        self.cancel_browse_image_thread()
+        self.browse_thumb.setText("Loading...")
         self.browse_thumb.setPixmap(QPixmap())
         self.browse_thumb_url = None
         self.browse_update_view(0)
@@ -1475,30 +1552,70 @@ class GenizahGUI(QMainWindow):
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
-        self.update_browse_thumbnail(meta)
+        self.fetch_browse_thumbnail(self.current_browse_sid, meta)
 
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
 
-    def update_browse_thumbnail(self, meta):
+    def cancel_browse_image_thread(self):
+        if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
+            self.browse_img_thread.cancel()
+            self.browse_img_thread.wait()
+
+    def fetch_browse_thumbnail(self, sys_id, meta=None):
+        self.cancel_browse_image_thread()
+        self.browse_thumb.setText("Loading...")
+        self.browse_thumb.setPixmap(QPixmap())
+
+        meta = meta or self.meta_mgr.nli_cache.get(sys_id)
         thumb_url = meta.get('thumb_url') if meta else None
 
-        if meta and not meta.get('thumb_checked'):
-            def worker():
-                url = self.meta_mgr.get_thumbnail(self.current_browse_sid)
-                QTimer.singleShot(0, lambda: self._apply_browse_thumb(url))
-
-            threading.Thread(target=worker, daemon=True).start()
+        if thumb_url:
+            self.start_browse_download(sys_id, thumb_url)
             return
 
-        self._apply_browse_thumb(thumb_url)
+        self.browse_thumb.setText("Resolving...")
 
-    def _apply_browse_thumb(self, thumb_url):
-        if thumb_url == self.browse_thumb_url:
+        def worker(target_sid=sys_id):
+            url = self.meta_mgr.get_thumbnail(target_sid)
+            QTimer.singleShot(0, lambda: self._on_browse_thumb_resolved(target_sid, url))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_browse_thumb_resolved(self, sid, thumb_url):
+        if sid != self.current_browse_sid:
             return
+        if thumb_url:
+            self.start_browse_download(sid, thumb_url)
+        else:
+            self.on_browse_img_failed()
+
+    def start_browse_download(self, sid, thumb_url):
+        if sid != self.current_browse_sid:
+            return
+
         self.browse_thumb_url = thumb_url
-        load_thumbnail_to_label(self.browse_thumb, thumb_url)
+        self.cancel_browse_image_thread()
+
+        if not thumb_url:
+            self.on_browse_img_failed()
+            return
+
+        self.browse_img_thread = ImageLoaderThread(thumb_url)
+        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
+        self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
+        self.browse_img_thread.start()
+
+    def on_browse_img_loaded(self, image):
+        pix = QPixmap.fromImage(image)
+        scaled = pix.scaled(self.browse_thumb.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.browse_thumb.setPixmap(scaled)
+        self.browse_thumb.setText("")
+
+    def on_browse_img_failed(self):
+        self.browse_thumb.setPixmap(QPixmap())
+        self.browse_thumb.setText("No Preview")
 
     def run_indexing(self):
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
@@ -1553,6 +1670,9 @@ class GenizahGUI(QMainWindow):
                 if self.group_thread.isRunning():
                     self.group_thread.terminate()
                     self.group_thread.wait()
+            if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
+                self.browse_img_thread.cancel()
+                self.browse_img_thread.wait()
         finally:
             super().closeEvent(event)
 
@@ -1564,52 +1684,6 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
-
-
-def load_thumbnail_to_label(label, thumb_url):
-    """Fetch an external thumbnail and place it inside the provided QLabel."""
-    label.setPixmap(QPixmap())
-
-    if not thumb_url:
-        label.setText("Preview unavailable")
-        return
-
-    label.setProperty("thumb_url", thumb_url)
-    label.setText("Loading preview…")
-
-    def worker():
-        try:
-            session = requests.Session()
-            resp = session.get(thumb_url, timeout=10, allow_redirects=True)
-            if resp.status_code != 200:
-                raise ValueError(f"Unexpected status: {resp.status_code}")
-
-            img = QImage.fromData(resp.content)
-            if img.isNull():
-                raise ValueError("Invalid image data")
-
-            def apply_image():
-                if label.property("thumb_url") != thumb_url:
-                    return
-                pix = QPixmap.fromImage(img)
-                scaled = pix.scaled(label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                label.setPixmap(scaled)
-                label.setText("")
-
-            dispatcher = _get_thumbnail_dispatcher()
-            if dispatcher:
-                dispatcher.apply.emit(apply_image)
-        except Exception:
-            def apply_error():
-                if label.property("thumb_url") != thumb_url:
-                    return
-                label.setText("Preview unavailable")
-
-            dispatcher = _get_thumbnail_dispatcher()
-            if dispatcher:
-                dispatcher.apply.emit(apply_error)
-
-    threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == "__main__":
     try:
