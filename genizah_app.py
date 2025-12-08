@@ -1416,6 +1416,36 @@ class GenizahGUI(QMainWindow):
         self.index_progress.setFormat("Indexing failed")
         QMessageBox.critical(self, "Indexing Error", str(err))
 
+    def closeEvent(self, event):
+        # Ensure worker threads are stopped before the window is destroyed
+        try:
+            if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
+                self.meta_loader.request_cancel()
+                self.meta_loader.wait()
+
+            if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
+                self.search_thread.requestInterruption()
+                self.search_thread.wait(2000)
+                if self.search_thread.isRunning():
+                    self.search_thread.terminate()
+                    self.search_thread.wait()
+
+            if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+                self.comp_thread.requestInterruption()
+                self.comp_thread.wait(2000)
+                if self.comp_thread.isRunning():
+                    self.comp_thread.terminate()
+                    self.comp_thread.wait()
+
+            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
+                self.group_thread.requestInterruption()
+                self.group_thread.wait(2000)
+                if self.group_thread.isRunning():
+                    self.group_thread.terminate()
+                    self.group_thread.wait()
+        finally:
+            super().closeEvent(event)
+
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
