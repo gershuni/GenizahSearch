@@ -1,3 +1,5 @@
+"""PyQt6 GUI for Genizah search, browsing, and AI assistance."""
+
 # genizah_app.py
 import sys
 import os
@@ -15,10 +17,8 @@ from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
 
-# ==============================================================================
-#  HELP DIALOG (NEW)
-# ==============================================================================
 class HelpDialog(QDialog):
+    """Display static HTML help content inside a simple dialog."""
     def __init__(self, parent, title, content):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -34,10 +34,8 @@ class HelpDialog(QDialog):
         layout.addWidget(btn)
         self.setLayout(layout)
 
-# ==============================================================================
-#  AI DIALOG
-# ==============================================================================
 class AIDialog(QDialog):
+    """Chat interface for requesting regex suggestions from the AI manager."""
     def __init__(self, parent, ai_mgr):
         super().__init__(parent)
         self.setWindowTitle("AI Regex Assistant (Gemini)")
@@ -98,10 +96,8 @@ class AIDialog(QDialog):
         self.generated_regex = regex
         self.btn_use.setEnabled(True)
 
-# ==============================================================================
-#  EXCLUDE MANUSCRIPTS DIALOG
-# ==============================================================================
 class ExcludeDialog(QDialog):
+    """Collect system IDs or shelfmarks that should be excluded from searches."""
     def __init__(self, parent, existing_entries=None):
         super().__init__(parent)
         self.setWindowTitle("Exclude Manuscripts")
@@ -143,13 +139,10 @@ class ExcludeDialog(QDialog):
     def get_entries_text(self):
         return self.text_area.toPlainText()
 
-# ==============================================================================
-#  RESULT DIALOG
-# ==============================================================================
 class ResultDialog(QDialog):
-    metadata_loaded = pyqtSignal(int, dict)
+    """Allow browsing a single search result and its surrounding pages."""
 
-    # Updated Init Signature
+    metadata_loaded = pyqtSignal(int, dict)
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
         
@@ -365,26 +358,24 @@ class ResultDialog(QDialog):
     def open_viewer(self):
         if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
-# ==============================================================================
-#  MAIN WINDOW
-# ==============================================================================
 class GenizahGUI(QMainWindow):
+    """Main application window orchestrating search, browsing, and indexing."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Genizah Search Pro V2.11")
         self.resize(1300, 850)
-        
-        # שלב 1: הצג חלון "ריק" עם הודעת טעינה
+
+        # Step 1: show a placeholder window with a loading message
         lbl_loading = QLabel("Loading components... Please wait.", self)
         lbl_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCentralWidget(lbl_loading)
-        
-        # שלב 2: תזמון טעינת המנוע לעוד 100ms (אחרי שהחלון עולה)
+
+        # Step 2: defer heavy initialization until the window is visible
         QTimer.singleShot(100, self.delayed_init)
 
     def delayed_init(self):
         try:
-            # כאן מתבצעת הטעינה הכבדה
+            # Perform heavy initialization here
             self.meta_mgr = MetadataManager()
             self.var_mgr = VariantManager()
             self.searcher = SearchEngine(self.meta_mgr, self.var_mgr)
