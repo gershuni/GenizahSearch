@@ -78,16 +78,32 @@ class GroupingThread(QThread):
 
 class ShelfmarkLoaderThread(QThread):
     progress_signal = pyqtSignal(int, int, str)
-    finished_signal = pyqtSignal()
+    finished_signal = pyqtSignal(bool)
+    error_signal = pyqtSignal(str)
 
     def __init__(self, meta_mgr, id_list):
         super().__init__()
-        self.meta_mgr = meta_mgr; self.id_list = id_list
+        self.meta_mgr = meta_mgr
+        self.id_list = id_list
+        self._cancelled = False
+
+    def request_cancel(self):
+        self._cancelled = True
 
     def run(self):
-        def cb(curr, total, sid): self.progress_signal.emit(curr, total, sid)
-        self.meta_mgr.batch_fetch_shelfmarks(self.id_list, progress_callback=cb)
-        self.finished_signal.emit()
+        try:
+            to_fetch = [sid for sid in self.id_list if sid and sid not in self.meta_mgr.nli_cache]
+            total = len(to_fetch)
+            for idx, sid in enumerate(to_fetch, start=1):
+                if self._cancelled or self.isInterruptionRequested():
+                    self.finished_signal.emit(True)
+                    return
+                self.meta_mgr.fetch_nli_data(sid)
+                self.progress_signal.emit(idx, total, sid)
+            self.meta_mgr.save_caches()
+            self.finished_signal.emit(False)
+        except Exception as e:
+            self.error_signal.emit(str(e))
 
 class AIWorkerThread(QThread):
     finished_signal = pyqtSignal(dict, str)
