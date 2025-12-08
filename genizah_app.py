@@ -1402,7 +1402,7 @@ class GenizahGUI(QMainWindow):
             shelf = shelf or meta.get('shelfmark', '')
 
         self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
-        self.browse_title_lbl.setText(title or "[Title missing]")
+        self.browse_title_lbl.setText(title or "")
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
