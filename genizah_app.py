@@ -583,12 +583,25 @@ class GenizahGUI(QMainWindow):
         top = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText("Enter System ID...")
         btn_go = QPushButton("Go"); btn_go.clicked.connect(self.browse_load)
+        self.browse_sys_input.returnPressed.connect(self.browse_load)
         top.addWidget(QLabel("System ID:")); top.addWidget(self.browse_sys_input); top.addWidget(btn_go)
         layout.addLayout(top)
-        
+
         self.browse_info_lbl = QLabel("Enter ID to browse.")
-        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(self.browse_info_lbl)
+        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ecf0f1;")
+        self.browse_title_lbl = QLabel("")
+        self.browse_title_lbl.setWordWrap(True)
+        self.browse_title_lbl.setStyleSheet("font-size: 12px; color: #dfe6e9;")
+        info_row = QHBoxLayout()
+        meta_col = QVBoxLayout()
+        meta_col.addWidget(self.browse_info_lbl)
+        meta_col.addWidget(self.browse_title_lbl)
+        info_row.addLayout(meta_col, 1)
+        self.btn_b_catalog = QPushButton("Go to Ktiv Catalog")
+        self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
+        self.btn_b_catalog.setEnabled(False)
+        info_row.addWidget(self.btn_b_catalog)
+        layout.addLayout(info_row)
         self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
         layout.addWidget(self.browse_text)
@@ -1372,6 +1385,7 @@ class GenizahGUI(QMainWindow):
         sid = self.browse_sys_input.text().strip()
         if not sid: return
         self.current_browse_sid = sid; self.current_browse_p = None
+        self.btn_b_catalog.setEnabled(True)
         self.browse_update_view(0)
 
     def browse_navigate(self, d): self.browse_update_view(d)
@@ -1388,8 +1402,13 @@ class GenizahGUI(QMainWindow):
             shelf = shelf or meta.get('shelfmark', '')
 
         self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
+        self.browse_title_lbl.setText(title or "[Title missing]")
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
+
+    def browse_open_catalog(self):
+        if self.current_browse_sid:
+            QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
 
     def run_indexing(self):
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
