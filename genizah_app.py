@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit)
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
 
@@ -408,7 +408,11 @@ class GenizahGUI(QMainWindow):
             self.is_comp_running = False
             self.current_browse_sid = None
             self.current_browse_p = None
-            
+            self.meta_loader = None
+            self.meta_cached_count = 0
+            self.meta_to_fetch_count = 0
+            self.meta_progress_current = 0
+
             self.init_ui() # בונה את self.tabs
             
             # בדיקת אינדקס והתראה
@@ -486,7 +490,22 @@ class GenizahGUI(QMainWindow):
         bot = QHBoxLayout()
         self.status_label = QLabel("Ready.")
         self.btn_export = QPushButton("Export Results"); self.btn_export.clicked.connect(self.export_results); self.btn_export.setEnabled(False)
-        bot.addWidget(self.status_label, 1); bot.addWidget(self.btn_export)
+
+        self.btn_reload_meta = QPushButton()
+        self.btn_reload_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        self.btn_reload_meta.setToolTip("Reload shelfmark/title metadata")
+        self.btn_reload_meta.clicked.connect(self.reload_metadata)
+
+        self.btn_stop_meta = QPushButton()
+        self.btn_stop_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserStop))
+        self.btn_stop_meta.setToolTip("Stop metadata loading")
+        self.btn_stop_meta.clicked.connect(self.stop_metadata_loading)
+        self.btn_stop_meta.setEnabled(False)
+
+        bot.addWidget(self.status_label, 1)
+        bot.addWidget(self.btn_reload_meta)
+        bot.addWidget(self.btn_stop_meta)
+        bot.addWidget(self.btn_export)
         layout.addLayout(bot)
         panel.setLayout(layout)
         return panel
@@ -688,14 +707,53 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
             self.result_row_by_sys_id[sid] = i
 
+        self.start_metadata_loading(ids)
+
+    def start_metadata_loading(self, ids):
+        if not ids:
+            return
+
+        if self.meta_loader and self.meta_loader.isRunning():
+            self.meta_loader.request_cancel()
+            self.meta_loader.wait()
+
+        self.meta_cached_count = len([sid for sid in ids if sid and sid in self.meta_mgr.nli_cache])
+        self.meta_to_fetch_count = len([sid for sid in ids if sid and sid not in self.meta_mgr.nli_cache])
+        self.meta_progress_current = 0
+
+        for i, res in enumerate(self.last_results):
+            shelf = res['display'].get('shelfmark', '')
+            title = res['display'].get('title', '')
+            _, _, cached_shelf, cached_title = self._get_meta_for_header(res.get('raw_header', ''))
+            shelf = cached_shelf or shelf
+            title = cached_title or title
+
+            if shelf:
+                self.results_table.setItem(i, 1, QTableWidgetItem(shelf))
+            elif not self.results_table.item(i, 1):
+                self.results_table.setItem(i, 1, QTableWidgetItem("Loading..."))
+
+            if title:
+                self.results_table.setItem(i, 2, QTableWidgetItem(title))
+            elif not self.results_table.item(i, 2):
+                self.results_table.setItem(i, 2, QTableWidgetItem("Loading..."))
+
+        if self.meta_to_fetch_count == 0:
+            self.status_label.setText(f"Metadata already loaded for {self.meta_cached_count} items.")
+            self.btn_stop_meta.setEnabled(False)
+            return
+
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
-        self.meta_loader.finished_signal.connect(lambda cancelled: self.status_label.setText(f"Loaded {len(results)} items." if not cancelled else "Metadata load cancelled"))
+        self.meta_loader.finished_signal.connect(self.on_meta_finished)
         self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, "Metadata Error", err))
+        self.btn_stop_meta.setEnabled(True)
+        self.status_label.setText(self._format_metadata_status())
         self.meta_loader.start()
 
     def on_meta_progress(self, curr, total, sid):
-        self.status_label.setText(f"Metadata {curr}/{total}")
+        self.meta_progress_current = curr
+        self.status_label.setText(self._format_metadata_status())
         row_index = self.result_row_by_sys_id.get(sid)
         if row_index is None:
             return
@@ -705,6 +763,36 @@ class GenizahGUI(QMainWindow):
         self.results_table.setItem(row_index, 2, QTableWidgetItem(title))
         self.last_results[row_index]['display']['shelfmark'] = shelf
         self.last_results[row_index]['display']['title'] = title
+
+    def on_meta_finished(self, cancelled):
+        total_loaded = self.meta_cached_count + self.meta_progress_current
+        total_expected = self.meta_cached_count + self.meta_to_fetch_count
+        if cancelled:
+            self.status_label.setText(f"Metadata load cancelled. Loaded {total_loaded}/{total_expected}.")
+        else:
+            self.status_label.setText(f"Loaded {total_expected} items.")
+        self.btn_stop_meta.setEnabled(False)
+        self.meta_loader = None
+
+    def reload_metadata(self):
+        if not self.last_results:
+            return
+        ids = [res['display'].get('id', '') for res in self.last_results]
+        self.start_metadata_loading(ids)
+
+    def stop_metadata_loading(self):
+        if self.meta_loader and self.meta_loader.isRunning():
+            self.meta_loader.request_cancel()
+            self.status_label.setText("Stopping metadata load...")
+            self.btn_stop_meta.setEnabled(False)
+
+    def _format_metadata_status(self):
+        total_expected = self.meta_cached_count + self.meta_to_fetch_count
+        total_loaded = self.meta_cached_count + self.meta_progress_current
+        progress_part = ""
+        if self.meta_to_fetch_count:
+            progress_part = f" (fetching {self.meta_progress_current}/{self.meta_to_fetch_count})"
+        return f"Metadata loaded: {total_loaded}/{total_expected}{progress_part}"
 
     def show_full_text(self):
         row = self.results_table.currentRow()
@@ -1327,6 +1415,36 @@ class GenizahGUI(QMainWindow):
     def on_index_error(self, err):
         self.index_progress.setFormat("Indexing failed")
         QMessageBox.critical(self, "Indexing Error", str(err))
+
+    def closeEvent(self, event):
+        # Ensure worker threads are stopped before the window is destroyed
+        try:
+            if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
+                self.meta_loader.request_cancel()
+                self.meta_loader.wait()
+
+            if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
+                self.search_thread.requestInterruption()
+                self.search_thread.wait(2000)
+                if self.search_thread.isRunning():
+                    self.search_thread.terminate()
+                    self.search_thread.wait()
+
+            if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+                self.comp_thread.requestInterruption()
+                self.comp_thread.wait(2000)
+                if self.comp_thread.isRunning():
+                    self.comp_thread.terminate()
+                    self.comp_thread.wait()
+
+            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
+                self.group_thread.requestInterruption()
+                self.group_thread.wait(2000)
+                if self.group_thread.isRunning():
+                    self.group_thread.terminate()
+                    self.group_thread.wait()
+        finally:
+            super().closeEvent(event)
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
