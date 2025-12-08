@@ -5,6 +5,7 @@ import sys
 import os
 import re
 import threading
+import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
@@ -12,7 +13,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction, QPixmap
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
@@ -155,6 +156,7 @@ class ResultDialog(QDialog):
         self.current_sys_id = None
         self.current_p_num = None
         self.current_fl_id = None
+        self.current_thumb_url = None
         
         self.current_meta_request = 0
 
@@ -220,6 +222,13 @@ class ResultDialog(QDialog):
         self.lbl_info.setStyleSheet("background-color: #ecf0f1; color: #2c3e50; border-radius: 6px; padding: 8px;")
         self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         header_layout.addWidget(self.lbl_info, 1)
+
+        self.lbl_thumb = QLabel("No preview available")
+        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_thumb.setFixedSize(220, 220)
+        self.lbl_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #f8f9fa; color: #7f8c8d;")
+        self.lbl_thumb.setScaledContents(True)
+        header_layout.addWidget(self.lbl_thumb)
         
         # --- Page Controls ---
         ctrl_layout = QVBoxLayout()
@@ -318,6 +327,9 @@ class ResultDialog(QDialog):
 
         info_html = f"<b>System ID:</b> {self.current_sys_id}<br><b>File ID (FL):</b> {self.current_fl_id or 'N/A'}"
         self.lbl_info.setText(info_html)
+        self.lbl_thumb.setText("Loading preview…")
+        self.lbl_thumb.setPixmap(QPixmap())
+        self.current_thumb_url = None
         
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
@@ -347,10 +359,31 @@ class ResultDialog(QDialog):
         self.lbl_title.setText(meta.get('title', ''))
         self.lbl_meta_loading.setVisible(False)
 
+        self.update_thumbnail(meta)
+
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
             return
         self.apply_metadata(meta or {})
+
+    def update_thumbnail(self, meta):
+        thumb_url = meta.get('thumb_url') if meta else None
+
+        if meta and not meta.get('thumb_checked'):
+            def worker():
+                url = self.meta_mgr.get_thumbnail(self.current_sys_id)
+                QTimer.singleShot(0, lambda: self._apply_thumbnail(url))
+
+            threading.Thread(target=worker, daemon=True).start()
+            return
+
+        self._apply_thumbnail(thumb_url)
+
+    def _apply_thumbnail(self, thumb_url):
+        if thumb_url == self.current_thumb_url:
+            return
+        self.current_thumb_url = thumb_url
+        load_thumbnail_to_label(self.lbl_thumb, thumb_url)
 
     def open_catalog(self):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
@@ -404,6 +437,7 @@ class GenizahGUI(QMainWindow):
             self.meta_cached_count = 0
             self.meta_to_fetch_count = 0
             self.meta_progress_current = 0
+            self.browse_thumb_url = None
 
             self.init_ui() # בונה את self.tabs
             
@@ -588,6 +622,14 @@ class GenizahGUI(QMainWindow):
         meta_col.addWidget(self.browse_info_lbl)
         meta_col.addWidget(self.browse_title_lbl)
         info_row.addLayout(meta_col, 1)
+
+        self.browse_thumb = QLabel("No preview available")
+        self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.browse_thumb.setFixedSize(200, 200)
+        self.browse_thumb.setStyleSheet("border: 1px solid #95a5a6; background: #fafafa; color: #7f8c8d;")
+        self.browse_thumb.setScaledContents(True)
+        info_row.addWidget(self.browse_thumb)
+
         self.btn_b_catalog = QPushButton("Go to Ktiv Catalog")
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
         self.btn_b_catalog.setEnabled(False)
@@ -1386,6 +1428,9 @@ class GenizahGUI(QMainWindow):
         if not sid: return
         self.current_browse_sid = sid; self.current_browse_p = None
         self.btn_b_catalog.setEnabled(True)
+        self.browse_thumb.setText("Loading preview…")
+        self.browse_thumb.setPixmap(QPixmap())
+        self.browse_thumb_url = None
         self.browse_update_view(0)
 
     def browse_navigate(self, d): self.browse_update_view(d)
@@ -1400,15 +1445,38 @@ class GenizahGUI(QMainWindow):
             meta = self.meta_mgr.fetch_nli_data(self.current_browse_sid)
             title = title or meta.get('title', '')
             shelf = shelf or meta.get('shelfmark', '')
+        else:
+            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
 
         self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
         self.browse_title_lbl.setText(title or "")
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
+        self.update_browse_thumbnail(meta)
+
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+
+    def update_browse_thumbnail(self, meta):
+        thumb_url = meta.get('thumb_url') if meta else None
+
+        if meta and not meta.get('thumb_checked'):
+            def worker():
+                url = self.meta_mgr.get_thumbnail(self.current_browse_sid)
+                QTimer.singleShot(0, lambda: self._apply_browse_thumb(url))
+
+            threading.Thread(target=worker, daemon=True).start()
+            return
+
+        self._apply_browse_thumb(thumb_url)
+
+    def _apply_browse_thumb(self, thumb_url):
+        if thumb_url == self.browse_thumb_url:
+            return
+        self.browse_thumb_url = thumb_url
+        load_thumbnail_to_label(self.browse_thumb, thumb_url)
 
     def run_indexing(self):
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
@@ -1474,6 +1542,46 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+
+
+def load_thumbnail_to_label(label, thumb_url):
+    """Fetch an external thumbnail and place it inside the provided QLabel."""
+    label.setPixmap(QPixmap())
+
+    if not thumb_url:
+        label.setText("Preview unavailable")
+        return
+
+    label.setProperty("thumb_url", thumb_url)
+    label.setText("Loading preview…")
+
+    def worker():
+        try:
+            resp = requests.get(thumb_url, timeout=10)
+            if resp.status_code != 200:
+                raise ValueError(f"Unexpected status: {resp.status_code}")
+
+            pix = QPixmap()
+            pix.loadFromData(resp.content)
+            if pix.isNull():
+                raise ValueError("Invalid image data")
+
+            def apply_pixmap():
+                if label.property("thumb_url") != thumb_url:
+                    return
+                scaled = pix.scaled(label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                label.setPixmap(scaled)
+                label.setText("")
+
+            QTimer.singleShot(0, apply_pixmap)
+        except Exception:
+            def apply_error():
+                if label.property("thumb_url") != thumb_url:
+                    return
+                label.setText("Preview unavailable")
+            QTimer.singleShot(0, apply_error)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == "__main__":
     try:
