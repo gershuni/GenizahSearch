@@ -237,11 +237,7 @@ class MetadataManager:
         threading.Thread(target=self._build_file_map_background, daemon=True).start()
 
     def _make_session(self):
-        session = requests.Session()
-        if hasattr(session, "trust_env"):
-            session.trust_env = False
-        session.proxies = {}
-        return session
+        return requests.Session()
 
     def _load_caches(self):
         self._load_metadata_bank()
