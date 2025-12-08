@@ -238,7 +238,8 @@ class MetadataManager:
 
     def _make_session(self):
         session = requests.Session()
-        session.trust_env = False
+        if hasattr(session, "trust_env"):
+            session.trust_env = False
         session.proxies = {}
         return session
 

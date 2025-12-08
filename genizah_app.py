@@ -1577,11 +1577,16 @@ def load_thumbnail_to_label(label, thumb_url):
     label.setProperty("thumb_url", thumb_url)
     label.setText("Loading preview…")
 
+    def _make_proxy_free_session():
+        session = requests.Session()
+        if hasattr(session, "trust_env"):
+            session.trust_env = False
+        session.proxies = {}
+        return session
+
     def worker():
         try:
-            session = requests.Session()
-            session.trust_env = False
-            session.proxies = {}
+            session = _make_proxy_free_session()
             resp = session.get(thumb_url, timeout=10, allow_redirects=True)
             if resp.status_code != 200:
                 raise ValueError(f"Unexpected status: {resp.status_code}")
