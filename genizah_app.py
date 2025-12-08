@@ -12,11 +12,33 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QObject
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
+
+
+class _ThumbnailDispatcher(QObject):
+    """Relay thumbnail UI updates onto the main Qt thread."""
+
+    apply = pyqtSignal(object)
+
+
+_thumbnail_dispatcher = None
+
+
+def _get_thumbnail_dispatcher():
+    """Return a singleton dispatcher bound to the QApplication thread."""
+    global _thumbnail_dispatcher
+    if _thumbnail_dispatcher is None:
+        app = QApplication.instance()
+        if app is None:
+            return None
+
+        _thumbnail_dispatcher = _ThumbnailDispatcher()
+        _thumbnail_dispatcher.apply.connect(lambda fn: fn())
+    return _thumbnail_dispatcher
 
 class HelpDialog(QDialog):
     """Display static HTML help content inside a simple dialog."""
@@ -1557,29 +1579,34 @@ def load_thumbnail_to_label(label, thumb_url):
 
     def worker():
         try:
-            resp = requests.get(thumb_url, timeout=10)
+            resp = requests.get(thumb_url, timeout=10, proxies={}, allow_redirects=True, trust_env=False)
             if resp.status_code != 200:
                 raise ValueError(f"Unexpected status: {resp.status_code}")
 
-            pix = QPixmap()
-            pix.loadFromData(resp.content)
-            if pix.isNull():
+            img = QImage.fromData(resp.content)
+            if img.isNull():
                 raise ValueError("Invalid image data")
 
-            def apply_pixmap():
+            def apply_image():
                 if label.property("thumb_url") != thumb_url:
                     return
+                pix = QPixmap.fromImage(img)
                 scaled = pix.scaled(label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 label.setPixmap(scaled)
                 label.setText("")
 
-            QTimer.singleShot(0, apply_pixmap)
+            dispatcher = _get_thumbnail_dispatcher()
+            if dispatcher:
+                dispatcher.apply.emit(apply_image)
         except Exception:
             def apply_error():
                 if label.property("thumb_url") != thumb_url:
                     return
                 label.setText("Preview unavailable")
-            QTimer.singleShot(0, apply_error)
+
+            dispatcher = _get_thumbnail_dispatcher()
+            if dispatcher:
+                dispatcher.apply.emit(apply_error)
 
     threading.Thread(target=worker, daemon=True).start()
 

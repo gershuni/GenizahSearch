@@ -364,7 +364,7 @@ class MetadataManager:
     def fetch_nli_data(self, system_id):
         if system_id in self.nli_cache:
             meta = self.nli_cache[system_id]
-            if not meta.get('thumb_checked'):
+            if not meta.get('thumb_checked') or not meta.get('thumb_url'):
                 meta['thumb_url'] = meta.get('thumb_url') or self.get_thumbnail(system_id)
                 meta['thumb_checked'] = True
             return meta
@@ -390,7 +390,7 @@ class MetadataManager:
                 # המתנה קלה כדי לא להעמיס
                 time.sleep(0.3)
                 
-                resp = requests.get(url, headers=headers, timeout=5)
+                resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
                 
                 if resp.status_code == 200:
                     try:
@@ -462,7 +462,7 @@ class MetadataManager:
         for fl_id in fl_ids:
             base = f"https://iiif.nli.org.il/IIIFv21/{fl_id}"
             try:
-                info = requests.get(f"{base}/info.json", timeout=5)
+                info = requests.get(f"{base}/info.json", timeout=5, proxies={}, allow_redirects=True, trust_env=False)
                 if info.status_code == 200:
                     return f"{base}/full/!{size},{size}/0/default.jpg"
             except Exception:
@@ -475,7 +475,7 @@ class MetadataManager:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=5)
+            resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.content)
                 return self._extract_fl_ids(root)
@@ -485,7 +485,7 @@ class MetadataManager:
 
     def get_thumbnail(self, system_id, size=320):
         meta = self.nli_cache.get(system_id)
-        if meta and meta.get('thumb_checked'):
+        if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
             return meta.get('thumb_url')
 
         fl_ids = []
