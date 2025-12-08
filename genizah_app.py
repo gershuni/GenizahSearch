@@ -588,10 +588,10 @@ class GenizahGUI(QMainWindow):
         layout.addLayout(top)
 
         self.browse_info_lbl = QLabel("Enter ID to browse.")
-        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
+        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ecf0f1;")
         self.browse_title_lbl = QLabel("")
         self.browse_title_lbl.setWordWrap(True)
-        self.browse_title_lbl.setStyleSheet("font-size: 12px; color: #34495e;")
+        self.browse_title_lbl.setStyleSheet("font-size: 12px; color: #dfe6e9;")
         info_row = QHBoxLayout()
         meta_col = QVBoxLayout()
         meta_col.addWidget(self.browse_info_lbl)
@@ -1402,7 +1402,7 @@ class GenizahGUI(QMainWindow):
             shelf = shelf or meta.get('shelfmark', '')
 
         self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
-        self.browse_title_lbl.setText(f"Title: {title or '[Title missing]'}")
+        self.browse_title_lbl.setText(title or "")
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
