@@ -189,6 +189,8 @@ class ResultDialog(QDialog):
     """Allow browsing a single search result and its surrounding pages."""
 
     metadata_loaded = pyqtSignal(int, dict)
+    thumb_resolved = pyqtSignal(str, object)
+    browse_thumb_resolved = pyqtSignal(str, object)
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
         
@@ -196,6 +198,9 @@ class ResultDialog(QDialog):
         self.current_result_idx = current_index
         self.meta_mgr = meta_mgr
         self.searcher = searcher
+
+        self.thumb_resolved.connect(self._on_thumb_resolved)
+        self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
         
         # State for internal browsing
         self.current_sys_id = None
@@ -438,7 +443,7 @@ class ResultDialog(QDialog):
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
-            QTimer.singleShot(0, lambda: self._on_thumb_resolved(target_sid, url))
+            self.thumb_resolved.emit(target_sid, url)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1579,7 +1584,7 @@ class GenizahGUI(QMainWindow):
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
-            QTimer.singleShot(0, lambda: self._on_browse_thumb_resolved(target_sid, url))
+            self.browse_thumb_resolved.emit(target_sid, url)
 
         threading.Thread(target=worker, daemon=True).start()
 
