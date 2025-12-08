@@ -362,14 +362,20 @@ class MetadataManager:
         return result
 
     def fetch_nli_data(self, system_id):
-        if system_id in self.nli_cache: return self.nli_cache[system_id]
+        if system_id in self.nli_cache:
+            meta = self.nli_cache[system_id]
+            if not meta.get('thumb_checked') or not meta.get('thumb_url'):
+                meta['thumb_url'] = meta.get('thumb_url') or self.get_thumbnail(system_id)
+                meta['thumb_checked'] = True
+            return meta
+
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
         return meta
 
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-        meta = {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
+        meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
         
         # כותרות כדי להיראות כמו דפדפן
         headers = {
@@ -384,13 +390,15 @@ class MetadataManager:
                 # המתנה קלה כדי לא להעמיס
                 time.sleep(0.3)
                 
-                resp = requests.get(url, headers=headers, timeout=5)
+                resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
                 
                 if resp.status_code == 200:
                     try:
                         root = ET.fromstring(resp.content)
                         # ... הלוגיקה הרגילה של ה-XML ...
                         c_942 = None; c_907 = None; c_090 = None; c_avd = None
+
+                        fl_ids = self._extract_fl_ids(root)
 
                         for df in root.findall('marc:datafield', self.ns):
                             tag = df.get('tag')
@@ -418,6 +426,10 @@ class MetadataManager:
 
                         final = c_942 or c_907 or c_090 or c_avd
                         if final: meta['shelfmark'] = final
+
+                        meta['fl_ids'] = fl_ids
+                        meta['thumb_url'] = self._resolve_thumbnail(fl_ids)
+                        meta['thumb_checked'] = True
                         
                         # הצלחה - צא מהלולאה והחזר תוצאה
                         return system_id, meta
@@ -436,6 +448,61 @@ class MetadataManager:
                 time.sleep(1)
         
         return system_id, meta
+
+    def _extract_fl_ids(self, root):
+        fl_ids = []
+        for df in root.findall("marc:datafield[@tag='907']", self.ns):
+            for sf in df.findall("marc:subfield[@code='d']", self.ns):
+                val = (sf.text or "").strip()
+                if val.startswith("FL"):
+                    fl_ids.append(val)
+        return fl_ids
+
+    def _resolve_thumbnail(self, fl_ids, size=320):
+        for fl_id in fl_ids:
+            base = f"https://iiif.nli.org.il/IIIFv21/{fl_id}"
+            try:
+                info = requests.get(f"{base}/info.json", timeout=5, proxies={}, allow_redirects=True, trust_env=False)
+                if info.status_code == 200:
+                    return f"{base}/full/!{size},{size}/0/default.jpg"
+            except Exception:
+                continue
+        return None
+
+    def _fetch_fl_ids(self, system_id):
+        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=5, proxies={}, allow_redirects=True, trust_env=False)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                return self._extract_fl_ids(root)
+        except Exception:
+            return []
+        return []
+
+    def get_thumbnail(self, system_id, size=320):
+        meta = self.nli_cache.get(system_id)
+        if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
+            return meta.get('thumb_url')
+
+        fl_ids = []
+        if meta:
+            fl_ids = meta.get('fl_ids', [])
+        if not fl_ids:
+            fl_ids = self._fetch_fl_ids(system_id)
+
+        thumb_url = self._resolve_thumbnail(fl_ids, size=size)
+
+        if meta is None:
+            meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': fl_ids}
+        meta['fl_ids'] = fl_ids
+        meta['thumb_url'] = thumb_url
+        meta['thumb_checked'] = True
+        self.nli_cache[system_id] = meta
+        return thumb_url
         
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
         to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
@@ -465,7 +532,8 @@ class MetadataManager:
             'title': meta.get('title', ''),
             'img': p_num,
             'source': src_label,
-            'id': sys_id
+            'id': sys_id,
+            'thumb_url': meta.get('thumb_url')
         }
 
 # ==============================================================================
