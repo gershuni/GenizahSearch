@@ -2,6 +2,7 @@
 import sys
 import os
 import re
+import threading
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
