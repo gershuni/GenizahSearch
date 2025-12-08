@@ -472,11 +472,54 @@ class MetadataManager:
             base = f"https://iiif.nli.org.il/IIIFv21/{fl_id}"
             try:
                 info = session.get(f"{base}/info.json", timeout=5, allow_redirects=True)
-                if info.status_code == 200:
-                    return f"{base}/full/!{size},{size}/0/default.jpg"
+                if info.status_code != 200:
+                    continue
+
+                thumb = self._pick_working_thumbnail(base, size, session)
+                if thumb:
+                    return thumb
             except Exception:
                 continue
         return None
+
+    def _pick_working_thumbnail(self, base, size, session):
+        candidates = [
+            f"{base}/full/!{size},{size}/0/default.jpg",
+            f"{base}/full/!{max(size, 600)},{max(size, 600)}/0/default.jpg",
+            f"{base}/full/full/0/default.jpg",
+            f"{base}/full/max/0/default.jpg",
+        ]
+
+        for url in candidates:
+            if self._url_returns_image(session, url):
+                return url
+        return None
+
+    def _url_returns_image(self, session, url):
+        def _is_image(resp):
+            ctype = (resp.headers.get("content-type") or "").lower()
+            return resp.status_code == 200 and "image" in ctype
+
+        try:
+            head = session.head(url, timeout=5, allow_redirects=True)
+            if _is_image(head):
+                head.close()
+                return True
+            head.close()
+
+            # If HEAD is not supported or inconclusive, try GET
+            if head.status_code not in (200, 405):
+                return False
+        except Exception:
+            pass
+
+        try:
+            resp = session.get(url, timeout=5, allow_redirects=True, stream=True)
+            ok = _is_image(resp)
+            resp.close()
+            return ok
+        except Exception:
+            return False
 
     def _fetch_fl_ids(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
