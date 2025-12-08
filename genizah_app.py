@@ -2,8 +2,6 @@
 import sys
 import os
 import re
-import threading
-import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
@@ -396,6 +394,7 @@ class GenizahGUI(QMainWindow):
             # אתחול הממשק המלא
             self.last_results = []
             self.last_search_query = ""
+            self.result_row_by_sys_id = {}
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
@@ -650,7 +649,8 @@ class GenizahGUI(QMainWindow):
         self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
         self.results_table.setRowCount(0); self.btn_export.setEnabled(False)
-        
+        self.result_row_by_sys_id = {}
+
         self.search_thread = SearchThread(self.searcher, query, mode, gap)
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
@@ -672,7 +672,8 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(f"Found {len(results)}. Loading metadata...")
         self.last_results = results; self.btn_export.setEnabled(True)
         self.results_table.setRowCount(len(results))
-        
+        self.result_row_by_sys_id = {}
+
         ids = []
         for i, res in enumerate(results):
             meta = res['display']; ids.append(meta['id'])
@@ -685,21 +686,25 @@ class GenizahGUI(QMainWindow):
             self.results_table.setCellWidget(i, 3, lbl)
             self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
             self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+            self.result_row_by_sys_id[sid] = i
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
-        self.meta_loader.finished_signal.connect(lambda: self.status_label.setText(f"Loaded {len(results)} items."))
+        self.meta_loader.finished_signal.connect(lambda cancelled: self.status_label.setText(f"Loaded {len(results)} items." if not cancelled else "Metadata load cancelled"))
+        self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, "Metadata Error", err))
         self.meta_loader.start()
 
     def on_meta_progress(self, curr, total, sid):
         self.status_label.setText(f"Metadata {curr}/{total}")
-        for r in range(self.results_table.rowCount()):
-            if self.results_table.item(r, 0).text() == sid:
-                _, _, shelf, title = self._get_meta_for_header(self.last_results[r]['raw_header'])
-                self.results_table.setItem(r, 1, QTableWidgetItem(shelf))
-                self.results_table.setItem(r, 2, QTableWidgetItem(title))
-                self.last_results[r]['display']['shelfmark'] = shelf
-                self.last_results[r]['display']['title'] = title
+        row_index = self.result_row_by_sys_id.get(sid)
+        if row_index is None:
+            return
+
+        _, _, shelf, title = self._get_meta_for_header(self.last_results[row_index]['raw_header'])
+        self.results_table.setItem(row_index, 1, QTableWidgetItem(shelf))
+        self.results_table.setItem(row_index, 2, QTableWidgetItem(title))
+        self.last_results[row_index]['display']['shelfmark'] = shelf
+        self.last_results[row_index]['display']['title'] = title
 
     def show_full_text(self):
         row = self.results_table.currentRow()
@@ -1058,7 +1063,9 @@ class GenizahGUI(QMainWindow):
         for item in self.comp_known:
             sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
             if sid: all_ids.append(sid)
-        self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
+        cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
+        if cancelled:
+            return
 
         missing_ids = []
         for item in self.comp_main + self.comp_known:
@@ -1078,8 +1085,9 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.StandardButton.No
             )
             if choice == QMessageBox.StandardButton.No:
-                self._fetch_metadata_with_dialog(list(set(missing_ids)), title="Loading missing metadata...")
-                self._refresh_comp_tree_metadata()
+                cancelled = self._fetch_metadata_with_dialog(list(set(missing_ids)), title="Loading missing metadata...")
+                if not cancelled:
+                    self._refresh_comp_tree_metadata()
 
         title = self.comp_title_input.text().strip() or "Untitled Composition"
         default_path = self._default_report_path(title, "Composition_Report")
@@ -1211,49 +1219,52 @@ class GenizahGUI(QMainWindow):
     def _fetch_metadata_with_dialog(self, system_ids, title="Loading metadata..."):
         to_fetch = [sid for sid in system_ids if sid and sid not in self.meta_mgr.nli_cache]
         if not to_fetch:
-            return
+            return False
 
-        dialog = QMessageBox(self)
+        dialog = QProgressDialog("Loading shelfmarks and titles...", "Cancel", 0, len(to_fetch), self)
         dialog.setWindowTitle(title)
-        dialog.setText("Please wait while shelfmarks and titles are loaded...\nThis may take a few seconds.")
-        dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumDuration(0)
+
+        loop = QEventLoop(self)
+        cancelled = False
+
+        worker = ShelfmarkLoaderThread(self.meta_mgr, to_fetch)
+
+        def on_progress(curr, total, sid):
+            dialog.setMaximum(total)
+            dialog.setValue(curr)
+            dialog.setLabelText(f"Loaded {curr}/{total} (ID: {sid})")
+
+        def on_finished(was_cancelled):
+            nonlocal cancelled
+            cancelled = was_cancelled
+            dialog.reset()
+            loop.quit()
+            if was_cancelled:
+                QMessageBox.information(self, "Metadata", "Metadata loading was cancelled.")
+
+        def on_error(err):
+            QMessageBox.critical(self, "Metadata Error", err)
+            dialog.reset()
+            loop.quit()
+
+        def handle_cancel():
+            worker.request_cancel()
+
+        dialog.canceled.connect(handle_cancel)
+        worker.progress_signal.connect(on_progress)
+        worker.finished_signal.connect(on_finished)
+        worker.error_signal.connect(on_error)
+
+        worker.start()
         dialog.show()
+        loop.exec()
+        worker.wait()
 
-        progress = {'count': 0}
-        start_time = time.time()
-        long_wait_prompted = False
-
-        def progress_cb(count, total, sid):
-            progress['count'] = count
-            dialog.setInformativeText(f"Loaded {count}/{total} (ID: {sid})")
-            QApplication.processEvents()
-
-        def run_fetch():
-            self.meta_mgr.batch_fetch_shelfmarks(to_fetch, progress_callback=progress_cb)
-
-        thread = threading.Thread(target=run_fetch, daemon=True)
-        thread.start()
-
-        while thread.is_alive():
-            QApplication.processEvents()
-
-            elapsed = time.time() - start_time
-            if not long_wait_prompted and elapsed > 12:
-                long_wait_prompted = True
-                choice = QMessageBox.question(
-                    self,
-                    "Still Loading...",
-                    "Metadata fetching is taking longer than expected.\n"
-                    "Do you want to keep waiting?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
-                if choice == QMessageBox.StandardButton.No:
-                    dialog.hide()
-                    return
-
-        thread.join()
-        dialog.hide()
+        return cancelled
 
     def _resolve_meta_labels(self, raw_header):
         sid, page, shelf, title = self._get_meta_for_header(raw_header)
