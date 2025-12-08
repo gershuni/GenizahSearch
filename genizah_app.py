@@ -363,6 +363,7 @@ class GenizahGUI(QMainWindow):
             # אתחול הממשק המלא
             self.last_results = []
             self.last_search_query = ""
+            self.result_row_by_sys_id = {}
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
@@ -617,7 +618,8 @@ class GenizahGUI(QMainWindow):
         self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
         self.results_table.setRowCount(0); self.btn_export.setEnabled(False)
-        
+        self.result_row_by_sys_id = {}
+
         self.search_thread = SearchThread(self.searcher, query, mode, gap)
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
@@ -639,7 +641,8 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(f"Found {len(results)}. Loading metadata...")
         self.last_results = results; self.btn_export.setEnabled(True)
         self.results_table.setRowCount(len(results))
-        
+        self.result_row_by_sys_id = {}
+
         ids = []
         for i, res in enumerate(results):
             meta = res['display']; ids.append(meta['id'])
@@ -652,6 +655,7 @@ class GenizahGUI(QMainWindow):
             self.results_table.setCellWidget(i, 3, lbl)
             self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
             self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+            self.result_row_by_sys_id[sid] = i
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
@@ -660,13 +664,15 @@ class GenizahGUI(QMainWindow):
 
     def on_meta_progress(self, curr, total, sid):
         self.status_label.setText(f"Metadata {curr}/{total}")
-        for r in range(self.results_table.rowCount()):
-            if self.results_table.item(r, 0).text() == sid:
-                _, _, shelf, title = self._get_meta_for_header(self.last_results[r]['raw_header'])
-                self.results_table.setItem(r, 1, QTableWidgetItem(shelf))
-                self.results_table.setItem(r, 2, QTableWidgetItem(title))
-                self.last_results[r]['display']['shelfmark'] = shelf
-                self.last_results[r]['display']['title'] = title
+        row_index = self.result_row_by_sys_id.get(sid)
+        if row_index is None:
+            return
+
+        _, _, shelf, title = self._get_meta_for_header(self.last_results[row_index]['raw_header'])
+        self.results_table.setItem(row_index, 1, QTableWidgetItem(shelf))
+        self.results_table.setItem(row_index, 2, QTableWidgetItem(title))
+        self.last_results[row_index]['display']['shelfmark'] = shelf
+        self.last_results[row_index]['display']['title'] = title
 
     def show_full_text(self):
         row = self.results_table.currentRow()
