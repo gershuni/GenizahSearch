@@ -702,6 +702,15 @@ class GenizahGUI(QMainWindow):
 
     def on_search_finished(self, results):
         self.reset_ui()
+        if not results:
+            self.status_label.setText("No results found.")
+            self.last_results = []
+            self.btn_export.setEnabled(False)
+            self.results_table.setRowCount(0)
+            self.result_row_by_sys_id = {}
+            self.btn_stop_meta.setEnabled(False)
+            return
+
         self.status_label.setText(f"Found {len(results)}. Loading metadata...")
         self.last_results = results; self.btn_export.setEnabled(True)
         self.results_table.setRowCount(len(results))
