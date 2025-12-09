@@ -269,105 +269,78 @@ class ResultDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle(f"Manuscript Viewer")
-        self.resize(1100, 800)
+        self.resize(1300, 850) # Wider for split view
         
         main_layout = QVBoxLayout()
         
-        # --- Top Bar (Result Prev/Next) ---
+        # --- Top Bar (Result Nav) ---
         top_bar = QHBoxLayout()
-        self.btn_res_prev = QPushButton("◀ Prev Result")
-        self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
-        
-        self.lbl_res_count = QLabel()
-        self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.btn_res_next = QPushButton("Next Result ▶")
-        self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
-        
+        self.btn_res_prev = QPushButton("◀ Prev Result"); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
+        self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_res_next = QPushButton("Next Result ▶"); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
         
-        # --- Header Area ---
+        # --- Header ---
         header_widget = QWidget()
-        # Removed fixed height so it expands naturally to fit the nav bar
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(0, 5, 0, 10)
         
-        # Left Column: Metadata + All Controls
-        meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop)
-        meta_col.setSpacing(4)
+        # Left: Meta + Controls
+        meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop); meta_col.setSpacing(4)
         
-        # 1. Shelfmark
-        self.lbl_shelf = QLabel()
-        self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
-        # 2. Title
-        self.lbl_title = QLabel()
-        self.lbl_title.setFont(QFont("Arial", 14))
-        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.lbl_title.setWordWrap(True)
-        self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_shelf = QLabel(); self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)); self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setWordWrap(True); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        # 3. Info Row (Ktiv Button + Status)
+        # Controls Row
         info_row = QHBoxLayout()
-        self.btn_img = QPushButton("Go to Ktiv")
-        self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
-        self.btn_img.clicked.connect(self.open_viewer)
-        self.btn_img.setFixedWidth(100)
-        
-        self.lbl_info = QLabel()
-        self.lbl_info.setStyleSheet("font-size: 11px;")
-        self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
+        self.btn_img = QPushButton("Go to Ktiv"); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_viewer); self.btn_img.setFixedWidth(100)
+        self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel("Loading..."); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
-        info_row.addWidget(self.btn_img)
-        info_row.addWidget(self.lbl_info)
-        info_row.addWidget(self.lbl_meta_loading)
-        info_row.addStretch()
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
-        # 4. Page Navigation Row (Moved INSIDE the header column)
+        # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
         btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
-        
-        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80)
-        self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        
+        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
         btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
-        
         self.lbl_total = QLabel("/ ?")
-        
-        # Assemble Nav Row
-        nav_row.addWidget(QLabel("Image:"))
-        nav_row.addWidget(btn_pg_prev)
-        nav_row.addWidget(self.spin_page)
-        nav_row.addWidget(self.lbl_total)
-        nav_row.addWidget(btn_pg_next)
-        nav_row.addStretch() # Push to left
+        nav_row.addWidget(QLabel("Image:")); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
 
-        # Add everything to Left Column
-        meta_col.addWidget(self.lbl_shelf)
-        meta_col.addWidget(self.lbl_title)
-        meta_col.addLayout(info_row)
-        meta_col.addLayout(nav_row) # <-- Added here
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row)
         
-        # Right Column: Thumbnail
-        self.lbl_thumb = QLabel("No Preview")
-        self.lbl_thumb.setFixedSize(120, 120)
-        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;")
-        self.lbl_thumb.setScaledContents(True)
+        # Right: Thumbnail
+        self.lbl_thumb = QLabel("No Preview"); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
         
-        header_layout.addLayout(meta_col, 1)
-        header_layout.addWidget(self.lbl_thumb)
+        header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
         
-        # --- Text Area ---
-        self.text_browser = QTextBrowser(); self.text_browser.setFont(QFont("SBL Hebrew", 16)); self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        main_layout.addWidget(self.text_browser)
+        # --- SPLIT VIEW (Manuscript | Source) ---
+        self.text_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # --- Footer ---
+        # 1. Manuscript View (Left)
+        ms_widget = QWidget()
+        ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
+        ms_layout.addWidget(QLabel("<b>Manuscript Text</b>"))
+        self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        ms_layout.addWidget(self.text_ms)
+        
+        # 2. Source Context View (Right)
+        self.src_widget = QWidget() # Container to hide/show easily
+        src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
+        src_layout.addWidget(QLabel("<b>Match Context (Source)</b>"))
+        self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        src_layout.addWidget(self.text_src)
+
+        self.text_splitter.addWidget(ms_widget)
+        self.text_splitter.addWidget(self.src_widget)
+        self.text_splitter.setStretchFactor(0, 2) # Manuscript takes more space by default
+        self.text_splitter.setStretchFactor(1, 1)
+        
+        main_layout.addWidget(self.text_splitter, 1)
+        
+        # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
         self.setLayout(main_layout)
         
@@ -381,44 +354,62 @@ class ResultDialog(QDialog):
         data = self.all_results[idx]
         if not data.get('full_text'):
             data['full_text'] = self.searcher.get_full_text_by_id(data['uid']) or data.get('text', '')
-        self.data = data # Current data object
+        self.data = data
         
+        # Nav UI Updates
         self.lbl_res_count.setText(f"Result {idx + 1} of {len(self.all_results)}")
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
         
-        # Parse IDs
+        # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data['raw_header'])
         self.current_sys_id = ids['sys_id']
         try: p = int(ids['p_num']) 
         except: p = 1
         
-        # Store context
-        self.initial_context = data.get('source_ctx', '')
-        # Fallback text (snippet or full)
-        self.initial_text = data.get('full_text', '') or data.get('text', '')
-        
-        # Load Page Content (Logic reused from previous version)
-        self.load_page(target=p)
-        
-        # Inject Context/Highlighting specific to this result
-        if 'source_ctx' in data and data['source_ctx']:
-             def htmlify_stars(text): return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", text)
-             ctx = htmlify_stars(data['source_ctx'].replace("\n", "<br>"))
-             full_html = f"<div style='background-color:#e8f8f5; color:black; padding:10px; border-bottom:2px solid green;'><b>Match Context:</b><br>{ctx}</div><br><hr><br>"
-             
-             raw = self.initial_text.replace("\n", "<br>")
-             if "*" in raw: raw = htmlify_stars(raw)
-             full_html += raw
-             self.text_browser.setHtml(f"<div dir='rtl'>{full_html}</div>")
+        # --- Prepare Text Content ---
+        def htmlify(text):
+            if not text: return ""
+            t = text.replace("\n", "<br>")
+            t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
+            return f"<div dir='rtl'>{t}</div>"
 
+        # 1. Manuscript Text (Apply Pattern!)
+        ms_raw = data.get('full_text', '') or data.get('text', '')
+        pattern_str = data.get('highlight_pattern') # Get regex pattern
+        
+        if pattern_str:
+            try:
+                # Apply Regex to clean full-text to verify highlighting on load
+                regex = re.compile(pattern_str, re.IGNORECASE)
+                ms_raw = regex.sub(r'*\g<0>*', ms_raw)
+            except:
+                pass
+
+        self.text_ms.setHtml(htmlify(ms_raw))
+        
+        # 2. Source Context
+        src_raw = data.get('source_ctx', '')
+        if src_raw:
+            self.src_widget.setVisible(True)
+            self.text_src.setHtml(htmlify(src_raw))
+        else:
+            self.src_widget.setVisible(False)
+        
+        # Load Page & Metadata
+        self.load_page(target=p)
+
+    # REPLACE IN genizah_app.py (Class ResultDialog)
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
+        self.cancel_image_thread()
+        
         if target is not None:
             p = target
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
         else:
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=self.current_p_num, next_prev=offset)
+            
         if not page_data: return
 
         self.current_p_num = page_data['p_num']
@@ -426,17 +417,42 @@ class ResultDialog(QDialog):
         self.current_fl_id = parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
 
-        info_html = f"<b>System ID:</b> {self.current_sys_id}<br><b>File ID (FL):</b> {self.current_fl_id or 'N/A'}"
+        # Update Info Label
+        info_html = f"<b>Sys:</b> {self.current_sys_id} | <b>FL:</b> {self.current_fl_id or '?'}"
         self.lbl_info.setText(info_html)
         
+        # Update Page Controls
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
-        html = page_data['text'].replace("\n", "<br>")
-        self.text_browser.setHtml(f"<div dir='rtl'>{html}</div>")
+        # --- Render Text with Highlights ---
+        raw_text = page_data['text']
+        
+        # Try to re-apply highlighting if we have a regex pattern stored in data
+        pattern_str = self.data.get('highlight_pattern')
+        
+        if pattern_str:
+            try:
+                # Compile regex again
+                regex = re.compile(pattern_str, re.IGNORECASE)
+                # Replace matches with *match* notation so htmlify can color it
+                # We use a lambda to wrap the found group with stars
+                highlighted_text = regex.sub(r'*\g<0>*', raw_text)
+                raw_text = highlighted_text
+            except:
+                pass # If regex fails, just show plain text
+        
+        def htmlify(text):
+            t = text.replace("\n", "<br>")
+            t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
+            return f"<div dir='rtl'>{t}</div>"
+
+        self.text_ms.setHtml(htmlify(raw_text))
+
+        # Handle Metadata & Image
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
-
+        
         cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
         if cached_meta:
             self.apply_metadata(cached_meta)
@@ -444,11 +460,9 @@ class ResultDialog(QDialog):
             self.lbl_meta_loading.setVisible(True)
             self.current_meta_request += 1
             request_id = self.current_meta_request
-
             def worker():
                 meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
                 self.metadata_loaded.emit(request_id, meta or {})
-
             threading.Thread(target=worker, daemon=True).start()
 
     def apply_metadata(self, meta):
@@ -720,6 +734,9 @@ class GenizahGUI(QMainWindow):
         
         self.results_table = QTableWidget(); self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels(["System ID", "Shelfmark", "Title", "Snippet", "Img", "Src"])
+        self.results_table.setColumnWidth(0, 135) 
+        self.results_table.setColumnWidth(1, 175)
+        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.doubleClicked.connect(self.show_full_text)
@@ -818,66 +835,73 @@ class GenizahGUI(QMainWindow):
     def create_browse_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         
-        # --- Top Area (Search + Info + Image) ---
-        top_container = QWidget()
-        top_container.setFixedHeight(120) 
-        top_layout = QHBoxLayout(top_container)
-        top_layout.setContentsMargins(0, 0, 0, 0)
+        # --- Top Area ---
+        top_container = QWidget(); top_container.setFixedHeight(120)
+        top_layout = QHBoxLayout(top_container); top_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Left Column
-        left_col = QVBoxLayout()
-        left_col.setSpacing(5)
-        left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Left Side
+        left_col = QVBoxLayout(); left_col.setSpacing(5); left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        # Search Row
+        # Row 1: Search
         search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText("Enter System ID...")
         btn_go = QPushButton("Go"); btn_go.setFixedWidth(50); btn_go.clicked.connect(self.browse_load)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         search_row.addWidget(QLabel("System ID:")); search_row.addWidget(self.browse_sys_input); search_row.addWidget(btn_go)
         
-        # Metadata Row
-        meta_row = QHBoxLayout()
-        
+        # Row 2: Metadata
         self.browse_info_lbl = QLabel("Enter ID to browse.")
-        self.browse_info_lbl.setStyleSheet("font-size: 14px;") 
+        self.browse_info_lbl.setStyleSheet("font-size: 13px;") 
         self.browse_info_lbl.setWordWrap(True)
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
-        # Button
-        self.btn_b_catalog = QPushButton("Go to Ktiv")
-        self.btn_b_catalog.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
+        # Row 3: Buttons (Catalog | Continuous | Save)
+        btn_row = QHBoxLayout()
+        
+        self.btn_b_catalog = QPushButton("Ktiv")
+        self.btn_b_catalog.setToolTip("Open in Ktiv Website")
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
         self.btn_b_catalog.setEnabled(False)
-        self.btn_b_catalog.setFixedWidth(100)
         
-        meta_row.addWidget(self.browse_info_lbl, 1)
-        meta_row.addWidget(self.btn_b_catalog)
-        
+        self.btn_b_all = QPushButton("View All")
+        self.btn_b_all.setToolTip("Show full text continuously (Infinite Scroll)")
+        self.btn_b_all.clicked.connect(self.browse_load_all)
+        self.btn_b_all.setEnabled(False)
+        self.btn_b_all.setStyleSheet("font-weight: bold; color: #2980b9;")
+
+        self.btn_b_save = QPushButton("Save")
+        self.btn_b_save.setToolTip("Save full manuscript to file")
+        self.btn_b_save.clicked.connect(self.browse_save_full)
+        self.btn_b_save.setEnabled(False)
+
+        btn_row.addWidget(self.btn_b_catalog)
+        btn_row.addWidget(self.btn_b_all)
+        btn_row.addWidget(self.btn_b_save)
+        btn_row.addStretch()
+
         left_col.addLayout(search_row)
-        left_col.addLayout(meta_row)
+        left_col.addWidget(self.browse_info_lbl)
+        left_col.addLayout(btn_row)
         
-        # Right Side: Image
+        # Right Side: Thumbnail
         self.browse_thumb = QLabel("No Preview")
         self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.browse_thumb.setFixedSize(110, 110)
-        self.browse_thumb.setStyleSheet("border: 1px solid #7f8c8d;") 
+        self.browse_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #ecf0f1; font-size: 9px;")
         self.browse_thumb.setScaledContents(True)
 
         top_layout.addLayout(left_col, 1)
         top_layout.addWidget(self.browse_thumb)
-        
         layout.addWidget(top_container)
         
-        # Helpers
         self.browse_title_lbl = QLabel(); self.browse_title_lbl.setVisible(False)
 
-        # Main Text
+        # Main Text Browser
         self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
         layout.addWidget(self.browse_text)
         
-        # Footer
+        # Navigation Footer
         nav = QHBoxLayout()
         self.btn_b_prev = QPushButton("<< Prev"); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
         self.btn_b_next = QPushButton("Next >>"); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
@@ -886,7 +910,75 @@ class GenizahGUI(QMainWindow):
         nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
         layout.addLayout(nav); panel.setLayout(layout)
         return panel
+    
+    def browse_load_all(self):
+        """Load all pages into the text browser for continuous scrolling."""
+        if not self.current_browse_sid: return
         
+        self.browse_text.setText("Loading full manuscript...")
+        QApplication.processEvents() # Refresh UI
+        
+        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+        if not pages:
+            QMessageBox.warning(self, "Error", "Could not load full text.")
+            return
+
+        html_content = []
+        for p in pages:
+            # Anchor for scrolling
+            anchor = f'<a name="page_{p["p_num"]}"></a>'
+            
+            # Visual Separator
+            separator = f"""
+            <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
+                <b>Page / Image: {p['p_num']}</b>
+            </div>
+            """
+            
+            # Content with line breaks preserved
+            content = p['text'].replace("\n", "<br>")
+            
+            html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+        
+        full_html = "".join(html_content)
+        self.browse_text.setHtml(full_html)
+        
+        # Disable paging buttons since we are showing everything
+        self.btn_b_prev.setEnabled(False)
+        self.btn_b_next.setEnabled(False)
+        self.lbl_page_count.setText("Continuous View")
+        
+        # Scroll to the page we were looking at
+        if self.current_browse_p:
+            self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
+
+    def browse_save_full(self):
+        if not self.current_browse_sid: return
+        
+        default_name = f"Manuscript_{self.current_browse_sid}.txt"
+        path, _ = QFileDialog.getSaveFileName(self, "Save Manuscript", 
+                                            os.path.join(Config.REPORTS_DIR, default_name), 
+                                            "Text (*.txt)")
+        if not path: return
+        
+        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+        if not pages: return
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            # Header
+            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+            f.write(f"System ID: {self.current_browse_sid}\n")
+            f.write(f"Shelfmark: {meta.get('shelfmark', 'Unknown')}\n")
+            f.write(f"Title: {meta.get('title', 'Unknown')}\n")
+            f.write("="*50 + "\n\n")
+            
+            for p in pages:
+                f.write(f"--- Page {p['p_num']} ---\n")
+                f.write(p['text'])
+                f.write("\n\n")
+        
+        QMessageBox.information(self, "Saved", f"Manuscript saved to:\n{path}")
+    
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         
@@ -1296,7 +1388,7 @@ class GenizahGUI(QMainWindow):
         self.comp_summary = summ
         self.comp_known = known
 
-        # Ensure metadata is loaded so shelfmarks/titles appear immediately
+        # Ensure metadata is loaded
         all_ids = []
         for item in filtered_main:
             sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
@@ -1312,17 +1404,40 @@ class GenizahGUI(QMainWindow):
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
         self.comp_tree.clear()
+        
+        # --- Helper to create colorful labels ---
+        def make_snippet_label(text_content):
+            if not text_content: return QLabel("")
+            # 1. Remove newlines -> Single line
+            flat = text_content.replace("\n", " ... ")
+            # 2. Convert *match* to Red HTML
+            # We assume text is safe, but basic escape could be good. 
+            # Here we just swap * for HTML tags.
+            html = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", flat)
+            
+            lbl = QLabel(f"<div dir='rtl' style='margin:2px;'>{html}</div>")
+            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            return lbl
+        # ----------------------------------------
+
+        # 1. Main Results
         root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(filtered_main)})"]); root.setExpanded(True)
         for i in filtered_main:
             sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
             node = QTreeWidgetItem(root)
-            node.setText(0, str(i.get('score', '')));
+            node.setText(0, str(i.get('score', '')))
             node.setText(1, shelf)
-            node.setText(2, title);
+            node.setText(2, title)
             node.setText(3, sid)
-            node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
+            # node.setText(4, ...) -> We skip setting text and set widget instead
+            
             node.setData(0, Qt.ItemDataRole.UserRole, i)
+            
+            # Set HTML Widget
+            lbl = make_snippet_label(i.get('text', ''))
+            self.comp_tree.setItemWidget(node, 4, lbl)
 
+        # 2. Appendix Results
         if filtered_appx:
             root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(filtered_appx)})"])
             for g, items in sorted(filtered_appx.items(), key=lambda x: len(x[1]), reverse=True):
@@ -1330,23 +1445,31 @@ class GenizahGUI(QMainWindow):
                 for i in items:
                     sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
                     ch = QTreeWidgetItem(gn)
-                    ch.setText(0, str(i.get('score', '')));
+                    ch.setText(0, str(i.get('score', '')))
                     ch.setText(1, shelf)
                     ch.setText(2, title)
                     ch.setText(3, sid)
                     ch.setData(0, Qt.ItemDataRole.UserRole, i)
+                    
+                    # Set HTML Widget
+                    lbl = make_snippet_label(i.get('text', ''))
+                    self.comp_tree.setItemWidget(ch, 4, lbl)
 
+        # 3. Known / Excluded Results
         if known:
             root_k = QTreeWidgetItem(self.comp_tree, [f"Known Manuscripts ({len(known)})"])
             for i in known:
                 sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
                 node = QTreeWidgetItem(root_k)
-                node.setText(0, str(i.get('score', '')));
+                node.setText(0, str(i.get('score', '')))
                 node.setText(1, shelf)
                 node.setText(2, title)
                 node.setText(3, sid or '')
-                node.setText(4, i.get('text','').split('\n')[0] if i.get('text') else "")
                 node.setData(0, Qt.ItemDataRole.UserRole, i)
+                
+                # Set HTML Widget
+                lbl = make_snippet_label(i.get('text', ''))
+                self.comp_tree.setItemWidget(node, 4, lbl)
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
@@ -1667,6 +1790,8 @@ class GenizahGUI(QMainWindow):
         if not sid: return
         self.current_browse_sid = sid; self.current_browse_p = None
         self.btn_b_catalog.setEnabled(True)
+        self.btn_b_all.setEnabled(True)   # Enable
+        self.btn_b_save.setEnabled(True)  # Enable
         self.browse_update_view(0)
 
     def browse_navigate(self, d): self.browse_update_view(d)
@@ -1676,7 +1801,7 @@ class GenizahGUI(QMainWindow):
         if not pd: QMessageBox.warning(self, "Nav", "Not found or end."); return
         
         self.current_browse_p = pd['p_num']
-        self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace(chr(10), '<br>')}</div>")
+        self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace('\n', '<br>')}</div>")
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)

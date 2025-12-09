@@ -653,7 +653,7 @@ class Indexer:
                         if cid and ctext:
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
-                                unique_id=str(cid), content=" ".join(ctext), source=str(label),
+                                unique_id=str(cid), content="\n".join(ctext), source=str(label),
                                 full_header=str(chead), shelfmark=str(shelfmark)
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
@@ -756,10 +756,20 @@ class SearchEngine:
         s, e = m.span()
         start = max(0, s - 60)
         end = min(len(text), e + 60)
+        
+        # Grab raw snippet
         snippet = text[start:end]
         matched_text = m.group(0)
-        if for_file: return snippet.replace(matched_text, f"*{matched_text}*")
-        else: return snippet.replace(matched_text, f"<b style='color:red;'>{matched_text}</b>")
+        
+        # If showing in table (HTML), verify valid HTML and remove newlines for compactness
+        if not for_file:
+            # Clean newlines for table display so rows don't explode
+            snippet_clean = snippet.replace('\n', ' ') 
+            match_clean = matched_text.replace('\n', ' ')
+            return snippet_clean.replace(match_clean, f"<b style='color:red;'>{match_clean}</b>")
+        
+        # If for export file, keep newlines or mark them
+        return snippet.replace(matched_text, f"*{matched_text}*")
 
     def execute_search(self, query_str, mode, gap, progress_callback=None):
         if not self.searcher: return []
@@ -942,6 +952,25 @@ class SearchEngine:
         except: pass
         return None
 
+    def get_full_manuscript(self, sys_id):
+        """Fetch ALL pages for a system ID, sorted by page number."""
+        if not os.path.exists(Config.BROWSE_MAP): return []
+        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        
+        pages_meta = browse_map.get(sys_id, [])
+        if not pages_meta: return []
+
+        full_content = []
+        for p in pages_meta:
+            text = self.get_full_text_by_id(p['uid'])
+            if text:
+                full_content.append({
+                    'p_num': p['p_num'],
+                    'text': text,
+                    'uid': p['uid']
+                })
+        return full_content
+        
     def get_browse_page(self, sys_id, p_num=None, next_prev=0):
         if not os.path.exists(Config.BROWSE_MAP): return None
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
