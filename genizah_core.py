@@ -9,6 +9,7 @@ import shutil
 import pickle
 import requests
 import threading
+import time 
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,6 +48,7 @@ class Config:
 
     # 3. User Data Directory (Index, Caches)
     INDEX_DIR = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
+    IMAGE_CACHE_DIR = os.path.join(INDEX_DIR, "images_cache")
     
     # Generated Files locations
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
@@ -220,6 +222,9 @@ class VariantManager:
 #  METADATA MANAGER
 # ==============================================================================
 class MetadataManager:
+    def _make_session(self):
+        return requests.Session()
+        
     """Handle metadata parsing, remote retrieval, and persistent caching."""
     def __init__(self):
         self.meta_map = {}
@@ -369,28 +374,39 @@ class MetadataManager:
 
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-        meta = {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
+        # Initialize default meta structure
+        meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
         
-        # כותרות כדי להיראות כמו דפדפן
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         
         import time 
 
-        # נסה פעמיים
         for attempt in range(2):
             try:
-                # המתנה קלה כדי לא להעמיס
                 time.sleep(0.3)
-                
-                resp = requests.get(url, headers=headers, timeout=5)
+                session = self._make_session()
+                resp = session.get(url, headers=headers, timeout=10)
                 
                 if resp.status_code == 200:
                     try:
                         root = ET.fromstring(resp.content)
-                        # ... הלוגיקה הרגילה של ה-XML ...
+                        
+                        # --- 1. Extract Representative FL (907 $d) ---
+                        # This is the "Cover Image" or main representative FL
+                        rep_fl = None
+                        for df in root.findall("marc:datafield[@tag='907']", self.ns):
+                            sf = df.find("marc:subfield[@code='d']", self.ns)
+                            if sf is not None and sf.text:
+                                clean_fl = sf.text.strip()
+                                if clean_fl.startswith("FL"):
+                                    rep_fl = clean_fl
+                                    break 
+                        
+                        # --- 2. Extract Standard Metadata ---
                         c_942 = None; c_907 = None; c_090 = None; c_avd = None
+                        fl_ids = self._extract_fl_ids(root) # Backup list
 
                         for df in root.findall('marc:datafield', self.ns):
                             tag = df.get('tag')
@@ -400,9 +416,10 @@ class MetadataManager:
 
                             if tag == '942':
                                 val = get_val('z')
-                                if val and not c_942: c_942 = val
-                                elif val and c_942 and c_942.isdigit() and not val.isdigit(): c_942 = val
-                                    
+                                if val: 
+                                    if not c_942: c_942 = val
+                                    elif val.isdigit(): pass
+                                    else: c_942 = val
                             elif tag == '907':
                                 val = get_val('e')
                                 if val: c_907 = val
@@ -418,24 +435,135 @@ class MetadataManager:
 
                         final = c_942 or c_907 or c_090 or c_avd
                         if final: meta['shelfmark'] = final
-                        
-                        # הצלחה - צא מהלולאה והחזר תוצאה
-                        return system_id, meta
-                    except ET.ParseError:
-                        pass # XML שבור, אין טעם לנסות שוב
-                        break
-                
-                elif resp.status_code >= 500:
-                    print(f"[DEBUG] Server Error {resp.status_code} for {system_id}. Retry {attempt+1}...")
-                    time.sleep(1) # חכה שניה לפני ניסיון הבא
-                else:
-                    break # שגיאה אחרת (404 וכו'), לא לנסות שוב
 
-            except Exception as e:
-                print(f"[DEBUG] Network Error: {e}")
+                        meta['fl_ids'] = fl_ids
+                        
+                        # --- 3. Set Thumbnail URL ---
+                        # PRIORITIZE the Representative FL found in 907 $d
+                        if rep_fl:
+                             meta['thumb_url'] = self._resolve_thumbnail([rep_fl])
+                        else:
+                             # Only if missing, fallback to the list
+                             meta['thumb_url'] = self._resolve_thumbnail(fl_ids)
+                             
+                        meta['thumb_checked'] = True
+                        return system_id, meta
+
+                    except ET.ParseError:
+                        break
+                elif resp.status_code >= 500:
+                    time.sleep(1)
+                else:
+                    break
+            except Exception:
                 time.sleep(1)
         
         return system_id, meta
+
+    def _extract_fl_ids(self, root):
+        fl_ids = []
+        for df in root.findall("marc:datafield[@tag='907']", self.ns):
+            for sf in df.findall("marc:subfield[@code='d']", self.ns):
+                val = (sf.text or "").strip()
+                if val.startswith("FL"):
+                    fl_ids.append(val)
+        return fl_ids
+
+    def _resolve_thumbnail(self, fl_ids, size=320, session=None):
+        if not fl_ids: return None
+        
+        # Ensure it's iterable but treat string as single item list
+        if isinstance(fl_ids, str): fl_ids = [fl_ids]
+            
+        for fl_id in fl_ids:
+            if not fl_id: continue
+            
+            # Robust extraction of digits
+            raw_str = str(fl_id)
+            digits = re.sub(r"\D", "", raw_str)
+            
+            # Basic validation: FL IDs are usually long (e.g. 7+ digits)
+            if not digits or len(digits) < 4: continue
+            
+            # Return the URL that worked in debug
+            return f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/400,/0/default.jpg"
+                
+        return None
+        
+    def _pick_working_thumbnail(self, base, size, session):
+        candidates = [
+            f"{base}/full/!{size},{size}/0/default.jpg",
+            f"{base}/full/!{max(size, 600)},{max(size, 600)}/0/default.jpg",
+            f"{base}/full/full/0/default.jpg",
+            f"{base}/full/max/0/default.jpg",
+        ]
+
+        for url in candidates:
+            if self._url_returns_image(session, url):
+                return url
+        return None
+
+    def _url_returns_image(self, session, url):
+        def _is_image(resp):
+            ctype = (resp.headers.get("content-type") or "").lower()
+            return resp.status_code == 200 and "image" in ctype
+
+        try:
+            head = session.head(url, timeout=5, allow_redirects=True)
+            if _is_image(head):
+                head.close()
+                return True
+            head.close()
+
+            # If HEAD is not supported or inconclusive, try GET
+            if head.status_code not in (200, 405):
+                return False
+        except Exception:
+            pass
+
+        try:
+            resp = session.get(url, timeout=5, allow_redirects=True, stream=True)
+            ok = _is_image(resp)
+            resp.close()
+            return ok
+        except Exception:
+            return False
+
+    def _fetch_fl_ids(self, system_id):
+        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        try:
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                return self._extract_fl_ids(root)
+        except Exception:
+            return []
+        return []
+
+    def get_thumbnail(self, system_id, size=320):
+        meta = self.nli_cache.get(system_id)
+        if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
+            return meta.get('thumb_url')
+
+        fl_ids = []
+        if meta:
+            fl_ids = meta.get('fl_ids', [])
+        if not fl_ids:
+            fl_ids = self._fetch_fl_ids(system_id)
+
+        thumb_url = self._resolve_thumbnail(fl_ids, size=size)
+
+        if meta is None:
+            meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': fl_ids}
+        meta['fl_ids'] = fl_ids
+        meta['thumb_url'] = thumb_url
+        meta['thumb_checked'] = True
+        self.nli_cache[system_id] = meta
+        return thumb_url
         
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
         to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]

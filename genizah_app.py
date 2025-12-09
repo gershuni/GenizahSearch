@@ -5,18 +5,120 @@ import sys
 import os
 import re
 import threading
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QGuiApplication, QAction
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QProgressDialog)  # Added QProgressDialog
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop # Added QEventLoop
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
 
+class ImageLoaderThread(QThread):
+    """
+    Smart Image Loader:
+    1. Checks Local Disk Cache first.
+    2. If missing, Downloads from IIIF (with Rosetta fallback).
+    3. Saves successful downloads to Disk Cache.
+    """
+
+    image_loaded = pyqtSignal(QImage)
+    load_failed = pyqtSignal()
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+        self._cancelled = False
+        
+        # Ensure cache directory exists
+        if not os.path.exists(Config.IMAGE_CACHE_DIR):
+            try: os.makedirs(Config.IMAGE_CACHE_DIR)
+            except: pass
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        if not self.url:
+            self.load_failed.emit()
+            return
+
+        # 1. Try to identify the FL ID to use as a filename
+        fl_match = re.search(r'FL(\d+)', self.url)
+        local_path = None
+        
+        if fl_match:
+            fl_id = fl_match.group(1)
+            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}.jpg")
+            
+            # --- CHECK LOCAL CACHE ---
+            if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                # print(f"[DEBUG] Loading from local cache: {local_path}")
+                img = QImage(local_path)
+                if not img.isNull():
+                    self.image_loaded.emit(img)
+                    return
+                else:
+                    # Corrupt file? Delete it so we re-download
+                    try: os.remove(local_path)
+                    except: pass
+
+        # 2. Download from Network (if not in cache)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.nli.org.il/"
+        }
+
+        data = None
+        
+        # Attempt A: Original URL
+        data = self._download_bytes(self.url, headers)
+        
+        # Attempt B: Fallback to Rosetta if Attempt A failed and we have an FL ID
+        if data is None and fl_match and not self._cancelled:
+            fl_digits = fl_match.group(1)
+            print(f"[DEBUG] Cache miss & IIIF failed. Trying Rosetta for FL{fl_digits}...")
+            fallback_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{fl_digits}"
+            data = self._download_bytes(fallback_url, headers)
+
+        # 3. Process Result
+        if data:
+            img = QImage.fromData(data)
+            if not img.isNull():
+                self.image_loaded.emit(img)
+                
+                # --- SAVE TO LOCAL CACHE ---
+                if local_path and not self._cancelled:
+                    try:
+                        with open(local_path, 'wb') as f:
+                            f.write(data)
+                        # print(f"[DEBUG] Saved to cache: {local_path}")
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to write cache: {e}")
+            else:
+                self.load_failed.emit()
+        else:
+            self.load_failed.emit()
+
+    def _download_bytes(self, target_url, headers):
+        """Helper to download bytes safely."""
+        try:
+            resp = requests.get(target_url, headers=headers, timeout=25, stream=True, verify=False)
+            if self._cancelled: return None
+            if resp.status_code == 200:
+                return resp.content
+            return None
+        except Exception:
+            return None
+                
 class HelpDialog(QDialog):
     """Display static HTML help content inside a simple dialog."""
     def __init__(self, parent, title, content):
@@ -143,6 +245,8 @@ class ResultDialog(QDialog):
     """Allow browsing a single search result and its surrounding pages."""
 
     metadata_loaded = pyqtSignal(int, dict)
+    thumb_resolved = pyqtSignal(str, object)
+
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
         
@@ -150,6 +254,7 @@ class ResultDialog(QDialog):
         self.current_result_idx = current_index
         self.meta_mgr = meta_mgr
         self.searcher = searcher
+        self.thumb_resolved.connect(self._on_thumb_resolved)
         
         # State for internal browsing
         self.current_sys_id = None
@@ -164,102 +269,91 @@ class ResultDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle(f"Manuscript Viewer")
-        self.resize(1200, 850)
+        self.resize(1100, 800)
         
         main_layout = QVBoxLayout()
         
-        # --- Top Bar: Result Navigation ---
+        # Top Bar
         top_bar = QHBoxLayout()
-        self.btn_res_prev = QPushButton("◀ Previous Result")
+        self.btn_res_prev = QPushButton("◀ Prev Result")
         self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
-        
-        self.lbl_res_count = QLabel()
-        self.lbl_res_count.setStyleSheet("font-weight: bold; color: #555;")
-        self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+        self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_res_next = QPushButton("Next Result ▶")
         self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
-        
-        top_bar.addWidget(self.btn_res_prev)
-        top_bar.addWidget(self.lbl_res_count, 1) # Expand middle
-        top_bar.addWidget(self.btn_res_next)
-        
+        top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
+        main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
         
-        # --- Separator ---
-        line = QSplitter(); line.setFrameShape(QSplitter.Shape.HLine); main_layout.addWidget(line)
+        # Header (Auto Height to fit text)
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(0, 10, 0, 10)
         
-        # --- Header Info (Shelf/Title) ---
-        header_layout = QHBoxLayout()
-        title_box = QWidget()
-        tb_layout = QVBoxLayout()
-        tb_layout.setContentsMargins(0,0,0,0)
+        # Left: Metadata
+        meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        meta_col.setSpacing(4)
         
+        # Shelfmark (Big)
         self.lbl_shelf = QLabel()
-        self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        self.lbl_shelf.setStyleSheet("color: #2c3e50;")
+        self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)) # Increased
         self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
+        # Title (Big & Left Aligned)
         self.lbl_title = QLabel()
-        self.lbl_title.setFont(QFont("Arial", 12))
+        self.lbl_title.setFont(QFont("Arial", 14)) # Increased
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft) # Force Left
         self.lbl_title.setWordWrap(True)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self.lbl_meta_loading = QLabel("Loading metadata…")
-        self.lbl_meta_loading.setStyleSheet("color: #7f8c8d; font-size: 10pt; font-style: italic;")
-        self.lbl_meta_loading.setVisible(False)
-
-        tb_layout.addWidget(self.lbl_shelf)
-        tb_layout.addWidget(self.lbl_title)
-        tb_layout.addWidget(self.lbl_meta_loading)
-        title_box.setLayout(tb_layout)
-        header_layout.addWidget(title_box, 2)
-        
+        # Tech Info & Button Row
+        info_row = QHBoxLayout()
         self.lbl_info = QLabel()
-        self.lbl_info.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_info.setStyleSheet("background-color: #ecf0f1; color: #2c3e50; border-radius: 6px; padding: 8px;")
+        self.lbl_info.setStyleSheet("font-size: 11px;")
         self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header_layout.addWidget(self.lbl_info, 1)
         
-        # --- Page Controls ---
-        ctrl_layout = QVBoxLayout()
-        nav_layout = QHBoxLayout()
+        self.btn_img = QPushButton("Go to Ktiv")
+        self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
+        self.btn_img.clicked.connect(self.open_viewer)
+        self.btn_img.setFixedWidth(100)
         
-        btn_pg_prev = QPushButton("Pg <"); btn_pg_prev.setFixedWidth(40)
-        btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        self.lbl_meta_loading = QLabel("Loading..."); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
-        self.spin_page = QSpinBox(); self.spin_page.setPrefix("Img: "); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(90)
+        info_row.addWidget(self.btn_img)
+        info_row.addWidget(self.lbl_info)
+        info_row.addWidget(self.lbl_meta_loading)
+        info_row.addStretch()
+
+        meta_col.addWidget(self.lbl_shelf)
+        meta_col.addWidget(self.lbl_title)
+        meta_col.addLayout(info_row)
+        
+        # Right: Thumbnail
+        self.lbl_thumb = QLabel("No Preview")
+        self.lbl_thumb.setFixedSize(110, 110)
+        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;") # Neutral border
+        self.lbl_thumb.setScaledContents(True)
+        
+        header_layout.addLayout(meta_col, 1)
+        header_layout.addWidget(self.lbl_thumb)
+        main_layout.addWidget(header_widget)
+        
+        # Page Nav
+        nav_bar = QHBoxLayout()
+        btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(40); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80)
         self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        
-        btn_pg_next = QPushButton("> Pg"); btn_pg_next.setFixedWidth(40)
-        btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
-        
+        btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(40); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
+        nav_bar.addWidget(QLabel("Img:")); nav_bar.addWidget(btn_pg_prev); nav_bar.addWidget(self.spin_page); nav_bar.addWidget(self.lbl_total); nav_bar.addWidget(btn_pg_next); nav_bar.addStretch()
+        main_layout.addLayout(nav_bar)
         
-        nav_layout.addWidget(btn_pg_prev); nav_layout.addWidget(self.spin_page); nav_layout.addWidget(self.lbl_total); nav_layout.addWidget(btn_pg_next)
-        ctrl_layout.addLayout(nav_layout)
-        
-        self.btn_cat = QPushButton("📄 Catalog"); self.btn_cat.clicked.connect(self.open_catalog)
-        self.btn_img = QPushButton("🖼️ Ktiv Viewer"); self.btn_img.clicked.connect(self.open_viewer)
-        ctrl_layout.addWidget(self.btn_cat); ctrl_layout.addWidget(self.btn_img)
-        header_layout.addLayout(ctrl_layout, 1)
-        
-        main_layout.addLayout(header_layout)
-        
-        # --- Text Area ---
-        self.text_browser = QTextBrowser()
-        self.text_browser.setReadOnly(True)
-        self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.text_browser.setFont(QFont("SBL Hebrew", 16))
+        # Text
+        self.text_browser = QTextBrowser(); self.text_browser.setFont(QFont("SBL Hebrew", 16)); self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         main_layout.addWidget(self.text_browser)
         
-        # Footer
-        btn_close = QPushButton("Close")
-        btn_close.clicked.connect(self.close)
-        main_layout.addWidget(btn_close)
-        
+        btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
         self.setLayout(main_layout)
-
+        
     def navigate_results(self, direction):
         new_idx = self.current_result_idx + direction
         if 0 <= new_idx < len(self.all_results):
@@ -272,7 +366,6 @@ class ResultDialog(QDialog):
             data['full_text'] = self.searcher.get_full_text_by_id(data['uid']) or data.get('text', '')
         self.data = data # Current data object
         
-        # Update Result Navigation UI
         self.lbl_res_count.setText(f"Result {idx + 1} of {len(self.all_results)}")
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
@@ -342,15 +435,148 @@ class ResultDialog(QDialog):
             threading.Thread(target=worker, daemon=True).start()
 
     def apply_metadata(self, meta):
+        # 1. Update Text Labels
         shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
         self.lbl_shelf.setText(shelf)
         self.lbl_title.setText(meta.get('title', ''))
         self.lbl_meta_loading.setVisible(False)
 
+        # 2. Trigger Image Fetch using the FRESH metadata
+        # (This meta object now contains 'thumb_url' from the XML 907 $d field)
+        self.fetch_image(self.current_sys_id, meta)
+
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
             return
         self.apply_metadata(meta or {})
+
+    def cancel_image_thread(self):
+        img_thread = getattr(self, 'img_thread', None)
+        if img_thread and img_thread.isRunning():
+            img_thread.cancel()
+            img_thread.wait()
+
+    def fetch_image(self, sys_id, meta=None):
+        self.cancel_image_thread()
+        self.lbl_thumb.setText("Loading...")
+        self.lbl_thumb.setPixmap(QPixmap())
+
+        # Ensure we look at the global cache which acts as the "Source of Truth"
+        if not meta:
+            meta = self.meta_mgr.nli_cache.get(sys_id)
+
+        # Retrieve the URL that MetadataManager logic (XML 907 $d) has determined
+        thumb_url = meta.get('thumb_url') if meta else None
+
+        if thumb_url:
+            self.start_download(sys_id, thumb_url)
+        else:
+            # If meta exists but no thumb_url, it means no representative image found
+            if meta:
+                self.lbl_thumb.setText("No Preview")
+            else:
+                self.lbl_thumb.setText("Waiting...")
+
+        def worker(target_sid=sys_id):
+            url = self.meta_mgr.get_thumbnail(target_sid)
+            self.thumb_resolved.emit(target_sid, url)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_thumb_resolved(self, sid, thumb_url):
+        if sid != self.current_sys_id:
+            return
+        if thumb_url:
+            self.start_download(sid, thumb_url)
+        else:
+            self.on_img_failed()
+
+    def start_download(self, sid, thumb_url):
+        if sid != self.current_sys_id:
+            return
+
+        self.current_thumb_url = thumb_url
+        self.cancel_image_thread()
+
+        if not thumb_url:
+            self.on_img_failed()
+            return
+
+        self.img_thread = ImageLoaderThread(thumb_url)
+        self.img_thread.image_loaded.connect(self.on_img_loaded)
+        self.img_thread.load_failed.connect(self.on_img_failed)
+        self.img_thread.start()
+        
+    def start_browse_download(self, sid, thumb_url):
+        if sid != self.current_browse_sid:
+            return
+
+        print(f"[DEBUG] Starting download for SID={sid}, URL={thumb_url}") 
+
+        self.browse_thumb_url = thumb_url
+        self.cancel_browse_image_thread()
+
+        if not thumb_url:
+            self.on_browse_img_failed()
+            return
+
+        # Create and start thread
+        self.browse_img_thread = ImageLoaderThread(thumb_url)
+        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
+        self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
+        self.browse_img_thread.start()
+
+    def on_img_loaded(self, image):
+        pix = QPixmap.fromImage(image)
+        scaled = pix.scaled(self.lbl_thumb.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.lbl_thumb.setPixmap(scaled)
+        self.lbl_thumb.setText("")
+
+    def on_img_failed(self):
+        self.lbl_thumb.setPixmap(QPixmap())
+        self.lbl_thumb.setText("No Preview")
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, 'meta_mgr'):
+                self.meta_mgr.save_caches()
+                print("[DEBUG] Cache saved successfully.")
+        except Exception as e:
+            print(f"[ERROR] Failed to save cache: {e}")
+
+        # 2. Stop worker threads safely
+        try:
+            if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
+                self.meta_loader.request_cancel()
+                self.meta_loader.wait()
+
+            if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
+                self.search_thread.requestInterruption()
+                self.search_thread.wait(2000)
+                if self.search_thread.isRunning():
+                    self.search_thread.terminate()
+                    self.search_thread.wait()
+
+            if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+                self.comp_thread.requestInterruption()
+                self.comp_thread.wait(2000)
+                if self.comp_thread.isRunning():
+                    self.comp_thread.terminate()
+                    self.comp_thread.wait()
+
+            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
+                self.group_thread.requestInterruption()
+                self.group_thread.wait(2000)
+                if self.group_thread.isRunning():
+                    self.group_thread.terminate()
+                    self.group_thread.wait()
+                    
+            if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
+                self.browse_img_thread.cancel()
+                self.browse_img_thread.wait()
+                
+        finally:
+            super().closeEvent(event)
 
     def open_catalog(self):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
@@ -360,6 +586,8 @@ class ResultDialog(QDialog):
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
+    browse_thumb_resolved = pyqtSignal(str, object)
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Genizah Search Pro V2.11")
@@ -373,6 +601,7 @@ class GenizahGUI(QMainWindow):
         # Step 2: defer heavy initialization until the window is visible
         QTimer.singleShot(100, self.delayed_init)
 
+    # REPLACE IN genizah_app.py inside class GenizahGUI
     def delayed_init(self):
         try:
             # Perform heavy initialization here
@@ -383,6 +612,10 @@ class GenizahGUI(QMainWindow):
             self.ai_mgr = AIManager()
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             
+            # --- FIX: Connect the signal here ---
+            self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
+            # ------------------------------------
+
             # אתחול הממשק המלא
             self.last_results = []
             self.last_search_query = ""
@@ -404,11 +637,11 @@ class GenizahGUI(QMainWindow):
             self.meta_cached_count = 0
             self.meta_to_fetch_count = 0
             self.meta_progress_current = 0
+            self.browse_thumb_url = None # Initialize
+            self.browse_img_thread = None # Initialize
 
             self.init_ui() # בונה את self.tabs
             
-            # בדיקת אינדקס והתראה
-            # אנחנו בודקים אם התיקייה קיימת
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
             
@@ -417,12 +650,12 @@ class GenizahGUI(QMainWindow):
                 reply = QMessageBox.question(self, "Index Missing", msg, 
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if reply == QMessageBox.StandardButton.Yes:
-                    self.tabs.setCurrentIndex(3) # מעבר לטאב הגדרות (כעת עובד כי השתמשנו ב-self.tabs)
+                    self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
                 
         except Exception as e:
             QMessageBox.critical(self, "Fatal Error", f"Failed to initialize:\n{e}")
-            
+             
     def init_ui(self):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.create_search_tab(), "Search")
@@ -571,41 +804,76 @@ class GenizahGUI(QMainWindow):
 
     def create_browse_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
-        top = QHBoxLayout()
+        
+        # --- Top Area (Search + Info + Image) ---
+        top_container = QWidget()
+        top_container.setFixedHeight(120) 
+        top_layout = QHBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Left Column
+        left_col = QVBoxLayout()
+        left_col.setSpacing(5)
+        left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        # Search Row
+        search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText("Enter System ID...")
-        btn_go = QPushButton("Go"); btn_go.clicked.connect(self.browse_load)
+        btn_go = QPushButton("Go"); btn_go.setFixedWidth(50); btn_go.clicked.connect(self.browse_load)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
-        top.addWidget(QLabel("System ID:")); top.addWidget(self.browse_sys_input); top.addWidget(btn_go)
-        layout.addLayout(top)
-
+        search_row.addWidget(QLabel("System ID:")); search_row.addWidget(self.browse_sys_input); search_row.addWidget(btn_go)
+        
+        # Metadata Row
+        meta_row = QHBoxLayout()
+        
         self.browse_info_lbl = QLabel("Enter ID to browse.")
-        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #ecf0f1;")
-        self.browse_title_lbl = QLabel("")
-        self.browse_title_lbl.setWordWrap(True)
-        self.browse_title_lbl.setStyleSheet("font-size: 12px; color: #dfe6e9;")
-        info_row = QHBoxLayout()
-        meta_col = QVBoxLayout()
-        meta_col.addWidget(self.browse_info_lbl)
-        meta_col.addWidget(self.browse_title_lbl)
-        info_row.addLayout(meta_col, 1)
-        self.btn_b_catalog = QPushButton("Go to Ktiv Catalog")
+        self.browse_info_lbl.setStyleSheet("font-size: 14px;") 
+        self.browse_info_lbl.setWordWrap(True)
+        self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        
+        # Button
+        self.btn_b_catalog = QPushButton("Go to Ktiv")
+        self.btn_b_catalog.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
         self.btn_b_catalog.setEnabled(False)
-        info_row.addWidget(self.btn_b_catalog)
-        layout.addLayout(info_row)
+        self.btn_b_catalog.setFixedWidth(100)
+        
+        meta_row.addWidget(self.browse_info_lbl, 1)
+        meta_row.addWidget(self.btn_b_catalog)
+        
+        left_col.addLayout(search_row)
+        left_col.addLayout(meta_row)
+        
+        # Right Side: Image
+        self.browse_thumb = QLabel("No Preview")
+        self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.browse_thumb.setFixedSize(110, 110)
+        self.browse_thumb.setStyleSheet("border: 1px solid #7f8c8d;") 
+        self.browse_thumb.setScaledContents(True)
+
+        top_layout.addLayout(left_col, 1)
+        top_layout.addWidget(self.browse_thumb)
+        
+        layout.addWidget(top_container)
+        
+        # Helpers
+        self.browse_title_lbl = QLabel(); self.browse_title_lbl.setVisible(False)
+
+        # Main Text
         self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
         layout.addWidget(self.browse_text)
         
+        # Footer
         nav = QHBoxLayout()
-        self.btn_b_prev = QPushButton("<< Previous Page"); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
-        self.btn_b_next = QPushButton("Next Page >>"); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
+        self.btn_b_prev = QPushButton("<< Prev"); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
+        self.btn_b_next = QPushButton("Next >>"); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
-        self.lbl_page_count = QLabel("Page 0/0")
+        self.lbl_page_count = QLabel("0/0")
         nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
         layout.addLayout(nav); panel.setLayout(layout)
         return panel
-
+        
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         
@@ -1393,23 +1661,98 @@ class GenizahGUI(QMainWindow):
     def browse_update_view(self, d):
         pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
         if not pd: QMessageBox.warning(self, "Nav", "Not found or end."); return
+        
         self.current_browse_p = pd['p_num']
         self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace(chr(10), '<br>')}</div>")
-        _, _, shelf, title = self._get_meta_for_header(pd.get('full_header', ''))
-        if self.current_browse_sid and self.current_browse_sid not in self.meta_mgr.nli_cache:
-            meta = self.meta_mgr.fetch_nli_data(self.current_browse_sid)
-            title = title or meta.get('title', '')
-            shelf = shelf or meta.get('shelfmark', '')
+        
+        full_header = pd.get('full_header', '')
+        _, _, shelf, title = self._get_meta_for_header(full_header)
 
-        self.browse_info_lbl.setText(f"{shelf} | Img: {pd['p_num']}")
-        self.browse_title_lbl.setText(title or "")
+        # --- UPDATE: Combined Label Text ---
+        info_text = f"<b>{shelf}</b><br>{title or ''}"
+        self.browse_info_lbl.setText(info_text)
+        # -----------------------------------
+
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
+        if self.current_browse_sid in self.meta_mgr.nli_cache:
+            self.fetch_browse_thumbnail(self.current_browse_sid)
+        else:
+            self.browse_thumb.setText("Loading Meta...")
+            def worker():
+                self.meta_mgr.fetch_nli_data(self.current_browse_sid)
+                self.browse_thumb_resolved.emit(self.current_browse_sid, "") 
+            threading.Thread(target=worker, daemon=True).start()
+        
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+    # ADD THIS BLOCK INSIDE CLASS GenizahGUI (e.g., before run_indexing)
 
+    def _on_browse_thumb_resolved(self, sid, _unused_url):
+        """Called when background metadata fetch is done."""
+        if sid != self.current_browse_sid:
+            return
+            
+        # Reload meta from cache (now populated with 907 $d URL)
+        self.fetch_browse_thumbnail(sid)
+
+    def start_browse_download(self, sid, thumb_url):
+        if sid != self.current_browse_sid:
+            return
+
+        self.browse_thumb_url = thumb_url
+        self.cancel_browse_image_thread()
+
+        if not thumb_url:
+            self.on_browse_img_failed()
+            return
+
+        self.browse_img_thread = ImageLoaderThread(thumb_url)
+        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
+        self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
+        self.browse_img_thread.start()
+
+    def on_browse_img_loaded(self, image):
+        pix = QPixmap.fromImage(image)
+        # Scale carefully to avoid distortion
+        if not pix.isNull():
+            scaled = pix.scaled(self.browse_thumb.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.browse_thumb.setPixmap(scaled)
+            self.browse_thumb.setText("")
+        else:
+            self.on_browse_img_failed()
+
+    def on_browse_img_failed(self):
+        self.browse_thumb.setPixmap(QPixmap())
+        self.browse_thumb.setText("No Preview")
+
+    def cancel_browse_image_thread(self):
+        if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
+            self.browse_img_thread.cancel()
+            self.browse_img_thread.wait()
+
+    def fetch_browse_thumbnail(self, sys_id, meta=None):
+        self.cancel_browse_image_thread()
+        self.browse_thumb.setText("Loading...")
+        self.browse_thumb.setPixmap(QPixmap())
+
+        # Load from cache if not provided
+        meta = meta or self.meta_mgr.nli_cache.get(sys_id)
+        
+        # In genizah_core, we now guarantee that 'thumb_url' comes from 907 $d if available
+        thumb_url = meta.get('thumb_url') if meta else None
+
+        if thumb_url:
+            self.start_browse_download(sys_id, thumb_url)
+        else:
+            # If metadata exists but no thumb_url, it means no image at all
+            if meta:
+                self.browse_thumb.setText("No Image")
+            else:
+                self.browse_thumb.setText("Waiting...")
+    
     def run_indexing(self):
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.index_progress.setRange(0, 1)
