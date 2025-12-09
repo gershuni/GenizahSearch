@@ -273,47 +273,52 @@ class ResultDialog(QDialog):
         
         main_layout = QVBoxLayout()
         
-        # Top Bar
+        # --- Top Bar (Result Prev/Next) ---
         top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton("◀ Prev Result")
         self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
-        self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.lbl_res_count = QLabel()
+        self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         self.btn_res_next = QPushButton("Next Result ▶")
         self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
+        
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
         
-        # Header (Auto Height to fit text)
+        # --- Header Area ---
         header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(0, 10, 0, 10)
+        # Removed fixed height so it expands naturally to fit the nav bar
+        header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(0, 5, 0, 10)
         
-        # Left: Metadata
+        # Left Column: Metadata + All Controls
         meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop)
         meta_col.setSpacing(4)
         
-        # Shelfmark (Big)
+        # 1. Shelfmark
         self.lbl_shelf = QLabel()
-        self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)) # Increased
+        self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
-        # Title (Big & Left Aligned)
+        # 2. Title
         self.lbl_title = QLabel()
-        self.lbl_title.setFont(QFont("Arial", 14)) # Increased
-        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft) # Force Left
+        self.lbl_title.setFont(QFont("Arial", 14))
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.lbl_title.setWordWrap(True)
         self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        # Tech Info & Button Row
+        # 3. Info Row (Ktiv Button + Status)
         info_row = QHBoxLayout()
-        self.lbl_info = QLabel()
-        self.lbl_info.setStyleSheet("font-size: 11px;")
-        self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
         self.btn_img = QPushButton("Go to Ktiv")
         self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton))
         self.btn_img.clicked.connect(self.open_viewer)
         self.btn_img.setFixedWidth(100)
+        
+        self.lbl_info = QLabel()
+        self.lbl_info.setStyleSheet("font-size: 11px;")
+        self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
         self.lbl_meta_loading = QLabel("Loading..."); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
@@ -322,35 +327,47 @@ class ResultDialog(QDialog):
         info_row.addWidget(self.lbl_meta_loading)
         info_row.addStretch()
 
+        # 4. Page Navigation Row (Moved INSIDE the header column)
+        nav_row = QHBoxLayout()
+        btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        
+        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80)
+        self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
+        
+        btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        
+        self.lbl_total = QLabel("/ ?")
+        
+        # Assemble Nav Row
+        nav_row.addWidget(QLabel("Image:"))
+        nav_row.addWidget(btn_pg_prev)
+        nav_row.addWidget(self.spin_page)
+        nav_row.addWidget(self.lbl_total)
+        nav_row.addWidget(btn_pg_next)
+        nav_row.addStretch() # Push to left
+
+        # Add everything to Left Column
         meta_col.addWidget(self.lbl_shelf)
         meta_col.addWidget(self.lbl_title)
         meta_col.addLayout(info_row)
+        meta_col.addLayout(nav_row) # <-- Added here
         
-        # Right: Thumbnail
+        # Right Column: Thumbnail
         self.lbl_thumb = QLabel("No Preview")
-        self.lbl_thumb.setFixedSize(110, 110)
+        self.lbl_thumb.setFixedSize(120, 120)
         self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;") # Neutral border
+        self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;")
         self.lbl_thumb.setScaledContents(True)
         
         header_layout.addLayout(meta_col, 1)
         header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
         
-        # Page Nav
-        nav_bar = QHBoxLayout()
-        btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(40); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
-        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80)
-        self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(40); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
-        self.lbl_total = QLabel("/ ?")
-        nav_bar.addWidget(QLabel("Img:")); nav_bar.addWidget(btn_pg_prev); nav_bar.addWidget(self.spin_page); nav_bar.addWidget(self.lbl_total); nav_bar.addWidget(btn_pg_next); nav_bar.addStretch()
-        main_layout.addLayout(nav_bar)
-        
-        # Text
+        # --- Text Area ---
         self.text_browser = QTextBrowser(); self.text_browser.setFont(QFont("SBL Hebrew", 16)); self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         main_layout.addWidget(self.text_browser)
         
+        # --- Footer ---
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
         self.setLayout(main_layout)
         
@@ -601,7 +618,6 @@ class GenizahGUI(QMainWindow):
         # Step 2: defer heavy initialization until the window is visible
         QTimer.singleShot(100, self.delayed_init)
 
-    # REPLACE IN genizah_app.py inside class GenizahGUI
     def delayed_init(self):
         try:
             # Perform heavy initialization here
@@ -612,11 +628,8 @@ class GenizahGUI(QMainWindow):
             self.ai_mgr = AIManager()
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             
-            # --- FIX: Connect the signal here ---
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
-            # ------------------------------------
 
-            # אתחול הממשק המלא
             self.last_results = []
             self.last_search_query = ""
             self.result_row_by_sys_id = {}
