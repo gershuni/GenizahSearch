@@ -1,84 +1,109 @@
-# 📜 Genizah Search Pro 2.0
+# 📜 Genizah Search Pro 3.0
 
-**Advanced Search & Analysis Tool for the Cairo Genizah Corpus**
+**The Ultimate Search & Analysis Tool for the Cairo Genizah Corpus**
 
-Genizah Search Pro is a powerful desktop application designed for researchers and scholars working with Cairo Genizah manuscripts. It provides high-speed search capabilities, intelligent composition analysis, and direct integration with the National Library of Israel (NLI) Ktiv project.
+Genizah Search Pro is a powerful desktop application designed for researchers working with Cairo Genizah manuscripts, especially with the transcriptions made available by the MiDRASH Project. **Version 3.0** introduces a complete overhaul of the user experience, focusing on speed, metadata accessibility, and reading continuity.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green)
+
+> **⚠️ IMPORTANT: FIRST RUN**  
+> After installing or upgrading to version 3.0, you must go to the **Settings & About** tab and click **"Build / Rebuild Index"**.  
+> This is required to support the new line-by-line display and metadata search features.
+
+---
+
+## 🚀 What's New in Version 3.0?
+
+*   **⚡ Instant Offline Metadata:** The software now includes an internal database (`libraries.csv`) with over 216,000 records, displaying Shelfmarks and Titles **instantly** alongside search results.
+*   **🔎 Metadata Search:** You can now search directly for a **Shelfmark** (e.g., "T-S NS 306.15") or a **Composition Title** directly from the main search bar.
+*   **📐 Original Line Breaks:** Manuscript text is now displayed line-by-line, exactly as it appears in the original transcription, rather than as a continuous block of text.
+*   **📊 Sortable Results:** Click on table headers to sort search results by Shelfmark, Title, or Relevance.
+*   **🖼️ Visual Preview:** Manuscript images are now displayed directly in the Search Results and Browse tabs (with smart caching for instant loading).
+*   **📜 Continuous Manuscript View:** Read a manuscript naturally. The new **"View All"** feature loads all pages of a manuscript into a single, continuous scrolling view.
+*   **💾 Save Entire Manuscript:** Export the full text of a multi-page manuscript into a single text file for offline study.
 
 ---
 
 ## ✨ Key Features
 
 ### 🔍 Advanced Search Engine
-*   **Ultra-fast Search:** Built on the [Tantivy](https://github.com/quickwit-oss/tantivy) engine (Rust-based) for instant results across millions of fragments.
-*   **Hebrew-Optimized Modes:**
-    *   **Exact:** Precise sequence matching.
-    *   **Variants (?):** Basic interchanges.
-    *   **Extended (??):** More variants.
-    *   **Maximum (???):** Aggressive swapping.
-    *   **Fuzzy (~):** Levenshtein distance tolerance for typos.
-    *   **Regex:** Full regular expression support.
-*   **Gap Control:** Find words with specific distances between them (e.g., "Abraham ... Isaac").
-*   **AI Assistant:** Integrated Google Gemini AI to help construct complex Regex queries via natural language.
+*   **Ultra-fast Search:** Powered by [Tantivy](https://github.com/quickwit-oss/tantivy) (Rust-based) for sub-second results.
+*   **Search Modes:**
+    *   **Text Search:** Exact, Fuzzy (Levenshtein), Regex, and **Variants** (Hebrew-optimized OCR correction).
+    *   **Metadata Search:** Dedicated modes for **Title** and **Shelfmark** lookup.
+*   **Rich Result Table:** Sortable columns, instant metadata, text snippets, and image previews.
 
-### 🧩 Composition Analysis
-*   **Source Matching:** Paste any text to find parallel fragments in the Genizah. It breaks the text to groups of words (default: 5) and search for them.
-*   **Smart Grouping:** Automatically identifies and groups recurring compositions based on NLI information.
-*   **Export Results:** Saves the results to file.
+### 🧩 Composition Analysis (Source Matching)
+*   **Find Parallels:** Paste a source text (e.g., a known poem or Halakhic text) to find all its occurrences in the Genizah.
+*   **Smart Grouping:** Automatically groups results by manuscript title (e.g., "Mishneh Torah") vs. "Appendix" (less certain matches).
+*   **Advanced Filtering:** Filter results by specific words before or after the analysis.
+*   **Split-Screen View:** Compare the Genizah fragment against your source text side-by-side with synchronized red highlighting.
 
-### 📚 Metadata & Browsing
-*   **Live Metadata:** Fetches Shelfmarks and Titles directly from the NLI API.
-*   **Manuscript Browser:** Navigate through manuscript pages (Previous/Next) directly within the app.
-*   **Deep Linking:** One-click access to the **Ktiv Catalog** record and the **Ktiv Image Viewer** (direct to specific image).
+### 📚 Manuscript Browser
+*   **Unified Search:** Enter a System ID (`99...`) or a File ID (`FL...`) to jump directly to a specific page.
+*   **Smart Image Engine:** Automatically retrieves the best available image (using NLI's IIIF/Rosetta servers) and caches it locally.
+*   **Deep Links:** One-click access to the Ktiv catalog and high-res viewer.
 
 ---
 
-## 🚀 Installation
+## 🛠 Installation
 
-1.  **Download:** Go to the [Releases](../../releases) page and download `GenizahSearchPro_v2.0.zip`.
-2.  **Extract:** Unzip the folder to a location on your computer (e.g., `C:\GenizahSearch`).
-3.  **Get Data:**
-    *   Download the transcription dataset (`Transcriptions.txt`) from Zenodo:
-    *   [**MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments**](https://doi.org/10.5281/zenodo.17734473)
-4.  **Setup:** Place the `Transcriptions.txt` file **inside the same folder** as the executable (`GenizahPro.exe`).
-5.  **Run:** Double-click `GenizahPro.exe`. On the first run, you will be prompted to build the index (this takes a few minutes).
+1.  **Download:** Get the latest `GenizahSearchPro_v3.0.zip` from the releases page.
+2.  **Extract:** Unzip to the folder where the Transcriptions.txt file exists (see below).
+3.  **Required Data Files:**
+    Ensure the following files are inside the folder next to `GenizahPro.exe`:
+    *   `Transcriptions.txt` (The MiDRASH dataset, https://doi.org/10.5281/zenodo.17734473).
+    *   `libraries.csv` (The metadata mapping file - **New in v3.0**).
+4.  **Run:** Double-click `GenizahSearchPro.exe`.
+5.	**On the first run, build the index. It will take a few minutes.
 
 ---
 
-## 🛠 Usage Guide
+## 📖 Usage Guide
 
-### Standard Search
-1.  Enter terms in the **Query** box.
-2.  Select a **Mode** (Variants recommended for OCR text).
-3.  Set **Gap** if words are not adjacent (0 = exact phrase).
-4.  Click **Search**. Double-click any result to view the full text and metadata.
+### 1. Standard Search
+*   **Query:** Type words, shelfmarks, or titles.
+*   **Mode:**
+	*	**Exact:** Search for words as they are. You can set **Gap** between words.
+    *   **Variants:** Best for general text search (handles OCR errors).
+	*	**Fuzzy:** Other method to overcome OCR errors.
+	*	**Regex:** Search with sophisticated Regular Expressions.
+    *   **Shelfmark / Title:** Specific metadata lookup.
+*   **Sort:** Click the "Shelfmark" or "Title" headers to organize results lexicographically.
+*   **View:** Double-click a result to open the full Viewer, showing the manuscript image, text, and metadata.
 
-### Composition Search
-1.  Go to the **Composition Search** tab.
-2.  **Paste** a text segment or load a text file.
-3.  Adjust **Chunk Size** (words per search block) and **Max Freq** (filter out common phrases).
-4.  Click **Analyze**. The results will appear as a tree structure, grouping identified manuscripts by title.
+### 2. Composition Search (Finding Parallels)
+This tool breaks your source text into small "chunks" and searches for them in the corpus.
+1.  **Input:** Paste your source text into the large text box, or click **Load Text File**.
+2.  **Settings:**
+    *   **Chunk:** Number of words per search block (Recommended: 4-7).
+    *   **Max Freq:** Ignore common phrases that appear more than X times (reduces noise).
+    *   **Filter >:** Move titles that appear many times to the "Appendix" group.
+3.	**Exclude Manuscripts (Optional):** Enter known system numbers or shelfmarks of manuscripts that you want to filter.
+3.  **Filter Text (Optional):** Click **Filter Text** to sort out known texts such as Bible or Mishna and Talmud.
+4.  **Analyze:** Click the button to start. Results will appear in a tree structure.
+5.  **Export:** Click **Save Report** to generate a detailed text file with all matches.
 
-### AI Assistant
-*   Click the **🤖 AI Assistant** button in the Search tab.
-*   **Requires API Key:** Go to *Settings & About* > *AI Configuration* and paste your Google Gemini API Key.
-*   Describe what you are looking for (e.g., *"Find words starting with Aleph and ending with Mem, 4 letters long"*).
+### 3. Browsing & Reading
+*   Go to the **Browse Manuscript** tab.
+*   Enter a **System ID** to load the manuscript cover, or an **FL ID** to jump to a specific image.
+*   **View All:** Loads the entire manuscript text (all pages) into one scrollable window.
+*   **Save:** Downloads the full text of the manuscript to your computer.
 
 ---
 
 ## 🎓 Credits & Acknowledgments
 
-**Developed by:** Hillel Gershuni (assisted by Gemini AI).
+**Developed by:** Hillel Gershuni.
 
 **Data Source:**
-The software relies on the incredible work of the MiDRASH project:
+This tool relies on the **MiDRASH** project dataset:
 > Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments* [Data set]. Zenodo. https://doi.org/10.5281/zenodo.17734473
 
 **Libraries Used:**
-*   [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) - GUI Framework
-*   [Tantivy](https://github.com/quickwit-oss/tantivy) - Search Engine
-*   [Google Generative AI](https://ai.google.dev/) - AI Logic
+*   PyQt6 (GUI Framework)
+*   Tantivy (High-performance Search)
+*   Requests & Urllib3 (Networking)
 
 ---
 
