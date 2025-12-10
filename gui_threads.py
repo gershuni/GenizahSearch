@@ -2,7 +2,7 @@
 
 # gui_threads.py
 from PyQt6.QtCore import QThread, pyqtSignal
-from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager
+from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
@@ -149,3 +149,23 @@ class AIWorkerThread(QThread):
     def run(self):
         data, err = self.ai_mgr.send_prompt(self.prompt)
         self.finished_signal.emit(data if data else {}, err if err else "")
+
+class StartupThread(QThread):
+    """Initialize heavy components in the background."""
+    finished_signal = pyqtSignal(object, object, object, object, object)
+    error_signal = pyqtSignal(str)
+
+    def run(self):
+        try:
+            meta_mgr = MetadataManager()
+            var_mgr = VariantManager()
+            searcher = SearchEngine(meta_mgr, var_mgr)
+            indexer = Indexer(meta_mgr)
+            ai_mgr = AIManager()
+
+            # Start loading heavy resources in background
+            meta_mgr.start_background_loading()
+
+            self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer, ai_mgr)
+        except Exception as e:
+            self.error_signal.emit(str(e))
