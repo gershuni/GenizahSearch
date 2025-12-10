@@ -667,12 +667,12 @@ class GenizahGUI(QMainWindow):
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
-        # We need structured storage for filtered results too
-        self.comp_filtered_main = []
-        self.comp_filtered_appendix = {}
-        self.comp_filtered_summary = {}
-        self.comp_raw_items = [] # Used for retry if grouping fails
-        self.comp_raw_filtered = [] # Used for retry
+            # We need structured storage for filtered results too
+            self.comp_filtered_main = []
+            self.comp_filtered_appendix = {}
+            self.comp_filtered_summary = {}
+            self.comp_raw_items = [] # Used for retry if grouping fails
+            self.comp_raw_filtered = [] # Used for retry
             self.comp_known = []
             self.excluded_raw_entries = []
             self.excluded_sys_ids = set()
@@ -1609,8 +1609,8 @@ class GenizahGUI(QMainWindow):
         # ----------------------------------------
 
         # 1. Main Results
-        root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(filtered_main)})"]); root.setExpanded(True)
-        for i in filtered_main:
+        root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(clean_main)})"]); root.setExpanded(True)
+        for i in clean_main:
             sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
             node = QTreeWidgetItem(root)
             node.setText(0, str(i.get('score', '')))
@@ -1626,9 +1626,9 @@ class GenizahGUI(QMainWindow):
             self.comp_tree.setItemWidget(node, 4, lbl)
 
         # 2. Appendix Results
-        if filtered_appx:
-            root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(filtered_appx)})"])
-            for g, items in sorted(filtered_appx.items(), key=lambda x: len(x[1]), reverse=True):
+        if clean_appx:
+            root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(clean_appx)})"])
+            for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                 for i in items:
                     sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
