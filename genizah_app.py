@@ -30,10 +30,13 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
 
         # Normalize: Remove 'Ms.'/'Ms' prefix (case insensitive) and lower case
         # We strip leading whitespace, then optional 'ms', optional '.', then whitespace
-        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE).lower()
-        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE).lower()
+        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE)
+        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE)
 
-        return norm1 < norm2
+        def natural_keys(text):
+            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
+
+        return natural_keys(norm1) < natural_keys(norm2)
 
 class ImageLoaderThread(QThread):
     """
