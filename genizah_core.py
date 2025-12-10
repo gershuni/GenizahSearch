@@ -650,6 +650,25 @@ class MetadataManager:
                 progress_callback(count, len(to_fetch), sid)
         self.save_caches()
 
+    def search_by_meta(self, query, field):
+        """Search for system IDs where the specified field matches the query."""
+        results = set()
+        q_norm = query.lower()
+
+        # 1. Search in CSV Bank (Fastest)
+        for sys_id, data in self.csv_bank.items():
+            val = data.get(field, '')
+            if val and q_norm in val.lower():
+                results.add(sys_id)
+
+        # 2. Search in NLI Cache (for items not in CSV or updated)
+        for sys_id, data in self.nli_cache.items():
+            val = data.get(field, '')
+            if val and q_norm in val.lower():
+                results.add(sys_id)
+
+        return list(results)
+
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
         parsed = self.parse_full_id_components(full_header)
@@ -842,8 +861,89 @@ class SearchEngine:
         # If for export file, keep newlines or mark them
         return snippet.replace(matched_text, f"*{matched_text}*")
 
+    def _get_best_text_for_id(self, sys_id):
+        """Find the first page with meaningful text for a given System ID."""
+        if not self.searcher: return "", "", "", ""
+
+        # Query index for all pages of this manuscript
+        try:
+            q = self.index.parse_query(f'full_header:"{sys_id}"', ["full_header"])
+            # Fetch enough docs to cover a manuscript
+            res = self.searcher.search(q, 2000)
+        except:
+            return "", "", "", ""
+
+        pages = []
+        for score, doc_addr in res.hits:
+            doc = self.searcher.doc(doc_addr)
+            full_header = doc['full_header'][0]
+
+            # Verify this doc really belongs to the sys_id (strict check)
+            parsed = self.meta_mgr.parse_header_smart(full_header)
+            if parsed[0] != sys_id:
+                continue
+
+            p_num_str = parsed[1]
+            try: p_num = int(p_num_str)
+            except: p_num = 999999
+
+            content = doc['content'][0]
+            uid = doc['unique_id'][0]
+            src = doc['source'][0]
+            pages.append({'p': p_num, 'text': content, 'head': full_header, 'uid': uid, 'src': src})
+
+        if not pages:
+            return "", "", "", ""
+
+        # Sort by page number
+        pages.sort(key=lambda x: x['p'])
+
+        # Heuristic: Find first page with sequence of 3 words, each > 3 chars
+        best_page = pages[0] # Default to first page
+
+        pattern = re.compile(r'[\w\u0590-\u05FF]{4,}\s+[\w\u0590-\u05FF]{4,}\s+[\w\u0590-\u05FF]{4,}')
+
+        for p in pages:
+            if pattern.search(p['text']):
+                best_page = p
+                break
+
+        return best_page['text'], best_page['head'], best_page['src'], best_page['uid']
+
     def execute_search(self, query_str, mode, gap, progress_callback=None):
         if not self.searcher: return []
+
+        # --- Metadata Search Modes ---
+        if mode in ['Title', 'Shelfmark']:
+            field_map = {'Title': 'title', 'Shelfmark': 'shelfmark'}
+            target_field = field_map.get(mode)
+
+            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+            results = []
+            total_ids = len(sys_ids)
+
+            for i, sid in enumerate(sys_ids):
+                if progress_callback and i % 10 == 0: progress_callback(i, total_ids)
+
+                text, head, src, uid = self._get_best_text_for_id(sid)
+                if not text: continue
+
+                meta = self.meta_mgr.get_display_data(head, src or "V0.8")
+
+                # Limit snippet length for display
+                snippet = text[:300] + "..." if len(text) > 300 else text
+
+                results.append({
+                    'display': meta,
+                    'snippet': snippet,
+                    'full_text': text,
+                    'uid': uid,
+                    'raw_header': head,
+                    'raw_file_hl': text,
+                    'highlight_pattern': None
+                })
+
+            return results
         
         if mode == 'Regex': terms = [query_str] 
         else: terms = query_str.split()
