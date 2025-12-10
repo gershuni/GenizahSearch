@@ -988,11 +988,15 @@ class SearchEngine:
             if r['display']['source'] == "V0.7" and r['uid'] not in v8: final.append(r)
         return final
 
-    def search_composition_logic(self, full_text, chunk_size, max_freq, mode, progress_callback=None):
+    def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None):
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
-        doc_hits = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
+
+        # We need two accumulators now
+        doc_hits_main = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
+        doc_hits_filtered = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
+
         total_chunks = len(chunks)
         
         for i, chunk in enumerate(chunks):
@@ -1000,6 +1004,13 @@ class SearchEngine:
             t_query = self.build_tantivy_query(chunk, mode)
             regex = self.build_regex_pattern(chunk, mode, 0)
             if not regex: continue
+
+            # Check filter text (sampling)
+            is_filtered = False
+            if filter_text:
+                if regex.search(filter_text):
+                    is_filtered = True
+
             try:
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
@@ -1009,7 +1020,21 @@ class SearchEngine:
                     content = doc['content'][0]
                     if regex.search(content):
                         uid = doc['unique_id'][0]
-                        rec = doc_hits[uid]
+
+                        # Decide which dict to use
+                        # If the chunk is filtered, we add it to the filtered results.
+                        # Note: A document might match some filtered chunks and some valid chunks.
+                        # For now, if ANY matched chunk is filtered, does it taint the whole doc?
+                        # Or do we separate by match?
+                        # The user requirement: "All text where these words are found will be filtered".
+                        # So if the *chunk* matches the filter text, this specific hit is filtered.
+                        # If a doc has ONLY filtered hits, it goes to filtered list.
+                        # If a doc has mixed hits... probably safer to split the *matches* or just classify the doc?
+                        # Let's say: we accumulate hits. At the end, if a doc has significant filtered content, maybe move it?
+                        # Simplest approach: Segregate by chunk.
+
+                        rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
+
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
@@ -1018,46 +1043,59 @@ class SearchEngine:
                         rec['patterns'].add(regex.pattern)
             except: pass
 
-        final_items = []
-        for uid, data in doc_hits.items():
-            src_indices = sorted(list(data['src_indices']))
-            src_snippets = []
-            if src_indices:
-                for k, g in itertools.groupby(enumerate(src_indices), lambda ix: ix[0] - ix[1]):
-                    group = list(map(lambda ix: ix[1], g))
-                    s, e = group[0], group[-1]
-                    ctx_s = max(0, s - 15); ctx_e = min(len(tokens), e + 1 + 15)
-                    seq = " ".join(tokens[s:e+1])
-                    src_snippets.append(f"... {' '.join(tokens[ctx_s:s])} *{seq}* {' '.join(tokens[e+1:ctx_e])} ...")
-            
-            spans = sorted(data['matches'], key=lambda x: x[0])
-            merged = []
-            if spans:
-                curr_s, curr_e = spans[0]
-                for s, e in spans[1:]:
-                    if s <= curr_e + 20: curr_e = max(curr_e, e)
-                    else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
-                merged.append((curr_s, curr_e))
-            
-            score = sum(e-s for s,e in merged)
-            ms_snips = []
-            for s, e in merged:
-                start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
+        def build_items(hits_dict):
+            final_items = []
+            for uid, data in hits_dict.items():
+                src_indices = sorted(list(data['src_indices']))
+                src_snippets = []
+                if src_indices:
+                    for k, g in itertools.groupby(enumerate(src_indices), lambda ix: ix[0] - ix[1]):
+                        group = list(map(lambda ix: ix[1], g))
+                        s, e = group[0], group[-1]
+                        ctx_s = max(0, s - 15); ctx_e = min(len(tokens), e + 1 + 15)
+                        seq = " ".join(tokens[s:e+1])
+                        src_snippets.append(f"... {' '.join(tokens[ctx_s:s])} *{seq}* {' '.join(tokens[e+1:ctx_e])} ...")
 
-            # Combined regex for highlighting
-            combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
+                spans = sorted(data['matches'], key=lambda x: x[0])
+                merged = []
+                if spans:
+                    curr_s, curr_e = spans[0]
+                    for s, e in spans[1:]:
+                        if s <= curr_e + 20: curr_e = max(curr_e, e)
+                        else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
+                    merged.append((curr_s, curr_e))
 
-            final_items.append({
-                'score': score, 'uid': uid, 
-                'raw_header': data['head'], 'src_lbl': data['src'],
-                'source_ctx': "\n".join(src_snippets), 
-                'text': "\n...\n".join(ms_snips),
-                'highlight_pattern': combined_pattern # <--- קריטי להדגשה
-            })
+                score = sum(e-s for s,e in merged)
+                ms_snips = []
+                for s, e in merged:
+                    start = max(0, s - 60); end = min(len(data['content']), e + 60)
+                    ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
 
-        final_items.sort(key=lambda x: x['score'], reverse=True)
-        return final_items
+                combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
+
+                final_items.append({
+                    'score': score, 'uid': uid,
+                    'raw_header': data['head'], 'src_lbl': data['src'],
+                    'source_ctx': "\n".join(src_snippets),
+                    'text': "\n...\n".join(ms_snips),
+                    'highlight_pattern': combined_pattern
+                })
+            final_items.sort(key=lambda x: x['score'], reverse=True)
+            return final_items
+
+        # Build both lists
+        main_list = build_items(doc_hits_main)
+        filtered_list = build_items(doc_hits_filtered)
+
+        # Post-processing: If a UID appears in both, usually it means different chunks matched.
+        # We can present it in both, or prioritize Main?
+        # If the user wants to filter out "known texts", appearing in Main implies there's *also* unknown content?
+        # Or should we be strict? "If found in this text... filtered".
+        # If I found a match that IS in the filter text, that match is filtered.
+        # If I found another match in the same doc that is NOT in filter text, that match stays in Main.
+        # So separated by matches is correct.
+
+        return {'main': main_list, 'filtered': filtered_list}
 
     def group_composition_results(self, items, threshold=5, progress_callback=None):
         ids = [self.meta_mgr.parse_header_smart(i['raw_header'])[0] for i in items]
