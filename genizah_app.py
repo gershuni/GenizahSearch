@@ -1064,10 +1064,17 @@ class GenizahGUI(QMainWindow):
 
         self.last_search_query = query
 
+        # Make sure no previous metadata loading is active
+        self.stop_metadata_loading()
+
         self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
         self.results_table.setRowCount(0); self.btn_export.setEnabled(False)
+
+        # Reset tracking dictionaries to avoid stale references
         self.result_row_by_sys_id = {}
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
 
         self.search_thread = SearchThread(self.searcher, query, mode, gap)
         self.search_thread.results_signal.connect(self.on_search_finished)
@@ -1208,11 +1215,15 @@ class GenizahGUI(QMainWindow):
         shelf = meta.get('shelfmark', 'Unknown')
         title = meta.get('title', '')
 
-        if sid in self.shelfmark_items_by_sid:
-             self.shelfmark_items_by_sid[sid].setText(shelf)
+        try:
+            if sid in self.shelfmark_items_by_sid:
+                 self.shelfmark_items_by_sid[sid].setText(shelf)
 
-        if sid in self.title_items_by_sid:
-             self.title_items_by_sid[sid].setText(title)
+            if sid in self.title_items_by_sid:
+                 self.title_items_by_sid[sid].setText(title)
+        except RuntimeError:
+            # Handle case where C++ object deleted (e.g. new search started)
+            pass
 
         # Also update the source data in self.last_results so exports etc are correct
         # This is O(N) but N=5000 max, usually small. Optimization: Dict map.
