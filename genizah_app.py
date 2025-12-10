@@ -714,7 +714,7 @@ class GenizahGUI(QMainWindow):
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Exact", "Variants (?)", "Extended (??)", "Maximum (???)", "Fuzzy (~)", "Regex"])
+        self.mode_combo.addItems(["Exact", "Variants (?)", "Extended (??)", "Maximum (???)", "Fuzzy (~)", "Regex", "Title", "Shelfmark"])
         # Tooltips
         self.mode_combo.setItemData(0, "Exact match")
         self.mode_combo.setItemData(1, "Basic variants: ד/ר, ה/ח, ו/י/ן etc.")
@@ -722,6 +722,8 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(3, "Maximum variants: Very broad search")
         self.mode_combo.setItemData(4, "Fuzzy search: Levenshtein distance")
         self.mode_combo.setItemData(5, "Regex: Use AI Assistant for complex patterns")
+        self.mode_combo.setItemData(6, "Search in Title metadata")
+        self.mode_combo.setItemData(7, "Search in Shelfmark metadata")
         
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText("Gap"); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip("Maximum word distance (0 = Exact phrase)")
@@ -1026,7 +1028,7 @@ class GenizahGUI(QMainWindow):
 
     # --- HELP TEXTS ---
     def get_search_help_text(self):
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns (Use AI mode for help, or consult your preferable AI engine).</li></ul><hr><b>Gap:</b> Max distance between words."""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns (Use AI mode for help, or consult your preferable AI engine).</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
 
     def get_comp_help_text(self):
         return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases appearing > X times.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
@@ -1055,7 +1057,9 @@ class GenizahGUI(QMainWindow):
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
-        mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex'][self.mode_combo.currentIndex()]
+        mode_idx = self.mode_combo.currentIndex()
+        modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+        mode = modes[mode_idx]
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         self.last_search_query = query
