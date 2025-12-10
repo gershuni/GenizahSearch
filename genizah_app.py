@@ -638,7 +638,7 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Genizah Search Pro V2.11")
+        self.setWindowTitle("Genizah Search Pro V3.0")
         self.resize(1300, 850)
 
         # Step 1: show a placeholder window with a loading message
@@ -657,6 +657,10 @@ class GenizahGUI(QMainWindow):
             self.searcher = SearchEngine(self.meta_mgr, self.var_mgr)
             self.indexer = Indexer(self.meta_mgr)
             self.ai_mgr = AIManager()
+
+            # Start loading heavy resources in background
+            self.meta_mgr.start_background_loading()
+
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
@@ -1033,7 +1037,7 @@ class GenizahGUI(QMainWindow):
         
         gb_about = QGroupBox("About")
         abl = QVBoxLayout()
-        about_txt = """<div style='text-align:center;'><h2>Genizah Search Pro 2.11</h2><p>Developed by Hillel Gershuni (with Gemini AI), gershuni@gmail.com</p><hr><p><b>Data Source:</b> Stoekl Ben Ezra et al. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. https://doi.org/10.5281/zenodo.17734473</p></div>"""
+        about_txt = """<div style='text-align:center;'><h2>Genizah Search Pro 3.0</h2><p>Developed by Hillel Gershuni (with Gemini AI), gershuni@gmail.com</p><hr><p><b>Data Source:</b> Stoekl Ben Ezra et al. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. https://doi.org/10.5281/zenodo.17734473</p></div>"""
         lbl_about = QLabel(about_txt); lbl_about.setOpenExternalLinks(True); lbl_about.setAlignment(Qt.AlignmentFlag.AlignCenter)
         abl.addWidget(lbl_about); gb_about.setLayout(abl); layout.addWidget(gb_about)
         
@@ -2216,7 +2220,7 @@ def resource_path(relative_path):
 if __name__ == "__main__":
     try:
         import ctypes
-        myappid = 'genizah.search.pro.2.11' 
+        myappid = 'genizah.search.pro.3.0'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except ImportError:
         pass
