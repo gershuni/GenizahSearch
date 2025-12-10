@@ -724,7 +724,7 @@ class GenizahGUI(QMainWindow):
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         top = QHBoxLayout()
-        self.query_input = QLineEdit(); self.query_input.setPlaceholderText("Search terms...")
+        self.query_input = QLineEdit(); self.query_input.setPlaceholderText("Search terms, title or shelfmark...")
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.mode_combo = QComboBox()
@@ -732,7 +732,7 @@ class GenizahGUI(QMainWindow):
         # Tooltips
         self.mode_combo.setItemData(0, "Exact match")
         self.mode_combo.setItemData(1, "Basic variants: ד/ר, ה/ח, ו/י/ן etc.")
-        self.mode_combo.setItemData(2, "Extended variants: Adds phonetical swaps (א/ע, ק/כ)")
+        self.mode_combo.setItemData(2, "Extended variants: Adds more swaps (א/ע, ק/כ etc.)")
         self.mode_combo.setItemData(3, "Maximum variants: Very broad search")
         self.mode_combo.setItemData(4, "Fuzzy search: Levenshtein distance")
         self.mode_combo.setItemData(5, "Regex: Use AI Assistant for complex patterns")
@@ -1056,9 +1056,12 @@ class GenizahGUI(QMainWindow):
             <h3>Data Source & Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>. I am grateful to the project leaders – Daniel Stoekl Ben Ezra, Marina Rustow, Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger – and to Tsafra Siew and Yitzchak Gila from the National Library of Israel.</p>
             <p>Making such a complex and valuable dataset freely available to the public is a significant step for Open Science, and I deeply appreciate their generosity in allowing everyone to access these texts.</p>
+            <h3>License</h3> 
+            
+            <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>) license</p>
 
             <h3>Citation</h3>
-            <p>If you use these results in your research, please cite the creators of the dataset:</p>
+            <p>If you use these results in your research, please cite the creators of the dataset: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a></p>
         </div>
         """
         
@@ -1071,7 +1074,7 @@ class GenizahGUI(QMainWindow):
         cit_row = QHBoxLayout()
         cit_row.addWidget(QLabel("<b>Citation:</b>"))
 
-        citation_str = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
+        citation_str = "Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. https://doi.org/10.5281/zenodo.17734473."
 
         self.txt_citation = QLineEdit(citation_str)
         self.txt_citation.setReadOnly(True)
