@@ -22,6 +22,19 @@ from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
 
+class ShelfmarkTableWidgetItem(QTableWidgetItem):
+    """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
+    def __lt__(self, other):
+        text1 = self.text()
+        text2 = other.text()
+
+        # Normalize: Remove 'Ms.'/'Ms' prefix (case insensitive) and lower case
+        # We strip leading whitespace, then optional 'ms', optional '.', then whitespace
+        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE).lower()
+        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE).lower()
+
+        return norm1 < norm2
+
 class ImageLoaderThread(QThread):
     """
     Smart Image Loader:
@@ -667,6 +680,9 @@ class GenizahGUI(QMainWindow):
             self.browse_thumb_url = None # Initialize
             self.browse_img_thread = None # Initialize
 
+            self.shelfmark_items_by_sid = {} # Track shelfmark items for direct updates
+            self.title_items_by_sid = {}     # Track title items for direct updates
+
             self.init_ui() # בונה את self.tabs
             
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
@@ -739,6 +755,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
         layout.addWidget(self.results_table)
         
@@ -1072,28 +1089,54 @@ class GenizahGUI(QMainWindow):
             self.btn_export.setEnabled(False)
             self.results_table.setRowCount(0)
             self.result_row_by_sys_id = {}
+            self.shelfmark_items_by_sid = {}
+            self.title_items_by_sid = {}
             self.btn_stop_meta.setEnabled(False)
             return
 
         self.status_label.setText(f"Found {len(results)}. Loading metadata...")
         self.last_results = results; self.btn_export.setEnabled(True)
+        self.results_table.setSortingEnabled(False) # Disable sorting during population
         self.results_table.setRowCount(len(results))
         self.result_row_by_sys_id = {}
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self._res_map_by_sid = {r['display']['id']: r for r in results} # New: map for metadata updates
 
         ids = []
         for i, res in enumerate(results):
             meta = res['display']; ids.append(meta['id'])
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta['id']
-            self.results_table.setItem(i, 0, QTableWidgetItem(sid))
-            self.results_table.setItem(i, 1, QTableWidgetItem("Loading..."))
-            self.results_table.setItem(i, 2, QTableWidgetItem("Loading..."))
+
+            # Col 0: System ID (Store full result data here for retrieval after sort)
+            item_sid = QTableWidgetItem(sid)
+            item_sid.setData(Qt.ItemDataRole.UserRole, res)
+            self.results_table.setItem(i, 0, item_sid)
+
+            # Col 1: Shelfmark (Custom Sort)
+            item_shelf = ShelfmarkTableWidgetItem("Loading...")
+            self.results_table.setItem(i, 1, item_shelf)
+            self.shelfmark_items_by_sid[sid] = item_shelf
+
+            # Col 2: Title
+            item_title = QTableWidgetItem("Loading...")
+            self.results_table.setItem(i, 2, item_title)
+            self.title_items_by_sid[sid] = item_title
+
+            # Col 3: Snippet (Widget)
             lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.results_table.setCellWidget(i, 3, lbl)
+
+            # Col 4: Img
             self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
+
+            # Col 5: Source
             self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+
             self.result_row_by_sys_id[sid] = i
 
+        self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
 
     def start_metadata_loading(self, ids):
@@ -1108,22 +1151,29 @@ class GenizahGUI(QMainWindow):
         self.meta_to_fetch_count = len([sid for sid in ids if sid and sid not in self.meta_mgr.nli_cache])
         self.meta_progress_current = 0
 
-        for i, res in enumerate(self.last_results):
+        # Update initial metadata from cache for all rows
+        for res in self.last_results:
+            sid = res['display']['id'] # Or better, re-parse if needed, but 'id' should be set
             shelf = res['display'].get('shelfmark', '')
             title = res['display'].get('title', '')
+
+            # Prefer fresh cache if available
             _, _, cached_shelf, cached_title = self._get_meta_for_header(res.get('raw_header', ''))
             shelf = cached_shelf or shelf
             title = cached_title or title
 
-            if shelf:
-                self.results_table.setItem(i, 1, QTableWidgetItem(shelf))
-            elif not self.results_table.item(i, 1):
-                self.results_table.setItem(i, 1, QTableWidgetItem("Loading..."))
+            # Update items directly by ID reference (robust against sorting)
+            if sid in self.shelfmark_items_by_sid and shelf:
+                self.shelfmark_items_by_sid[sid].setText(shelf)
+                # Also update the data object stored in UserRole so sort keeps working on fresh data if needed
+                # Note: We don't update UserRole here to avoid complexity,
+                # but show_full_text pulls from UserRole. The UserRole has 'res'.
+                # We should update 'res' in place.
+                res['display']['shelfmark'] = shelf
 
-            if title:
-                self.results_table.setItem(i, 2, QTableWidgetItem(title))
-            elif not self.results_table.item(i, 2):
-                self.results_table.setItem(i, 2, QTableWidgetItem("Loading..."))
+            if sid in self.title_items_by_sid and title:
+                self.title_items_by_sid[sid].setText(title)
+                res['display']['title'] = title
 
         if self.meta_to_fetch_count == 0:
             self.status_label.setText(f"Metadata already loaded for {self.meta_cached_count} items.")
@@ -1141,15 +1191,57 @@ class GenizahGUI(QMainWindow):
     def on_meta_progress(self, curr, total, sid):
         self.meta_progress_current = curr
         self.status_label.setText(self._format_metadata_status())
-        row_index = self.result_row_by_sys_id.get(sid)
-        if row_index is None:
-            return
 
-        _, _, shelf, title = self._get_meta_for_header(self.last_results[row_index]['raw_header'])
-        self.results_table.setItem(row_index, 1, QTableWidgetItem(shelf))
-        self.results_table.setItem(row_index, 2, QTableWidgetItem(title))
-        self.last_results[row_index]['display']['shelfmark'] = shelf
-        self.last_results[row_index]['display']['title'] = title
+        # We don't rely on row index anymore. We update the items directly.
+        # But we need to know what the new metadata IS.
+        # The thread fetched it into nli_cache. We can retrieve it via _get_meta_for_header.
+
+        # We need the header to parse, but we only have SID.
+        # Find the result object for this SID (scan last_results or just use what we have in cache)
+        # Actually, for the table update, we just need the shelfmark string.
+
+        meta = self.meta_mgr.nli_cache.get(sid, {})
+        shelf = meta.get('shelfmark', 'Unknown')
+        title = meta.get('title', '')
+
+        if sid in self.shelfmark_items_by_sid:
+             self.shelfmark_items_by_sid[sid].setText(shelf)
+
+        if sid in self.title_items_by_sid:
+             self.title_items_by_sid[sid].setText(title)
+
+        # Also update the source data in self.last_results so exports etc are correct
+        # This is O(N) but N=5000 max, usually small. Optimization: Dict map.
+        # However, we have self.result_row_by_sys_id which maps to original index?
+        # No, result_row_by_sys_id maps to TABLE ROW. That was unreliable.
+        # Let's assume we don't need to update self.last_results for table display (since we updated items),
+        # but we DO need it for export_results() and show_full_text() if they use last_results.
+        # Wait, show_full_text() will now use UserRole.
+        # So we must update the UserRole object.
+
+        # Iterate items to find the UserRole object? No, that's slow.
+        # We stored UserRole on column 0 item.
+        # We don't have a map for column 0 items. Let's make one if needed.
+        # Or just iterate self.last_results?
+        # Actually, we can update the 'res' dictionary in place if we have a reference.
+        # self.last_results holds references to the same dicts that are in UserRole (shallow copy list, same dict objects).
+        # So finding it in self.last_results and updating it updates UserRole too.
+
+        # Optimization: Map sid -> result dict
+        if not hasattr(self, '_res_map_by_sid'):
+            self._res_map_by_sid = {r['display']['id']: r for r in self.last_results} # Lazy build or build in search_finished
+
+        if sid in self._res_map_by_sid:
+            r = self._res_map_by_sid[sid]
+            r['display']['shelfmark'] = shelf
+            r['display']['title'] = title
+        else:
+            # Fallback
+            for r in self.last_results:
+                 if r['display']['id'] == sid:
+                     r['display']['shelfmark'] = shelf
+                     r['display']['title'] = title
+                     break
 
     def on_meta_finished(self, cancelled):
         total_loaded = self.meta_cached_count + self.meta_progress_current
@@ -1183,7 +1275,23 @@ class GenizahGUI(QMainWindow):
 
     def show_full_text(self):
         row = self.results_table.currentRow()
-        if row >= 0: ResultDialog(self, self.last_results, row, self.meta_mgr, self.searcher).exec()
+        if row < 0: return
+
+        # Reconstruct list of results in current visual order
+        sorted_results = []
+        rows = self.results_table.rowCount()
+        for i in range(rows):
+            item = self.results_table.item(i, 0)
+            if item:
+                res = item.data(Qt.ItemDataRole.UserRole)
+                if res:
+                    sorted_results.append(res)
+
+        # If something went wrong, fall back to last_results but that might be disordered relative to view
+        if not sorted_results:
+            sorted_results = self.last_results
+
+        ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def export_results(self):
         default_path = self._default_report_path(self.last_search_query, "Search_Results")
