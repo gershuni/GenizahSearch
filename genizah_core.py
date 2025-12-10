@@ -68,11 +68,11 @@ class Config:
 #  AI MANAGER
 # ==============================================================================
 class AIManager:
-    """Manage Gemini configuration, key persistence, and prompt sessions."""
+    """Manage AI configuration (Provider, Model, Key) and prompt sessions."""
     def __init__(self):
+        self.provider = "Google Gemini"
+        self.model_name = "gemini-1.5-flash"
         self.api_key = ""
-        self.chat_history = []
-        self.model = None
         self.chat = None
         
         # Ensure dir exists
@@ -84,24 +84,32 @@ class AIManager:
             try:
                 with open(Config.CONFIG_FILE, 'rb') as f:
                     cfg = pickle.load(f)
-                    self.api_key = cfg.get('gemini_key', '')
+                    # Support legacy key
+                    if 'gemini_key' in cfg and 'api_key' not in cfg:
+                        self.api_key = cfg.get('gemini_key', '')
+                    else:
+                        self.api_key = cfg.get('api_key', '')
+                        self.provider = cfg.get('provider', 'Google Gemini')
+                        self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
             except: pass
 
-    def save_key(self, key):
+    def save_config(self, provider, model_name, key):
+        self.provider = provider
+        self.model_name = model_name
         self.api_key = key.strip()
+
         if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
         with open(Config.CONFIG_FILE, 'wb') as f:
-            pickle.dump({'gemini_key': self.api_key}, f)
+            pickle.dump({
+                'provider': self.provider,
+                'model_name': self.model_name,
+                'api_key': self.api_key
+            }, f)
+        # Reset session
+        self.chat = None
 
-    def init_session(self):
-        if not HAS_GENAI: return "Error: 'google-generativeai' library missing."
-        if not self.api_key: return "Error: Missing API Key."
-        
-        try:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash')
-            
-            sys_inst = """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah). 
+    def _get_sys_inst(self):
+        return """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah).
             Your goal is to help the user construct Python Regex patterns.
             
             IMPORTANT RULES:
@@ -111,23 +119,77 @@ class AIManager:
             4. Output format MUST be strictly JSON: {"regex": "THE_PATTERN", "explanation": "Brief explanation"}.
             5. Do not include markdown formatting like ```json.
             """
-            
-            self.chat = self.model.start_chat(history=[
-                {"role": "user", "parts": [sys_inst]},
-                {"role": "model", "parts": ["Understood. I will provide JSON output with robust Hebrew regex."]}
-            ])
-            return None
-        except Exception as e:
-            return str(e)
+
+    def init_session(self):
+        if not self.api_key: return "Error: Missing API Key."
+
+        if self.provider == "Google Gemini":
+            if not HAS_GENAI: return "Error: 'google-generativeai' library missing."
+            try:
+                genai.configure(api_key=self.api_key)
+                model = genai.GenerativeModel(self.model_name)
+
+                self.chat = model.start_chat(history=[
+                    {"role": "user", "parts": [self._get_sys_inst()]},
+                    {"role": "model", "parts": ["Understood. I will provide JSON output with robust Hebrew regex."]}
+                ])
+                return None
+            except Exception as e:
+                return str(e)
+
+        return None # Other providers are stateless or handled in send_prompt
 
     def send_prompt(self, user_text):
-        if not self.chat:
+        if self.provider == "Google Gemini" and not self.chat:
             err = self.init_session()
             if err: return None, err
             
         try:
-            response = self.chat.send_message(user_text)
-            clean = response.text.strip().replace('```json', '').replace('```', '').strip()
+            response_text = ""
+
+            if self.provider == "Google Gemini":
+                response = self.chat.send_message(user_text)
+                response_text = response.text
+
+            elif self.provider == "OpenAI":
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}"
+                }
+                payload = {
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": self._get_sys_inst()},
+                        {"role": "user", "content": user_text}
+                    ],
+                    "response_format": { "type": "json_object" }
+                }
+                r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
+                if r.status_code != 200:
+                    return None, f"OpenAI Error {r.status_code}: {r.text}"
+                res_json = r.json()
+                response_text = res_json['choices'][0]['message']['content']
+
+            elif self.provider == "Anthropic Claude":
+                headers = {
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                }
+                payload = {
+                    "model": self.model_name,
+                    "max_tokens": 1024,
+                    "messages": [
+                        {"role": "user", "content": self._get_sys_inst() + "\n\n" + user_text}
+                    ]
+                }
+                r = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=20)
+                if r.status_code != 200:
+                    return None, f"Claude Error {r.status_code}: {r.text}"
+                res_json = r.json()
+                response_text = res_json['content'][0]['text']
+
+            clean = response_text.strip().replace('```json', '').replace('```', '').strip()
             data = json.loads(clean)
             return data, None
         except Exception as e:
