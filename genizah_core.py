@@ -250,13 +250,16 @@ class MetadataManager:
         if not os.path.exists(Config.INDEX_DIR):
             try: os.makedirs(Config.INDEX_DIR)
             except: pass
-            
-        self._load_caches()
+
+        # Load small caches immediately
+        self._load_small_caches()
+
+    def start_background_loading(self):
+        """Start loading heavy metadata resources (CSV, Maps) in background."""
+        threading.Thread(target=self._load_heavy_caches_bg, daemon=True).start()
         threading.Thread(target=self._build_file_map_background, daemon=True).start()
 
-    def _load_caches(self):
-        self._load_metadata_bank()
-        self._load_csv_bank()
+    def _load_small_caches(self):
         if os.path.exists(Config.CACHE_NLI):
             try:
                 with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
@@ -265,6 +268,10 @@ class MetadataManager:
             try:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
             except: pass
+
+    def _load_heavy_caches_bg(self):
+        self._load_metadata_bank()
+        self._load_csv_bank()
 
     def _load_csv_bank(self):
         """Load the massive CSV file into memory for instant lookup."""
@@ -307,6 +314,8 @@ class MetadataManager:
         title = ""
 
         # 1. Check CSV (Fastest & Most reliable for basic info)
+        # Note: Accessing self.csv_bank is generally thread-safe for reading in Python
+        # (GIL handles atomic dict reads), even if being populated.
         if sys_id in self.csv_bank:
             return self.csv_bank[sys_id]['shelfmark'], self.csv_bank[sys_id]['title']
 
