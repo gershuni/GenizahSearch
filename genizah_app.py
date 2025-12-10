@@ -1037,12 +1037,53 @@ class GenizahGUI(QMainWindow):
         
         gb_about = QGroupBox("About")
         abl = QVBoxLayout()
-        about_txt = """<div style='text-align:center;'><h2>Genizah Search Pro 3.0</h2><p>Developed by Hillel Gershuni (with Gemini AI), gershuni@gmail.com</p><hr><p><b>Data Source:</b> Stoekl Ben Ezra et al. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. https://doi.org/10.5281/zenodo.17734473</p></div>"""
-        lbl_about = QLabel(about_txt); lbl_about.setOpenExternalLinks(True); lbl_about.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        abl.addWidget(lbl_about); gb_about.setLayout(abl); layout.addWidget(gb_about)
+        about_txt = """
+        <style>
+            h3 { margin-bottom: 0px; margin-top: 10px; color: #2c3e50; }
+            p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
+            a { color: #2980b9; text-decoration: none; }
+        </style>
+        <div style='font-family: Arial; font-size: 13px;'>
+            <div style='text-align:center;'>
+                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.0</h2>
+                <p style='color: #7f8c8d;'>Developed by Hillel Gershuni (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
+            </div>
+            <hr>
+
+            <h3>Data Source & Acknowledgments</h3>
+            <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>. I am grateful to the project leaders—Daniel Stoekl Ben Ezra, Marina Rustow, Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger—and to Tsafra Siew and Yitzchak Gila from the National Library of Israel.</p>
+            <p>Making such a complex and valuable dataset freely available to the public is a significant step for Open Science, and I deeply appreciate their generosity in allowing everyone to access these texts.</p>
+
+            <h3>Credits</h3>
+            <p>This tool was developed with the coding assistance of <b>Gemini 3.0</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Itai Kagan and Elnatan Chen for their advice and support.</p>
+
+            <h3>Citation</h3>
+            <p>If you use these results in your research, please cite the creators of the dataset:</p>
+            <div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #3498db; font-style: italic;'>
+                Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). <i>MiDRASH Automatic Transcriptions</i>. Zenodo. <a href="https://doi.org/10.5281/zenodo.17734473">https://doi.org/10.5281/zenodo.17734473</a>
+            </div>
+        </div>
+        """
         
-        layout.addStretch(); panel.setLayout(layout)
+        txt_about = QTextBrowser()
+        txt_about.setHtml(about_txt)
+        txt_about.setOpenExternalLinks(True)
+        abl.addWidget(txt_about)
+
+        btn_copy = QPushButton("Copy Citation to Clipboard")
+        btn_copy.clicked.connect(self.copy_citation)
+        btn_copy.setStyleSheet("background-color: #3498db; color: white; font-weight: bold; padding: 8px;")
+        abl.addWidget(btn_copy)
+
+        gb_about.setLayout(abl); layout.addWidget(gb_about)
+
+        panel.setLayout(layout)
         return panel
+
+    def copy_citation(self):
+        citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
+        QApplication.clipboard().setText(citation)
+        QMessageBox.information(self, "Copied", "Citation copied to clipboard!")
 
     # --- HELP TEXTS ---
     def get_search_help_text(self):
@@ -2220,9 +2261,10 @@ def resource_path(relative_path):
 if __name__ == "__main__":
     try:
         import ctypes
-        myappid = 'genizah.search.pro.3.0'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except ImportError:
+        if hasattr(ctypes, 'windll'):
+            myappid = 'genizah.search.pro.3.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except (ImportError, AttributeError):
         pass
 
     app = QApplication(sys.argv)
