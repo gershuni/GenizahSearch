@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoo
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
-from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
+from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread
 from filter_text_dialog import FilterTextDialog
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
@@ -651,15 +651,20 @@ class GenizahGUI(QMainWindow):
 
     def delayed_init(self):
         try:
-            # Perform heavy initialization here
-            self.meta_mgr = MetadataManager()
-            self.var_mgr = VariantManager()
-            self.searcher = SearchEngine(self.meta_mgr, self.var_mgr)
-            self.indexer = Indexer(self.meta_mgr)
-            self.ai_mgr = AIManager()
+            self.startup_thread = StartupThread()
+            self.startup_thread.finished_signal.connect(self.on_startup_finished)
+            self.startup_thread.error_signal.connect(lambda e: QMessageBox.critical(self, "Fatal Error", f"Failed to initialize:\n{e}"))
+            self.startup_thread.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Fatal Error", f"Failed to start initialization:\n{e}")
 
-            # Start loading heavy resources in background
-            self.meta_mgr.start_background_loading()
+    def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
+        try:
+            self.meta_mgr = meta_mgr
+            self.var_mgr = var_mgr
+            self.searcher = searcher
+            self.indexer = indexer
+            self.ai_mgr = ai_mgr
 
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             
@@ -709,9 +714,9 @@ class GenizahGUI(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
-                
+
         except Exception as e:
-            QMessageBox.critical(self, "Fatal Error", f"Failed to initialize:\n{e}")
+            QMessageBox.critical(self, "Fatal Error", f"Failed to finalize initialization:\n{e}")
              
     def init_ui(self):
         self.tabs = QTabWidget()
