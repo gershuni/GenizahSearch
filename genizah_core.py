@@ -44,7 +44,6 @@ class Config:
     INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
     RESULTS_DIR = os.path.join(BASE_DIR, "Results")
     REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
-    METADATA_BANK = os.path.join(BASE_DIR, "metadata_bank.pkl")
     LIBRARIES_CSV = os.path.join(BASE_DIR, "libraries.csv")
 
     # 3. User Data Directory (Index, Caches)
@@ -303,7 +302,6 @@ class MetadataManager:
     def __init__(self):
         self.meta_map = {}
         self.nli_cache = {}
-        self.shelf_bank = {}
         self.csv_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
@@ -332,7 +330,6 @@ class MetadataManager:
             except: pass
 
     def _load_heavy_caches_bg(self):
-        self._load_metadata_bank()
         self._load_csv_bank()
 
     def _load_csv_bank(self):
@@ -388,65 +385,8 @@ class MetadataManager:
 
         return shelf, title
 
-    def _normalize_shelfmark(self, raw):
-        if not raw: return None
-        cleaned = str(raw).strip().strip('-').strip()
-        cleaned = cleaned if cleaned else None
-        if not cleaned: return None
-
-        # Ignore optional "MS"/"Ms" prefix (with optional punctuation/spacing like "M.S." or "Ms.")
-        cleaned = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", cleaned, flags=re.IGNORECASE)
-
-        no_spaces = re.sub(r"[^\w]", "", cleaned).lower()
-        if no_spaces.startswith("ms"):
-            cleaned = cleaned[2:].lstrip()
-        return cleaned
-
-    def _load_metadata_bank(self):
-        if not os.path.exists(Config.METADATA_BANK): return
-        try:
-            with open(Config.METADATA_BANK, 'rb') as f:
-                data = pickle.load(f)
-        except Exception:
-            return
-
-        parsed = {}
-
-        def add_entry(ie_id, shelf):
-            shelfmark = self._normalize_shelfmark(shelf)
-            if ie_id and shelfmark:
-                parsed[ie_id] = shelfmark
-
-        if isinstance(data, dict):
-            for key, val in data.items():
-                ie_match = re.search(r'(IE\d+)', str(key)) or re.search(r'(IE\d+)', str(val))
-                add_entry(ie_match.group(1) if ie_match else None, val)
-        elif isinstance(data, (list, tuple)):
-            for item in data:
-                ie_match = re.search(r'(IE\d+)', str(item))
-                shelf_match = re.split(r'"', str(item).replace('”', '"').replace('“', '"'))
-                shelf = shelf_match[-1] if shelf_match else None
-                add_entry(ie_match.group(1) if ie_match else None, shelf)
-        elif isinstance(data, str):
-            chunks = data.replace('\n', ' ').replace('”', '"').replace('“', '"').split(' - ')
-            for chunk in chunks:
-                parts = [p for p in chunk.split('"') if p]
-                ie_match = None
-                shelf = None
-                for p in parts:
-                    if not ie_match:
-                        m = re.search(r'(IE\d+)', p)
-                        if m: ie_match = m.group(1)
-                    if not shelf and re.search(r'[A-Za-z]{1,3}\.?[A-Za-z0-9\.\- ]+', p):
-                        shelf = p
-                add_entry(ie_match, shelf)
-
-        self.shelf_bank = parsed
-
     def get_shelfmark_from_header(self, full_header):
         parsed = self.parse_full_id_components(full_header)
-        if parsed.get('ie_id') and parsed['ie_id'] in self.shelf_bank:
-            return self.shelf_bank.get(parsed['ie_id'], '')
 
         sys_id = parsed.get('sys_id')
         if sys_id:
@@ -742,13 +682,14 @@ class MetadataManager:
 
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
-        parsed = self.parse_full_id_components(full_header)
 
-        shelfmark = None
-        if parsed.get('ie_id') and parsed['ie_id'] in self.shelf_bank:
-            shelfmark = self.shelf_bank.get(parsed['ie_id'])
         meta = self.nli_cache.get(sys_id, {'shelfmark': '', 'title': ''})
-        shelfmark = shelfmark or meta.get('shelfmark')
+        shelfmark = meta.get('shelfmark')
+
+        # Fallback to CSV bank if not in cache (get_meta_for_id handles this priority)
+        if not shelfmark or shelfmark == "Unknown":
+             shelfmark, _ = self.get_meta_for_id(sys_id)
+
         return {
             'shelfmark': shelfmark or f"ID: {sys_id}",
             'title': meta.get('title', ''),
