@@ -157,7 +157,7 @@ class AIDialog(QDialog):
     """Chat interface for requesting regex suggestions from the AI manager."""
     def __init__(self, parent, ai_mgr):
         super().__init__(parent)
-        self.setWindowTitle("AI Regex Assistant (Gemini)")
+        self.setWindowTitle(f"AI Regex Assistant ({ai_mgr.provider})")
         self.resize(600, 500)
         self.ai_mgr = ai_mgr
         self.generated_regex = ""
@@ -1029,10 +1029,31 @@ class GenizahGUI(QMainWindow):
         gb_data.setLayout(dl); layout.addWidget(gb_data)
         
         gb_ai = QGroupBox("AI Configuration")
-        al = QHBoxLayout()
+        al = QVBoxLayout()
+
+        row1 = QHBoxLayout()
+        self.combo_provider = QComboBox()
+        self.combo_provider.addItems(["Google Gemini", "OpenAI", "Anthropic Claude"])
+        self.combo_provider.setCurrentText(self.ai_mgr.provider)
+        self.combo_provider.currentTextChanged.connect(self._on_provider_changed)
+
+        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name)
+        self.txt_model.setPlaceholderText("Model Name (e.g. gemini-1.5-flash)")
+
+        row1.addWidget(QLabel("Provider:")); row1.addWidget(self.combo_provider)
+        row1.addWidget(QLabel("Model:")); row1.addWidget(self.txt_model)
+
+        row2 = QHBoxLayout()
         self.txt_api_key = QLineEdit(); self.txt_api_key.setText(self.ai_mgr.api_key); self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        btn_save = QPushButton("Save Key"); btn_save.clicked.connect(lambda: (self.ai_mgr.save_key(self.txt_api_key.text()), QMessageBox.information(self, "Saved", "API Key saved.")))
-        al.addWidget(QLabel("API Key:")); al.addWidget(self.txt_api_key); al.addWidget(btn_save)
+        self.txt_api_key.setPlaceholderText("API Key")
+
+        btn_save = QPushButton("Save Settings")
+        btn_save.clicked.connect(self.save_ai_settings)
+
+        row2.addWidget(QLabel("API Key:")); row2.addWidget(self.txt_api_key)
+        row2.addWidget(btn_save)
+
+        al.addLayout(row1); al.addLayout(row2)
         gb_ai.setLayout(al); layout.addWidget(gb_ai)
         
         gb_about = QGroupBox("About")
@@ -1080,6 +1101,24 @@ class GenizahGUI(QMainWindow):
         panel.setLayout(layout)
         return panel
 
+    def _on_provider_changed(self, text):
+        if text == "Google Gemini":
+            self.txt_model.setText("gemini-2.0-flash")
+        elif text == "OpenAI":
+            self.txt_model.setText("gpt-4o")
+        elif text == "Anthropic Claude":
+            self.txt_model.setText("claude-3-5-sonnet-20240620")
+
+    def save_ai_settings(self):
+        provider = self.combo_provider.currentText()
+        model = self.txt_model.text().strip()
+        key = self.txt_api_key.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Missing Key", "Please enter an API Key.")
+            return
+        self.ai_mgr.save_config(provider, model, key)
+        QMessageBox.information(self, "Saved", f"AI settings saved for {provider}.")
+
     def copy_citation(self):
         citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
         QApplication.clipboard().setText(citation)
@@ -1105,7 +1144,7 @@ class GenizahGUI(QMainWindow):
     # --- LOGIC ---
     def open_ai(self):
         if not self.ai_mgr.api_key:
-            QMessageBox.warning(self, "Missing Key", "Please set your Gemini API Key in Settings."); return
+            QMessageBox.warning(self, "Missing Key", "Please configure your AI Provider & Key in Settings."); return
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
