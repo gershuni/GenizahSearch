@@ -1238,10 +1238,18 @@ class GenizahGUI(QMainWindow):
     def _get_meta_for_header(self, raw_header):
         """Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks."""
         sys_id, p_num = self.meta_mgr.parse_header_smart(raw_header)
-        shelf = self.meta_mgr.get_shelfmark_from_header(raw_header)
-        meta = self.meta_mgr.nli_cache.get(sys_id, {}) if sys_id else {}
-        shelf = shelf or meta.get('shelfmark', '')
-        title = meta.get('title', '')
+
+        shelf = "Unknown"
+        title = ""
+
+        if sys_id:
+            # Use the new unified lookup
+            shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        # Fallback to header parsing if CSV/Cache failed
+        if not shelf or shelf == "Unknown":
+            shelf = self.meta_mgr.get_shelfmark_from_header(raw_header) or "Unknown"
+
         return sys_id, p_num, shelf, title
 
     def _item_matches_exclusion(self, item):

@@ -45,6 +45,7 @@ class Config:
     RESULTS_DIR = os.path.join(BASE_DIR, "Results")
     REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
     METADATA_BANK = os.path.join(BASE_DIR, "metadata_bank.pkl")
+    LIBRARIES_CSV = os.path.join(BASE_DIR, "libraries.csv")
 
     # 3. User Data Directory (Index, Caches)
     INDEX_DIR = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
@@ -241,6 +242,7 @@ class MetadataManager:
         self.meta_map = {}
         self.nli_cache = {}
         self.shelf_bank = {}
+        self.csv_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
         
@@ -254,6 +256,7 @@ class MetadataManager:
 
     def _load_caches(self):
         self._load_metadata_bank()
+        self._load_csv_bank()
         if os.path.exists(Config.CACHE_NLI):
             try:
                 with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
@@ -262,6 +265,57 @@ class MetadataManager:
             try:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
             except: pass
+
+    def _load_csv_bank(self):
+        """Load the massive CSV file into memory for instant lookup."""
+        if not os.path.exists(Config.LIBRARIES_CSV):
+            return
+
+        import csv
+        try:
+            with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
+                reader = csv.reader(f, delimiter=',')
+                next(reader, None) # Skip header
+
+                for row in reader:
+                    if not row or len(row) < 2: continue
+                    # Format: system_number | call_numbers | ... | titles
+                    sys_id = row[0].strip()
+
+                    # Call numbers can be multiple separated by '|'
+                    # We take the shortest one that looks like a shelfmark, or just the first
+                    raw_shelves = row[1].split('|')
+                    shelf = raw_shelves[0].strip()
+                    # Try to find a nice short shelfmark
+                    for s in raw_shelves:
+                        s = s.strip()
+                        if s and len(s) < len(shelf):
+                            shelf = s
+
+                    # Title is column index 5 (0-based)
+                    title = ""
+                    if len(row) > 5:
+                        title = row[5].strip()
+
+                    self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+        except Exception as e:
+            print(f"Error loading CSV bank: {e}")
+
+    def get_meta_for_id(self, sys_id):
+        """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
+        shelf = "Unknown"
+        title = ""
+
+        # 1. Check CSV (Fastest & Most reliable for basic info)
+        if sys_id in self.csv_bank:
+            return self.csv_bank[sys_id]['shelfmark'], self.csv_bank[sys_id]['title']
+
+        # 2. Check NLI Cache (If we fetched it before)
+        if sys_id in self.nli_cache:
+            m = self.nli_cache[sys_id]
+            return m.get('shelfmark', 'Unknown'), m.get('title', '')
+
+        return shelf, title
 
     def _normalize_shelfmark(self, raw):
         if not raw: return None
@@ -322,7 +376,13 @@ class MetadataManager:
         parsed = self.parse_full_id_components(full_header)
         if parsed.get('ie_id') and parsed['ie_id'] in self.shelf_bank:
             return self.shelf_bank.get(parsed['ie_id'], '')
+
         sys_id = parsed.get('sys_id')
+        if sys_id:
+            shelf, _ = self.get_meta_for_id(sys_id)
+            if shelf and shelf != "Unknown":
+                return shelf
+
         if sys_id and sys_id in self.nli_cache:
             return self.nli_cache[sys_id].get('shelfmark', '')
         return ''
