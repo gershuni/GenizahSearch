@@ -1066,6 +1066,16 @@ class GenizahGUI(QMainWindow):
 
         self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
+
+        # Stop any previous metadata loading to prevent race conditions
+        if self.meta_loader and self.meta_loader.isRunning():
+            self.meta_loader.request_cancel()
+            self.meta_loader.wait()
+
+        # Clear item references BEFORE clearing the table to avoid accessing deleted items
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+
         self.results_table.setRowCount(0); self.btn_export.setEnabled(False)
         self.result_row_by_sys_id = {}
 
@@ -1209,10 +1219,16 @@ class GenizahGUI(QMainWindow):
         title = meta.get('title', '')
 
         if sid in self.shelfmark_items_by_sid:
-             self.shelfmark_items_by_sid[sid].setText(shelf)
+            try:
+                self.shelfmark_items_by_sid[sid].setText(shelf)
+            except RuntimeError:
+                pass # Item deleted
 
         if sid in self.title_items_by_sid:
-             self.title_items_by_sid[sid].setText(title)
+            try:
+                self.title_items_by_sid[sid].setText(title)
+            except RuntimeError:
+                pass # Item deleted
 
         # Also update the source data in self.last_results so exports etc are correct
         # This is O(N) but N=5000 max, usually small. Optimization: Dict map.
