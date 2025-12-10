@@ -667,12 +667,12 @@ class GenizahGUI(QMainWindow):
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
-        # We need structured storage for filtered results too
-        self.comp_filtered_main = []
-        self.comp_filtered_appendix = {}
-        self.comp_filtered_summary = {}
-        self.comp_raw_items = [] # Used for retry if grouping fails
-        self.comp_raw_filtered = [] # Used for retry
+            # We need structured storage for filtered results too
+            self.comp_filtered_main = []
+            self.comp_filtered_appendix = {}
+            self.comp_filtered_summary = {}
+            self.comp_raw_items = [] # Used for retry if grouping fails
+            self.comp_raw_filtered = [] # Used for retry
             self.comp_known = []
             self.excluded_raw_entries = []
             self.excluded_sys_ids = set()
