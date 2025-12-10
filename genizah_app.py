@@ -21,6 +21,7 @@ from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread
+from filter_text_dialog import FilterTextDialog
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
@@ -666,11 +667,17 @@ class GenizahGUI(QMainWindow):
             self.comp_main = []
             self.comp_appendix = {}
             self.comp_summary = {}
-            self.comp_raw_items = []
+        # We need structured storage for filtered results too
+        self.comp_filtered_main = []
+        self.comp_filtered_appendix = {}
+        self.comp_filtered_summary = {}
+        self.comp_raw_items = [] # Used for retry if grouping fails
+        self.comp_raw_filtered = [] # Used for retry
             self.comp_known = []
             self.excluded_raw_entries = []
             self.excluded_sys_ids = set()
             self.excluded_shelfmarks = set()
+            self.filter_text_content = "" # Store filter text content
             self.group_thread = None
             self.is_searching = False
             self.is_comp_running = False
@@ -812,6 +819,9 @@ class GenizahGUI(QMainWindow):
         btn_exclude = QPushButton("Exclude Manuscripts")
         btn_exclude.clicked.connect(self.open_exclude_dialog)
 
+        btn_filter_text = QPushButton("Filter Text")
+        btn_filter_text.clicked.connect(self.open_filter_dialog)
+
         self.lbl_exclude_status = QLabel("Excluded: 0")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
 
@@ -834,7 +844,8 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run = QPushButton("Analyze Composition"); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
 
-        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(self.lbl_exclude_status)
+        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
+        cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.btn_comp_run)
         in_l.addLayout(cr)
@@ -1326,6 +1337,11 @@ class GenizahGUI(QMainWindow):
             QMessageBox.information(self, "Saved", f"Saved to {path}")
 
     # Composition & Browse
+    def open_filter_dialog(self):
+        dlg = FilterTextDialog(self, current_text=self.filter_text_content)
+        if dlg.exec():
+            self.filter_text_content = dlg.get_text()
+
     def load_comp_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text (*.txt)")
         if path:
@@ -1447,12 +1463,14 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
         self.comp_progress.setFormat("Scanning chunks...")
         self.comp_raw_items = []
+        self.comp_filtered = []
         self.comp_known = []
         self.btn_comp_export.setEnabled(False)
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
 
         self.comp_thread = CompositionThread(
-            self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode, self.spin_filter.value()
+            self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
+            filter_text=self.filter_text_content, threshold=self.spin_filter.value()
         )
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
@@ -1467,11 +1485,21 @@ class GenizahGUI(QMainWindow):
             self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(curr)
 
-    def on_comp_scan_finished(self, items):
+    def on_comp_scan_finished(self, result_obj):
         self.is_comp_running = False
         self.reset_comp_ui()
-        self.comp_raw_items = items or []
-        if not items:
+
+        if isinstance(result_obj, dict):
+            items = result_obj.get('main', [])
+            filtered_items = result_obj.get('filtered', [])
+        else:
+            items = result_obj or []
+            filtered_items = []
+
+        self.comp_raw_items = items
+        self.comp_raw_filtered = filtered_items
+
+        if not items and not filtered_items:
             QMessageBox.information(self, "No Results", "No composition matches found.")
             return
 
@@ -1483,21 +1511,24 @@ class GenizahGUI(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if msg == QMessageBox.StandardButton.Yes:
-            self.start_grouping(items)
+            self.start_grouping(items, filtered_items)
         else:
-            self.display_comp_results(items, {}, {})
+            # Pass empty grouping info
+            self.display_comp_results(items, {}, {}, filtered_items, {}, {})
 
-    def start_grouping(self, items):
+    def start_grouping(self, items, filtered_items=None):
         self.is_comp_running = True
         self.btn_comp_run.setText("Stop")
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True)
-        total_items = len(items) if items else 0
+        total_items = (len(items) if items else 0) + (len(filtered_items) if filtered_items else 0)
         self.comp_progress.setRange(0, total_items)
         self.comp_progress.setValue(0)
         self.comp_progress.setFormat("Grouping compositions...")
 
-        self.group_thread = GroupingThread(self.searcher, items, self.spin_filter.value())
+        self.group_thread = GroupingThread(
+            self.searcher, items, self.spin_filter.value(), filtered_items=filtered_items
+        )
         self.group_thread.progress_signal.connect(self.on_comp_progress)
         self.group_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
         self.group_thread.finished_signal.connect(self.on_comp_finished)
@@ -1506,39 +1537,57 @@ class GenizahGUI(QMainWindow):
 
     def on_grouping_error(self, err):
         QMessageBox.critical(self, "Grouping Error", err)
-        self.display_comp_results(self.comp_raw_items or [], {}, {})
+        # Fallback to ungrouped display
+        self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
 
-    def on_comp_finished(self, main, appx, summ):
-        self.display_comp_results(main, appx, summ)
+    def on_comp_finished(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        self.display_comp_results(main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ)
 
-    def display_comp_results(self, main, appx, summ):
+    def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.is_comp_running = False
         self.btn_comp_run.setText("Analyze Composition")
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
         self.btn_comp_export.setEnabled(True)
         self.group_thread = None
-        self.comp_raw_items = main
+        self.comp_raw_items = main_res
+        self.comp_raw_filtered = filt_res
 
-        filtered_main, filtered_appx, known = self._apply_manual_exclusions(main, appx)
+        # 1. Apply Exclusions to Main
+        clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
 
-        self.comp_main = filtered_main
-        self.comp_appendix = filtered_appx
-        self.comp_summary = summ
+        # 2. Apply Exclusions to Filtered (treating it as its own result set)
+        clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
+
+        known = known_main + known_filt
+
+        self.comp_main = clean_main
+        self.comp_appendix = clean_appx
+        self.comp_summary = main_summ
+
+        self.comp_filtered_main = clean_filt
+        self.comp_filtered_appendix = clean_filt_appx
+        self.comp_filtered_summary = filt_summ
+
         self.comp_known = known
 
         # Ensure metadata is loaded
         all_ids = []
-        for item in filtered_main:
-            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-            if sid: all_ids.append(sid)
-        for group_items in filtered_appx.values():
-            for item in group_items:
+        def collect_ids(item_list):
+            for item in item_list:
                 sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
                 if sid: all_ids.append(sid)
-        for item in known:
-            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-            if sid: all_ids.append(sid)
+
+        collect_ids(clean_main)
+        for group_items in clean_appx.values():
+            collect_ids(group_items)
+
+        collect_ids(clean_filt)
+        for group_items in clean_filt_appx.values():
+            collect_ids(group_items)
+
+        collect_ids(known)
+
         if all_ids:
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
@@ -1594,7 +1643,43 @@ class GenizahGUI(QMainWindow):
                     lbl = make_snippet_label(i.get('text', ''))
                     self.comp_tree.setItemWidget(ch, 4, lbl)
 
-        # 3. Known / Excluded Results
+        # 3. Filtered by Text (New Category with Sub-Grouping)
+        total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
+        if total_filtered > 0:
+            root_f = QTreeWidgetItem(self.comp_tree, [f"Filtered by Text ({total_filtered})"])
+
+            # 3a. Filtered Main
+            if clean_filt:
+                f_main_node = QTreeWidgetItem(root_f, [f"Filtered Main ({len(clean_filt)})"])
+                f_main_node.setExpanded(True)
+                for i in clean_filt:
+                    sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
+                    node = QTreeWidgetItem(f_main_node)
+                    node.setText(0, str(i.get('score', '')))
+                    node.setText(1, shelf)
+                    node.setText(2, title)
+                    node.setText(3, sid or '')
+                    node.setData(0, Qt.ItemDataRole.UserRole, i)
+                    lbl = make_snippet_label(i.get('text', ''))
+                    self.comp_tree.setItemWidget(node, 4, lbl)
+
+            # 3b. Filtered Appendix
+            if clean_filt_appx:
+                f_appx_node = QTreeWidgetItem(root_f, [f"Filtered Appendix ({sum(len(v) for v in clean_filt_appx.values())})"])
+                for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
+                    for i in items:
+                        sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
+                        ch = QTreeWidgetItem(gn)
+                        ch.setText(0, str(i.get('score', '')))
+                        ch.setText(1, shelf)
+                        ch.setText(2, title)
+                        ch.setText(3, sid)
+                        ch.setData(0, Qt.ItemDataRole.UserRole, i)
+                        lbl = make_snippet_label(i.get('text', ''))
+                        self.comp_tree.setItemWidget(ch, 4, lbl)
+
+        # 4. Known / Excluded Results
         if known:
             root_k = QTreeWidgetItem(self.comp_tree, [f"Known Manuscripts ({len(known)})"])
             for i in known:
@@ -1692,28 +1777,36 @@ class GenizahGUI(QMainWindow):
                     update_node(child)
 
     def export_comp_report(self):
-        if not (self.comp_main or self.comp_appendix or self.comp_known):
+        # Gather all filtered items
+        all_filtered = self.comp_filtered_main[:]
+        for v in self.comp_filtered_appendix.values():
+            all_filtered.extend(v)
+
+        if not (self.comp_main or self.comp_appendix or self.comp_known or all_filtered):
             QMessageBox.warning(self, "Save", "No composition data to export.")
             return
 
-        # Proactively load missing metadata so shelfmarks and pages are populated
+        # Proactively load missing metadata
         all_ids = []
-        for item in self.comp_main:
-            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-            if sid: all_ids.append(sid)
-        for group_items in self.comp_appendix.values():
-            for item in group_items:
+        def collect_ids(item_list):
+            for item in item_list:
                 sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
                 if sid: all_ids.append(sid)
-        for item in self.comp_known:
-            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-            if sid: all_ids.append(sid)
+
+        collect_ids(self.comp_main)
+        for group_items in self.comp_appendix.values():
+            collect_ids(group_items)
+        collect_ids(self.comp_known)
+        collect_ids(all_filtered) # This covers filtered main and appendix
+
         cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
         if cancelled:
             return
 
         missing_ids = []
-        for item in self.comp_main + self.comp_known:
+        # Check all categories for missing metadata (flattened)
+        check_list = self.comp_main + self.comp_known + all_filtered
+        for item in check_list:
             sys_id, p_num, shelf, title = self._get_meta_for_header(item['raw_header'])
             if not shelf or shelf == 'Unknown' or not title or not p_num or p_num == 'Unknown':
                 if sys_id:
@@ -1740,8 +1833,13 @@ class GenizahGUI(QMainWindow):
         if path:
             sep = "=" * 80
             appendix_count = sum(len(v) for v in self.comp_appendix.values())
+
+            filtered_main_count = len(self.comp_filtered_main)
+            filtered_appx_count = sum(len(v) for v in self.comp_filtered_appendix.values())
+            filtered_total = filtered_main_count + filtered_appx_count
+
             known_count = len(self.comp_known)
-            total_count = len(self.comp_main) + appendix_count + known_count
+            total_count = len(self.comp_main) + appendix_count + known_count + filtered_total
 
             def _fmt_item(item):
                 sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
@@ -1763,11 +1861,12 @@ class GenizahGUI(QMainWindow):
                 ]
                 return lines
 
-            def _append_group_summary_lines(target):
-                if self.comp_appendix:
-                    for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+            def _append_group_summary_lines(target, appx_data, summary_data, label):
+                target.extend([sep, label, sep])
+                if appx_data:
+                    for sig, items in sorted(appx_data.items(), key=lambda x: len(x[1]), reverse=True):
                         fallback_summary = []
-                        summary_entries = self.comp_summary.get(sig, [])
+                        summary_entries = summary_data.get(sig, [])
                         for idx, itm in enumerate(items):
                             shelf_val = summary_entries[idx] if idx < len(summary_entries) else ""
                             if not shelf_val or shelf_val.lower() == 'unknown':
@@ -1776,7 +1875,7 @@ class GenizahGUI(QMainWindow):
                             fallback_summary.append(shelf_val)
                         target.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
                 else:
-                    target.append("No filtered compositions moved to Appendix.")
+                    target.append("No items.")
 
             def _append_known_summary_lines(target):
                 target.extend([
@@ -1799,14 +1898,13 @@ class GenizahGUI(QMainWindow):
                 f"Composition Search: {title}",
                 f"Total Results: {total_count}",
                 f"Main Manuscripts: {len(self.comp_main)}",
-                f"Grouped Manuscripts (Appendix): {appendix_count}",
+                f"Main Appendix: {appendix_count}",
+                f"Filtered by Text: {filtered_total}",
                 f"Known Manuscripts (Excluded): {known_count}",
-                sep,
-                "GROUPED MANUSCRIPTS SUMMARY",
-                sep,
             ]
 
-            _append_group_summary_lines(summary_lines)
+            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY")
+            _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, "FILTERED APPENDIX SUMMARY")
             _append_known_summary_lines(summary_lines)
 
             detail_lines = [
@@ -1817,6 +1915,15 @@ class GenizahGUI(QMainWindow):
 
             for item in self.comp_main:
                 detail_lines.extend(_fmt_item(item))
+
+            if self.comp_filtered_main:
+                detail_lines.extend([
+                    sep,
+                    "FILTERED BY TEXT (Main)",
+                    sep,
+                ])
+                for item in self.comp_filtered_main:
+                    detail_lines.extend(_fmt_item(item))
 
             detail_lines.extend([
                 sep,
@@ -1832,10 +1939,21 @@ class GenizahGUI(QMainWindow):
             if self.comp_appendix:
                 detail_lines.extend([
                     sep,
-                    "APPENDIX (Filtered Groups)",
+                    "MAIN APPENDIX (Grouped)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                    detail_lines.append(f"{sig} ({len(items)} items)")
+                    for item in items:
+                        detail_lines.extend(_fmt_item(item))
+
+            if self.comp_filtered_appendix:
+                detail_lines.extend([
+                    sep,
+                    "FILTERED APPENDIX (Grouped)",
+                    sep,
+                ])
+                for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
                     detail_lines.append(f"{sig} ({len(items)} items)")
                     for item in items:
                         detail_lines.extend(_fmt_item(item))
