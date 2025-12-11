@@ -1819,6 +1819,7 @@ class GenizahGUI(QMainWindow):
                     'text': node_data['text'], # Snippet
                     'full_text': None, # Will be fetched by Dialog on load
                     'source_ctx': node_data.get('source_ctx', ''),
+                    'highlight_pattern': node_data.get('highlight_pattern'),
                     'display': {
                         'shelfmark': shelf,
                         'title': title,
