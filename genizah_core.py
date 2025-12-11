@@ -311,23 +311,35 @@ class MetadataManager:
             try: os.makedirs(Config.INDEX_DIR)
             except: pass
 
-        # Load small caches immediately
-        self._load_small_caches()
-
     def start_background_loading(self):
         """Start loading heavy metadata resources (CSV, Maps) in background."""
         threading.Thread(target=self._load_heavy_caches_bg, daemon=True).start()
-        threading.Thread(target=self._build_file_map_background, daemon=True).start()
+        threading.Thread(target=self._load_caches_background, daemon=True).start()
 
-    def _load_small_caches(self):
+    def _load_caches_background(self):
+        # 1. Load NLI Cache
         if os.path.exists(Config.CACHE_NLI):
             try:
-                with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
+                with open(Config.CACHE_NLI, 'rb') as f:
+                    data = pickle.load(f)
+                    if isinstance(data, dict):
+                        # Use update to preserve any items fetched before load completed
+                        if self.nli_cache:
+                            data.update(self.nli_cache)
+                        self.nli_cache = data
             except: pass
+
+        # 2. Load Meta Map
         if os.path.exists(Config.CACHE_META):
             try:
-                with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
+                with open(Config.CACHE_META, 'rb') as f:
+                    data = pickle.load(f)
+                    if isinstance(data, dict):
+                        self.meta_map = data
             except: pass
+
+        # 3. Fallback / Build Meta Map if missing
+        self._build_file_map_background()
 
     def _load_heavy_caches_bg(self):
         self._load_csv_bank()
