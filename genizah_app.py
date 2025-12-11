@@ -715,6 +715,9 @@ class GenizahGUI(QMainWindow):
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
 
+            # Start background loading delayed to allow UI to render first
+            QTimer.singleShot(1000, self.meta_mgr.start_background_loading)
+
         except Exception as e:
             QMessageBox.critical(self, "Fatal Error", f"Failed to finalize initialization:\n{e}")
              

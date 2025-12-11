@@ -163,9 +163,6 @@ class StartupThread(QThread):
             indexer = Indexer(meta_mgr)
             ai_mgr = AIManager()
 
-            # Start loading heavy resources in background
-            meta_mgr.start_background_loading()
-
             self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer, ai_mgr)
         except Exception as e:
             self.error_signal.emit(str(e))
