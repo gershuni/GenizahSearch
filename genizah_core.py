@@ -288,21 +288,42 @@ class VariantManager:
         if len(term) < 2:
             return [term]
 
+        # Priority Queues logic
+        # Rank 0: Original Term
+        # Rank 1: Basic Variants
+        # Rank 2: Extended Variants
+        # Rank 3: Maximum Variants
+
+        candidates = {term: 0}
+
+        layers = []
         if mode == 'variants':
-            mapping = self.basic_map
-            max_changes = 1
+            layers.append((self.basic_map, 1, 1))
         elif mode == 'variants_extended':
-            mapping = self.extended_map
-            max_changes = 2
+            layers.append((self.basic_map, 1, 1))
+            layers.append((self.extended_map, 2, 2))
         elif mode == 'variants_maximum':
-            mapping = self.maximum_map
-            max_changes = 2
+            layers.append((self.basic_map, 1, 1))
+            layers.append((self.extended_map, 2, 2))
+            layers.append((self.maximum_map, 2, 3))
         else:
             return [term]
 
-        variants = self.generate_variants(term, mapping, max_changes, limit)
-        variants.add(term)
-        return sorted(list(variants), key=lambda x: self.hamming_distance(term, x))
+        # Process layers
+        for mapping, max_changes, rank in layers:
+            layer_vars = self.generate_variants(term, mapping, max_changes, limit)
+            for v in layer_vars:
+                if v not in candidates:
+                    candidates[v] = rank
+
+        # Sort by Rank then Hamming Distance
+        def sort_key(v):
+            return (candidates[v], self.hamming_distance(term, v))
+
+        final_list = sorted(list(candidates.keys()), key=sort_key)
+
+        # Clamp to limit
+        return final_list[:limit]
 
 # ==============================================================================
 #  METADATA MANAGER
