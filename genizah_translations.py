@@ -37,6 +37,7 @@ TRANSLATIONS = {
     "Generate Regex with Gemini AI": "צור ביטוי רגולרי באמצעות AI",
     "Search Help": "עזרה בחיפוש",
     "System ID": "מספר מערכת",
+    "System ID:": "מספר מערכת:",
     "Shelfmark": "סימון מדף",
     "Title": "כותרת",
     "Snippet": "קטע",
