@@ -641,15 +641,49 @@ class GenizahGUI(QMainWindow):
         self.setWindowTitle("Genizah Search Pro V3.0")
         self.resize(1300, 850)
 
-        # Step 1: show a placeholder window with a loading message
-        lbl_loading = QLabel("Loading components... Please wait.", self)
-        lbl_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(lbl_loading)
+        self.meta_mgr = None
+        self.var_mgr = None
+        self.searcher = None
+        self.indexer = None
+        self.ai_mgr = None
 
-        # Step 2: defer heavy initialization until the window is visible
-        QTimer.singleShot(100, self.delayed_init)
+        self.last_results = []
+        self.last_search_query = ""
+        self.result_row_by_sys_id = {}
+        self.comp_main = []
+        self.comp_appendix = {}
+        self.comp_summary = {}
+        self.comp_filtered_main = []
+        self.comp_filtered_appendix = {}
+        self.comp_filtered_summary = {}
+        self.comp_raw_items = []
+        self.comp_raw_filtered = []
+        self.comp_known = []
+        self.excluded_raw_entries = []
+        self.excluded_sys_ids = set()
+        self.excluded_shelfmarks = set()
+        self.filter_text_content = ""
+        self.group_thread = None
+        self.is_searching = False
+        self.is_comp_running = False
+        self.current_browse_sid = None
+        self.current_browse_p = None
+        self.meta_loader = None
+        self.meta_cached_count = 0
+        self.meta_to_fetch_count = 0
+        self.meta_progress_current = 0
+        self.browse_thumb_url = None
+        self.browse_img_thread = None
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
 
-    def delayed_init(self):
+        self.init_ui()
+
+        # Step 2: Start heavy initialization in background
+        self.status_label.setText("Initializing components... Please wait.")
+        QTimer.singleShot(100, self.start_background_init)
+
+    def start_background_init(self):
         try:
             self.startup_thread = StartupThread()
             self.startup_thread.finished_signal.connect(self.on_startup_finished)
@@ -667,43 +701,24 @@ class GenizahGUI(QMainWindow):
             self.ai_mgr = ai_mgr
 
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
-            
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
 
-            self.last_results = []
-            self.last_search_query = ""
-            self.result_row_by_sys_id = {}
-            self.comp_main = []
-            self.comp_appendix = {}
-            self.comp_summary = {}
-            # We need structured storage for filtered results too
-            self.comp_filtered_main = []
-            self.comp_filtered_appendix = {}
-            self.comp_filtered_summary = {}
-            self.comp_raw_items = [] # Used for retry if grouping fails
-            self.comp_raw_filtered = [] # Used for retry
-            self.comp_known = []
-            self.excluded_raw_entries = []
-            self.excluded_sys_ids = set()
-            self.excluded_shelfmarks = set()
-            self.filter_text_content = "" # Store filter text content
-            self.group_thread = None
-            self.is_searching = False
-            self.is_comp_running = False
-            self.current_browse_sid = None
-            self.current_browse_p = None
-            self.meta_loader = None
-            self.meta_cached_count = 0
-            self.meta_to_fetch_count = 0
-            self.meta_progress_current = 0
-            self.browse_thumb_url = None # Initialize
-            self.browse_img_thread = None # Initialize
+            # Update Settings Tab with loaded AI config
+            if self.ai_mgr:
+                self.combo_provider.setCurrentText(self.ai_mgr.provider)
+                self.txt_model.setText(self.ai_mgr.model_name)
+                self.txt_api_key.setText(self.ai_mgr.api_key)
 
-            self.shelfmark_items_by_sid = {} # Track shelfmark items for direct updates
-            self.title_items_by_sid = {}     # Track title items for direct updates
-
-            self.init_ui() # בונה את self.tabs
+            # Enable UI interactions
+            self.btn_search.setEnabled(True)
+            self.btn_ai.setEnabled(True)
+            self.btn_comp_run.setEnabled(True)
+            self.btn_browse_go.setEnabled(True)
+            self.btn_save_ai.setEnabled(True)
+            self.btn_build_index.setEnabled(True)
             
+            self.status_label.setText("Components loaded. Ready.")
+
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
             
@@ -749,10 +764,12 @@ class GenizahGUI(QMainWindow):
         
         self.btn_search = QPushButton("Search"); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
+        self.btn_search.setEnabled(False)
         
-        btn_ai = QPushButton("🤖 AI Assistant"); btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        btn_ai.setToolTip("Generate Regex with Gemini AI")
-        btn_ai.clicked.connect(self.open_ai)
+        self.btn_ai = QPushButton("🤖 AI Assistant"); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
+        self.btn_ai.setToolTip("Generate Regex with Gemini AI")
+        self.btn_ai.clicked.connect(self.open_ai)
+        self.btn_ai.setEnabled(False)
 
         # Help Button
         btn_help = QPushButton("?")
@@ -763,7 +780,7 @@ class GenizahGUI(QMainWindow):
         top.addWidget(QLabel("Query:")); top.addWidget(self.query_input, 2)
         top.addWidget(QLabel("Mode:")); top.addWidget(self.mode_combo)
         top.addWidget(QLabel("Gap:")); top.addWidget(self.gap_input)
-        top.addWidget(self.btn_search); top.addWidget(btn_ai); top.addWidget(btn_help)
+        top.addWidget(self.btn_search); top.addWidget(self.btn_ai); top.addWidget(btn_help)
         layout.addLayout(top)
         
         self.search_progress = QProgressBar(); self.search_progress.setVisible(False)
@@ -852,6 +869,7 @@ class GenizahGUI(QMainWindow):
 
         self.btn_comp_run = QPushButton("Analyze Composition"); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
+        self.btn_comp_run.setEnabled(False)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
@@ -887,9 +905,10 @@ class GenizahGUI(QMainWindow):
         # Row 1: Search
         search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText("Enter System ID...")
-        btn_go = QPushButton("Go"); btn_go.setFixedWidth(50); btn_go.clicked.connect(self.browse_load)
+        self.btn_browse_go = QPushButton("Go"); self.btn_browse_go.setFixedWidth(50); self.btn_browse_go.clicked.connect(self.browse_load)
+        self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
-        search_row.addWidget(QLabel("System ID:")); search_row.addWidget(self.browse_sys_input); search_row.addWidget(btn_go)
+        search_row.addWidget(QLabel("System ID:")); search_row.addWidget(self.browse_sys_input); search_row.addWidget(self.btn_browse_go)
         
         # Row 2: Metadata
         self.browse_info_lbl = QLabel("Enter ID to browse.")
@@ -1028,8 +1047,9 @@ class GenizahGUI(QMainWindow):
         dl = QVBoxLayout()
         btn_dl = QPushButton("Download Transcriptions (Zenodo)"); btn_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://doi.org/10.5281/zenodo.17734473")))
         dl.addWidget(btn_dl)
-        btn_idx = QPushButton("Build / Rebuild Index"); btn_idx.clicked.connect(self.run_indexing)
-        dl.addWidget(btn_idx)
+        self.btn_build_index = QPushButton("Build / Rebuild Index"); self.btn_build_index.clicked.connect(self.run_indexing)
+        self.btn_build_index.setEnabled(False)
+        dl.addWidget(self.btn_build_index)
         self.index_progress = QProgressBar(); dl.addWidget(self.index_progress)
         gb_data.setLayout(dl); layout.addWidget(gb_data)
         
@@ -1039,24 +1059,25 @@ class GenizahGUI(QMainWindow):
         row1 = QHBoxLayout()
         self.combo_provider = QComboBox()
         self.combo_provider.addItems(["Google Gemini", "OpenAI", "Anthropic Claude"])
-        self.combo_provider.setCurrentText(self.ai_mgr.provider)
+        self.combo_provider.setCurrentText(self.ai_mgr.provider if self.ai_mgr else "Google Gemini")
         self.combo_provider.currentTextChanged.connect(self._on_provider_changed)
 
-        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name)
+        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name if self.ai_mgr else "gemini-1.5-flash")
         self.txt_model.setPlaceholderText("Model Name (e.g. gemini-1.5-flash)")
 
         row1.addWidget(QLabel("Provider:")); row1.addWidget(self.combo_provider)
         row1.addWidget(QLabel("Model:")); row1.addWidget(self.txt_model)
 
         row2 = QHBoxLayout()
-        self.txt_api_key = QLineEdit(); self.txt_api_key.setText(self.ai_mgr.api_key); self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_api_key = QLineEdit(); self.txt_api_key.setText(self.ai_mgr.api_key if self.ai_mgr else ""); self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_api_key.setPlaceholderText("API Key")
 
-        btn_save = QPushButton("Save Settings")
-        btn_save.clicked.connect(self.save_ai_settings)
+        self.btn_save_ai = QPushButton("Save Settings")
+        self.btn_save_ai.clicked.connect(self.save_ai_settings)
+        self.btn_save_ai.setEnabled(False)
 
         row2.addWidget(QLabel("API Key:")); row2.addWidget(self.txt_api_key)
-        row2.addWidget(btn_save)
+        row2.addWidget(self.btn_save_ai)
 
         al.addLayout(row1); al.addLayout(row2)
         gb_ai.setLayout(al); layout.addWidget(gb_ai)
@@ -1129,6 +1150,7 @@ class GenizahGUI(QMainWindow):
             self.txt_model.setText("claude-3-5-sonnet-20240620")
 
     def save_ai_settings(self):
+        if not self.ai_mgr: return
         provider = self.combo_provider.currentText()
         model = self.txt_model.text().strip()
         key = self.txt_api_key.text().strip()
@@ -1162,12 +1184,14 @@ class GenizahGUI(QMainWindow):
 
     # --- LOGIC ---
     def open_ai(self):
+        if not self.ai_mgr: return
         if not self.ai_mgr.api_key:
             QMessageBox.warning(self, "Missing Key", "Please configure your AI Provider & Key in Settings."); return
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
     def toggle_search(self):
+        if not self.searcher: return
         if self.is_searching: self.stop_search()
         else: self.start_search()
 
@@ -2147,6 +2171,7 @@ class GenizahGUI(QMainWindow):
         return sys_id, page, shelf_lbl, title_lbl
 
     def browse_load(self):
+        if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
         if not sid: return
         self.current_browse_sid = sid; self.current_browse_p = None
@@ -2253,6 +2278,7 @@ class GenizahGUI(QMainWindow):
                 self.browse_thumb.setText("Waiting...")
     
     def run_indexing(self):
+        if not self.indexer: return
         if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
