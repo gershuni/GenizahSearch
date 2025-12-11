@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop # Added QEventLoop
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
-from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager
+from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread
 from filter_text_dialog import FilterTextDialog
 
@@ -148,7 +148,7 @@ class HelpDialog(QDialog):
         text.setHtml(content)
         text.setOpenExternalLinks(True)
         layout.addWidget(text)
-        btn = QPushButton("Close")
+        btn = QPushButton(tr("Close"))
         btn.clicked.connect(self.close)
         layout.addWidget(btn)
         self.setLayout(layout)
@@ -157,7 +157,7 @@ class AIDialog(QDialog):
     """Chat interface for requesting regex suggestions from the AI manager."""
     def __init__(self, parent, ai_mgr):
         super().__init__(parent)
-        self.setWindowTitle(f"AI Regex Assistant ({ai_mgr.provider})")
+        self.setWindowTitle(tr("AI Regex Assistant ({})").format(ai_mgr.provider))
         self.resize(600, 500)
         self.ai_mgr = ai_mgr
         self.generated_regex = ""
@@ -169,37 +169,38 @@ class AIDialog(QDialog):
         
         input_layout = QHBoxLayout()
         self.prompt_input = QLineEdit()
-        self.prompt_input.setPlaceholderText("Describe pattern (e.g. 'Word starting with Aleph')...")
+        self.prompt_input.setPlaceholderText(tr("Describe pattern (e.g. 'Word starting with Aleph')..."))
         self.prompt_input.returnPressed.connect(self.send_request)
-        self.btn_send = QPushButton("Send")
+        self.btn_send = QPushButton(tr("Send"))
         self.btn_send.clicked.connect(self.send_request)
         input_layout.addWidget(self.prompt_input)
         input_layout.addWidget(self.btn_send)
         layout.addLayout(input_layout)
         
-        self.lbl_preview = QLabel("Generated Regex will appear here.")
+        self.lbl_preview = QLabel(tr("Generated Regex will appear here."))
         self.lbl_preview.setStyleSheet("font-weight: bold; color: #2980b9; padding: 10px; background: #ecf0f1;")
         self.lbl_preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.lbl_preview)
         
-        self.btn_use = QPushButton("Use this Regex")
+        self.btn_use = QPushButton(tr("Use this Regex"))
         self.btn_use.clicked.connect(self.accept)
         self.btn_use.setEnabled(False)
         self.btn_use.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         layout.addWidget(self.btn_use)
         self.setLayout(layout)
-        self.append_chat("System", "Hello! I can help you build Regex for Hebrew manuscripts.")
+        self.append_chat("System", tr("Hello! I can help you build Regex for Hebrew manuscripts."))
 
     def append_chat(self, sender, text):
+        sender_tr = tr(sender)
         color = "blue" if sender == "System" else "green" if sender == "You" else "black"
-        self.chat_display.append(f"<b style='color:{color}'>{sender}:</b> {text}<br>")
+        self.chat_display.append(f"<b style='color:{color}'>{sender_tr}:</b> {text}<br>")
 
     def send_request(self):
         text = self.prompt_input.text().strip()
         if not text: return
         self.append_chat("You", text)
         self.prompt_input.clear(); self.prompt_input.setEnabled(False); self.btn_send.setEnabled(False)
-        self.lbl_preview.setText("Thinking...")
+        self.lbl_preview.setText(tr("Thinking..."))
         self.worker = AIWorkerThread(self.ai_mgr, text)
         self.worker.finished_signal.connect(self.on_response)
         self.worker.start()
@@ -207,7 +208,7 @@ class AIDialog(QDialog):
     def on_response(self, data, err):
         self.prompt_input.setEnabled(True); self.btn_send.setEnabled(True); self.prompt_input.setFocus()
         if err:
-            self.append_chat("Error", err); self.lbl_preview.setText("Error.")
+            self.append_chat("Error", err); self.lbl_preview.setText(tr("Error."))
             return
         regex = data.get("regex", "")
         self.append_chat("Gemini", f"{data.get('explanation', '')}<br><code>{regex}</code>")
@@ -219,11 +220,11 @@ class ExcludeDialog(QDialog):
     """Collect system IDs or shelfmarks that should be excluded from searches."""
     def __init__(self, parent, existing_entries=None):
         super().__init__(parent)
-        self.setWindowTitle("Exclude Manuscripts")
+        self.setWindowTitle(tr("Exclude Manuscripts"))
         self.resize(500, 400)
         layout = QVBoxLayout()
 
-        help_lbl = QLabel("Enter system IDs or shelfmarks to exclude (one per line).")
+        help_lbl = QLabel(tr("Enter system IDs or shelfmarks to exclude (one per line)."))
         help_lbl.setWordWrap(True)
         layout.addWidget(help_lbl)
 
@@ -234,14 +235,14 @@ class ExcludeDialog(QDialog):
         layout.addWidget(self.text_area)
 
         btn_row = QHBoxLayout()
-        self.btn_load = QPushButton("Load from File")
+        self.btn_load = QPushButton(tr("Load from File"))
         self.btn_load.clicked.connect(self.load_file)
         btn_row.addWidget(self.btn_load)
 
         btn_row.addStretch()
-        btn_apply = QPushButton("Apply")
+        btn_apply = QPushButton(tr("Apply"))
         btn_apply.clicked.connect(self.accept)
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_apply)
@@ -285,16 +286,16 @@ class ResultDialog(QDialog):
         self.load_result_by_index(self.current_result_idx)
 
     def init_ui(self):
-        self.setWindowTitle(f"Manuscript Viewer")
+        self.setWindowTitle(tr("Manuscript Viewer"))
         self.resize(1300, 850) # Wider for split view
         
         main_layout = QVBoxLayout()
         
         # --- Top Bar (Result Nav) ---
         top_bar = QHBoxLayout()
-        self.btn_res_prev = QPushButton("◀ Prev Result"); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
+        self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
         self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_res_next = QPushButton("Next Result ▶"); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
+        self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
@@ -311,24 +312,29 @@ class ResultDialog(QDialog):
 
         # Controls Row
         info_row = QHBoxLayout()
-        self.btn_img = QPushButton("Go to Ktiv"); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_viewer); self.btn_img.setFixedWidth(100)
+        self.btn_img = QPushButton(tr("Go to Ktiv")); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_viewer); self.btn_img.setFixedWidth(100)
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_meta_loading = QLabel("Loading..."); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
+        self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
         info_row.addWidget(self.btn_img); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
-        btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+
+        # Arrows logic (Standard: Prev <, Next > regardless of RTL)
+        prev_arrow = "<"
+        next_arrow = ">"
+
+        btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
-        nav_row.addWidget(QLabel("Image:")); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
 
         meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row)
         
         # Right: Thumbnail
-        self.lbl_thumb = QLabel("No Preview"); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
+        self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
         
         header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
@@ -339,14 +345,14 @@ class ResultDialog(QDialog):
         # 1. Manuscript View (Left)
         ms_widget = QWidget()
         ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
-        ms_layout.addWidget(QLabel("<b>Manuscript Text</b>"))
+        ms_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_layout.addWidget(self.text_ms)
         
         # 2. Source Context View (Right)
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
-        src_layout.addWidget(QLabel("<b>Match Context (Source)</b>"))
+        src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
         self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         src_layout.addWidget(self.text_src)
 
@@ -374,7 +380,7 @@ class ResultDialog(QDialog):
         self.data = data
         
         # Nav UI Updates
-        self.lbl_res_count.setText(f"Result {idx + 1} of {len(self.all_results)}")
+        self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
         
@@ -416,6 +422,7 @@ class ResultDialog(QDialog):
         # Load Page & Metadata
         self.load_page(target=p)
 
+    # REPLACE IN genizah_app.py (Class ResultDialog)
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
@@ -434,7 +441,7 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
 
         # Update Info Label
-        info_html = f"<b>Sys:</b> {self.current_sys_id} | <b>FL:</b> {self.current_fl_id or '?'}"
+        info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
         self.lbl_info.setText(info_html)
         
         # Update Page Controls
@@ -505,7 +512,7 @@ class ResultDialog(QDialog):
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
-        self.lbl_thumb.setText("Loading...")
+        self.lbl_thumb.setText(tr("Loading..."))
         self.lbl_thumb.setPixmap(QPixmap())
 
         # Ensure we look at the global cache which acts as the "Source of Truth"
@@ -520,9 +527,9 @@ class ResultDialog(QDialog):
         else:
             # If meta exists but no thumb_url, it means no representative image found
             if meta:
-                self.lbl_thumb.setText("No Preview")
+                self.lbl_thumb.setText(tr("No Preview"))
             else:
-                self.lbl_thumb.setText("Waiting...")
+                self.lbl_thumb.setText(tr("Waiting..."))
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
@@ -581,7 +588,7 @@ class ResultDialog(QDialog):
 
     def on_img_failed(self):
         self.lbl_thumb.setPixmap(QPixmap())
-        self.lbl_thumb.setText("No Preview")
+        self.lbl_thumb.setText(tr("No Preview"))
 
     def closeEvent(self, event):
         try:
@@ -629,8 +636,7 @@ class ResultDialog(QDialog):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
 
     def open_viewer(self):
-        if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
-        #OLD - not working: if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
+        if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
@@ -680,17 +686,17 @@ class GenizahGUI(QMainWindow):
         self.init_ui()
 
         # Step 2: Start heavy initialization in background
-        self.status_label.setText("Initializing components... Please wait.")
+        self.status_label.setText(tr("Initializing components... Please wait."))
         QTimer.singleShot(100, self.start_background_init)
 
     def start_background_init(self):
         try:
             self.startup_thread = StartupThread()
             self.startup_thread.finished_signal.connect(self.on_startup_finished)
-            self.startup_thread.error_signal.connect(lambda e: QMessageBox.critical(self, "Fatal Error", f"Failed to initialize:\n{e}"))
+            self.startup_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to initialize:\n{}").format(e)))
             self.startup_thread.start()
         except Exception as e:
-            QMessageBox.critical(self, "Fatal Error", f"Failed to start initialization:\n{e}")
+            QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
 
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
         try:
@@ -717,57 +723,73 @@ class GenizahGUI(QMainWindow):
             self.btn_save_ai.setEnabled(True)
             self.btn_build_index.setEnabled(True)
             
-            self.status_label.setText("Components loaded. Ready.")
+            self.status_label.setText(tr("Components loaded. Ready."))
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
             
             if not index_exists:
-                msg = "Index not found.\nWould you like to build it now?\n(Requires 'Transcriptions.txt' next to this app)"
-                reply = QMessageBox.question(self, "Index Missing", msg, 
+                msg = tr("Index not found.\nWould you like to build it now?\n(Requires 'Transcriptions.txt' next to this app)")
+                reply = QMessageBox.question(self, tr("Index Missing"), msg,
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if reply == QMessageBox.StandardButton.Yes:
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
 
         except Exception as e:
-            QMessageBox.critical(self, "Fatal Error", f"Failed to finalize initialization:\n{e}")
+            QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
              
     def init_ui(self):
+        if CURRENT_LANG == 'he':
+            QApplication.instance().setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_search_tab(), "Search")
-        self.tabs.addTab(self.create_composition_tab(), "Composition Search")
-        self.tabs.addTab(self.create_browse_tab(), "Browse Manuscript")
-        self.tabs.addTab(self.create_settings_tab(), "Settings & About")
+        self.tabs.addTab(self.create_search_tab(), tr("Search"))
+        self.tabs.addTab(self.create_composition_tab(), tr("Composition Search"))
+        self.tabs.addTab(self.create_browse_tab(), tr("Browse Manuscript"))
+        self.tabs.addTab(self.create_settings_tab(), tr("Settings & About"))
+
+        # Language Toggle
+        lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
+        lang_btn.setFlat(True)
+        lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        lang_btn.clicked.connect(self.toggle_language)
+        self.tabs.setCornerWidget(lang_btn, Qt.Corner.TopRightCorner if CURRENT_LANG == 'en' else Qt.Corner.TopLeftCorner)
+
         self.setCentralWidget(self.tabs)
+
+    def toggle_language(self):
+        new_lang = 'en' if CURRENT_LANG == 'he' else 'he'
+        save_language(new_lang)
+        QMessageBox.information(self, tr("Restart Required"), tr("Please restart the application for the language change to take effect."))
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         top = QHBoxLayout()
-        self.query_input = QLineEdit(); self.query_input.setPlaceholderText("Search terms, title or shelfmark...")
+        self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Exact", "Variants (?)", "Extended (??)", "Maximum (???)", "Fuzzy (~)", "Regex", "Title", "Shelfmark"])
+        self.mode_combo.addItems([tr("Exact"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex"), tr("Title"), tr("Shelfmark")])
         # Tooltips
-        self.mode_combo.setItemData(0, "Exact match")
-        self.mode_combo.setItemData(1, "Basic variants: ד/ר, ה/ח, ו/י/ן etc.")
-        self.mode_combo.setItemData(2, "Extended variants: Adds more swaps (א/ע, ק/כ etc.)")
-        self.mode_combo.setItemData(3, "Maximum variants: Very broad search")
-        self.mode_combo.setItemData(4, "Fuzzy search: Levenshtein distance")
-        self.mode_combo.setItemData(5, "Regex: Use AI Assistant for complex patterns")
-        self.mode_combo.setItemData(6, "Search in Title metadata")
-        self.mode_combo.setItemData(7, "Search in Shelfmark metadata")
+        self.mode_combo.setItemData(0, tr("Exact match"))
+        self.mode_combo.setItemData(1, tr("Basic variants: ד/ר, ה/ח, ו/י/ן etc."))
+        self.mode_combo.setItemData(2, tr("Extended variants: Adds more swaps (א/ע, ק/כ etc.)"))
+        self.mode_combo.setItemData(3, tr("Maximum variants: Very broad search"))
+        self.mode_combo.setItemData(4, tr("Fuzzy search: Levenshtein distance"))
+        self.mode_combo.setItemData(5, tr("Regex: Use AI Assistant for complex patterns"))
+        self.mode_combo.setItemData(6, tr("Search in Title metadata"))
+        self.mode_combo.setItemData(7, tr("Search in Shelfmark metadata"))
         
-        self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText("Gap"); self.gap_input.setFixedWidth(50)
-        self.gap_input.setToolTip("Maximum word distance (0 = Exact phrase)")
+        self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
+        self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
         
-        self.btn_search = QPushButton("Search"); self.btn_search.clicked.connect(self.toggle_search)
+        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
         self.btn_search.setEnabled(False)
         
-        self.btn_ai = QPushButton("🤖 AI Assistant"); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        self.btn_ai.setToolTip("Generate Regex with Gemini AI")
+        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
+        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
         self.btn_ai.clicked.connect(self.open_ai)
         self.btn_ai.setEnabled(False)
 
@@ -775,11 +797,11 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: HelpDialog(self, "Search Help", self.get_search_help_text()).exec())
+        btn_help.clicked.connect(lambda: HelpDialog(self, tr("Search Help"), self.get_search_help_text()).exec())
 
-        top.addWidget(QLabel("Query:")); top.addWidget(self.query_input, 2)
-        top.addWidget(QLabel("Mode:")); top.addWidget(self.mode_combo)
-        top.addWidget(QLabel("Gap:")); top.addWidget(self.gap_input)
+        top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
+        top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
+        top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
         top.addWidget(self.btn_search); top.addWidget(self.btn_ai); top.addWidget(btn_help)
         layout.addLayout(top)
         
@@ -787,7 +809,7 @@ class GenizahGUI(QMainWindow):
         layout.addWidget(self.search_progress)
         
         self.results_table = QTableWidget(); self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels(["System ID", "Shelfmark", "Title", "Snippet", "Img", "Src"])
+        self.results_table.setHorizontalHeaderLabels([tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
         self.results_table.setColumnWidth(0, 135) 
         self.results_table.setColumnWidth(1, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
@@ -798,17 +820,17 @@ class GenizahGUI(QMainWindow):
         layout.addWidget(self.results_table)
         
         bot = QHBoxLayout()
-        self.status_label = QLabel("Ready.")
-        self.btn_export = QPushButton("Export Results"); self.btn_export.clicked.connect(self.export_results); self.btn_export.setEnabled(False)
+        self.status_label = QLabel(tr("Ready."))
+        self.btn_export = QPushButton(tr("Export Results")); self.btn_export.clicked.connect(self.export_results); self.btn_export.setEnabled(False)
 
         self.btn_reload_meta = QPushButton()
         self.btn_reload_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
-        self.btn_reload_meta.setToolTip("Reload shelfmark/title metadata")
+        self.btn_reload_meta.setToolTip(tr("Reload shelfmark/title metadata"))
         self.btn_reload_meta.clicked.connect(self.reload_metadata)
 
         self.btn_stop_meta = QPushButton()
         self.btn_stop_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserStop))
-        self.btn_stop_meta.setToolTip("Stop metadata loading")
+        self.btn_stop_meta.setToolTip(tr("Stop metadata loading"))
         self.btn_stop_meta.clicked.connect(self.stop_metadata_loading)
         self.btn_stop_meta.setEnabled(False)
 
@@ -824,54 +846,53 @@ class GenizahGUI(QMainWindow):
         panel = QWidget(); layout = QVBoxLayout(); splitter = QSplitter(Qt.Orientation.Vertical)
         
         inp_w = QWidget(); in_l = QVBoxLayout()
-        tr = QHBoxLayout()
-        self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText("Composition Title")
-        tr.addWidget(QLabel("Title:")); tr.addWidget(self.comp_title_input)
+        top_row = QHBoxLayout()
+        self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
+        top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
+        # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: HelpDialog(self, "Composition Help", self.get_comp_help_text()).exec())
-        tr.addWidget(btn_help)
+        btn_help.clicked.connect(lambda: HelpDialog(self, tr("Composition Help"), self.get_comp_help_text()).exec())
+        top_row.addWidget(btn_help)
         
-        in_l.addLayout(tr)
-        self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText("Paste source text...")
+        in_l.addLayout(top_row)
+        self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
+        if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
         cr = QHBoxLayout()
-        btn_load = QPushButton("Load Text File"); btn_load.clicked.connect(self.load_comp_file)
+        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
 
-        btn_exclude = QPushButton("Exclude Manuscripts")
+        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
         btn_exclude.clicked.connect(self.open_exclude_dialog)
 
-        btn_filter_text = QPushButton("Filter Text")
+        btn_filter_text = QPushButton(tr("Filter Text"))
         btn_filter_text.clicked.connect(self.open_filter_dialog)
 
-        self.lbl_exclude_status = QLabel("Excluded: 0")
+        self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
 
-        self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix("Chunk: ")
-        self.spin_chunk.setToolTip("Words per search block (Rec: 5-7)")
+        self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
+        self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         
-        self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix("Max Freq: ")
-        self.spin_freq.setToolTip("Ignore phrases appearing > X times (filters common phrases)")
+        self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
+        self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
         
-        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems(["Exact", "Variants", "Extended", "Maximum", "Fuzzy"])
-        self.comp_mode_combo.setItemData(0, "Exact match (Strict)")
-        self.comp_mode_combo.setItemData(1, "Basic variants (Common swaps)")
-        self.comp_mode_combo.setItemData(2, "Extended variants")
-        self.comp_mode_combo.setItemData(3, "Maximum variants")
-        self.comp_mode_combo.setItemData(4, "Fuzzy (Recommended: Finds partial matches like 'דקיום'->'וקיום')")
+        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Extended"), tr("Maximum"), tr("Fuzzy")])
+        self.comp_mode_combo.setItemData(0, tr("Exact match"))
+        self.comp_mode_combo.setItemData(1, tr("Basic variants"))
+        self.comp_mode_combo.setItemData(2, tr("Extended variants"))
+        self.comp_mode_combo.setItemData(3, tr("Maximum variants"))
+        self.comp_mode_combo.setItemData(4, tr("Fuzzy search"))
 
-        # --- SET DEFAULT TO FUZZY ---
-        self.comp_mode_combo.setCurrentIndex(4) 
-        # ----------------------------
+        self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
+        self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
-        self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix("Filter > ")
-        self.spin_filter.setToolTip("Move titles appearing > X times to Appendix")
-
-        self.btn_comp_run = QPushButton("Analyze Composition"); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
+        self.btn_comp_run.setEnabled(False)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
@@ -883,11 +904,11 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels(["Score", "Shelfmark", "Title", "System ID", "Context"])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
         self.comp_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
         rl.addWidget(self.comp_tree)
-        self.btn_comp_export = QPushButton("Save Report"); self.btn_comp_export.clicked.connect(self.export_comp_report); self.btn_comp_export.setEnabled(False)
+        self.btn_comp_export = QPushButton(tr("Save Report")); self.btn_comp_export.clicked.connect(self.export_comp_report); self.btn_comp_export.setEnabled(False)
         rl.addWidget(self.btn_comp_export)
         res_w.setLayout(rl); splitter.addWidget(res_w)
         
@@ -906,14 +927,14 @@ class GenizahGUI(QMainWindow):
         
         # Row 1: Search
         search_row = QHBoxLayout()
-        self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText("Enter System ID...")
-        self.btn_browse_go = QPushButton("Go"); self.btn_browse_go.setFixedWidth(50); self.btn_browse_go.clicked.connect(self.browse_load)
+        self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
+        self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50); self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
-        search_row.addWidget(QLabel("System ID:")); search_row.addWidget(self.browse_sys_input); search_row.addWidget(self.btn_browse_go)
+        search_row.addWidget(QLabel(tr("System ID:"))); search_row.addWidget(self.browse_sys_input); search_row.addWidget(self.btn_browse_go)
         
         # Row 2: Metadata
-        self.browse_info_lbl = QLabel("Enter ID to browse.")
+        self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
         self.browse_info_lbl.setStyleSheet("font-size: 13px;") 
         self.browse_info_lbl.setWordWrap(True)
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -921,19 +942,19 @@ class GenizahGUI(QMainWindow):
         # Row 3: Buttons (Catalog | Continuous | Save)
         btn_row = QHBoxLayout()
         
-        self.btn_b_catalog = QPushButton("Ktiv")
-        self.btn_b_catalog.setToolTip("Open in Ktiv Website")
+        self.btn_b_catalog = QPushButton(tr("Ktiv"))
+        self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
         self.btn_b_catalog.setEnabled(False)
         
-        self.btn_b_all = QPushButton("View All")
-        self.btn_b_all.setToolTip("Show full text continuously (Infinite Scroll)")
+        self.btn_b_all = QPushButton(tr("View All"))
+        self.btn_b_all.setToolTip(tr("Show full text continuously (Infinite Scroll)"))
         self.btn_b_all.clicked.connect(self.browse_load_all)
         self.btn_b_all.setEnabled(False)
         self.btn_b_all.setStyleSheet("font-weight: bold; color: #2980b9;")
 
-        self.btn_b_save = QPushButton("Save")
-        self.btn_b_save.setToolTip("Save full manuscript to file")
+        self.btn_b_save = QPushButton(tr("Save"))
+        self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
         self.btn_b_save.clicked.connect(self.browse_save_full)
         self.btn_b_save.setEnabled(False)
 
@@ -947,7 +968,7 @@ class GenizahGUI(QMainWindow):
         left_col.addLayout(btn_row)
         
         # Right Side: Thumbnail
-        self.browse_thumb = QLabel("No Preview")
+        self.browse_thumb = QLabel(tr("No Preview"))
         self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.browse_thumb.setFixedSize(110, 110)
         self.browse_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #ecf0f1; font-size: 9px;")
@@ -966,8 +987,8 @@ class GenizahGUI(QMainWindow):
         
         # Navigation Footer
         nav = QHBoxLayout()
-        self.btn_b_prev = QPushButton("<< Prev"); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
-        self.btn_b_next = QPushButton("Next >>"); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
+        self.btn_b_prev = QPushButton(tr("<< Prev")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
+        self.btn_b_next = QPushButton(tr("Next >>")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
         self.lbl_page_count = QLabel("0/0")
         nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
@@ -978,12 +999,12 @@ class GenizahGUI(QMainWindow):
         """Load all pages into the text browser for continuous scrolling."""
         if not self.current_browse_sid: return
         
-        self.browse_text.setText("Loading full manuscript...")
+        self.browse_text.setText(tr("Loading full manuscript..."))
         QApplication.processEvents() # Refresh UI
         
         pages = self.searcher.get_full_manuscript(self.current_browse_sid)
         if not pages:
-            QMessageBox.warning(self, "Error", "Could not load full text.")
+            QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
         html_content = []
@@ -992,9 +1013,10 @@ class GenizahGUI(QMainWindow):
             anchor = f'<a name="page_{p["p_num"]}"></a>'
             
             # Visual Separator
+            img_lbl = tr("Image")
             separator = f"""
             <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>Page / Image: {p['p_num']}</b>
+                <b>{img_lbl}: {p['p_num']}</b>
             </div>
             """
             
@@ -1009,7 +1031,7 @@ class GenizahGUI(QMainWindow):
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
-        self.lbl_page_count.setText("Continuous View")
+        self.lbl_page_count.setText(tr("Continuous View"))
         
         # Scroll to the page we were looking at
         if self.current_browse_p:
@@ -1019,7 +1041,7 @@ class GenizahGUI(QMainWindow):
         if not self.current_browse_sid: return
         
         default_name = f"Manuscript_{self.current_browse_sid}.txt"
-        path, _ = QFileDialog.getSaveFileName(self, "Save Manuscript", 
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save Manuscript"),
                                             os.path.join(Config.REPORTS_DIR, default_name), 
                                             "Text (*.txt)")
         if not path: return
@@ -1040,22 +1062,22 @@ class GenizahGUI(QMainWindow):
                 f.write(p['text'])
                 f.write("\n\n")
         
-        QMessageBox.information(self, "Saved", f"Manuscript saved to:\n{path}")
+        QMessageBox.information(self, tr("Saved"), tr("Manuscript saved to:\n{}").format(path))
     
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
         
-        gb_data = QGroupBox("Data & Index")
+        gb_data = QGroupBox(tr("Data & Index"))
         dl = QVBoxLayout()
-        btn_dl = QPushButton("Download Transcriptions (Zenodo)"); btn_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://doi.org/10.5281/zenodo.17734473")))
+        btn_dl = QPushButton(tr("Download Transcriptions (Zenodo)")); btn_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://doi.org/10.5281/zenodo.17734473")))
         dl.addWidget(btn_dl)
-        self.btn_build_index = QPushButton("Build / Rebuild Index"); self.btn_build_index.clicked.connect(self.run_indexing)
+        self.btn_build_index = QPushButton(tr("Build / Rebuild Index")); self.btn_build_index.clicked.connect(self.run_indexing)
         self.btn_build_index.setEnabled(False)
         dl.addWidget(self.btn_build_index)
         self.index_progress = QProgressBar(); dl.addWidget(self.index_progress)
         gb_data.setLayout(dl); layout.addWidget(gb_data)
         
-        gb_ai = QGroupBox("AI Configuration")
+        gb_ai = QGroupBox(tr("AI Configuration"))
         al = QVBoxLayout()
 
         row1 = QHBoxLayout()
@@ -1065,28 +1087,28 @@ class GenizahGUI(QMainWindow):
         self.combo_provider.currentTextChanged.connect(self._on_provider_changed)
 
         self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name if self.ai_mgr else "gemini-1.5-flash")
-        self.txt_model.setPlaceholderText("Model Name (e.g. gemini-1.5-flash)")
+        self.txt_model.setPlaceholderText(tr("Model:") + " (e.g. gemini-1.5-flash)")
 
-        row1.addWidget(QLabel("Provider:")); row1.addWidget(self.combo_provider)
-        row1.addWidget(QLabel("Model:")); row1.addWidget(self.txt_model)
+        row1.addWidget(QLabel(tr("Provider:"))); row1.addWidget(self.combo_provider)
+        row1.addWidget(QLabel(tr("Model:"))); row1.addWidget(self.txt_model)
 
         row2 = QHBoxLayout()
         self.txt_api_key = QLineEdit(); self.txt_api_key.setText(self.ai_mgr.api_key if self.ai_mgr else ""); self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.txt_api_key.setPlaceholderText("API Key")
+        self.txt_api_key.setPlaceholderText(tr("API Key:"))
 
-        self.btn_save_ai = QPushButton("Save Settings")
+        self.btn_save_ai = QPushButton(tr("Save Settings"))
         self.btn_save_ai.clicked.connect(self.save_ai_settings)
         self.btn_save_ai.setEnabled(False)
 
-        row2.addWidget(QLabel("API Key:")); row2.addWidget(self.txt_api_key)
+        row2.addWidget(QLabel(tr("API Key:"))); row2.addWidget(self.txt_api_key)
         row2.addWidget(self.btn_save_ai)
 
         al.addLayout(row1); al.addLayout(row2)
         gb_ai.setLayout(al); layout.addWidget(gb_ai)
         
-        gb_about = QGroupBox("About")
+        gb_about = QGroupBox(tr("About"))
         abl = QVBoxLayout()
-        about_txt = """
+        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else """
         <style>
             h3 { margin-bottom: 0px; margin-top: 10px; }
             p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
@@ -1121,7 +1143,7 @@ class GenizahGUI(QMainWindow):
 
         # Citation Row
         cit_row = QHBoxLayout()
-        cit_row.addWidget(QLabel("<b>Citation:</b>"))
+        cit_row.addWidget(QLabel(tr("Citation:")))
 
         citation_str = "Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. https://doi.org/10.5281/zenodo.17734473."
 
@@ -1130,8 +1152,8 @@ class GenizahGUI(QMainWindow):
         self.txt_citation.setCursorPosition(0)
         cit_row.addWidget(self.txt_citation)
 
-        btn_copy = QPushButton("Copy")
-        btn_copy.setToolTip("Copy Citation")
+        btn_copy = QPushButton(tr("Copy"))
+        btn_copy.setToolTip(tr("Copy Citation"))
         btn_copy.setFixedSize(60, 24) # Small
         btn_copy.clicked.connect(self.copy_citation)
         cit_row.addWidget(btn_copy)
@@ -1157,21 +1179,23 @@ class GenizahGUI(QMainWindow):
         model = self.txt_model.text().strip()
         key = self.txt_api_key.text().strip()
         if not key:
-            QMessageBox.warning(self, "Missing Key", "Please enter an API Key.")
+            QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings."))
             return
         self.ai_mgr.save_config(provider, model, key)
-        QMessageBox.information(self, "Saved", f"AI settings saved for {provider}.")
+        QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(provider))
 
     def copy_citation(self):
         citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
         QApplication.clipboard().setText(citation)
-        QMessageBox.information(self, "Copied", "Citation copied to clipboard!")
+        QMessageBox.information(self, tr("Copied"), tr("Citation copied to clipboard!"))
 
     # --- HELP TEXTS ---
     def get_search_help_text(self):
+        if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
         return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns (Use AI mode for help, or consult your preferable AI engine).</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
 
     def get_comp_help_text(self):
+        if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
         return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases appearing > X times.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
 
     def _sanitize_filename(self, text, fallback):
@@ -1188,7 +1212,7 @@ class GenizahGUI(QMainWindow):
     def open_ai(self):
         if not self.ai_mgr: return
         if not self.ai_mgr.api_key:
-            QMessageBox.warning(self, "Missing Key", "Please configure your AI Provider & Key in Settings."); return
+            QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
@@ -1207,7 +1231,7 @@ class GenizahGUI(QMainWindow):
 
         self.last_search_query = query
 
-        self.is_searching = True; self.btn_search.setText("Stop"); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
 
         # Stop any previous metadata loading to prevent race conditions
@@ -1233,15 +1257,15 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
 
     def reset_ui(self):
-        self.is_searching = False; self.btn_search.setText("Search"); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
+        self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
         self.search_progress.setVisible(False)
 
-    def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, "Error", str(err))
+    def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
 
     def on_search_finished(self, results):
         self.reset_ui()
         if not results:
-            self.status_label.setText("No results found.")
+            self.status_label.setText(tr("No results found."))
             self.last_results = []
             self.btn_export.setEnabled(False)
             self.results_table.setRowCount(0)
@@ -1251,7 +1275,7 @@ class GenizahGUI(QMainWindow):
             self.btn_stop_meta.setEnabled(False)
             return
 
-        self.status_label.setText(f"Found {len(results)}. Loading metadata...")
+        self.status_label.setText(tr("Found {}. Loading metadata...").format(len(results)))
         self.last_results = results; self.btn_export.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
         self.results_table.setRowCount(len(results))
@@ -1272,12 +1296,12 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(i, 0, item_sid)
 
             # Col 1: Shelfmark (Custom Sort)
-            item_shelf = ShelfmarkTableWidgetItem("Loading...")
+            item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
             self.results_table.setItem(i, 1, item_shelf)
             self.shelfmark_items_by_sid[sid] = item_shelf
 
             # Col 2: Title
-            item_title = QTableWidgetItem("Loading...")
+            item_title = QTableWidgetItem(tr("Loading..."))
             self.results_table.setItem(i, 2, item_title)
             self.title_items_by_sid[sid] = item_title
 
@@ -1333,14 +1357,14 @@ class GenizahGUI(QMainWindow):
                 res['display']['title'] = title
 
         if self.meta_to_fetch_count == 0:
-            self.status_label.setText(f"Metadata already loaded for {self.meta_cached_count} items.")
+            self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
             self.btn_stop_meta.setEnabled(False)
             return
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
         self.meta_loader.finished_signal.connect(self.on_meta_finished)
-        self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, "Metadata Error", err))
+        self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, tr("Metadata Error"), err))
         self.btn_stop_meta.setEnabled(True)
         self.status_label.setText(self._format_metadata_status())
         self.meta_loader.start()
@@ -1410,9 +1434,9 @@ class GenizahGUI(QMainWindow):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
         if cancelled:
-            self.status_label.setText(f"Metadata load cancelled. Loaded {total_loaded}/{total_expected}.")
+            self.status_label.setText(tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected))
         else:
-            self.status_label.setText(f"Loaded {total_expected} items.")
+            self.status_label.setText(tr("Loaded {} items.").format(total_expected))
         self.btn_stop_meta.setEnabled(False)
         self.meta_loader = None
 
@@ -1425,7 +1449,7 @@ class GenizahGUI(QMainWindow):
     def stop_metadata_loading(self):
         if self.meta_loader and self.meta_loader.isRunning():
             self.meta_loader.request_cancel()
-            self.status_label.setText("Stopping metadata load...")
+            self.status_label.setText(tr("Stopping metadata load..."))
             self.btn_stop_meta.setEnabled(False)
 
     def _format_metadata_status(self):
@@ -1433,8 +1457,9 @@ class GenizahGUI(QMainWindow):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         progress_part = ""
         if self.meta_to_fetch_count:
-            progress_part = f" (fetching {self.meta_progress_current}/{self.meta_to_fetch_count})"
-        return f"Metadata loaded: {total_loaded}/{total_expected}{progress_part}"
+            # We construct this carefully to allow for formatting
+            progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
+        return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
     def show_full_text(self):
         row = self.results_table.currentRow()
@@ -1457,13 +1482,13 @@ class GenizahGUI(QMainWindow):
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def export_results(self):
-        default_path = self._default_report_path(self.last_search_query, "Search_Results")
-        path, _ = QFileDialog.getSaveFileName(self, "Export", default_path, "Text (*.txt)")
+        default_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
+        path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, "Text (*.txt)")
         if path:
             with open(path, 'w', encoding='utf-8') as f:
                 for r in self.last_results:
                     f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{r.get('raw_file_hl','')}\n\n")
-            QMessageBox.information(self, "Saved", f"Saved to {path}")
+            QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
     # Composition & Browse
     def open_filter_dialog(self):
@@ -1472,7 +1497,7 @@ class GenizahGUI(QMainWindow):
             self.filter_text_content = dlg.get_text()
 
     def load_comp_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text (*.txt)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("Load"), "", "Text (*.txt)")
         if path:
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
@@ -1499,7 +1524,7 @@ class GenizahGUI(QMainWindow):
 
         self.excluded_sys_ids = sys_ids
         self.excluded_shelfmarks = shelves
-        self.lbl_exclude_status.setText(f"Excluded: {len(entries)}")
+        self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
 
     def normalize_shelfmark(self, shelf: str):
         if not shelf:
@@ -1571,7 +1596,7 @@ class GenizahGUI(QMainWindow):
         if self.is_comp_running:
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
                 self.group_thread.terminate()
-                QMessageBox.information(self, "Stopped", "Grouping stopped. Showing ungrouped results.")
+                QMessageBox.information(self, tr("Stopped"), tr("Grouping stopped. Showing ungrouped results."))
                 self.display_comp_results(self.comp_raw_items or [], {}, {})
             elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
                 self.comp_thread.terminate()
@@ -1581,16 +1606,16 @@ class GenizahGUI(QMainWindow):
             self.run_composition()
         
     def reset_comp_ui(self):
-        self.is_comp_running = False; self.btn_comp_run.setText("Analyze Composition")
+        self.is_comp_running = False; self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
 
     def run_composition(self):
         txt = self.comp_text_area.toPlainText().strip();
         if not txt: return
-        self.is_comp_running = True; self.btn_comp_run.setText("Stop"); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
+        self.is_comp_running = True; self.btn_comp_run.setText(tr("Stop")); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
-        self.comp_progress.setFormat("Scanning chunks...")
+        self.comp_progress.setFormat(tr("Scanning chunks..."))
         self.comp_raw_items = []
         self.comp_filtered = []
         self.comp_known = []
@@ -1604,7 +1629,7 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
         self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
-        self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, "Error", e))
+        self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Error"), e))
         self.comp_thread.start()
 
     def on_comp_progress(self, curr, total):
@@ -1629,13 +1654,13 @@ class GenizahGUI(QMainWindow):
         self.comp_raw_filtered = filtered_items
 
         if not items and not filtered_items:
-            QMessageBox.information(self, "No Results", "No composition matches found.")
+            QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             return
 
         msg = QMessageBox.question(
             self,
-            "Group Results?",
-            "Grouping may take longer and relies on NLI metadata. Group now?",
+            tr("Group Results?"),
+            tr("Grouping may take longer and relies on NLI metadata. Group now?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -1647,13 +1672,13 @@ class GenizahGUI(QMainWindow):
 
     def start_grouping(self, items, filtered_items=None):
         self.is_comp_running = True
-        self.btn_comp_run.setText("Stop")
+        self.btn_comp_run.setText(tr("Stop"))
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True)
         total_items = (len(items) if items else 0) + (len(filtered_items) if filtered_items else 0)
         self.comp_progress.setRange(0, total_items)
         self.comp_progress.setValue(0)
-        self.comp_progress.setFormat("Grouping compositions...")
+        self.comp_progress.setFormat(tr("Grouping compositions..."))
 
         self.group_thread = GroupingThread(
             self.searcher, items, self.spin_filter.value(), filtered_items=filtered_items
@@ -1665,7 +1690,7 @@ class GenizahGUI(QMainWindow):
         self.group_thread.start()
 
     def on_grouping_error(self, err):
-        QMessageBox.critical(self, "Grouping Error", err)
+        QMessageBox.critical(self, tr("Grouping Error"), err)
         # Fallback to ungrouped display
         self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
 
@@ -1674,7 +1699,7 @@ class GenizahGUI(QMainWindow):
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.is_comp_running = False
-        self.btn_comp_run.setText("Analyze Composition")
+        self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
         self.btn_comp_export.setEnabled(True)
@@ -1738,7 +1763,7 @@ class GenizahGUI(QMainWindow):
         # ----------------------------------------
 
         # 1. Main Results
-        root = QTreeWidgetItem(self.comp_tree, [f"Main ({len(clean_main)})"]); root.setExpanded(True)
+        root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
         for i in clean_main:
             sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
             node = QTreeWidgetItem(root)
@@ -1756,7 +1781,7 @@ class GenizahGUI(QMainWindow):
 
         # 2. Appendix Results
         if clean_appx:
-            root_a = QTreeWidgetItem(self.comp_tree, [f"Appendix ({len(clean_appx)})"])
+            root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
             for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                 for i in items:
@@ -1775,11 +1800,11 @@ class GenizahGUI(QMainWindow):
         # 3. Filtered by Text (New Category with Sub-Grouping)
         total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
         if total_filtered > 0:
-            root_f = QTreeWidgetItem(self.comp_tree, [f"Filtered by Text ({total_filtered})"])
+            root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
 
             # 3a. Filtered Main
             if clean_filt:
-                f_main_node = QTreeWidgetItem(root_f, [f"Filtered Main ({len(clean_filt)})"])
+                f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
                 f_main_node.setExpanded(True)
                 for i in clean_filt:
                     sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
@@ -1794,7 +1819,7 @@ class GenizahGUI(QMainWindow):
 
             # 3b. Filtered Appendix
             if clean_filt_appx:
-                f_appx_node = QTreeWidgetItem(root_f, [f"Filtered Appendix ({sum(len(v) for v in clean_filt_appx.values())})"])
+                f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
                 for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
                     for i in items:
@@ -1810,7 +1835,7 @@ class GenizahGUI(QMainWindow):
 
         # 4. Known / Excluded Results
         if known:
-            root_k = QTreeWidgetItem(self.comp_tree, [f"Known Manuscripts ({len(known)})"])
+            root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
             for i in known:
                 sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
                 node = QTreeWidgetItem(root_k)
@@ -1913,7 +1938,7 @@ class GenizahGUI(QMainWindow):
             all_filtered.extend(v)
 
         if not (self.comp_main or self.comp_appendix or self.comp_known or all_filtered):
-            QMessageBox.warning(self, "Save", "No composition data to export.")
+            QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
         # Proactively load missing metadata
@@ -1929,7 +1954,7 @@ class GenizahGUI(QMainWindow):
         collect_ids(self.comp_known)
         collect_ids(all_filtered) # This covers filtered main and appendix
 
-        cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title="Fetching metadata before export...")
+        cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title=tr("Fetching metadata before export..."))
         if cancelled:
             return
 
@@ -1943,23 +1968,20 @@ class GenizahGUI(QMainWindow):
                     missing_ids.append(sys_id)
 
         if missing_ids:
-            prompt = (
-                "Shelfmark/Title/Page info missing for some items.\n"
-                "Continue using system IDs? Choose No to load metadata first."
-            )
+            prompt = tr("Shelfmark/Title/Page info missing for some items.\nContinue using system IDs? Choose No to load metadata first.")
             choice = QMessageBox.question(
-                self, "Metadata Missing", prompt,
+                self, tr("Metadata Missing"), prompt,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
             if choice == QMessageBox.StandardButton.No:
-                cancelled = self._fetch_metadata_with_dialog(list(set(missing_ids)), title="Loading missing metadata...")
+                cancelled = self._fetch_metadata_with_dialog(list(set(missing_ids)), title=tr("Loading missing metadata..."))
                 if not cancelled:
                     self._refresh_comp_tree_metadata()
 
-        title = self.comp_title_input.text().strip() or "Untitled Composition"
-        default_path = self._default_report_path(title, "Composition_Report")
-        path, _ = QFileDialog.getSaveFileName(self, "Report", default_path, "Text (*.txt)")
+        title = self.comp_title_input.text().strip() or tr("Untitled Composition")
+        default_path = self._default_report_path(title, tr("Composition_Report"))
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, "Text (*.txt)")
         if path:
             sep = "=" * 80
             appendix_count = sum(len(v) for v in self.comp_appendix.values())
@@ -1978,14 +2000,17 @@ class GenizahGUI(QMainWindow):
                 version = item.get('src_lbl', '') or "Unknown"
                 page = p_num or "?"
                 uid = item.get('uid', sid) or sid or "Unknown"
+                img_lbl = tr("Img")
+                src_ctx_lbl = tr("Source Context")
+                ms_lbl = tr("Manuscript")
 
                 lines = [
                     sep,
-                    f"{shelfmark} | {title_txt} | Img: {page} | Version: {version} | ID: {uid} (Score: {item.get('score', 0)})",
-                    "Source Context:",
+                    f"{shelfmark} | {title_txt} | {img_lbl}: {page} | Version: {version} | ID: {uid} (Score: {item.get('score', 0)})",
+                    f"{src_ctx_lbl}:",
                     (item.get('source_ctx', '') or "[No source context available]").strip(),
                     "",
-                    "Manuscript:",
+                    f"{ms_lbl}:",
                     (item.get('text', '') or "[No manuscript text available]").strip(),
                     "",
                 ]
@@ -2005,12 +2030,12 @@ class GenizahGUI(QMainWindow):
                             fallback_summary.append(shelf_val)
                         target.append(f"{sig} ({len(items)} items): {', '.join(fallback_summary)}")
                 else:
-                    target.append("No items.")
+                    target.append(tr("No items."))
 
             def _append_known_summary_lines(target):
                 target.extend([
                     sep,
-                    "KNOWN MANUSCRIPTS SUMMARY",
+                    tr("KNOWN MANUSCRIPTS SUMMARY"),
                     sep,
                 ])
                 if self.comp_known:
@@ -2019,27 +2044,29 @@ class GenizahGUI(QMainWindow):
                         shelfmark = shelf or sys_id or "Unknown"
                         target.append(f"- {shelfmark}")
                 else:
-                    target.append("No known manuscripts were excluded.")
+                    target.append(tr("No known manuscripts were excluded."))
 
             summary_lines = [
                 sep,
-                "COMPOSITION REPORT SUMMARY",
+                tr("COMPOSITION REPORT SUMMARY"),
                 sep,
                 f"Composition Search: {title}",
-                f"Total Results: {total_count}",
-                f"Main Manuscripts: {len(self.comp_main)}",
-                f"Main Appendix: {appendix_count}",
-                f"Filtered by Text: {filtered_total}",
-                f"Known Manuscripts (Excluded): {known_count}",
+                f"{tr('Total Results')}: {total_count}",
+                f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
+                f"{tr('Main Appendix')}: {appendix_count}",
+                f"{tr('Filtered by Text')}: {filtered_total}",
+                f"{tr('Known Manuscripts')} (Excluded): {known_count}",
             ]
 
-            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY")
-            _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, "FILTERED APPENDIX SUMMARY")
+            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY") # Label is key, so keep English key for translation lookup inside helper? No, helper receives label.
+            # Fix: The helper prints the label directly. So I must translate the label BEFORE passing it.
+            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
+            _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, tr("FILTERED APPENDIX SUMMARY"))
             _append_known_summary_lines(summary_lines)
 
             detail_lines = [
                 sep,
-                "MAIN MANUSCRIPTS",
+                tr("MAIN MANUSCRIPTS"),
                 sep,
             ]
 
@@ -2049,7 +2076,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_filtered_main:
                 detail_lines.extend([
                     sep,
-                    "FILTERED BY TEXT (Main)",
+                    tr("FILTERED BY TEXT") + " (Main)",
                     sep,
                 ])
                 for item in self.comp_filtered_main:
@@ -2057,7 +2084,7 @@ class GenizahGUI(QMainWindow):
 
             detail_lines.extend([
                 sep,
-                "KNOWN MANUSCRIPTS (Excluded)",
+                tr("KNOWN MANUSCRIPTS") + " (Excluded)",
                 sep,
             ])
             if self.comp_known:
@@ -2069,7 +2096,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_appendix:
                 detail_lines.extend([
                     sep,
-                    "MAIN APPENDIX (Grouped)",
+                    tr("MAIN APPENDIX") + " (Grouped)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
@@ -2080,7 +2107,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_filtered_appendix:
                 detail_lines.extend([
                     sep,
-                    "FILTERED APPENDIX (Grouped)",
+                    tr("FILTERED APPENDIX") + " (Grouped)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
@@ -2091,7 +2118,7 @@ class GenizahGUI(QMainWindow):
             with open(path, 'w', encoding='utf-8') as f:
                 all_lines = summary_lines + detail_lines
                 f.write("\n".join(all_lines).strip() + "\n")
-            QMessageBox.information(self, "Saved", f"Saved to {path}")
+            QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
     def _format_comp_entry(self, item):
         sys_id, page, shelfmark, title = self._resolve_meta_labels(item['raw_header'])
@@ -2110,12 +2137,20 @@ class GenizahGUI(QMainWindow):
         ])
 
     def _fetch_metadata_with_dialog(self, system_ids, title="Loading metadata..."):
+        # Note: default title "Loading metadata..." is English, but caller often provides translated title.
+        # However, to be safe, we should translate default if used, or assume caller handles it.
+        # But wait, Python default args are evaluated once. `tr` might depend on config loaded at runtime?
+        # Yes, `tr` works at runtime. But default arg evaluation happens at definition time?
+        # No, `tr` is a function call. If I put `title=tr("...")` in def, it runs at import time.
+        # That is BAD because config might not be loaded or language not set.
+        # So I'll keep the default as string and translate inside.
+
         to_fetch = [sid for sid in system_ids if sid and sid not in self.meta_mgr.nli_cache]
         if not to_fetch:
             return False
 
-        dialog = QProgressDialog("Loading shelfmarks and titles...", "Cancel", 0, len(to_fetch), self)
-        dialog.setWindowTitle(title)
+        dialog = QProgressDialog(tr("Loading shelfmarks and titles..."), tr("Cancel"), 0, len(to_fetch), self)
+        dialog.setWindowTitle(title) # Caller should provide translated title
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.setAutoClose(False)
         dialog.setAutoReset(False)
@@ -2137,10 +2172,10 @@ class GenizahGUI(QMainWindow):
             dialog.reset()
             loop.quit()
             if was_cancelled:
-                QMessageBox.information(self, "Metadata", "Metadata loading was cancelled.")
+                QMessageBox.information(self, "Metadata", tr("Loading metadata was cancelled."))
 
         def on_error(err):
-            QMessageBox.critical(self, "Metadata Error", err)
+            QMessageBox.critical(self, tr("Metadata Error"), err)
             dialog.reset()
             loop.quit()
 
@@ -2186,7 +2221,7 @@ class GenizahGUI(QMainWindow):
 
     def browse_update_view(self, d):
         pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
-        if not pd: QMessageBox.warning(self, "Nav", "Not found or end."); return
+        if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
         
         self.current_browse_p = pd['p_num']
         self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace('\n', '<br>')}</div>")
@@ -2275,16 +2310,16 @@ class GenizahGUI(QMainWindow):
         else:
             # If metadata exists but no thumb_url, it means no image at all
             if meta:
-                self.browse_thumb.setText("No Image")
+                self.browse_thumb.setText(tr("No Image"))
             else:
-                self.browse_thumb.setText("Waiting...")
+                self.browse_thumb.setText(tr("Waiting..."))
     
     def run_indexing(self):
         if not self.indexer: return
-        if QMessageBox.question(self, "Index", "Start indexing?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, tr("Index"), tr("Start indexing?"), QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
-            self.index_progress.setFormat("Indexing... %p%")
+            self.index_progress.setFormat(tr("Indexing... %p%"))
             self.ithread = IndexerThread(self.meta_mgr)
             self.ithread.progress_signal.connect(self.on_index_progress)
             self.ithread.finished_signal.connect(self.on_index_finished)
@@ -2298,13 +2333,13 @@ class GenizahGUI(QMainWindow):
 
     def on_index_finished(self, total_docs):
         self.index_progress.setValue(self.index_progress.maximum())
-        self.index_progress.setFormat("Indexing complete")
+        self.index_progress.setFormat(tr("Indexing complete"))
         self.searcher.reload_index()
-        QMessageBox.information(self, "Done", f"Indexing complete. Documents indexed: {total_docs}")
+        QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
 
     def on_index_error(self, err):
-        self.index_progress.setFormat("Indexing failed")
-        QMessageBox.critical(self, "Indexing Error", str(err))
+        self.index_progress.setFormat(tr("Indexing failed"))
+        QMessageBox.critical(self, tr("Indexing Error"), str(err))
 
     def closeEvent(self, event):
         # Ensure worker threads are stopped before the window is destroyed
