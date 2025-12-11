@@ -174,6 +174,7 @@ TRANSLATIONS = {
     "Go to Ktiv": "עיון בכתיב", # Updated
     "Sys": "מס' מערכת", # New
     "FL": "מס' קובץ", # New
+    "Image:": "תמונה:", # New
     "Manuscript Text": "טקסט כתב היד", # Confirmed
 
     # Arrows for RTL:
