@@ -416,7 +416,6 @@ class ResultDialog(QDialog):
         # Load Page & Metadata
         self.load_page(target=p)
 
-    # REPLACE IN genizah_app.py (Class ResultDialog)
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
@@ -829,7 +828,6 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText("Composition Title")
         tr.addWidget(QLabel("Title:")); tr.addWidget(self.comp_title_input)
         
-        # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
@@ -859,18 +857,21 @@ class GenizahGUI(QMainWindow):
         self.spin_freq.setToolTip("Ignore phrases appearing > X times (filters common phrases)")
         
         self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems(["Exact", "Variants", "Extended", "Maximum", "Fuzzy"])
-        self.comp_mode_combo.setItemData(0, "Exact match")
-        self.comp_mode_combo.setItemData(1, "Basic variants")
+        self.comp_mode_combo.setItemData(0, "Exact match (Strict)")
+        self.comp_mode_combo.setItemData(1, "Basic variants (Common swaps)")
         self.comp_mode_combo.setItemData(2, "Extended variants")
         self.comp_mode_combo.setItemData(3, "Maximum variants")
-        self.comp_mode_combo.setItemData(4, "Fuzzy search")
+        self.comp_mode_combo.setItemData(4, "Fuzzy (Recommended: Finds partial matches like 'דקיום'->'וקיום')")
+
+        # --- SET DEFAULT TO FUZZY ---
+        self.comp_mode_combo.setCurrentIndex(4) 
+        # ----------------------------
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix("Filter > ")
         self.spin_filter.setToolTip("Move titles appearing > X times to Appendix")
 
         self.btn_comp_run = QPushButton("Analyze Composition"); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
-        self.btn_comp_run.setEnabled(False)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
