@@ -404,15 +404,7 @@ class MetadataManager:
         try:
             with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
                 reader = csv.reader(f, delimiter=',')
-                header = next(reader, None)
-
-                # Determine title index dynamically
-                title_idx = 5 # Default legacy
-                if header:
-                    for i, h in enumerate(header):
-                        if 'titles_non_placeholder' in h.lower():
-                            title_idx = i
-                            break
+                next(reader, None) # Skip header
 
                 for row in reader:
                     if not row or len(row) < 2: continue
@@ -429,10 +421,10 @@ class MetadataManager:
                         if s and len(s) < len(shelf):
                             shelf = s
 
-                    # Title
+                    # Title is column index 5 (0-based)
                     title = ""
-                    if len(row) > title_idx:
-                        title = row[title_idx].strip()
+                    if len(row) > 5:
+                        title = row[5].strip()
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
         except Exception as e:
@@ -1118,72 +1110,59 @@ class SearchEngine:
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
 
+        # We need two accumulators now
         doc_hits_main = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
         doc_hits_filtered = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
 
         total_chunks = len(chunks)
         
-        # Determine allowed errors per word based on mode
-        fuzziness = 0
-        if mode == 'fuzzy': fuzziness = 1
-        elif 'variants' in mode: fuzziness = 0 # Variants are exact strings in regex terms
-        
         for i, chunk in enumerate(chunks):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
-            
-            # 1. Build Tantivy Query (The heavy lifter)
             t_query = self.build_tantivy_query(chunk, mode)
-            
-            # 2. Build Strict Regex (For highlighting and exact modes)
-            strict_regex = self.build_regex_pattern(chunk, mode, 0)
-            if not strict_regex: continue
+            regex = self.build_regex_pattern(chunk, mode, 0)
+            if not regex: continue
 
-            # Filter Check (Sampling)
+            # Check filter text (sampling)
             is_filtered = False
             if filter_text:
-                if strict_regex.search(filter_text):
+                if regex.search(filter_text):
                     is_filtered = True
 
             try:
-                # Execute Search
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
                 if len(hits) > max_freq: continue 
-                
                 for score, doc_addr in hits:
                     doc = self.searcher.doc(doc_addr)
                     content = doc['content'][0]
-                    
-                    match_spans = []
-                    
-                    # Path A: Strict Regex (Fast, works for Exact/Variants)
-                    if mode != 'fuzzy':
-                        for m in strict_regex.finditer(content):
-                            match_spans.append(m.span())
-                    
-                    # Path B: Fuzzy Validation (Slower but finds "דקיום" -> "וקיום")
-                    else:
-                        match_spans = self._fuzzy_find_in_text(content, chunk, threshold=1)
-
-                    if match_spans:
+                    if regex.search(content):
                         uid = doc['unique_id'][0]
+
+                        # Decide which dict to use
+                        # If the chunk is filtered, we add it to the filtered results.
+                        # Note: A document might match some filtered chunks and some valid chunks.
+                        # For now, if ANY matched chunk is filtered, does it taint the whole doc?
+                        # Or do we separate by match?
+                        # The user requirement: "All text where these words are found will be filtered".
+                        # So if the *chunk* matches the filter text, this specific hit is filtered.
+                        # If a doc has ONLY filtered hits, it goes to filtered list.
+                        # If a doc has mixed hits... probably safer to split the *matches* or just classify the doc?
+                        # Let's say: we accumulate hits. At the end, if a doc has significant filtered content, maybe move it?
+                        # Simplest approach: Segregate by chunk.
+
                         rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
-                        rec['matches'].extend(match_spans)
+                        rec['matches'].append(regex.search(content).span())
                         rec['src_indices'].update(range(i, i + chunk_size))
-                        
-                        # Store pattern for highlighting (if strict) or construct one
-                        if mode != 'fuzzy':
-                            rec['patterns'].add(strict_regex.pattern)
+                        rec['patterns'].add(regex.pattern)
             except: pass
 
         def build_items(hits_dict):
             final_items = []
             for uid, data in hits_dict.items():
-                # Source context builder
                 src_indices = sorted(list(data['src_indices']))
                 src_snippets = []
                 if src_indices:
@@ -1194,8 +1173,7 @@ class SearchEngine:
                         seq = " ".join(tokens[s:e+1])
                         src_snippets.append(f"... {' '.join(tokens[ctx_s:s])} *{seq}* {' '.join(tokens[e+1:ctx_e])} ...")
 
-                # Manuscript matches builder
-                spans = sorted(list(set(data['matches'])), key=lambda x: x[0])
+                spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
                 if spans:
                     curr_s, curr_e = spans[0]
@@ -1206,26 +1184,11 @@ class SearchEngine:
 
                 score = sum(e-s for s,e in merged)
                 ms_snips = []
-                
-                # Special Fuzzy Highlighting Logic
-                # If fuzzy, we don't have a regex pattern. We manually star the spans.
-                if mode == 'fuzzy':
-                    full_content = data['content']
-                    # Apply stars backwards to not mess up indices
-                    for s, e in reversed(merged):
-                        full_content = full_content[:s] + "*" + full_content[s:e] + "*" + full_content[e:]
-                    
-                    for s, e in merged:
-                        start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                        snip = data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end]
-                        ms_snips.append(snip)
-                    combined_pattern = "" # No regex for highlighting in viewer, handled by stars
-                else:
-                    # Standard Regex Highlighting
-                    for s, e in merged:
-                        start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                        ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
-                    combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
+                for s, e in merged:
+                    start = max(0, s - 60); end = min(len(data['content']), e + 60)
+                    ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
+
+                combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
                 final_items.append({
                     'score': score, 'uid': uid,
@@ -1237,65 +1200,19 @@ class SearchEngine:
             final_items.sort(key=lambda x: x['score'], reverse=True)
             return final_items
 
-        return {'main': build_items(doc_hits_main), 'filtered': build_items(doc_hits_filtered)}
+        # Build both lists
+        main_list = build_items(doc_hits_main)
+        filtered_list = build_items(doc_hits_filtered)
 
-    def _fuzzy_find_in_text(self, content, chunk_words, threshold=1):
-        """
-        Scan content for a sequence of words that fuzzy-matches the chunk.
-        Returns list of (start, end) tuples.
-        """
-        # 1. Tokenize content but keep track of character offsets
-        doc_tokens = []
-        for m in re.finditer(Config.WORD_TOKEN_PATTERN, content):
-            doc_tokens.append((m.group(0), m.start(), m.end()))
-            
-        if not doc_tokens: return []
-        
-        matches = []
-        chunk_len = len(chunk_words)
-        
-        # 2. Sliding window over document words
-        # Optimization: Check if first word matches fuzzy, only then check rest
-        for i in range(len(doc_tokens) - chunk_len + 1):
-            
-            # Check first word (Fast rejection)
-            if self.var_mgr.hamming_distance(doc_tokens[i][0], chunk_words[0]) > threshold:
-                # Allow length difference check if hamming is strict
-                if abs(len(doc_tokens[i][0]) - len(chunk_words[0])) > threshold:
-                    continue
-                # Detailed Levenshtein could go here, but simple diff count is fast
-            
-            # Check full sequence
-            is_match = True
-            for j in range(chunk_len):
-                doc_w = doc_tokens[i+j][0]
-                qry_w = chunk_words[j]
-                
-                # Allow 1 error per word
-                # Simple check: count different chars. 
-                # Ideally use Levenshtein, but for speed we estimate:
-                diffs = 0
-                len_diff = abs(len(doc_w) - len(qry_w))
-                if len_diff > threshold: 
-                    is_match = False; break
-                
-                # Check character diffs
-                min_len = min(len(doc_w), len(qry_w))
-                for k in range(min_len):
-                    if doc_w[k] != qry_w[k]: diffs += 1
-                diffs += len_diff
-                
-                if diffs > threshold:
-                    is_match = False
-                    break
-            
-            if is_match:
-                # Found a sequence!
-                start_char = doc_tokens[i][1]
-                end_char = doc_tokens[i + chunk_len - 1][2]
-                matches.append((start_char, end_char))
-                
-        return matches
+        # Post-processing: If a UID appears in both, usually it means different chunks matched.
+        # We can present it in both, or prioritize Main?
+        # If the user wants to filter out "known texts", appearing in Main implies there's *also* unknown content?
+        # Or should we be strict? "If found in this text... filtered".
+        # If I found a match that IS in the filter text, that match is filtered.
+        # If I found another match in the same doc that is NOT in filter text, that match stays in Main.
+        # So separated by matches is correct.
+
+        return {'main': main_list, 'filtered': filtered_list}
 
     def group_composition_results(self, items, threshold=5, progress_callback=None):
         ids = [self.meta_mgr.parse_header_smart(i['raw_header'])[0] for i in items]
