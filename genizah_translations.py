@@ -134,10 +134,8 @@ TRANSLATIONS = {
     "Manuscript saved to:\n{}": "כתב היד נשמר אל:\n{}",
     "<< Prev": ">> הקודם", # RTL Logic: Prev logic is "Next" visually in RTL? No, stick to logical arrows.
     "Next >>": "הבא <<",
-    # Actually, in RTL, "Prev" (Right arrow) moves to higher page number? No.
-    # Hebrew books open Right-to-Left. Page 1 is rightmost. Next page is to the left.
-    # So "Next" should point Left (<<). "Prev" should point Right (>>).
-    # I will handle the arrow symbols in the code or here.
+    "Page / Image": "עמוד / תמונה", # Or just "תמונה" if redundancy not desired
+    "Image": "תמונה",
 
     # --- Settings Tab ---
     "Data & Index": "נתונים ואינדקס",
@@ -202,6 +200,20 @@ TRANSLATIONS = {
     "Load Text": "טען טקסט",
     "Load": "טען",
 
+    # --- Export Report Headers (Missing) ---
+    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש מקבילות",
+    "Total Results": "סך כל התוצאות",
+    "Main Manuscripts": "כתבי יד ראשיים",
+    "Main Appendix": "נספח ראשי",
+    "Known Manuscripts": "כתבי יד ידועים",
+    "Filtered by Text": "סונן לפי טקסט",
+    "Search_Results": "תוצאות_חיפוש",
+    "Composition_Report": "דוח_חיפוש_מקבילות",
+    "Source Context": "טקסט מקור",
+    "Manuscript": "כתב יד",
+    "Source": "מקור",
+    "MS": "כ\"י",
+
     # --- HTML Help Content (Search) ---
     "SEARCH_HELP_HTML": """<div dir='rtl'><h3>מצבי חיפוש</h3>
     <ul>
@@ -227,7 +239,6 @@ TRANSLATIONS = {
     </ul></div>""",
 
     # --- HTML About ---
-    # We will construct the About HTML dynamically or store the translated version here
     "ABOUT_HTML": """
         <style>
             h3 { margin-bottom: 0px; margin-top: 10px; }
@@ -245,7 +256,7 @@ TRANSLATIONS = {
             <p>כלי זה פותח בסיוע <b>Gemini 3.0 Pro</b> ו-<b>GPT 5.1</b>. תודתי נתונה לאבי שמידמן, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן ואלנתן חן על עצותיהם ותמיכתם.</p>
 
             <h3>מקור הנתונים ותודות</h3>
-            <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטו, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרא סיו וליצחק גילה מהספרייה הלאומית.</p>
+            <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית.</p>
             <p>הנגשת מאגר כה מורכב וערך לציבור היא צעד משמעותי למדע הפתוח, ואני מעריך מאוד את נדיבותם באפשרם לכל אחד לגשת לטקסטים אלו.</p>
             <h3>רישיון</h3>
 

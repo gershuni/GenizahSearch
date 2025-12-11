@@ -138,7 +138,7 @@ class AIManager:
         self.chat = None
 
     def _get_sys_inst(self):
-        return """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah).
+        base_inst = """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah).
             Your goal is to help the user construct Python Regex patterns.
             
             IMPORTANT RULES:
@@ -148,6 +148,11 @@ class AIManager:
             4. Output format MUST be strictly JSON: {"regex": "THE_PATTERN", "explanation": "Brief explanation"}.
             5. Do not include markdown formatting like ```json.
             """
+
+        if CURRENT_LANG == 'he':
+            base_inst += "\n\nIMPORTANT: Provide the 'explanation' field in Hebrew."
+
+        return base_inst
 
     def init_session(self):
         if not self.api_key: return "Error: Missing API Key."

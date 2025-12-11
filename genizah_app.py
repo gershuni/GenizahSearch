@@ -639,7 +639,7 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(tr("Genizah Search Pro V3.0"))
+        self.setWindowTitle("Genizah Search Pro V3.0")
         self.resize(1300, 850)
 
         self.meta_mgr = None
@@ -854,6 +854,7 @@ class GenizahGUI(QMainWindow):
         
         in_l.addLayout(top_row)
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
+        if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
         cr = QHBoxLayout()
@@ -1007,9 +1008,10 @@ class GenizahGUI(QMainWindow):
             anchor = f'<a name="page_{p["p_num"]}"></a>'
             
             # Visual Separator
+            img_lbl = tr("Image")
             separator = f"""
             <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>Page / Image: {p['p_num']}</b>
+                <b>{img_lbl}: {p['p_num']}</b>
             </div>
             """
             
@@ -1475,7 +1477,7 @@ class GenizahGUI(QMainWindow):
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def export_results(self):
-        default_path = self._default_report_path(self.last_search_query, "Search_Results")
+        default_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, "Text (*.txt)")
         if path:
             with open(path, 'w', encoding='utf-8') as f:
@@ -1973,7 +1975,7 @@ class GenizahGUI(QMainWindow):
                     self._refresh_comp_tree_metadata()
 
         title = self.comp_title_input.text().strip() or tr("Untitled Composition")
-        default_path = self._default_report_path(title, "Composition_Report")
+        default_path = self._default_report_path(title, tr("Composition_Report"))
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, "Text (*.txt)")
         if path:
             sep = "=" * 80
@@ -1993,14 +1995,17 @@ class GenizahGUI(QMainWindow):
                 version = item.get('src_lbl', '') or "Unknown"
                 page = p_num or "?"
                 uid = item.get('uid', sid) or sid or "Unknown"
+                img_lbl = tr("Img")
+                src_ctx_lbl = tr("Source Context")
+                ms_lbl = tr("Manuscript")
 
                 lines = [
                     sep,
-                    f"{shelfmark} | {title_txt} | Img: {page} | Version: {version} | ID: {uid} (Score: {item.get('score', 0)})",
-                    "Source Context:",
+                    f"{shelfmark} | {title_txt} | {img_lbl}: {page} | Version: {version} | ID: {uid} (Score: {item.get('score', 0)})",
+                    f"{src_ctx_lbl}:",
                     (item.get('source_ctx', '') or "[No source context available]").strip(),
                     "",
-                    "Manuscript:",
+                    f"{ms_lbl}:",
                     (item.get('text', '') or "[No manuscript text available]").strip(),
                     "",
                 ]
@@ -2025,7 +2030,7 @@ class GenizahGUI(QMainWindow):
             def _append_known_summary_lines(target):
                 target.extend([
                     sep,
-                    "KNOWN MANUSCRIPTS SUMMARY",
+                    tr("KNOWN MANUSCRIPTS SUMMARY"),
                     sep,
                 ])
                 if self.comp_known:
@@ -2038,23 +2043,25 @@ class GenizahGUI(QMainWindow):
 
             summary_lines = [
                 sep,
-                "COMPOSITION REPORT SUMMARY",
+                tr("COMPOSITION REPORT SUMMARY"),
                 sep,
                 f"Composition Search: {title}",
-                f"Total Results: {total_count}",
-                f"Main Manuscripts: {len(self.comp_main)}",
-                f"Main Appendix: {appendix_count}",
-                f"Filtered by Text: {filtered_total}",
-                f"Known Manuscripts (Excluded): {known_count}",
+                f"{tr('Total Results')}: {total_count}",
+                f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
+                f"{tr('Main Appendix')}: {appendix_count}",
+                f"{tr('Filtered by Text')}: {filtered_total}",
+                f"{tr('Known Manuscripts')} (Excluded): {known_count}",
             ]
 
-            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY")
-            _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, "FILTERED APPENDIX SUMMARY")
+            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY") # Label is key, so keep English key for translation lookup inside helper? No, helper receives label.
+            # Fix: The helper prints the label directly. So I must translate the label BEFORE passing it.
+            _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
+            _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, tr("FILTERED APPENDIX SUMMARY"))
             _append_known_summary_lines(summary_lines)
 
             detail_lines = [
                 sep,
-                "MAIN MANUSCRIPTS",
+                tr("MAIN MANUSCRIPTS"),
                 sep,
             ]
 
@@ -2064,7 +2071,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_filtered_main:
                 detail_lines.extend([
                     sep,
-                    "FILTERED BY TEXT (Main)",
+                    tr("FILTERED BY TEXT") + " (Main)",
                     sep,
                 ])
                 for item in self.comp_filtered_main:
@@ -2072,7 +2079,7 @@ class GenizahGUI(QMainWindow):
 
             detail_lines.extend([
                 sep,
-                "KNOWN MANUSCRIPTS (Excluded)",
+                tr("KNOWN MANUSCRIPTS") + " (Excluded)",
                 sep,
             ])
             if self.comp_known:
@@ -2084,7 +2091,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_appendix:
                 detail_lines.extend([
                     sep,
-                    "MAIN APPENDIX (Grouped)",
+                    tr("MAIN APPENDIX") + " (Grouped)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
@@ -2095,7 +2102,7 @@ class GenizahGUI(QMainWindow):
             if self.comp_filtered_appendix:
                 detail_lines.extend([
                     sep,
-                    "FILTERED APPENDIX (Grouped)",
+                    tr("FILTERED APPENDIX") + " (Grouped)",
                     sep,
                 ])
                 for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
