@@ -321,9 +321,9 @@ class ResultDialog(QDialog):
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
 
-        # Arrows logic
-        prev_arrow = ">" if CURRENT_LANG == 'he' else "<"
-        next_arrow = "<" if CURRENT_LANG == 'he' else ">"
+        # Arrows logic (Standard: Prev <, Next > regardless of RTL)
+        prev_arrow = "<"
+        next_arrow = ">"
 
         btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
