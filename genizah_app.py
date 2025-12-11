@@ -436,7 +436,7 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
 
         # Update Info Label
-        info_html = f"<b>Sys:</b> {self.current_sys_id} | <b>FL:</b> {self.current_fl_id or '?'}"
+        info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
         self.lbl_info.setText(info_html)
         
         # Update Page Controls
@@ -2039,7 +2039,7 @@ class GenizahGUI(QMainWindow):
                         shelfmark = shelf or sys_id or "Unknown"
                         target.append(f"- {shelfmark}")
                 else:
-                    target.append("No known manuscripts were excluded.")
+                    target.append(tr("No known manuscripts were excluded."))
 
             summary_lines = [
                 sep,

@@ -21,7 +21,7 @@ TRANSLATIONS = {
 
     # --- Tabs ---
     "Search": "חיפוש",
-    "Composition Search": "חיפוש מקבילות",
+    "Composition Search": "חיפוש חיבורים", # Updated
     "Browse Manuscript": "דפדוף בכתב יד",
     "Settings & About": "הגדרות ואודות",
 
@@ -88,7 +88,7 @@ TRANSLATIONS = {
     "Context": "הקשר",
     "Save Report": "שמור דוח",
     "Composition Help": "עזרה בחיפוש מקבילות",
-    "Scanning chunks...": "סורק גושים...",
+    "Scanning chunks...": "סורק...", # Updated
     "No composition matches found.": "לא נמצאו התאמות.",
     "Group Results?": "לקבץ תוצאות?",
     "Grouping may take longer and relies on NLI metadata. Group now?": "הקיבוץ עשוי להימשך זמן מה ומתבסס על נתוני הספרייה הלאומית. לקבץ כעת?",
@@ -170,12 +170,18 @@ TRANSLATIONS = {
 
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
-    "◀ Prev Result": "▶ תוצאה קודמת", # Swap arrows for RTL
+    "Result {} of {}": "תוצאה {} מתוך {}", # Updated
+    "Go to Ktiv": "עיון בכתיב", # Updated
+    "Sys": "מס' מערכת", # New
+    "FL": "מס' קובץ", # New
+    "Manuscript Text": "טקסט כתב היד", # Confirmed
+
+    # Arrows for RTL:
+    # "Next Result" -> Point Left in RTL. Icon should be Left Arrow.
+    # "Prev Result" -> Point Right in RTL. Icon should be Right Arrow.
+    "◀ Prev Result": "▶ תוצאה קודמת",
     "Next Result ▶": "תוצאה הבאה ◀",
-    "Result {} of {}": "תוצאה {} מתוך {}",
-    "Go to Ktiv": "עבור לכתיב",
-    "Image:": "תמונה:",
-    "Manuscript Text": "טקסט כתב היד",
+
     "Match Context (Source)": "הקשר (מקור)",
 
     # --- AI Dialog ---
@@ -200,15 +206,22 @@ TRANSLATIONS = {
     "Load Text": "טען טקסט",
     "Load": "טען",
 
-    # --- Export Report Headers (Missing) ---
-    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש מקבילות",
+    # --- Export Report Headers (Updated) ---
+    "Composition Search": "חיפוש חיבורים", # Updated
+    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש חיבורים", # Updated
     "Total Results": "סך כל התוצאות",
     "Main Manuscripts": "כתבי יד ראשיים",
     "Main Appendix": "נספח ראשי",
+    "MAIN APPENDIX SUMMARY": "סיכום נספח ראשי", # New
+    "FILTERED APPENDIX SUMMARY": "סיכום נספח מסונן", # New
+    "KNOWN MANUSCRIPTS SUMMARY": "סיכום כתבי יד ידועים", # New
+    "No known manuscripts were excluded.": "לא הוחרגו כתבי יד ידועים.", # New
+    "MAIN MANUSCRIPTS": "כתבי יד ראשיים", # New
     "Known Manuscripts": "כתבי יד ידועים",
+    "Excluded": "הוחרגו", # New
     "Filtered by Text": "סונן לפי טקסט",
     "Search_Results": "תוצאות_חיפוש",
-    "Composition_Report": "דוח_חיפוש_מקבילות",
+    "Composition_Report": "דוח_חיפוש_חיבורים",
     "Source Context": "טקסט מקור",
     "Manuscript": "כתב יד",
     "Source": "מקור",
