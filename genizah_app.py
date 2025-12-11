@@ -286,16 +286,16 @@ class ResultDialog(QDialog):
         self.load_result_by_index(self.current_result_idx)
 
     def init_ui(self):
-        self.setWindowTitle(f"Manuscript Viewer")
+        self.setWindowTitle(tr("Manuscript Viewer"))
         self.resize(1300, 850) # Wider for split view
         
         main_layout = QVBoxLayout()
         
         # --- Top Bar (Result Nav) ---
         top_bar = QHBoxLayout()
-        self.btn_res_prev = QPushButton("◀ Prev Result"); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
+        self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
         self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_res_next = QPushButton("Next Result ▶"); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
+        self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
@@ -312,24 +312,29 @@ class ResultDialog(QDialog):
 
         # Controls Row
         info_row = QHBoxLayout()
-        self.btn_img = QPushButton("Go to Ktiv"); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_viewer); self.btn_img.setFixedWidth(100)
+        self.btn_img = QPushButton(tr("Go to Ktiv")); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_viewer); self.btn_img.setFixedWidth(100)
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_meta_loading = QLabel("Loading..."); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
+        self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
         info_row.addWidget(self.btn_img); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
-        btn_pg_prev = QPushButton("<"); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+
+        # Arrows logic
+        prev_arrow = ">" if CURRENT_LANG == 'he' else "<"
+        next_arrow = "<" if CURRENT_LANG == 'he' else ">"
+
+        btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        btn_pg_next = QPushButton(">"); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
-        nav_row.addWidget(QLabel("Image:")); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
 
         meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row)
         
         # Right: Thumbnail
-        self.lbl_thumb = QLabel("No Preview"); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
+        self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
         
         header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
@@ -340,14 +345,14 @@ class ResultDialog(QDialog):
         # 1. Manuscript View (Left)
         ms_widget = QWidget()
         ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
-        ms_layout.addWidget(QLabel("<b>Manuscript Text</b>"))
+        ms_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_layout.addWidget(self.text_ms)
         
         # 2. Source Context View (Right)
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
-        src_layout.addWidget(QLabel("<b>Match Context (Source)</b>"))
+        src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
         self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         src_layout.addWidget(self.text_src)
 
@@ -375,7 +380,7 @@ class ResultDialog(QDialog):
         self.data = data
         
         # Nav UI Updates
-        self.lbl_res_count.setText(f"Result {idx + 1} of {len(self.all_results)}")
+        self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
         
@@ -507,7 +512,7 @@ class ResultDialog(QDialog):
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
-        self.lbl_thumb.setText("Loading...")
+        self.lbl_thumb.setText(tr("Loading..."))
         self.lbl_thumb.setPixmap(QPixmap())
 
         # Ensure we look at the global cache which acts as the "Source of Truth"
@@ -522,9 +527,9 @@ class ResultDialog(QDialog):
         else:
             # If meta exists but no thumb_url, it means no representative image found
             if meta:
-                self.lbl_thumb.setText("No Preview")
+                self.lbl_thumb.setText(tr("No Preview"))
             else:
-                self.lbl_thumb.setText("Waiting...")
+                self.lbl_thumb.setText(tr("Waiting..."))
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
@@ -583,7 +588,7 @@ class ResultDialog(QDialog):
 
     def on_img_failed(self):
         self.lbl_thumb.setPixmap(QPixmap())
-        self.lbl_thumb.setText("No Preview")
+        self.lbl_thumb.setText(tr("No Preview"))
 
     def closeEvent(self, event):
         try:
