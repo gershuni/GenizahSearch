@@ -417,7 +417,6 @@ class ResultDialog(QDialog):
         # Load Page & Metadata
         self.load_page(target=p)
 
-    # REPLACE IN genizah_app.py (Class ResultDialog)
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
@@ -631,7 +630,8 @@ class ResultDialog(QDialog):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
 
     def open_viewer(self):
-        if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
+        if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
+        #OLD - not working: if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
@@ -845,7 +845,6 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         tr.addWidget(QLabel(tr("Title:"))); tr.addWidget(self.comp_title_input)
         
-        # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
@@ -874,19 +873,22 @@ class GenizahGUI(QMainWindow):
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
         self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
         
-        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Extended"), tr("Maximum"), tr("Fuzzy")])
-        self.comp_mode_combo.setItemData(0, tr("Exact match"))
-        self.comp_mode_combo.setItemData(1, tr("Basic variants"))
-        self.comp_mode_combo.setItemData(2, tr("Extended variants"))
-        self.comp_mode_combo.setItemData(3, tr("Maximum variants"))
-        self.comp_mode_combo.setItemData(4, tr("Fuzzy search"))
+        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems(["Exact", "Variants", "Extended", "Maximum", "Fuzzy"])
+        self.comp_mode_combo.setItemData(0, "Exact match (Strict)")
+        self.comp_mode_combo.setItemData(1, "Basic variants (Common swaps)")
+        self.comp_mode_combo.setItemData(2, "Extended variants")
+        self.comp_mode_combo.setItemData(3, "Maximum variants")
+        self.comp_mode_combo.setItemData(4, "Fuzzy (Recommended: Finds partial matches like 'דקיום'->'וקיום')")
+
+        # --- SET DEFAULT TO FUZZY ---
+        self.comp_mode_combo.setCurrentIndex(4) 
+        # ----------------------------
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
-        self.btn_comp_run.setEnabled(False)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
