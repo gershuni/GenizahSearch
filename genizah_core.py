@@ -58,7 +58,7 @@ class Config:
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
     
     # Settings
-    TANTIVY_CLAUSE_LIMIT = 100
+    TANTIVY_CLAUSE_LIMIT = 5000
     SEARCH_LIMIT = 5000
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
@@ -853,14 +853,39 @@ class SearchEngine:
             if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
                 parts.append(term)
                 continue
+                
             if mode == 'fuzzy':
                 if len(term) < 3: parts.append(f'"{term}"') 
                 elif len(term) < 5: parts.append(f'"{term}"~1')
                 else: parts.append(f'"{term}"~2')
             else:
-                all_vars = self.var_mgr.get_variants(term, mode, limit=Config.TANTIVY_CLAUSE_LIMIT)
-                quoted_vars = [f'"{v}"' for v in all_vars]
-                parts.append(f'({" OR ".join(quoted_vars)})')
+                # 1. Get variants (limit 200 is usually enough if quality is good)
+                all_vars = self.var_mgr.get_variants(term, mode, limit=200)
+                
+                # 2. Prepare list
+                clean_vars = []
+                
+                # Add EXACT term with BOOST (^5)
+                # This tells Tantivy: "If you find the exact word, it's 5x more important"
+                clean_vars.append(f'"{term}"^5')
+                
+                # Add variants
+                for v in all_vars:
+                    if v == term: continue # Skip exact (already added)
+                    
+                    # CRITICAL FIX: Filter out 1-letter noise variants
+                    # If original was >1 char, variant must be >1 char.
+                    # This prevents "דא" becoming "ר" and matching everything in the universe.
+                    if len(term) > 1 and len(v) < 2:
+                        continue
+                        
+                    # Clean quotes
+                    v_clean = v.replace('"', '')
+                    if v_clean:
+                        clean_vars.append(f'"{v_clean}"')
+                
+                parts.append(f'({" OR ".join(clean_vars)})')
+                
         return " AND ".join(parts)
 
     def build_regex_pattern(self, terms, mode, max_gap):
@@ -871,17 +896,37 @@ class SearchEngine:
         parts = []
         for term in terms:
             regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
+            
+            # 1. Get variants
             vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT)
-            escaped = [re.escape(v) for v in vars_list]
+            
+            # 2. Ensure exact term
+            if term not in vars_list:
+                vars_list.append(term)
+            
+            # 3. Sort by LENGTH (Descending)
+            # This is the correct fix for the visual glitch. 
+            # It ensures "וידא" matches before "דא".
+            unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
+            
+            # 4. Escape special chars
+            escaped = [re.escape(v) for v in unique_vars]
+            
+            # 5. Simple Group (Removed strict Lookbehind/Lookahead)
+            # This allows finding "והמילה" even if searching "מילה"
             parts.append(f"({'|'.join(escaped)})")
 
         if max_gap == 0:
+            # Flexible separator (any non-word char)
             sep = r'[^\w\u0590-\u05FF\']+'
         else:
+            # Gap logic
             sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
 
-        try: return re.compile(sep.join(parts), re.IGNORECASE)
-        except: return None
+        try: 
+            return re.compile(sep.join(parts), re.IGNORECASE)
+        except: 
+            return None
 
     def highlight(self, text, regex, for_file=False):
         m = regex.search(text)
