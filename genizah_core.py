@@ -17,10 +17,12 @@ from typing import Mapping
 import itertools
 import json
 
+from genizah_translations import TRANSLATIONS
+
 try:
     import tantivy
 except ImportError:
-    raise ImportError("Tantivy library missing. Please install it.")
+    raise ImportError(tr("Tantivy library missing. Please install it."))
 
 try:
     import google.generativeai as genai
@@ -55,6 +57,7 @@ class Config:
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
     CACHE_NLI = os.path.join(INDEX_DIR, "nli_cache.pkl")
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
+    LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
     
     # Settings
@@ -63,6 +66,32 @@ class Config:
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
+
+def load_language():
+    """Load language preference. Returns 'en' or 'he'."""
+    try:
+        if os.path.exists(Config.LANGUAGE_FILE):
+            with open(Config.LANGUAGE_FILE, 'rb') as f:
+                return pickle.load(f)
+    except: pass
+    return 'en'
+
+def save_language(lang):
+    """Save language preference."""
+    try:
+        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
+        with open(Config.LANGUAGE_FILE, 'wb') as f:
+            pickle.dump(lang, f)
+    except: pass
+
+# Global language state
+CURRENT_LANG = load_language()
+
+def tr(text):
+    """Translate text if current language is Hebrew."""
+    if CURRENT_LANG == 'he':
+        return TRANSLATIONS.get(text, text)
+    return text
 
 # ==============================================================================
 #  AI MANAGER
@@ -743,7 +772,7 @@ class Indexer:
     def create_index(self, progress_callback=None):
         # Validation
         if not os.path.exists(Config.FILE_V8):
-            raise FileNotFoundError(f"Input file not found: {Config.FILE_V8}\nPlease place 'Transcriptions.txt' next to the executable.")
+            raise FileNotFoundError(tr("Input file not found: {}\nPlease place 'Transcriptions.txt' next to the executable.").format(Config.FILE_V8))
 
         # Ensure main index dir exists
         if not os.path.exists(Config.INDEX_DIR):
