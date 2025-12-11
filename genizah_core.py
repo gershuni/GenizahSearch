@@ -375,7 +375,15 @@ class MetadataManager:
         try:
             with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
                 reader = csv.reader(f, delimiter=',')
-                next(reader, None) # Skip header
+                header = next(reader, None)
+
+                # Determine title index dynamically
+                title_idx = 5 # Default legacy
+                if header:
+                    for i, h in enumerate(header):
+                        if 'titles_non_placeholder' in h.lower():
+                            title_idx = i
+                            break
 
                 for row in reader:
                     if not row or len(row) < 2: continue
@@ -392,10 +400,10 @@ class MetadataManager:
                         if s and len(s) < len(shelf):
                             shelf = s
 
-                    # Title is column index 5 (0-based)
+                    # Title
                     title = ""
-                    if len(row) > 5:
-                        title = row[5].strip()
+                    if len(row) > title_idx:
+                        title = row[title_idx].strip()
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
         except Exception as e:
