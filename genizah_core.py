@@ -13,6 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Mapping
 import itertools
 import json
 
@@ -199,97 +200,109 @@ class AIManager:
 # ==============================================================================
 class VariantManager:
     """Generate spelling variants for Hebrew search terms using multiple maps."""
-    def __init__(self):
-        self.basic_map = self._build_basic()
-        self.extended_map = self._build_extended()
-        self.maximum_map = self._build_maximum()
 
-    def _build_basic(self):
-        pairs = [
-            ('ד', 'ר'), ('כ', 'ב'), ('ה', 'ח'),
-            ('ו', 'ז'), ('ו', 'י'), ('ו', 'ן'),
-            ('ט', 'ת'), ('ס', 'ש')
-        ]
+    _BASIC_LIST = [
+        ('ד', 'ר'), ('כ', 'ב'), ('ה', 'ח'),
+        ('ו', 'ז'), ('ו', 'י'), ('ו', 'ן'),
+        ('ט', 'ת'), ('ס', 'ש')
+    ]
+
+    @staticmethod
+    def make_multimap(pairs):
         m = defaultdict(set)
         for a, b in pairs:
             m[a].add(b)
             m[b].add(a)
         return m
 
-    def _build_extended(self):
-        pairs = [('ה', 'ח'), ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('ל', 'י'), ('א', 'י'), ('ה', 'ת'), ('ר', 'י'), ('א', 'ח'), ('י', 'א'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'), ('ה', 'ו'), ('ו', 'א'), ('ו', 'נ'), ('ו', 'ל'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ו', 'ר'), ('ל', 'ר'), ('מ', 'י'), ('ה', 'א'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('ו', 'ה'), ('ו', 'ן'), ('ן', 'ו'), ('ח', 'ה'), ('א', 'ל'), ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'), ('ב', 'י'), ('ל', 'א'), ('ה', 'ם'), ('י', 'ב'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'), ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'), ('ו', 'ז'), ('א', 'ש'), ('ש', 'י'), ('ס', 'ם'), ('ז', 'ו'), ('ש', 'ו'), ('ב', 'נ'), ('ח', 'א'), ('ו', 'מ'), ('מ', 'ש'), ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('ו', 'ב'), ('מ', 'ל'), ('מ', 'ב'), ('ד', 'י'), ('נ', 'ג'), ('ה', 'ד')]
-        m = defaultdict(set)
-        for k, v in self._build_basic().items():
-            if isinstance(v, (set, list)):
-                m[k].update(v)
-            else:
-                m[k].add(v)
-        for a, b in pairs: m[a].add(b); m[b].add(a)
-        return m
+    def __init__(self):
+        self.basic_map = self.make_multimap(self._BASIC_LIST)
+        self.extended_map = self.make_multimap(self._BASIC_LIST + [
+            ('ה', 'ח'), ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('ל', 'י'), ('א', 'י'), ('ה', 'ת'),
+            ('ר', 'י'), ('א', 'ח'), ('י', 'א'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'), ('ה', 'ו'),
+            ('ו', 'א'), ('ו', 'נ'), ('ו', 'ל'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ו', 'ר'), ('ל', 'ר'),
+            ('מ', 'י'), ('ה', 'א'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('ו', 'ה'), ('ו', 'ן'),
+            ('ן', 'ו'), ('ח', 'ה'), ('א', 'ל'), ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'),
+            ('ב', 'י'), ('ל', 'א'), ('ה', 'ם'), ('י', 'ב'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
+            ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'), ('ו', 'ז'), ('א', 'ש'),
+            ('ש', 'י'), ('ס', 'ם'), ('ז', 'ו'), ('ש', 'ו'), ('ב', 'נ'), ('ח', 'א'), ('ו', 'מ'), ('מ', 'ש'),
+            ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('ו', 'ב'), ('מ', 'ל'), ('מ', 'ב'), ('ד', 'י'), ('נ', 'ג'),
+            ('ה', 'ד')
+        ])
 
-    def _build_maximum(self):
-        all_pairs = [("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ה'), ('א', 'ו'), ('א', 'ח'), ('א', 'י'), ('א', 'ל'), ('א', 'מ'), ('א', 'ם'), ('א', 'נ'), ('א', 'ע'), ('א', 'ר'), ('א', 'ש'), ('א', 'ת'), ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ו'), ('ב', 'י'), ('ב', 'כ'), ('ב', 'ל'), ('ב', 'מ'), ('ב', 'נ'), ('ב', 'פ'), ('ב', 'ר'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'), ('ד', 'ו'), ('ד', 'י'), ('ד', 'כ'), ('ד', 'ל'), ('ד', 'ר'), ('ה', 'ב'), ('ה', 'ד'), ('ה', 'ו'), ('ה', 'ח'), ('ה', 'י'), ('ה', 'ך'), ('ה', 'כ'), ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ם'), ('ה', 'ק'), ('ה', 'ר'), ('ה', 'ש'), ('ה', 'ת'), ('ו', 'ג'), ('ו', 'ד'), ('ו', 'ה'), ('ו', 'ז'), ('ו', 'ח'), ('ו', 'י'), ('ו', 'כ'), ('ו', 'ל'), ('ו', 'מ'), ('ו', 'ם'), ('ו', 'נ'), ('ו', 'ע'), ('ו', 'ר'), ('ו', 'ש'), ('ו', 'ת'), ('ז', 'י'), ('ח', 'א'), ('ח', 'ה'), ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'), ('ט', 'ע'), ('ט', 'ש'), ('ט', 'ת'), ('י', 'ב'), ('י', 'ד'), ('י', 'ה'), ('י', 'ו'), ('י', 'ך'), ('י', 'כ'), ('י', 'ל'), ('י', 'מ'), ('י', 'ם'), ('י', 'נ'), ('י', 'ן'), ('י', 'ע'), ('י', 'ר'), ('י', 'ש'), ('י', 'ת'), ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'), ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'ו'), ('ל', 'מ'), ('ל', 'ם'), ('ל', 'נ'), ('ל', 'ע'), ('ל', 'ר'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ב'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'), ('מ', 'ס'), ('מ', 'ע'), ('מ', 'ר'), ('מ', 'ש'), ('מ', 'ת'), ('נ', 'ג'), ('נ', 'ו'), ('נ', 'ל'), ('נ', 'פ'), ('נ', 'ר'), ('נ', 'ת'), ('ס', 'ם'), ('ס', 'מ'), ('ס', 'ש'), ('ע', 'ל'), ('ע', 'מ'), ('ע', 'נ'), ('ע', 'ש'), ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ה'), ('ק', 'ר'), ('ר', 'ב'), ('ר', 'ה'), ('ר', 'ך'), ('ר', 'ח'), ('ר', 'כ'), ('ר', 'ל'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'), ('ר', 'ש'), ('ר', 'ת'), ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ו'), ('ש', 'ט'), ('ש', 'י'), ('ש', 'ל'), ('ש', 'מ'), ('ש', 'ע'), ('ש', 'ר'), ('ת', 'ה'), ('ת', 'ו'), ('ת', 'ח'), ('ת', 'ט'), ('ת', 'י'), ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'), ('ת', 'נ')]
-        m = defaultdict(set)
-        for a, b in all_pairs: m[a].add(b); m[b].add(a)
-        return m
+        self.maximum_map = self.make_multimap([
+            ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ה'), ('א', 'ו'), ('א', 'ח'), ('א', 'י'),
+            ('א', 'ל'), ('א', 'מ'), ('א', 'ם'), ('א', 'נ'), ('א', 'ע'), ('א', 'ר'), ('א', 'ש'), ('א', 'ת'),
+            ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ו'), ('ב', 'י'), ('ב', 'כ'), ('ב', 'ל'), ('ב', 'מ'), ('ב', 'נ'),
+            ('ב', 'פ'), ('ב', 'ר'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'), ('ד', 'ו'),
+            ('ד', 'י'), ('ד', 'כ'), ('ד', 'ל'), ('ד', 'ר'), ('ה', 'ב'), ('ה', 'ד'), ('ה', 'ו'), ('ה', 'ח'),
+            ('ה', 'י'), ('ה', 'ך'), ('ה', 'כ'), ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ם'), ('ה', 'ק'), ('ה', 'ר'),
+            ('ה', 'ש'), ('ה', 'ת'), ('ו', 'ג'), ('ו', 'ד'), ('ו', 'ה'), ('ו', 'ז'), ('ו', 'ח'), ('ו', 'י'),
+            ('ו', 'כ'), ('ו', 'ל'), ('ו', 'מ'), ('ו', 'ם'), ('ו', 'נ'), ('ו', 'ע'), ('ו', 'ר'), ('ו', 'ש'),
+            ('ו', 'ת'), ('ז', 'י'), ('ח', 'א'), ('ח', 'ה'), ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'),
+            ('ט', 'ע'), ('ט', 'ש'), ('ט', 'ת'), ('י', 'ב'), ('י', 'ד'), ('י', 'ה'), ('י', 'ו'), ('י', 'ך'),
+            ('י', 'כ'), ('י', 'ל'), ('י', 'מ'), ('י', 'ם'), ('י', 'נ'), ('י', 'ן'), ('י', 'ע'), ('י', 'ר'),
+            ('י', 'ש'), ('י', 'ת'), ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
+            ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'ו'), ('ל', 'מ'), ('ל', 'ם'), ('ל', 'נ'),
+            ('ל', 'ע'), ('ל', 'ר'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ב'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
+            ('מ', 'ס'), ('מ', 'ע'), ('מ', 'ר'), ('מ', 'ש'), ('מ', 'ת'), ('נ', 'ג'), ('נ', 'ו'), ('נ', 'ל'),
+            ('נ', 'פ'), ('נ', 'ר'), ('נ', 'ת'), ('ס', 'ם'), ('ס', 'מ'), ('ס', 'ש'), ('ע', 'ל'), ('ע', 'מ'),
+            ('ע', 'נ'), ('ע', 'ש'), ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ה'), ('ק', 'ר'), ('ר', 'ב'),
+            ('ר', 'ה'), ('ר', 'ך'), ('ר', 'ח'), ('ר', 'כ'), ('ר', 'ל'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'),
+            ('ר', 'ש'), ('ר', 'ת'), ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ו'), ('ש', 'ט'), ('ש', 'י'), ('ש', 'ל'),
+            ('ש', 'מ'), ('ש', 'ע'), ('ש', 'ר'), ('ת', 'ה'), ('ת', 'ו'), ('ת', 'ח'), ('ת', 'ט'), ('ת', 'י'),
+            ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'), ('ת', 'נ')
+        ])
 
-    def _calc_similarity(self, term, variant):
-        if len(term) != len(variant): return 99 
+    def hamming_distance(self, term: str, variant: str) -> int:
+        if len(term) != len(variant):
+            # quite arbitrary, but ensures variants of different lengths are sorted last
+            return len(term) + len(variant)
         diff = sum(1 for a, b in zip(term, variant) if a != b)
         return diff
 
-    def generate_variants_recursive(self, term, mapping, max_depth, limit):
-        results = {term}
+    def generate_variants(self, term: str, mapping: Mapping[str, set[str]], max_changes: int, limit: int) -> set[str]:
         indices = range(len(term))
-        for depth in range(1, max_depth + 1):
-            if len(results) >= limit: break
-            for positions_to_change in itertools.combinations(indices, depth):
-                if len(results) >= limit: break
+        limit = min(limit, Config.VARIANT_GEN_LIMIT)
+        result = set()
+        for number_of_changes in range(max_changes):
+            for positions_to_change in itertools.combinations(indices, number_of_changes + 1):
                 char_options_list = []
-                valid_combination = True
                 for i, char in enumerate(term):
                     if i in positions_to_change:
-                        repls = set()
-                        if char in mapping:
-                            val = mapping[char]
-                            if isinstance(val, (set, list)): repls.update(val)
-                            else: repls.add(val)
-                        if char in repls: repls.remove(char)
+                        repls = mapping[char] - {char}
                         if not repls:
-                            valid_combination = False
                             break
-                        char_options_list.append(list(repls))
+                        char_options_list.append(repls)
                     else:
-                        char_options_list.append([char])
-                if valid_combination:
+                        char_options_list.append({char})
+                else:
                     for p in itertools.product(*char_options_list):
-                        results.add("".join(p))
-                        if len(results) >= limit: break
-        return list(results)
+                        result.add("".join(p))
+                        if len(result) >= limit:
+                            return result
+        return result
 
-    def get_variants(self, term, mode):
-        if len(term) < 2: return [term]
-        
-        mapping = None
-        limit = Config.VARIANT_GEN_LIMIT
-        max_depth = 1 
-        
+    def get_variants(self, term: str, mode: str, limit: int = Config.VARIANT_GEN_LIMIT) -> list[str]:
+        """Generate spelling variants for Hebrew search terms using multiple maps."""
+        if len(term) < 2:
+            return [term]
+
         if mode == 'variants':
             mapping = self.basic_map
-            max_depth = 1
+            max_changes = 1
         elif mode == 'variants_extended':
             mapping = self.extended_map
-            max_depth = 2
+            max_changes = 2
         elif mode == 'variants_maximum':
             mapping = self.maximum_map
-            max_depth = 2 
+            max_changes = 2
         else:
             return [term]
 
-        variants = self.generate_variants_recursive(term, mapping, max_depth, limit)
-        if term not in variants: variants.append(term)
-        variants.sort(key=lambda x: (x != term, self._calc_similarity(term, x)))
-        return variants
+        variants = self.generate_variants(term, mapping, max_changes, limit)
+        variants.add(term)
+        return sorted(list(variants), key=lambda x: self.hamming_distance(term, x))
 
 # ==============================================================================
 #  METADATA MANAGER
@@ -824,10 +837,8 @@ class SearchEngine:
                 elif len(term) < 5: parts.append(f'"{term}"~1')
                 else: parts.append(f'"{term}"~2')
             else:
-                all_vars = self.var_mgr.get_variants(term, mode)
-                subset = all_vars[:Config.TANTIVY_CLAUSE_LIMIT]
-                if term not in subset: subset.insert(0, term)
-                quoted_vars = [f'"{v}"' for v in subset]
+                all_vars = self.var_mgr.get_variants(term, mode, limit=Config.TANTIVY_CLAUSE_LIMIT)
+                quoted_vars = [f'"{v}"' for v in all_vars]
                 parts.append(f'({" OR ".join(quoted_vars)})')
         return " AND ".join(parts)
 
@@ -839,8 +850,7 @@ class SearchEngine:
         parts = []
         for term in terms:
             regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
-            vars_list = self.var_mgr.get_variants(term, regex_mode)
-            vars_list = vars_list[:Config.REGEX_VARIANTS_LIMIT]
+            vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT)
             escaped = [re.escape(v) for v in vars_list]
             parts.append(f"({'|'.join(escaped)})")
 
