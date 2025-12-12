@@ -766,6 +766,8 @@ class Indexer:
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+        # Field for SWIFT / q-gram search: Space-separated 5-grams
+        builder.add_text_field("nospaces", stored=False, tokenizer_name="whitespace")
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
