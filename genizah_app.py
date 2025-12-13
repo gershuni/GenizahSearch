@@ -1631,8 +1631,25 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
         self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
-        self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Error"), e))
+        self.comp_thread.error_signal.connect(self.handle_comp_error)
         self.comp_thread.start()
+
+    def handle_comp_error(self, err_msg):
+        self.is_comp_running = False
+        self.reset_comp_ui()
+
+        if "Index outdated" in err_msg:
+            ret = QMessageBox.question(
+                self,
+                tr("Index Rebuild Required"),
+                tr("The SWIFT search requires a newer index version.\nWould you like to rebuild the index now?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if ret == QMessageBox.StandardButton.Yes:
+                self.tabs.setCurrentIndex(3) # Settings Tab
+                self.run_indexing()
+        else:
+            QMessageBox.critical(self, tr("Error"), err_msg)
 
     def on_comp_progress(self, curr, total):
         if total:
