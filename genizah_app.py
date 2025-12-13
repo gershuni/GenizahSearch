@@ -880,12 +880,13 @@ class GenizahGUI(QMainWindow):
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
         self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
         
-        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Extended"), tr("Maximum"), tr("Fuzzy")])
+        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Extended"), tr("Maximum"), tr("Fuzzy"), tr("Structural (SWIFT)")])
         self.comp_mode_combo.setItemData(0, tr("Exact match"))
         self.comp_mode_combo.setItemData(1, tr("Basic variants"))
         self.comp_mode_combo.setItemData(2, tr("Extended variants"))
         self.comp_mode_combo.setItemData(3, tr("Maximum variants"))
         self.comp_mode_combo.setItemData(4, tr("Fuzzy search"))
+        self.comp_mode_combo.setItemData(5, tr("SWIFT: Advanced structural search (Requires Index Rebuild)"))
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
@@ -1620,7 +1621,8 @@ class GenizahGUI(QMainWindow):
         self.comp_filtered = []
         self.comp_known = []
         self.btn_comp_export.setEnabled(False)
-        mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
+        modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Structural (SWIFT)']
+        mode = modes[self.comp_mode_combo.currentIndex()]
 
         self.comp_thread = CompositionThread(
             self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,

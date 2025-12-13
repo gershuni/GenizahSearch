@@ -61,11 +61,17 @@ class CompositionThread(QThread):
             self.status_signal.emit("Scanning chunks...")
             def cb(curr, total): self.progress_signal.emit(curr, total)
 
-            # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
-            result = self.searcher.search_composition_logic(
-                self.text, self.chunk, self.freq, self.mode,
-                filter_text=self.filter_text, progress_callback=cb
-            )
+            # SWIFT Mode check
+            if self.mode == 'Structural (SWIFT)':
+                result = self.searcher.search_composition_swift(
+                    self.text, threshold=self.chunk, progress_callback=cb
+                )
+            else:
+                # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
+                result = self.searcher.search_composition_logic(
+                    self.text, self.chunk, self.freq, self.mode,
+                    filter_text=self.filter_text, progress_callback=cb
+                )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
 

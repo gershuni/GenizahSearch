@@ -792,6 +792,7 @@ class Indexer:
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+        builder.add_text_field("nospaces", stored=True) # SWIFT Support
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
@@ -821,9 +822,13 @@ class Indexer:
                     
                     if is_sep:
                         if cid and ctext:
+                            full_c = "\n".join(ctext)
+                            # Strip all whitespace/punctuation for SWIFT
+                            clean_c = re.sub(r'[^\w\u0590-\u05FF]', '', full_c)
+
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
-                                unique_id=str(cid), content="\n".join(ctext), source=str(label),
+                                unique_id=str(cid), content=full_c, nospaces=clean_c, source=str(label),
                                 full_header=str(chead), shelfmark=str(shelfmark)
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
@@ -838,9 +843,12 @@ class Indexer:
                         progress_callback(processed_lines, total_lines)
                 
                 if cid and ctext:
+                    full_c = " ".join(ctext)
+                    clean_c = re.sub(r'[^\w\u0590-\u05FF]', '', full_c)
+
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                     writer.add_document(tantivy.Document(
-                        unique_id=str(cid), content=" ".join(ctext), source=str(label),
+                        unique_id=str(cid), content=full_c, nospaces=clean_c, source=str(label),
                         full_header=str(chead), shelfmark=str(shelfmark)
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
@@ -1218,6 +1226,277 @@ class SearchEngine:
         # So separated by matches is correct.
 
         return {'main': main_list, 'filtered': filtered_list}
+
+    def search_composition_swift(self, source_text, threshold=5, progress_callback=None):
+        """
+        Hybrid Tantivy/Python SWIFT Implementation.
+        1. Clean source text and generate q-grams (seeds).
+        2. Fetch candidate docs from Tantivy containing these seeds.
+        3. Python: 'Parallelogram Filter' - find diagonals in (source_pos, doc_pos) grid.
+        """
+        if not self.searcher: return {'main': [], 'filtered': []}
+
+        # 0. Check Index Compatibility
+        try:
+            # Try to access 'nospaces' field in a dummy query to see if schema matches
+            # or just check if the field exists in the searcher/index wrapper
+            # Since tantivy-py doesn't expose schema easily on searcher, we try a query
+            q = self.index.parse_query('nospaces:"test"', ["nospaces"])
+        except Exception:
+             raise Exception(tr("Index outdated. Please rebuild index to use SWIFT mode."))
+
+        # 1. Preprocessing (Seeds)
+        # Clean text
+        clean_source = re.sub(r'[^\w\u0590-\u05FF]', '', source_text)
+        if len(clean_source) < 10: return {'main': [], 'filtered': []}
+
+        seed_len = 5
+        step = 3 # Sample every 3rd seed
+        seeds = []
+        # specific_seeds map: seed_str -> list of [positions_in_clean_source]
+        seed_map = defaultdict(list)
+
+        for i in range(0, len(clean_source) - seed_len + 1, 1): # Index all positions for map
+            s = clean_source[i : i + seed_len]
+            seed_map[s].append(i)
+
+        # Select query seeds (sampling)
+        query_seeds = list(seed_map.keys())[::step]
+        if not query_seeds: return {'main': [], 'filtered': []}
+
+        # 2. Querying (Batching to avoid clause limits)
+        candidate_docs = set()
+
+        # Max boolean clauses is usually 1024 or 4096. Let's be safe with batches of 500.
+        batch_size = 500
+        total_batches = (len(query_seeds) + batch_size - 1) // batch_size
+
+        for i in range(0, len(query_seeds), batch_size):
+            if progress_callback:
+                 progress_callback(i, len(query_seeds) * 2) # Phase 1 is querying
+
+            batch = query_seeds[i : i + batch_size]
+            # Construct OR query: nospaces:"SEED1" OR nospaces:"SEED2"...
+            # Use raw query string for simplicity
+            parts = [f'"{s}"' for s in batch]
+            q_str = " OR ".join(parts)
+
+            try:
+                # We query 'nospaces' field
+                q = self.index.parse_query(q_str, ["nospaces"])
+                # We need enough top docs. SWIFT is high recall.
+                # If we have many seeds, we might match MANY docs.
+                # But typical composition search expects specific manuscripts.
+                res = self.searcher.search(q, 5000)
+                for score, doc_addr in res.hits:
+                    candidate_docs.add(doc_addr)
+            except: pass
+
+        # 3. Parallelogram Filter (Python)
+        # We need to process each candidate doc
+        results = []
+        total_candidates = len(candidate_docs)
+
+        # Cache regex for finding seeds in doc content
+        # Actually, brute force find in string is fast enough in Python for limited docs
+
+        for idx, doc_addr in enumerate(candidate_docs):
+            if progress_callback and idx % 10 == 0:
+                 # Phase 2 is filtering (mapped to second half of progress)
+                 progress_callback(len(query_seeds) + int((idx / total_candidates) * len(query_seeds)), len(query_seeds) * 2)
+
+            doc = self.searcher.doc(doc_addr)
+            doc_uid = doc['unique_id'][0]
+
+            # Get nospaces content (Must exist if schema check passed)
+            try:
+                doc_clean = doc['nospaces'][0]
+            except IndexError:
+                # Should not happen if index is rebuilt
+                continue
+
+            if not doc_clean: continue
+
+            # Find hits: (source_pos, doc_pos)
+            # We iterate over the SEEDS found in this document.
+            # Optimization: Instead of searching all source seeds in doc,
+            # we can iterate the doc seeds (if doc is small) or source seeds (if source is small).
+            # Usually Source is smaller than the whole Genizah but larger than a single fragment?
+            # No, Source is the input text (e.g. a chapter of Mishnah). Fragment is small.
+            # So iterate fragment n-grams.
+
+            hits = [] # List of (src_pos, doc_pos)
+
+            # Sliding window over DOC to find matching seeds
+            # Only check seeds that exist in our source map
+            doc_len = len(doc_clean)
+            if doc_len < seed_len: continue
+
+            for d_pos in range(0, doc_len - seed_len + 1):
+                gram = doc_clean[d_pos : d_pos + seed_len]
+                if gram in seed_map:
+                    # Retrieve all source positions for this gram
+                    for s_pos in seed_map[gram]:
+                        hits.append((s_pos, d_pos))
+
+            if not hits: continue
+
+            # Diagonal Clustering
+            # We look for hits where (d_pos - s_pos) is roughly constant.
+            # We bucket them by diff.
+            # Allow variance of a few chars? The paper suggests strict diagonals or fuzzy.
+            # Simple approach: Bucket by (d_pos - s_pos) // tolerance
+            # But Hebrew SWIFT Guide implies strict Parallelogram or "approximately constant".
+            # Let's use a tolerance of +/- 20 chars drift?
+            # Or just strict binning with merging.
+
+            # Let's simple bin by exact difference first.
+            diagonals = defaultdict(list)
+            for s, d in hits:
+                diff = d - s
+                diagonals[diff].append((s, d))
+
+            # Filter clusters
+            valid_clusters = []
+
+            # Tolerance merging:
+            # If we have diff=500 with 3 hits and diff=502 with 3 hits, they are likely same cluster.
+            # Sort keys (diffs)
+            sorted_diffs = sorted(diagonals.keys())
+            if not sorted_diffs: continue
+
+            current_cluster_hits = []
+            last_diff = sorted_diffs[0]
+
+            # We group diffs that are close (e.g. within 10 chars)
+            diff_tolerance = 15
+
+            # We need to flatten the map to iterate easily
+            # List of (diff, hit_list)
+
+            # Grouping Logic:
+            # Iterate through sorted diffs. If diff is close to last, merge.
+
+            merged_groups = []
+            if sorted_diffs:
+                curr_group = diagonals[sorted_diffs[0]][:]
+                curr_diff_ref = sorted_diffs[0]
+
+                for diff in sorted_diffs[1:]:
+                    if diff - curr_diff_ref <= diff_tolerance:
+                        curr_group.extend(diagonals[diff])
+                    else:
+                        merged_groups.append(curr_group)
+                        curr_group = diagonals[diff][:]
+                        curr_diff_ref = diff
+                merged_groups.append(curr_group)
+
+            # Check Threshold
+            final_matches = []
+            for group in merged_groups:
+                # Group is list of (s, d).
+                # We need count of UNIQUE seeds involved? Or just count?
+                # Using unique source positions prevents counting the same word multiple times if it appears twice in doc closeby?
+                # Actually, we want to know if we covered enough length.
+                # Threshold is "Chunk" (e.g. 5).
+                if len(group) >= threshold:
+                    # Sort by source pos
+                    group.sort(key=lambda x: x[0])
+
+                    # Determine range in clean strings
+                    s_start = group[0][0]
+                    s_end = group[-1][0] + seed_len
+                    d_start = group[0][1]
+                    d_end = group[-1][1] + seed_len
+
+                    final_matches.append({
+                        'score': len(group),
+                        'clean_range': (d_start, d_end),
+                        'src_range': (s_start, s_end)
+                    })
+
+            if not final_matches: continue
+
+            # Construct Result Item
+            # We need to map clean_range back to original text content
+            full_content = doc['content'][0]
+
+            # Helper to map clean index to original index
+            # This is expensive if we do it char by char.
+            # Heuristic: The ratio of length is roughly constant? No.
+            # Robust way: Re-scan original text to find non-whitespace chars.
+
+            # Function to find start/end in original text given clean indices
+            # We iterate original text, counting valid chars.
+
+            def get_orig_indices(text, start_clean, end_clean):
+                orig_len = len(text)
+                c_idx = 0
+                o_start = 0
+                o_end = 0
+                found_start = False
+
+                for i, char in enumerate(text):
+                    # Check if char is valid (was kept in clean)
+                    if re.match(r'[\w\u0590-\u05FF]', char):
+                        if c_idx == start_clean:
+                            o_start = i
+                            found_start = True
+                        c_idx += 1
+                        if c_idx == end_clean:
+                            o_end = i + 1 # Include this char
+                            break
+                if not found_start: return 0, 0
+                if o_end == 0: o_end = len(text)
+                return o_start, o_end
+
+            # Collect matches in this doc
+            combined_snips = []
+            best_score = 0
+
+            # Extract distinct words for highlighting
+            found_words = set()
+
+            for m in final_matches:
+                best_score = max(best_score, m['score'])
+                d_s, d_e = m['clean_range']
+
+                # Get snippet from clean to find words?
+                # Better: Get snippet from original.
+                o_s, o_e = get_orig_indices(full_content, d_s, d_e)
+
+                # Context
+                ctx_s = max(0, o_s - 50)
+                ctx_e = min(len(full_content), o_e + 50)
+
+                match_text = full_content[o_s:o_e]
+                # Extract words for highlighter (simple split)
+                for w in re.split(r'[^\w\u0590-\u05FF]+', match_text):
+                    if len(w) > 2: found_words.add(w)
+
+                snippet = full_content[ctx_s:o_s] + "*" + match_text + "*" + full_content[o_e:ctx_e]
+                combined_snips.append(snippet)
+
+            # Generate Regex Pattern for highlighting
+            # (word1|word2|...)
+            hl_pattern = ""
+            if found_words:
+                 # Escape words
+                 esc_words = [re.escape(w) for w in found_words]
+                 hl_pattern = "|".join(esc_words)
+
+            results.append({
+                'score': best_score,
+                'uid': doc_uid,
+                'raw_header': doc['full_header'][0],
+                'src_lbl': doc['source'][0],
+                'source_ctx': "", # We could extract source context similarly if needed
+                'text': "\n...\n".join(combined_snips),
+                'highlight_pattern': hl_pattern
+            })
+
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return {'main': results, 'filtered': []}
 
     def group_composition_results(self, items, threshold=5, progress_callback=None):
         ids = [self.meta_mgr.parse_header_smart(i['raw_header'])[0] for i in items]
