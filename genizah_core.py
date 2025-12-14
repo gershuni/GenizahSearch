@@ -639,45 +639,15 @@ class MetadataManager:
             return f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/400,/0/default.jpg"
                 
         return None
-        
-    def _pick_working_thumbnail(self, base, size, session):
-        candidates = [
-            f"{base}/full/!{size},{size}/0/default.jpg",
-            f"{base}/full/!{max(size, 600)},{max(size, 600)}/0/default.jpg",
-            f"{base}/full/full/0/default.jpg",
-            f"{base}/full/max/0/default.jpg",
-        ]
 
-        for url in candidates:
-            if self._url_returns_image(session, url):
-                return url
-        return None
-
-    def _url_returns_image(self, session, url):
-        def _is_image(resp):
-            ctype = (resp.headers.get("content-type") or "").lower()
-            return resp.status_code == 200 and "image" in ctype
-
-        try:
-            head = session.head(url, timeout=5, allow_redirects=True)
-            if _is_image(head):
-                head.close()
-                return True
-            head.close()
-
-            # If HEAD is not supported or inconclusive, try GET
-            if head.status_code not in (200, 405):
-                return False
-        except Exception:
-            pass
-
-        try:
-            resp = session.get(url, timeout=5, allow_redirects=True, stream=True)
-            ok = _is_image(resp)
-            resp.close()
-            return ok
-        except Exception:
-            return False
+    @staticmethod
+    def get_rosetta_fallback_url(fl_id):
+        """Construct a fallback URL for Rosetta if IIIF fails."""
+        if not fl_id: return None
+        raw_str = str(fl_id)
+        digits = re.sub(r"\D", "", raw_str)
+        if not digits: return None
+        return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
 
     def _fetch_fl_ids(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
@@ -969,19 +939,32 @@ class SearchEngine:
         start = max(0, s - 60)
         end = min(len(text), e + 60)
         
+        # Calculate indices relative to snippet
+        rel_s = s - start
+        rel_e = e - start
+
         # Grab raw snippet
         snippet = text[start:end]
-        matched_text = m.group(0)
         
         # If showing in table (HTML), verify valid HTML and remove newlines for compactness
         if not for_file:
             # Clean newlines for table display so rows don't explode
-            snippet_clean = snippet.replace('\n', ' ') 
-            match_clean = matched_text.replace('\n', ' ')
-            return snippet_clean.replace(match_clean, f"<b style='color:red;'>{match_clean}</b>")
+            snippet_clean = snippet.replace('\n', ' ')
+
+            # Since we removed newlines, indices might shift if newlines were before the match.
+            # However, simpler approach: Split snippet into pre-match, match, post-match based on INDICES.
+            # But 'replace' logic assumes we are working on the string WITH newlines removed.
+            # If we remove newlines first, we lose index fidelity if newlines were inside the snippet range.
+            # A safer way: Highlight FIRST, then clean newlines.
+
+            # 1. Highlight in raw text snippet
+            hl_snippet = snippet[:rel_s] + f"<b style='color:red;'>{snippet[rel_s:rel_e]}</b>" + snippet[rel_e:]
+
+            # 2. Now clean newlines
+            return hl_snippet.replace('\n', ' ')
         
         # If for export file, keep newlines or mark them
-        return snippet.replace(matched_text, f"*{matched_text}*")
+        return snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
 
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""

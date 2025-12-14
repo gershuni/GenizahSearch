@@ -108,8 +108,9 @@ class ImageLoaderThread(QThread):
         if data is None and fl_match and not self._cancelled:
             fl_digits = fl_match.group(1)
             print(f"[DEBUG] Cache miss & IIIF failed. Trying Rosetta for FL{fl_digits}...")
-            fallback_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{fl_digits}"
-            data = self._download_bytes(fallback_url, headers)
+            fallback_url = MetadataManager.get_rosetta_fallback_url(fl_digits)
+            if fallback_url:
+                data = self._download_bytes(fallback_url, headers)
 
         # 3. Process Result
         if data:
@@ -378,6 +379,12 @@ class ResultDialog(QDialog):
             self.current_result_idx = new_idx
             self.load_result_by_index(new_idx)
 
+    def _htmlify(self, text):
+        if not text: return ""
+        t = text.replace("\n", "<br>")
+        t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
+        return f"<div dir='rtl'>{t}</div>"
+
     def load_result_by_index(self, idx):
         data = self.all_results[idx]
         if not data.get('full_text'):
@@ -396,12 +403,6 @@ class ResultDialog(QDialog):
         except: p = 1
         
         # --- Prepare Text Content ---
-        def htmlify(text):
-            if not text: return ""
-            t = text.replace("\n", "<br>")
-            t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
-            return f"<div dir='rtl'>{t}</div>"
-
         # 1. Manuscript Text (Apply Pattern!)
         ms_raw = data.get('full_text', '') or data.get('text', '')
         pattern_str = data.get('highlight_pattern') # Get regex pattern
@@ -414,13 +415,13 @@ class ResultDialog(QDialog):
             except:
                 pass
 
-        self.text_ms.setHtml(htmlify(ms_raw))
+        self.text_ms.setHtml(self._htmlify(ms_raw))
         
         # 2. Source Context
         src_raw = data.get('source_ctx', '')
         if src_raw:
             self.src_widget.setVisible(True)
-            self.text_src.setHtml(htmlify(src_raw))
+            self.text_src.setHtml(self._htmlify(src_raw))
         else:
             self.src_widget.setVisible(False)
         
@@ -469,12 +470,7 @@ class ResultDialog(QDialog):
             except:
                 pass # If regex fails, just show plain text
         
-        def htmlify(text):
-            t = text.replace("\n", "<br>")
-            t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
-            return f"<div dir='rtl'>{t}</div>"
-
-        self.text_ms.setHtml(htmlify(raw_text))
+        self.text_ms.setHtml(self._htmlify(raw_text))
 
         # Handle Metadata & Image
         self.lbl_meta_loading.setVisible(False)
