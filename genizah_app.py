@@ -1125,7 +1125,7 @@ class GenizahGUI(QMainWindow):
             <h3>Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l</h3>
             
             <h3>Credits</h3>
-            <p>This tool was developed with the coding assistance of <b>Gemini 3.0 Pro</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan and Elnatan Chen for their advice and support.</p>
+            <p>This tool was developed with the coding assistance of <b>Gemini 3.0</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan and Elnatan Chen for their advice and support.</p>
 
             <h3>Data Source & Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>. I am grateful to the project leaders – Daniel Stoekl Ben Ezra, Marina Rustow, Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger – and to Tsafra Siew and Yitzchak Gila from the National Library of Israel. Many thanks also to the rest of the project team: Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale, Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
