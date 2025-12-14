@@ -2,7 +2,7 @@
 
 TRANSLATIONS = {
     # --- General ---
-    "Genizah Search Pro V3.0": "גניזה חיפוש פרו 3.0",
+    "Genizah Search Pro V3.1": "Genizah Search Pro V3.1",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
     "Fatal Error": "שגיאה קריטית",
     "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
@@ -22,11 +22,11 @@ TRANSLATIONS = {
     # --- Tabs ---
     "Search": "חיפוש",
     "Composition Search": "חיפוש חיבורים", # Updated
-    "Browse Manuscript": "דפדוף בכתב יד",
+    "Browse Manuscript": "עיון בכתב יד",
     "Settings & About": "הגדרות ואודות",
 
     # --- Main Search Tab ---
-    "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או סימון מדף...",
+    "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",
@@ -43,8 +43,8 @@ TRANSLATIONS = {
     "Snippet": "קטע",
     "Img": "תמונה",
     "Src": "מקור",
-    "Export Results": "ייצא תוצאות",
-    "Reload shelfmark/title metadata": "רענן נתוני סימון מדף/כותרת",
+    "Export Results": "יצא תוצאות",
+    "Reload shelfmark/title metadata": "רענן נתוני מספר מדף/כותרת",
     "Stop metadata loading": "עצור טעינת נתונים",
     "No results found.": "לא נמצאו תוצאות.",
     "Found {}. Loading metadata...": "נמצאו {}. טוען נתונים...",
@@ -66,10 +66,10 @@ TRANSLATIONS = {
     "Basic variants: ד/ר, ה/ח, ו/י/ן etc.": "וריאנטים בסיסיים: ד/ר, ה/ח, ו/י/ן וכו'",
     "Extended variants: Adds more swaps (א/ע, ק/כ etc.)": "וריאנטים מורחבים: מוסיף עוד חילופים (א/ע, ק/כ וכו')",
     "Maximum variants: Very broad search": "וריאנטים מקסימליים: חיפוש רחב מאוד",
-    "Fuzzy search: Levenshtein distance": "חיפוש עמום: מרחק לוינשטיין",
+    "Fuzzy search: Levenshtein distance": "חיפוש עמום: מרחק לווינשטיין",
     "Regex: Use AI Assistant for complex patterns": "ביטוי רגולרי: השתמש בעוזר ה-AI לתבניות מורכבות",
     "Search in Title metadata": "חיפוש בכותרות (Metadata)",
-    "Search in Shelfmark metadata": "חיפוש בסימוני מדף (Metadata)",
+    "Search in Shelfmark metadata": "חיפוש במספרי מדף (Metadata)",
 
     # --- Composition Tab ---
     "Composition Title": "כותרת החיבור",
@@ -89,7 +89,7 @@ TRANSLATIONS = {
     "Context": "הקשר",
     "Save Report": "שמור דוח",
     "Composition Help": "עזרה בחיפוש מקבילות",
-    "Scanning chunks...": "סורק...", # Updated
+    "Scanning chunks...": "סורק...", 
     "No composition matches found.": "לא נמצאו התאמות.",
     "Group Results?": "לקבץ תוצאות?",
     "Grouping may take longer and relies on NLI metadata. Group now?": "הקיבוץ עשוי להימשך זמן מה ומתבסס על נתוני הספרייה הלאומית. לקבץ כעת?",
@@ -135,7 +135,7 @@ TRANSLATIONS = {
     "Manuscript saved to:\n{}": "כתב היד נשמר אל:\n{}",
     "<< Prev": ">> הקודם", # RTL Logic: Prev logic is "Next" visually in RTL? No, stick to logical arrows.
     "Next >>": "הבא <<",
-    "Page / Image": "עמוד / תמונה", # Or just "תמונה" if redundancy not desired
+    "Page / Image": "עמוד / תמונה", 
     "Image": "תמונה",
 
     # --- Settings Tab ---
@@ -181,8 +181,8 @@ TRANSLATIONS = {
     # Arrows for RTL:
     # "Next Result" -> Point Left in RTL. Icon should be Left Arrow.
     # "Prev Result" -> Point Right in RTL. Icon should be Right Arrow.
-    "◀ Prev Result": "▶ תוצאה קודמת",
-    "Next Result ▶": "תוצאה הבאה ◀",
+    "◀ Prev Result": "▶ לתוצאה קודמת",
+    "Next Result ▶": "לתוצאה הבאה ◀",
 
     "Match Context (Source)": "הקשר (מקור)",
 
@@ -236,13 +236,13 @@ TRANSLATIONS = {
     <li><b>וריאנטים (?):</b> שגיאות OCR בסיסיות.</li>
     <li><b>מורחב (??):</b> וריאנטים נוספים.</li>
     <li><b>מקסימלי (???):</b> חילופים אגרסיביים (השתמש בזהירות).</li>
-    <li><b>עמום (~):</b> מרחק לוינשטיין (1-2 שגיאות).</li>
+    <li><b>עמום (~):</b> מרחק לווינשטיין (1-2 שגיאות).</li>
     <li><b>ביטוי רגולרי:</b> תבניות מורכבות (היעזר ב-AI).</li>
     <li><b>כותרת:</b> חיפוש בכותרות החיבורים.</li>
     <li><b>סימון מדף:</b> חיפוש בסימוני מדף.</li>
     </ul>
     <hr>
-    <b>מרחק (Gap):</b> מרחק מקסימלי בין מילים (לא רלוונטי לכותרת/סימון מדף).</div>""",
+    <b>מרחק (Gap):</b> מרחק מרבי בין מילים (לא רלוונטי לכותרת/מספר מדף).</div>""",
 
     # --- HTML Help Content (Composition) ---
     "COMP_HELP_HTML": """<div dir='rtl'><h3>חיפוש מקבילות</h3>
@@ -262,27 +262,35 @@ TRANSLATIONS = {
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.0</h2>
+                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.0</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
 
+            <h3>מוקדש לזכרו של מורנו האהוב, פרופ' מנחם כהנא ז"ל</h3>
             <h3>קרדיטים</h3>
             <p>כלי זה פותח בסיוע <b>Gemini 3.0 Pro</b> ו-<b>GPT 5.1</b>. תודתי נתונה לאבי שמידמן, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן ואלנתן חן על עצותיהם ותמיכתם.</p>
 
             <h3>מקור הנתונים ותודות</h3>
-            <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית.</p>
+            <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית.תודות רבות גם לשאר חברי הצוות: לואיג'י במבאצ'י, שרווה גוגאוולה, דריה וסיוטינסקי שפירא, משה לביא, אלנה לולי, חיים לפין, נורית עזר, בראת קוראר-ברכאת, בנימין קיסלינג וורד רזיאל קרצ'מר.</p>
             <p>הנגשת מאגר כה מורכב וערך לציבור היא צעד משמעותי למדע הפתוח, ואני מעריך מאוד את נדיבותם באפשרם לכל אחד לגשת לטקסטים אלו.</p>
             <h3>רישיון</h3>
 
             <p>המאגר הבסיסי מופץ תחת רישיון Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>)</p>
 
             <h3>ציטוט</h3>
-            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Genizah Search Pro by Hillel Gershuni.</p>
+            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Genizah Search Pro של הלל גרשוני.</p>
         </div>
         """,
 
     "Restart Required": "נדרש אתחול מחדש",
     "Please restart the application for the language change to take effect.": "אנא הפעל מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף.",
-    "Language": "שפה"
+    "Language": "שפה",
+    
+    # --- Report Headers ---
+    "REPORT_CREDIT_TXT": """הופק באמצעות Genizah Search Pro
+מקור הנתונים: תעתיקי MiDRASH (שטוקל בן עזרא ואח', 2025)
+המאגר זמין בכתובת: https://doi.org/10.5281/zenodo.17734473
+================================================================================
+"""
 }
