@@ -38,7 +38,7 @@ TRANSLATIONS = {
     "Search Help": "עזרה בחיפוש",
     "System ID": "מספר מערכת",
     "System ID:": "מספר מערכת:",
-    "Shelfmark": "סימון מדף",
+    "Shelfmark": "מספר מדף",
     "Title": "כותרת",
     "Snippet": "קטע",
     "Img": "תמונה",
@@ -104,8 +104,8 @@ TRANSLATIONS = {
     "Filtered Appendix ({})": "נספח מסונן ({})",
     "Untitled Composition": "חיבור ללא כותרת",
     "Metadata Missing": "חסרים נתונים",
-    "Shelfmark/Title/Page info missing for some items.\nContinue using system IDs? Choose No to load metadata first.": "חסרים פרטי סימון מדף/כותרת/עמוד לחלק מהפריטים.\nלהמשיך עם מספרי מערכת? בחר 'לא' כדי לטעון נתונים תחילה.",
-    "Loading shelfmarks and titles...": "טוען סימוני מדף וכותרות...",
+    "Shelfmark/Title/Page info missing for some items.\nContinue using system IDs? Choose No to load metadata first.": "חסרים פרטי מספר מדף/כותרת/עמוד לחלק מהפריטים.\nלהמשיך עם מספרי מערכת? בחר 'לא' כדי לטעון נתונים תחילה.",
+    "Loading shelfmarks and titles...": "טוען מספרי מדף וכותרות...",
     "Loading metadata was cancelled.": "טעינת הנתונים בוטלה.",
     "Fetching metadata before export...": "טוען נתונים לפני ייצוא...",
     "Loading missing metadata...": "טוען נתונים חסרים...",
@@ -199,7 +199,7 @@ TRANSLATIONS = {
     "Gemini": "ג'מיני",
 
     # --- Exclude Dialog ---
-    "Enter system IDs or shelfmarks to exclude (one per line).": "הכנס מספרי מערכת או סימוני מדף להחרגה (אחד בשורה).",
+    "Enter system IDs or shelfmarks to exclude (one per line).": "הכנס מספרי מערכת או מספרי מדף להחרגה (אחד בשורה).",
     "Load from File": "טען מקובץ",
 
     # --- Filter Text Dialog ---
@@ -208,19 +208,19 @@ TRANSLATIONS = {
     "Load Text": "טען טקסט",
     "Load": "טען",
 
-    # --- Export Report Headers (Updated) ---
-    "Composition Search": "חיפוש חיבורים", # Updated
-    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש חיבורים", # Updated
+    # --- Export Report Headers ---
+    "Composition Search": "חיפוש חיבורים", 
+    "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש חיבורים", 
     "Total Results": "סך כל התוצאות",
     "Main Manuscripts": "כתבי יד ראשיים",
     "Main Appendix": "נספח ראשי",
-    "MAIN APPENDIX SUMMARY": "סיכום נספח ראשי", # New
-    "FILTERED APPENDIX SUMMARY": "סיכום נספח מסונן", # New
-    "KNOWN MANUSCRIPTS SUMMARY": "סיכום כתבי יד ידועים", # New
-    "No known manuscripts were excluded.": "לא הוחרגו כתבי יד ידועים.", # New
-    "MAIN MANUSCRIPTS": "כתבי יד ראשיים", # New
+    "MAIN APPENDIX SUMMARY": "סיכום נספח ראשי", 
+    "FILTERED APPENDIX SUMMARY": "סיכום נספח מסונן", 
+    "KNOWN MANUSCRIPTS SUMMARY": "סיכום כתבי יד ידועים", 
+    "No known manuscripts were excluded.": "לא הוחרגו כתבי יד ידועים.", 
+    "MAIN MANUSCRIPTS": "כתבי יד ראשיים", 
     "Known Manuscripts": "כתבי יד ידועים",
-    "Excluded": "הוחרגו", # New
+    "Excluded": "הוחרגו", 
     "Filtered by Text": "סונן לפי טקסט",
     "Search_Results": "תוצאות_חיפוש",
     "Composition_Report": "דוח_חיפוש_חיבורים",
@@ -239,7 +239,7 @@ TRANSLATIONS = {
     <li><b>עמום (~):</b> מרחק לווינשטיין (1-2 שגיאות).</li>
     <li><b>ביטוי רגולרי:</b> תבניות מורכבות (היעזר ב-AI).</li>
     <li><b>כותרת:</b> חיפוש בכותרות החיבורים.</li>
-    <li><b>סימון מדף:</b> חיפוש בסימוני מדף.</li>
+    <li><b>מספר מדף:</b> חיפוש במספרי מדף.</li>
     </ul>
     <hr>
     <b>מרחק (Gap):</b> מרחק מרבי בין מילים (לא רלוונטי לכותרת/מספר מדף).</div>""",
@@ -262,7 +262,7 @@ TRANSLATIONS = {
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.0</h2>
+                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.1</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
