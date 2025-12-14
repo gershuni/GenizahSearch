@@ -649,32 +649,6 @@ class MetadataManager:
         if not digits: return None
         return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
 
-    def _url_returns_image(self, session, url):
-        def _is_image(resp):
-            ctype = (resp.headers.get("content-type") or "").lower()
-            return resp.status_code == 200 and "image" in ctype
-
-        try:
-            head = session.head(url, timeout=5, allow_redirects=True)
-            if _is_image(head):
-                head.close()
-                return True
-            head.close()
-
-            # If HEAD is not supported or inconclusive, try GET
-            if head.status_code not in (200, 405):
-                return False
-        except Exception:
-            pass
-
-        try:
-            resp = session.get(url, timeout=5, allow_redirects=True, stream=True)
-            ok = _is_image(resp)
-            resp.close()
-            return ok
-        except Exception:
-            return False
-
     def _fetch_fl_ids(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
         headers = {
