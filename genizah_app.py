@@ -648,7 +648,7 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Genizah Search Pro V3.1")
+        self.setWindowTitle("Genizah Search Pro V3.2")
         self.resize(1300, 850)
 
         self.meta_mgr = None
@@ -1167,7 +1167,7 @@ class GenizahGUI(QMainWindow):
         </style>
         <div style='font-family: Arial; font-size: 13px;'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.1</h2>
+                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.2</h2>
                 <p style='color: #7f8c8d;'>Developed by Hillel Gershuni (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
@@ -2604,7 +2604,7 @@ if __name__ == "__main__":
     try:
         import ctypes
         if hasattr(ctypes, 'windll'):
-            myappid = 'genizah.search.pro.3.1'
+            myappid = 'genizah.search.pro.3.2'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except (ImportError, AttributeError):
         pass

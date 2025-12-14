@@ -2,7 +2,7 @@
 
 TRANSLATIONS = {
     # --- General ---
-    "Genizah Search Pro V3.1": "Genizah Search Pro V3.1",
+    "Genizah Search Pro V3.2": "Genizah Search Pro V3.2",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
     "Fatal Error": "שגיאה קריטית",
     "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
@@ -262,7 +262,7 @@ TRANSLATIONS = {
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.1</h2>
+                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.2</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
