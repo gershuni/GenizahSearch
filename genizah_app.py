@@ -1091,6 +1091,15 @@ class GenizahGUI(QMainWindow):
         shelfmark = meta.get('shelfmark')
 
         if shelfmark and shelfmark != "Unknown":
+            # Logic: Remove "Ms."/"Ms" prefix unless followed only by a number
+            # 1. Match Ms prefix
+            ms_match = re.match(r'^\s*ms\.?\s*(.*)', shelfmark, re.IGNORECASE)
+            if ms_match:
+                remainder = ms_match.group(1)
+                # If remainder is NOT just digits (e.g. "T-S ...", "Or. ..."), use remainder
+                if not re.fullmatch(r'\d+', remainder.strip()):
+                    shelfmark = remainder.strip()
+
             # Sanitize filename: remove illegal chars, preserve dots, convert spaces to underscores
             safe_shelf = re.sub(r'[<>:"/\\|?*]', '', shelfmark)
             safe_shelf = re.sub(r'\s+', '_', safe_shelf).strip('_')
