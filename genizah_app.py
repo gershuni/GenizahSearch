@@ -1086,7 +1086,18 @@ class GenizahGUI(QMainWindow):
     def browse_save_full(self):
         if not self.current_browse_sid: return
         
-        default_name = f"Manuscript_{self.current_browse_sid}.txt"
+        # Determine default filename from shelfmark if available
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        shelfmark = meta.get('shelfmark')
+
+        if shelfmark and shelfmark != "Unknown":
+            # Sanitize filename: remove illegal chars, preserve dots, convert spaces to underscores
+            safe_shelf = re.sub(r'[<>:"/\\|?*]', '', shelfmark)
+            safe_shelf = re.sub(r'\s+', '_', safe_shelf).strip('_')
+            default_name = f"{safe_shelf}.txt"
+        else:
+            default_name = f"Manuscript_{self.current_browse_sid}.txt"
+
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Manuscript"),
                                             os.path.join(Config.REPORTS_DIR, default_name), 
                                             "Text (*.txt)")
@@ -1098,7 +1109,6 @@ class GenizahGUI(QMainWindow):
         with open(path, 'w', encoding='utf-8') as f:
             # Header
             f.write(self._get_credit_header())
-            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
             f.write(f"System ID: {self.current_browse_sid}\n")
             f.write(f"Shelfmark: {meta.get('shelfmark', 'Unknown')}\n")
             f.write(f"Title: {meta.get('title', 'Unknown')}\n")
