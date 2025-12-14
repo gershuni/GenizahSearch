@@ -1143,18 +1143,6 @@ class SearchEngine:
                     if regex.search(content):
                         uid = doc['unique_id'][0]
 
-                        # Decide which dict to use
-                        # If the chunk is filtered, we add it to the filtered results.
-                        # Note: A document might match some filtered chunks and some valid chunks.
-                        # For now, if ANY matched chunk is filtered, does it taint the whole doc?
-                        # Or do we separate by match?
-                        # The user requirement: "All text where these words are found will be filtered".
-                        # So if the *chunk* matches the filter text, this specific hit is filtered.
-                        # If a doc has ONLY filtered hits, it goes to filtered list.
-                        # If a doc has mixed hits... probably safer to split the *matches* or just classify the doc?
-                        # Let's say: we accumulate hits. At the end, if a doc has significant filtered content, maybe move it?
-                        # Simplest approach: Segregate by chunk.
-
                         rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
 
                         rec['head'] = doc['full_header'][0]
@@ -1208,14 +1196,6 @@ class SearchEngine:
         # Build both lists
         main_list = build_items(doc_hits_main)
         filtered_list = build_items(doc_hits_filtered)
-
-        # Post-processing: If a UID appears in both, usually it means different chunks matched.
-        # We can present it in both, or prioritize Main?
-        # If the user wants to filter out "known texts", appearing in Main implies there's *also* unknown content?
-        # Or should we be strict? "If found in this text... filtered".
-        # If I found a match that IS in the filter text, that match is filtered.
-        # If I found another match in the same doc that is NOT in filter text, that match stays in Main.
-        # So separated by matches is correct.
 
         return {'main': main_list, 'filtered': filtered_list}
 

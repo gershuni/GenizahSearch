@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
-                             QProgressDialog)  # Added QProgressDialog
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop # Added QEventLoop
+                             QProgressDialog) 
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG
@@ -422,7 +422,6 @@ class ResultDialog(QDialog):
         # Load Page & Metadata
         self.load_page(target=p)
 
-    # REPLACE IN genizah_app.py (Class ResultDialog)
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
@@ -1360,13 +1359,8 @@ class GenizahGUI(QMainWindow):
             shelf = cached_shelf or shelf
             title = cached_title or title
 
-            # Update items directly by ID reference (robust against sorting)
             if sid in self.shelfmark_items_by_sid and shelf:
                 self.shelfmark_items_by_sid[sid].setText(shelf)
-                # Also update the data object stored in UserRole so sort keeps working on fresh data if needed
-                # Note: We don't update UserRole here to avoid complexity,
-                # but show_full_text pulls from UserRole. The UserRole has 'res'.
-                # We should update 'res' in place.
                 res['display']['shelfmark'] = shelf
 
             if sid in self.title_items_by_sid and title:
@@ -1390,14 +1384,6 @@ class GenizahGUI(QMainWindow):
         self.meta_progress_current = curr
         self.status_label.setText(self._format_metadata_status())
 
-        # We don't rely on row index anymore. We update the items directly.
-        # But we need to know what the new metadata IS.
-        # The thread fetched it into nli_cache. We can retrieve it via _get_meta_for_header.
-
-        # We need the header to parse, but we only have SID.
-        # Find the result object for this SID (scan last_results or just use what we have in cache)
-        # Actually, for the table update, we just need the shelfmark string.
-
         meta = self.meta_mgr.nli_cache.get(sid, {})
         shelf = meta.get('shelfmark', 'Unknown')
         title = meta.get('title', '')
@@ -1414,24 +1400,6 @@ class GenizahGUI(QMainWindow):
             except RuntimeError:
                 pass # Item deleted
 
-        # Also update the source data in self.last_results so exports etc are correct
-        # This is O(N) but N=5000 max, usually small. Optimization: Dict map.
-        # However, we have self.result_row_by_sys_id which maps to original index?
-        # No, result_row_by_sys_id maps to TABLE ROW. That was unreliable.
-        # Let's assume we don't need to update self.last_results for table display (since we updated items),
-        # but we DO need it for export_results() and show_full_text() if they use last_results.
-        # Wait, show_full_text() will now use UserRole.
-        # So we must update the UserRole object.
-
-        # Iterate items to find the UserRole object? No, that's slow.
-        # We stored UserRole on column 0 item.
-        # We don't have a map for column 0 items. Let's make one if needed.
-        # Or just iterate self.last_results?
-        # Actually, we can update the 'res' dictionary in place if we have a reference.
-        # self.last_results holds references to the same dicts that are in UserRole (shallow copy list, same dict objects).
-        # So finding it in self.last_results and updating it updates UserRole too.
-
-        # Optimization: Map sid -> result dict
         if not hasattr(self, '_res_map_by_sid'):
             self._res_map_by_sid = {r['display']['id']: r for r in self.last_results} # Lazy build or build in search_finished
 
@@ -1474,7 +1442,6 @@ class GenizahGUI(QMainWindow):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         progress_part = ""
         if self.meta_to_fetch_count:
-            # We construct this carefully to allow for formatting
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
@@ -1765,14 +1732,9 @@ class GenizahGUI(QMainWindow):
 
         self.comp_tree.clear()
         
-        # --- Helper to create colorful labels ---
         def make_snippet_label(text_content):
             if not text_content: return QLabel("")
-            # 1. Remove newlines -> Single line
             flat = text_content.replace("\n", " ... ")
-            # 2. Convert *match* to Red HTML
-            # We assume text is safe, but basic escape could be good. 
-            # Here we just swap * for HTML tags.
             html = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", flat)
             
             lbl = QLabel(f"<div dir='rtl' style='margin:2px;'>{html}</div>")
@@ -1789,7 +1751,6 @@ class GenizahGUI(QMainWindow):
             node.setText(1, shelf)
             node.setText(2, title)
             node.setText(3, sid)
-            # node.setText(4, ...) -> We skip setting text and set widget instead
             
             node.setData(0, Qt.ItemDataRole.UserRole, i)
             
@@ -1925,7 +1886,6 @@ class GenizahGUI(QMainWindow):
         ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
 
     def _refresh_comp_tree_metadata(self):
-        """Refresh shelfmark/title columns after metadata is (re)fetched."""
 
         def update_node(node):
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
@@ -2077,7 +2037,6 @@ class GenizahGUI(QMainWindow):
             ]
 
             _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, "MAIN APPENDIX SUMMARY") # Label is key, so keep English key for translation lookup inside helper? No, helper receives label.
-            # Fix: The helper prints the label directly. So I must translate the label BEFORE passing it.
             _append_group_summary_lines(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
             _append_group_summary_lines(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, tr("FILTERED APPENDIX SUMMARY"))
             _append_known_summary_lines(summary_lines)
@@ -2156,20 +2115,13 @@ class GenizahGUI(QMainWindow):
         ])
 
     def _fetch_metadata_with_dialog(self, system_ids, title="Loading metadata..."):
-        # Note: default title "Loading metadata..." is English, but caller often provides translated title.
-        # However, to be safe, we should translate default if used, or assume caller handles it.
-        # But wait, Python default args are evaluated once. `tr` might depend on config loaded at runtime?
-        # Yes, `tr` works at runtime. But default arg evaluation happens at definition time?
-        # No, `tr` is a function call. If I put `title=tr("...")` in def, it runs at import time.
-        # That is BAD because config might not be loaded or language not set.
-        # So I'll keep the default as string and translate inside.
 
         to_fetch = [sid for sid in system_ids if sid and sid not in self.meta_mgr.nli_cache]
         if not to_fetch:
             return False
 
         dialog = QProgressDialog(tr("Loading shelfmarks and titles..."), tr("Cancel"), 0, len(to_fetch), self)
-        dialog.setWindowTitle(title) # Caller should provide translated title
+        dialog.setWindowTitle(title) 
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.setAutoClose(False)
         dialog.setAutoReset(False)
@@ -2268,14 +2220,11 @@ class GenizahGUI(QMainWindow):
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
-    # ADD THIS BLOCK INSIDE CLASS GenizahGUI (e.g., before run_indexing)
 
     def _on_browse_thumb_resolved(self, sid, _unused_url):
-        """Called when background metadata fetch is done."""
         if sid != self.current_browse_sid:
             return
             
-        # Reload meta from cache (now populated with 907 $d URL)
         self.fetch_browse_thumbnail(sid)
 
     def start_browse_download(self, sid, thumb_url):
