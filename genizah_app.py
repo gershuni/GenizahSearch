@@ -2460,9 +2460,11 @@ class GenizahGUI(QMainWindow):
     def browse_update_view(self, d):
         pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
         if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
-        
+
         self.current_browse_p = pd['p_num']
-        self.browse_text.setHtml(f"<div dir='rtl'>{pd['text'].replace('\n', '<br>')}</div>")
+        # Preprocess the text outside the f-string to avoid backslash parsing issues
+        browse_html_text = pd['text'].replace('\n', '<br>')
+        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
