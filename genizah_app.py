@@ -823,7 +823,7 @@ class GenizahGUI(QMainWindow):
         self.status_label = QLabel(tr("Ready."))
         lbl_export = QLabel(tr("Export Results") + ":")
         
-        # כפתורים נפרדים
+        # Separate export buttons
         self.btn_exp_xlsx = QPushButton("XLSX")
         self.btn_exp_xlsx.clicked.connect(lambda: self.export_results('xlsx'))
         self.btn_exp_xlsx.setFixedWidth(50)
@@ -836,7 +836,7 @@ class GenizahGUI(QMainWindow):
         self.btn_exp_txt.clicked.connect(lambda: self.export_results('txt'))
         self.btn_exp_txt.setFixedWidth(50)
         
-        # רשימה לניהול קל של מצב הכפתורים (Enabled/Disabled)
+        # Track export buttons for bulk enable/disable
         self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt]
         for b in self.export_buttons: b.setEnabled(False)
 
@@ -851,13 +851,13 @@ class GenizahGUI(QMainWindow):
         self.btn_stop_meta.clicked.connect(self.stop_metadata_loading)
         self.btn_stop_meta.setEnabled(False)
 
-        # הוספה ל-Layout
+        # Add controls to status row
         bot.addWidget(self.status_label, 1)
         bot.addWidget(self.btn_reload_meta)
         bot.addWidget(self.btn_stop_meta)
-        
-        # הוספת מקטע הייצוא מימין
-        bot.addWidget(QLabel("|")) 
+
+        # Append export controls to the right
+        bot.addWidget(QLabel("|"))
         bot.addWidget(lbl_export)
         bot.addWidget(self.btn_exp_xlsx)
         bot.addWidget(self.btn_exp_csv)
@@ -1553,93 +1553,93 @@ class GenizahGUI(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
 
-        # הכנת הנתונים
+        # Prepare tabular data
         headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
         data_rows = []
         for r in self.last_results:
             d = r['display']
-            # שים לב: אנחנו משתמשים ב-raw_file_hl שמכיל כוכביות *התאמה*
+            # Use raw_file_hl so highlight markers remain intact
             data_rows.append([
                 d.get('id', ''),
                 d.get('shelfmark', ''),
                 d.get('title', ''),
                 str(d.get('img', '')),
                 d.get('source', ''),
-                r.get('raw_file_hl', '').strip() 
+                r.get('raw_file_hl', '').strip()
             ])
 
         credit_text = self._get_credit_header()
 
-        # --- XLSX (עם הדגשה אדומה) ---
+        # --- XLSX with inline highlighting ---
         if fmt == 'xlsx':
             try:
                 wb = openpyxl.Workbook()
                 ws = wb.active
                 ws.title = "Genizah Results"
                 ws.sheet_view.rightToLeft = True
-                
-                # הגדרת פונטים לשימוש ב-Rich Text
-                font_red = InlineFont(color='FF0000', b=True) # אדום מודגש
-                font_normal = InlineFont(color='000000')      # שחור רגיל
 
-                # פונקציית עזר לכתיבת תא עם צבעים
+                # Fonts used for rich text snippets
+                font_red = InlineFont(color='FF0000', b=True)
+                font_normal = InlineFont(color='000000')
+
+                # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
-                    # אם אין כוכביות, כותבים רגיל (עם הגנה מנוסחאות)
+                    # No markers: write as-is with formula guard
                     if '*' not in text:
                         ws.cell(row=row, column=col, value=clean_for_excel(text))
                         return
-                    
-                    # פירוק הטקסט לפי כוכביות
+
+                    # Split by asterisk markers
                     parts = text.split('*')
                     rich_string = CellRichText()
-                    
+
                     for i, part in enumerate(parts):
                         if not part: continue
-                        # אינדקס אי-זוגי (1, 3, 5) הוא הטקסט שבתוך הכוכביות -> אדום
+                        # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
                         else:
-                            # אינדקס זוגי -> טקסט רגיל
+                            # Even indices are plain text
                             rich_string.append(TextBlock(font_normal, part))
-                    
+
                     ws.cell(row=row, column=col, value=rich_string)
 
-                # כותרת קרדיט
+                # Credit header
                 current_row = 1
                 for line in credit_text.split('\n'):
                     if not line.strip(): continue
                     cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
                     cell.font = Font(bold=True, color="555555")
                     current_row += 1
-                current_row += 1 
+                current_row += 1
 
-                # כותרות טבלה
+                # Table headers
                 for col_idx, header in enumerate(headers, 1):
                     cell = ws.cell(row=current_row, column=col_idx, value=header)
                     cell.font = Font(bold=True, color="FFFFFF")
                     cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
                 current_row += 1
 
-                # נתונים
+                # Data rows
                 for row_data in data_rows:
                     for col_idx, val in enumerate(row_data, 1):
                         val_str = str(val)
-                        
-                        # עמודה 6 היא ה-Snippet (אינדקס 6 כי מתחילים מ-1 בלולאה)
+
+                        # Column 6 holds the snippet
                         if col_idx == 6:
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
-                            # ניקוי HTML אם יש בעמודות אחרות וסניטציה
+                            # Strip HTML tags in other columns
                             clean_val = re.sub(r'<[^>]+>', '', val_str)
                             ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
-                            
+
                     current_row += 1
 
-                # רוחב עמודות
+                # Column widths
                 ws.column_dimensions['A'].width = 15
                 ws.column_dimensions['B'].width = 20
                 ws.column_dimensions['C'].width = 40
-                ws.column_dimensions['F'].width = 80 # Snippet רחב יותר
+                ws.column_dimensions['F'].width = 80  # Wider snippet column
 
                 wb.save(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -1656,7 +1656,7 @@ class GenizahGUI(QMainWindow):
                     writer.writerow([])
                     writer.writerow(headers)
                     for row in data_rows:
-                        # ב-CSV נסיר את ה-HTML אבל נשאיר כוכביות לסימון
+                        # Strip HTML but keep highlight markers
                         clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
                         writer.writerow(clean_row)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -2109,7 +2109,7 @@ class GenizahGUI(QMainWindow):
                     update_node(child)
 
     def export_comp_report(self, fmt='xlsx'):
-        # 1. איסוף נתונים
+        # 1. Collect composition results
         all_filtered = self.comp_filtered_main[:]
         for v in self.comp_filtered_appendix.values():
             all_filtered.extend(v)
@@ -2118,7 +2118,7 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
-        # 2. טעינת מטא-דאטה חסר
+        # 2. Load any missing metadata
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
@@ -2147,7 +2147,7 @@ class GenizahGUI(QMainWindow):
                 cancelled = self._fetch_metadata_with_dialog(list(set(missing_ids)), title=tr("Loading missing metadata..."))
                 if not cancelled: self._refresh_comp_tree_metadata()
 
-        # 3. הגדרת נתיב
+        # 3. Choose export path
         comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
         base_path = self._default_report_path(comp_title, tr("Composition_Report"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
@@ -2181,8 +2181,8 @@ class GenizahGUI(QMainWindow):
                         title or "",
                         str(p_num or ""),
                         str(item.get('score', 0)),
-                        (item.get('source_ctx', '') or '').strip(), # מכיל כוכביות
-                        (item.get('text', '') or '').strip()        # מכיל כוכביות
+                        (item.get('source_ctx', '') or '').strip(),  # Includes highlight markers
+                        (item.get('text', '') or '').strip()         # Includes highlight markers
                     ])
 
             add_rows(self.comp_main, "Main Manuscripts")
@@ -2201,7 +2201,7 @@ class GenizahGUI(QMainWindow):
                     ws.title = "Composition Report"
                     ws.sheet_view.rightToLeft = True
 
-                    # פונטים
+                    # Fonts for highlighted snippets
                     font_red = InlineFont(color='FF0000', b=True)
                     font_normal = InlineFont(color='000000')
 
@@ -2219,7 +2219,7 @@ class GenizahGUI(QMainWindow):
                                 rich_string.append(TextBlock(font_normal, part))
                         ws.cell(row=row, column=col, value=rich_string)
 
-                    # קרדיט
+                    # Credit block
                     curr_row = 1
                     for line in credit_text.split('\n'):
                         if not line.strip(): continue
@@ -2228,7 +2228,7 @@ class GenizahGUI(QMainWindow):
                         curr_row += 1
                     curr_row += 1
 
-                    # כותרות
+                    # Table headers
                     headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
                     for idx, h in enumerate(headers, 1):
                         c = ws.cell(row=curr_row, column=idx, value=h)
@@ -2236,12 +2236,12 @@ class GenizahGUI(QMainWindow):
                         c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
                     curr_row += 1
 
-                    # נתונים
+                    # Data rows
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            
-                            # עמודות 8 (Source Context) ו-9 (Manuscript Text) הן העמודות עם ההדגשות
+
+                            # Columns 8 and 9 hold highlighted text
                             if idx in [8, 9]:
                                 write_rich_cell(curr_row, idx, val_str)
                             else:
@@ -2249,8 +2249,8 @@ class GenizahGUI(QMainWindow):
                                 safe_val = clean_for_excel(clean_val)
                                 ws.cell(row=curr_row, column=idx, value=safe_val)
                         curr_row += 1
-                    
-                    # עיצוב
+
+                    # Column sizing
                     ws.column_dimensions['A'].width = 20
                     ws.column_dimensions['D'].width = 20
                     ws.column_dimensions['E'].width = 30

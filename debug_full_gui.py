@@ -5,10 +5,10 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBo
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QImage, QPixmap, QImageReader
 
-# השתקת אזהרות SSL כפי שעשינו בתוכנה
+# Silence SSL warnings for test run
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# כתובת שידועה כעובדת מהבדיקה הקודמת שלך
+# Known-good test URL
 TEST_URL = "https://iiif.nli.org.il/IIIFv21/FL160999962/full/400,/0/default.jpg"
 
 class DebugThread(QThread):
@@ -39,7 +39,7 @@ class DebugThread(QThread):
                 self.load_failed.emit("Empty response body")
                 return
 
-            # הדפסת התחלת הקובץ כדי לראות אם זה באמת תמונה או HTML שגיאה
+            # Print first bytes to confirm image vs. HTML error page
             first_bytes = data[:20]
             print(f"[THREAD] First 20 bytes: {first_bytes}")
 
@@ -82,7 +82,7 @@ class DebugWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
         
-        # בדיקת תמיכה בפורמטים
+        # Report supported image formats
         formats = [fmt.data().decode("ascii") for fmt in QImageReader.supportedImageFormats()]
         print(f"[MAIN] Supported Image Formats on this system: {formats}")
 
@@ -90,7 +90,7 @@ class DebugWindow(QMainWindow):
         self.lbl_status.setText("Downloading...")
         self.btn_start.setEnabled(False)
         
-        # שמירה כמשתנה מחלקה כדי למנוע Garbage Collection
+        # Keep reference to avoid premature garbage collection
         self.worker = DebugThread()
         self.worker.image_loaded.connect(self.on_success)
         self.worker.load_failed.connect(self.on_fail)
