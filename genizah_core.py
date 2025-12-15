@@ -879,7 +879,7 @@ class SearchEngine:
                     
                     # CRITICAL FIX: Filter out 1-letter noise variants
                     # If original was >1 char, variant must be >1 char.
-                    # This prevents "דא" becoming "ר" and matching everything in the universe.
+                    # Prevents single-letter fallbacks that over-match
                     if len(term) > 1 and len(v) < 2:
                         continue
                         
@@ -910,14 +910,14 @@ class SearchEngine:
             
             # 3. Sort by LENGTH (Descending)
             # This is the correct fix for the visual glitch. 
-            # It ensures "וידא" matches before "דא".
+            # Favor longer matches before short variants
             unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
             
             # 4. Escape special chars
             escaped = [re.escape(v) for v in unique_vars]
             
             # 5. Simple Group (Removed strict Lookbehind/Lookahead)
-            # This allows finding "והמילה" even if searching "מילה"
+            # Allow prefix matches when search term appears inside a word
             parts.append(f"({'|'.join(escaped)})")
 
         if max_gap == 0:
