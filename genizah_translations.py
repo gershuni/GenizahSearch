@@ -19,6 +19,19 @@ TRANSLATIONS = {
     "Loading...": "טוען...",
     "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
+    
+    # --- Connectivity / Status ---
+    "Online": "מקוון",
+    "Offline": "לא מקוון",
+    "Degraded": "זמין חלקית",
+    "Checking connectivity...": "בודק קישוריות...",
+    "All external services responding.": "כל השירותים החיצוניים מגיבים.",
+    "All services healthy": "כל השירותים תקינים",
+    "No internet connection": "אין חיבור לאינטרנט",
+    "NLI service unavailable": "שירות הספרייה הלאומית אינו זמין",
+    "AI provider unavailable": "ספק הבינה המלאכותית אינו זמין",
+    "Connectivity Error": "שגיאת קישוריות",
+    "Components loaded. Ready.": "הרכיבים נטענו. המערכת מוכנה.",
 
     # --- Tabs ---
     "Search": "חיפוש",
