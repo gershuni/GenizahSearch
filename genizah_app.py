@@ -713,6 +713,8 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
         self._connectivity_lock = threading.Lock()
         self._last_connectivity_state = None
+        self._last_connectivity_ui_state = {"status": "degraded", "details": [tr("Checking connectivity...")]}
+
 
         self.init_ui()
         self.init_connectivity_monitor()
@@ -752,7 +754,11 @@ class GenizahGUI(QMainWindow):
                     extra['ai_provider'] = ai_endpoint
 
             statuses = check_external_services(extra_endpoints=extra, timeout=3)
+            logger.debug("Connectivity summarized: %s", self._summarize_connectivity(statuses))
+            logger.debug("Connectivity raw statuses: %r", statuses)
             state = self._summarize_connectivity(statuses)
+            self._last_connectivity_ui_state = state
+
 
             state_key = (state['status'], tuple(state['details']))
             if state_key != self._last_connectivity_state:
@@ -760,42 +766,33 @@ class GenizahGUI(QMainWindow):
                 readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
                 logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
 
-            QTimer.singleShot(0, lambda: self._update_connectivity_ui(state))
+            QTimer.singleShot(0, lambda s=state: self._update_connectivity_ui(s))
+
         finally:
             self._connectivity_lock.release()
 
     def _summarize_connectivity(self, statuses):
-        network_status = statuses.get("network", {})
-        offline = not network_status.get("reachable", False)
+        def is_reachable(obj, default=False):
+            if isinstance(obj, dict):
+                return bool(obj.get("reachable", default))
+            return bool(obj) if obj is not None else default
+
+        offline = not is_reachable(statuses.get("network"), default=False)
+
         degraded = []
-        if network_status.get("note"):
-            degraded.append(tr("Network reachable but issues: {}").format(network_status["note"]))
-
-        nli_status = statuses.get("nli", {})
-        if not nli_status.get("reachable", True):
-            reason = nli_status.get("note") or tr("NLI service unavailable")
-            degraded.append(reason)
-
-        ai_status = statuses.get("ai_provider", {})
-        if ai_status:
-            if not ai_status.get("reachable", True):
-                reason = ai_status.get("note") or tr("AI provider unavailable")
-                degraded.append(reason)
-            elif ai_status.get("note"):
-                degraded.append(tr("AI provider reachable but {}").format(ai_status["note"]))
+        if not is_reachable(statuses.get("nli"), default=True):
+            degraded.append(tr("NLI service unavailable"))
+        if "ai_provider" in statuses and not is_reachable(statuses.get("ai_provider"), default=True):
+            degraded.append(tr("AI provider unavailable"))
 
         if offline:
-            status = "offline"
-            details = [tr("No internet connection")] + degraded
-        elif degraded:
-            status = "degraded"
-            details = degraded
-        else:
-            status = "online"
-            details = []
+            return {"status": "offline", "details": [tr("No internet connection")] + degraded}
+        if degraded:
+            return {"status": "degraded", "details": degraded}
+        return {"status": "online", "details": []}
 
-        return {"status": status, "details": details}
 
+ 
     def _update_connectivity_ui(self, state):
         status = state['status']
         if status == "offline":
@@ -952,6 +949,8 @@ class GenizahGUI(QMainWindow):
         self.connectivity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.connectivity_label.setMinimumWidth(150)
         self.connectivity_label.setStyleSheet("padding:6px; border-radius:6px; color: white; background-color: #f39c12;")
+        QTimer.singleShot(0, lambda: self._update_connectivity_ui(getattr(self, "_last_connectivity_ui_state", {"status": "online", "details": []})))
+
         self.status_label = QLabel(tr("Ready."))
         lbl_export = QLabel(tr("Export Results") + ":")
         
@@ -1509,24 +1508,36 @@ class GenizahGUI(QMainWindow):
 
         ids = []
         for i, res in enumerate(results):
-            meta = res['display']; ids.append(meta['id'])
+            meta = res['display']
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
-            sid = parsed['sys_id'] or meta['id']
-
+            sid = parsed['sys_id'] or meta.get('id')
             # Col 0: System ID (Store full result data here for retrieval after sort)
             item_sid = QTableWidgetItem(sid)
             item_sid.setData(Qt.ItemDataRole.UserRole, res)
             self.results_table.setItem(i, 0, item_sid)
 
-            # Col 1: Shelfmark (Custom Sort)
-            item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+            # Pull immediate metadata from CSV/cache
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+
+            # Fallback decision: only queue background fetch if CSV/cache didn't provide useful data
+            needs_fetch = (shelf == "Unknown" and (not title))
+
+            if needs_fetch:
+                ids.append(sid)  
+                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+                item_title = QTableWidgetItem(tr("Loading..."))
+            else:
+                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
+                item_title = QTableWidgetItem(title if title else "")
+
+            # Col 1: Shelfmark
             self.results_table.setItem(i, 1, item_shelf)
             self.shelfmark_items_by_sid[sid] = item_shelf
 
             # Col 2: Title
-            item_title = QTableWidgetItem(tr("Loading..."))
             self.results_table.setItem(i, 2, item_title)
             self.title_items_by_sid[sid] = item_title
+
 
             # Col 3: Snippet (Widget)
             lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1546,6 +1557,7 @@ class GenizahGUI(QMainWindow):
     def start_metadata_loading(self, ids):
         if not ids:
             return
+            logger.debug("start_metadata_loading: %d ids, sample=%s", len(ids), ids[:10])
 
         if self.meta_loader and self.meta_loader.isRunning():
             self.meta_loader.request_cancel()
@@ -1557,7 +1569,7 @@ class GenizahGUI(QMainWindow):
 
         # Update initial metadata from cache for all rows
         for res in self.last_results:
-            sid = res['display']['id'] # Or better, re-parse if needed, but 'id' should be set
+            sid = res['display']['id'] or meta.get('id')
             shelf = res['display'].get('shelfmark', '')
             title = res['display'].get('title', '')
 
@@ -1596,6 +1608,14 @@ class GenizahGUI(QMainWindow):
         title = meta.get('title', '')
 
         if sid in self.shelfmark_items_by_sid:
+            if sid not in self.shelfmark_items_by_sid or sid not in self.title_items_by_sid:
+                logger.debug(
+                    "Meta progress sid not in table maps: sid=%s in_shelf=%s in_title=%s",
+                    sid,
+                    sid in self.shelfmark_items_by_sid,
+                    sid in self.title_items_by_sid,
+                )
+
             try:
                 self.shelfmark_items_by_sid[sid].setText(shelf)
             except RuntimeError:

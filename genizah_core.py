@@ -492,8 +492,11 @@ class MetadataManager:
     def _load_csv_bank(self):
         """Load the massive CSV file into memory for instant lookup."""
         if not os.path.exists(Config.LIBRARIES_CSV):
+            LOGGER.warning("libraries.csv not found at %s; csv_bank will remain empty", Config.LIBRARIES_CSV)
             return
 
+        LOGGER.info("Loading libraries.csv from %s", Config.LIBRARIES_CSV)
+        
         import csv
         try:
             with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
@@ -501,10 +504,12 @@ class MetadataManager:
                 next(reader, None) # Skip header
 
                 for row in reader:
+
                     if not row or len(row) < 2:
                         continue
                     # Format: system_number | call_numbers | ... | titles
-                    sys_id = row[0].strip()
+                    raw_sys_id = row[0]
+                    sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
 
                     # Call numbers can be multiple separated by '|'
                     # We take the shortest one that looks like a shelfmark, or just the first
@@ -522,10 +527,22 @@ class MetadataManager:
                         title = row[5].strip()
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+            LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 
     def get_meta_for_id(self, sys_id):
+        # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
+        if sys_id is None:
+            return "Unknown", ""
+        sys_id = "".join(ch for ch in str(sys_id) if ch.isdigit())
+        # Log only if normalization changed the identifier
+        raw = str(sys_id)
+        norm = "".join(ch for ch in raw if ch.isdigit())
+        if raw != norm:
+            LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw, norm)
+        sys_id = norm
+
         """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
         shelf = "Unknown"
         title = ""
@@ -540,6 +557,11 @@ class MetadataManager:
         if sys_id in self.nli_cache:
             m = self.nli_cache[sys_id]
             return m.get('shelfmark', 'Unknown'), m.get('title', '')
+
+        LOGGER.debug(
+            "CSV miss for sys_id=%s (csv_bank size=%d). nli_cache_hit=%s",
+            sys_id, len(self.csv_bank), sys_id in self.nli_cache
+            )
 
         return shelf, title
 
