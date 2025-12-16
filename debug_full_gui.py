@@ -5,6 +5,10 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBo
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QImage, QPixmap, QImageReader
 
+from genizah_core import get_logger
+
+logger = get_logger(__name__)
+
 # Silence SSL warnings for test run
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -16,16 +20,16 @@ class DebugThread(QThread):
     load_failed = pyqtSignal(str)
 
     def run(self):
-        print(f"[THREAD] Starting download from: {TEST_URL}")
+        logger.info("Starting debug download from %s", TEST_URL)
         
         headers = {"User-Agent": "GenizahPro/2.1 Debugger"}
         
         try:
-            print("[THREAD] Sending GET request (verify=False)...")
+            logger.debug("Sending GET request (verify=False)")
             resp = requests.get(TEST_URL, headers=headers, timeout=30, stream=True, verify=False)
             
-            print(f"[THREAD] Response received. Status Code: {resp.status_code}")
-            print(f"[THREAD] Content-Type header: {resp.headers.get('Content-Type')}")
+            logger.info("Response received. Status Code: %s", resp.status_code)
+            logger.debug("Content-Type header: %s", resp.headers.get('Content-Type'))
             
             if resp.status_code != 200:
                 self.load_failed.emit(f"HTTP Error {resp.status_code}")
@@ -33,7 +37,7 @@ class DebugThread(QThread):
 
             data = resp.content
             data_len = len(data)
-            print(f"[THREAD] Data downloaded. Size: {data_len} bytes")
+            logger.info("Data downloaded. Size: %s bytes", data_len)
             
             if data_len == 0:
                 self.load_failed.emit("Empty response body")
@@ -41,20 +45,20 @@ class DebugThread(QThread):
 
             # Print first bytes to confirm image vs. HTML error page
             first_bytes = data[:20]
-            print(f"[THREAD] First 20 bytes: {first_bytes}")
+            logger.debug("First 20 bytes: %s", first_bytes)
 
-            print("[THREAD] Attempting QImage.fromData()...")
+            logger.debug("Attempting QImage.fromData()")
             img = QImage.fromData(data)
             
             if img.isNull():
-                print("[THREAD] FAIL: QImage.fromData returned Null image!")
+                logger.error("QImage.fromData returned Null image")
                 self.load_failed.emit("QImage decoding failed (isNull=True)")
             else:
-                print(f"[THREAD] SUCCESS: Image created. Size: {img.width()}x{img.height()}")
+                logger.info("Image created. Size: %sx%s", img.width(), img.height())
                 self.image_loaded.emit(img)
 
         except Exception as e:
-            print(f"[THREAD] EXCEPTION: {e}")
+            logger.exception("Debug download failed: %s", e)
             self.load_failed.emit(str(e))
 
 class DebugWindow(QMainWindow):
@@ -84,7 +88,7 @@ class DebugWindow(QMainWindow):
         
         # Report supported image formats
         formats = [fmt.data().decode("ascii") for fmt in QImageReader.supportedImageFormats()]
-        print(f"[MAIN] Supported Image Formats on this system: {formats}")
+        logger.info("Supported image formats on this system: %s", formats)
 
     def start_test(self):
         self.lbl_status.setText("Downloading...")
@@ -97,13 +101,13 @@ class DebugWindow(QMainWindow):
         self.worker.start()
 
     def on_success(self, img):
-        print("[MAIN] Signal received: Image Loaded!")
+        logger.info("Signal received: Image Loaded!")
         self.lbl_status.setText("Success!")
         self.lbl_img.setPixmap(QPixmap.fromImage(img))
         self.btn_start.setEnabled(True)
 
     def on_fail(self, err):
-        print(f"[MAIN] Signal received: FAILED - {err}")
+        logger.error("Signal received: FAILED - %s", err)
         self.lbl_status.setText(f"Error: {err}")
         self.btn_start.setEnabled(True)
 
