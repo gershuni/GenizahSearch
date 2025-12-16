@@ -17,6 +17,7 @@ TRANSLATIONS = {
     "Information": "מידע",
     "Ready.": "מוכן.",
     "Loading...": "טוען...",
+    "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
 
     # --- Tabs ---
