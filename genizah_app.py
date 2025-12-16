@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import time
 import threading
 import requests
 import urllib3
@@ -24,7 +25,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoo
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
-from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread
+from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
@@ -711,7 +712,8 @@ class GenizahGUI(QMainWindow):
         self.browse_img_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
-        self._connectivity_lock = threading.Lock()
+        self._connectivity_thread = None
+        self._connectivity_start_time = 0
         self._last_connectivity_state = None
         self._last_connectivity_ui_state = {"status": "degraded", "details": [tr("Checking connectivity...")]}
 
@@ -741,35 +743,39 @@ class GenizahGUI(QMainWindow):
         self.connectivity_timer.start()
 
     def refresh_connectivity_status(self):
-        if not self._connectivity_lock.acquire(blocking=False):
-            return
-        threading.Thread(target=self._check_services_and_update, daemon=True).start()
+        # Manage the worker thread
+        if self._connectivity_thread and self._connectivity_thread.isRunning():
+            # If stuck for > 30 seconds, kill and restart
+            if time.time() - self._connectivity_start_time > 30:
+                logger.warning("Connectivity thread stuck (>30s). Terminating.")
+                self._connectivity_thread.terminate()
+                self._connectivity_thread.wait()
+            else:
+                # Still running normally, skip this check cycle
+                return
 
-    def _check_services_and_update(self):
-        try:
-            extra = {}
-            if self.ai_mgr:
-                ai_endpoint = self.ai_mgr.get_healthcheck_endpoint()
-                if ai_endpoint:
-                    extra['ai_provider'] = ai_endpoint
+        self._connectivity_start_time = time.time()
+        self._connectivity_thread = ConnectivityThread(self.ai_mgr)
+        self._connectivity_thread.finished_signal.connect(self._on_connectivity_finished)
+        self._connectivity_thread.start()
 
-            statuses = check_external_services(extra_endpoints=extra, timeout=3)
-            logger.debug("Connectivity summarized: %s", self._summarize_connectivity(statuses))
+    def _on_connectivity_finished(self, statuses):
+        if "error" in statuses:
+            logger.error("Connectivity check error: %s", statuses["error"])
+            state = {"status": "degraded", "details": [tr("Check failed")]}
+        else:
             logger.debug("Connectivity raw statuses: %r", statuses)
             state = self._summarize_connectivity(statuses)
-            self._last_connectivity_ui_state = state
 
+        self._last_connectivity_ui_state = state
+        state_key = (state['status'], tuple(state['details']))
 
-            state_key = (state['status'], tuple(state['details']))
-            if state_key != self._last_connectivity_state:
-                self._last_connectivity_state = state_key
-                readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
-                logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
+        if state_key != self._last_connectivity_state:
+            self._last_connectivity_state = state_key
+            readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
+            logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
 
-            QTimer.singleShot(0, lambda s=state: self._update_connectivity_ui(s))
-
-        finally:
-            self._connectivity_lock.release()
+        self._update_connectivity_ui(state)
 
     def _summarize_connectivity(self, statuses):
         def is_reachable(obj, default=False):
@@ -1557,7 +1563,7 @@ class GenizahGUI(QMainWindow):
     def start_metadata_loading(self, ids):
         if not ids:
             return
-            logger.debug("start_metadata_loading: %d ids, sample=%s", len(ids), ids[:10])
+        logger.debug("start_metadata_loading: %d ids, sample=%s", len(ids), ids[:10])
 
         if self.meta_loader and self.meta_loader.isRunning():
             self.meta_loader.request_cancel()
@@ -1569,7 +1575,7 @@ class GenizahGUI(QMainWindow):
 
         # Update initial metadata from cache for all rows
         for res in self.last_results:
-            sid = res['display']['id'] or meta.get('id')
+            sid = res['display']['id']
             shelf = res['display'].get('shelfmark', '')
             title = res['display'].get('title', '')
 

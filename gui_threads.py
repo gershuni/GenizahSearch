@@ -2,7 +2,29 @@
 
 # gui_threads.py
 from PyQt6.QtCore import QThread, pyqtSignal
-from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager
+from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager, check_external_services
+
+class ConnectivityThread(QThread):
+    """Check connectivity in a separate thread and emit signal with result."""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, ai_mgr):
+        super().__init__()
+        self.ai_mgr = ai_mgr
+
+    def run(self):
+        try:
+            extra = {}
+            if self.ai_mgr:
+                ai_endpoint = self.ai_mgr.get_healthcheck_endpoint()
+                if ai_endpoint:
+                    extra['ai_provider'] = ai_endpoint
+
+            statuses = check_external_services(extra_endpoints=extra, timeout=3)
+            self.finished_signal.emit(statuses)
+        except Exception as e:
+            # Emit a minimal "failure" status so the UI can update
+            self.finished_signal.emit({"error": str(e)})
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
