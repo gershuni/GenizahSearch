@@ -2801,5 +2801,5 @@ if __name__ == "__main__":
         app.setWindowIcon(app_icon)
     
     window = GenizahGUI()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
