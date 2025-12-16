@@ -7,7 +7,6 @@ import re
 import threading
 import requests
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import csv
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -24,9 +23,26 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
-from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG
+from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread
 from filter_text_dialog import FilterTextDialog
+
+logger = get_logger(__name__)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+_TLS_NOTICE_LOGGED = False
+
+
+def log_tls_relaxation_notice():
+    """Log once that TLS verification is intentionally disabled for thumbnail fetches."""
+    global _TLS_NOTICE_LOGGED
+    if not _TLS_NOTICE_LOGGED:
+        logger.info(
+            "TLS verification is disabled for thumbnail downloads to accommodate legacy IIIF endpoints "
+            "with outdated certificates; certificate validation is skipped for these image requests."
+        )
+        _TLS_NOTICE_LOGGED = True
+
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
@@ -62,8 +78,14 @@ class ImageLoaderThread(QThread):
         
         # Ensure cache directory exists
         if not os.path.exists(Config.IMAGE_CACHE_DIR):
-            try: os.makedirs(Config.IMAGE_CACHE_DIR)
-            except: pass
+            try:
+                os.makedirs(Config.IMAGE_CACHE_DIR)
+            except Exception as e:
+                logger.warning(
+                    "Could not create image cache directory at %s: %s; image caching disabled for this session.",
+                    Config.IMAGE_CACHE_DIR,
+                    e,
+                )
 
     def cancel(self):
         self._cancelled = True
@@ -83,15 +105,16 @@ class ImageLoaderThread(QThread):
             
             # --- CHECK LOCAL CACHE ---
             if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                # print(f"[DEBUG] Loading from local cache: {local_path}")
                 img = QImage(local_path)
                 if not img.isNull():
                     self.image_loaded.emit(img)
                     return
                 else:
                     # Corrupt file? Delete it so we re-download
-                    try: os.remove(local_path)
-                    except: pass
+                    try:
+                        os.remove(local_path)
+                    except Exception as e:
+                        logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
 
         # 2. Download from Network (if not in cache)
         headers = {
@@ -107,7 +130,7 @@ class ImageLoaderThread(QThread):
         # Attempt B: Fallback to Rosetta if Attempt A failed and we have an FL ID
         if data is None and fl_match and not self._cancelled:
             fl_digits = fl_match.group(1)
-            print(f"[DEBUG] Cache miss & IIIF failed. Trying Rosetta for FL{fl_digits}...")
+            logger.info("Cache miss & IIIF failed. Trying Rosetta fallback for FL%s...", fl_digits)
             fallback_url = MetadataManager.get_rosetta_fallback_url(fl_digits)
             if fallback_url:
                 data = self._download_bytes(fallback_url, headers)
@@ -123,9 +146,13 @@ class ImageLoaderThread(QThread):
                     try:
                         with open(local_path, 'wb') as f:
                             f.write(data)
-                        # print(f"[DEBUG] Saved to cache: {local_path}")
+                        logger.debug("Saved thumbnail cache to %s", local_path)
                     except Exception as e:
-                        print(f"[DEBUG] Failed to write cache: {e}")
+                        logger.warning(
+                            "Failed to write thumbnail cache for %s: %s; future loads will re-download.",
+                            local_path,
+                            e,
+                        )
             else:
                 self.load_failed.emit()
         else:
@@ -139,7 +166,8 @@ class ImageLoaderThread(QThread):
             if resp.status_code == 200:
                 return resp.content
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning("Image download failed for %s: %s", target_url, e)
             return None
                 
 class HelpDialog(QDialog):
@@ -565,7 +593,7 @@ class ResultDialog(QDialog):
         if sid != self.current_browse_sid:
             return
 
-        print(f"[DEBUG] Starting download for SID={sid}, URL={thumb_url}") 
+        logger.debug("Starting browse image download for SID=%s, URL=%s", sid, thumb_url)
 
         self.browse_thumb_url = thumb_url
         self.cancel_browse_image_thread()
@@ -594,9 +622,9 @@ class ResultDialog(QDialog):
         try:
             if hasattr(self, 'meta_mgr'):
                 self.meta_mgr.save_caches()
-                print("[DEBUG] Cache saved successfully.")
+                logger.info("Metadata caches flushed to disk on exit.")
         except Exception as e:
-            print(f"[ERROR] Failed to save cache: {e}")
+            logger.error("Failed to save metadata caches on exit: %s", e)
 
         # 2. Stop worker threads safely
         try:
@@ -646,6 +674,7 @@ class GenizahGUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Genizah Search Pro V3.2")
         self.resize(1300, 850)
+        log_tls_relaxation_notice()
 
         self.meta_mgr = None
         self.var_mgr = None
@@ -682,8 +711,11 @@ class GenizahGUI(QMainWindow):
         self.browse_img_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
+        self._connectivity_lock = threading.Lock()
+        self._last_connectivity_state = None
 
         self.init_ui()
+        self.init_connectivity_monitor()
 
         # Step 2: Start heavy initialization in background
         self.status_label.setText(tr("Initializing components... Please wait."))
@@ -698,6 +730,88 @@ class GenizahGUI(QMainWindow):
             self.startup_thread.start()
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
+
+    def init_connectivity_monitor(self):
+        self.connectivity_timer = QTimer(self)
+        self.connectivity_timer.setInterval(60_000)
+        self.connectivity_timer.timeout.connect(self.refresh_connectivity_status)
+        self.refresh_connectivity_status()
+        self.connectivity_timer.start()
+
+    def refresh_connectivity_status(self):
+        if not self._connectivity_lock.acquire(blocking=False):
+            return
+        threading.Thread(target=self._check_services_and_update, daemon=True).start()
+
+    def _check_services_and_update(self):
+        try:
+            extra = {}
+            if self.ai_mgr:
+                ai_endpoint = self.ai_mgr.get_healthcheck_endpoint()
+                if ai_endpoint:
+                    extra['ai_provider'] = ai_endpoint
+
+            statuses = check_external_services(extra_endpoints=extra, timeout=3)
+            state = self._summarize_connectivity(statuses)
+
+            state_key = (state['status'], tuple(state['details']))
+            if state_key != self._last_connectivity_state:
+                self._last_connectivity_state = state_key
+                readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
+                logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
+
+            QTimer.singleShot(0, lambda: self._update_connectivity_ui(state))
+        finally:
+            self._connectivity_lock.release()
+
+    def _summarize_connectivity(self, statuses):
+        network_status = statuses.get("network", {})
+        offline = not network_status.get("reachable", False)
+        degraded = []
+        if network_status.get("note"):
+            degraded.append(tr("Network reachable but issues: {}").format(network_status["note"]))
+
+        nli_status = statuses.get("nli", {})
+        if not nli_status.get("reachable", True):
+            reason = nli_status.get("note") or tr("NLI service unavailable")
+            degraded.append(reason)
+
+        ai_status = statuses.get("ai_provider", {})
+        if ai_status:
+            if not ai_status.get("reachable", True):
+                reason = ai_status.get("note") or tr("AI provider unavailable")
+                degraded.append(reason)
+            elif ai_status.get("note"):
+                degraded.append(tr("AI provider reachable but {}").format(ai_status["note"]))
+
+        if offline:
+            status = "offline"
+            details = [tr("No internet connection")] + degraded
+        elif degraded:
+            status = "degraded"
+            details = degraded
+        else:
+            status = "online"
+            details = []
+
+        return {"status": status, "details": details}
+
+    def _update_connectivity_ui(self, state):
+        status = state['status']
+        if status == "offline":
+            text = tr("Offline")
+            color = "#c0392b"
+        elif status == "degraded":
+            text = tr("Degraded")
+            color = "#f39c12"
+        else:
+            text = tr("Online")
+            color = "#27ae60"
+
+        tooltip = "\n".join(state['details']) if state['details'] else tr("All external services responding.")
+        self.connectivity_label.setText(text)
+        self.connectivity_label.setStyleSheet(f"padding:6px; border-radius:6px; color: white; background-color: {color};")
+        self.connectivity_label.setToolTip(tooltip)
 
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
         try:
@@ -715,6 +829,7 @@ class GenizahGUI(QMainWindow):
                 self.combo_provider.setCurrentText(self.ai_mgr.provider)
                 self.txt_model.setText(self.ai_mgr.model_name)
                 self.txt_api_key.setText(self.ai_mgr.api_key)
+                self.refresh_connectivity_status()
 
             # Enable UI interactions
             self.btn_search.setEnabled(True)
@@ -818,10 +933,11 @@ class GenizahGUI(QMainWindow):
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
+        
         self.results_placeholder = QLabel(tr("Please wait while components load..."))
         self.results_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_placeholder.setWordWrap(True)
-        self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b; padding: 20px; border: 2px dashed #c0392b; background: #fff9f2;")
+        self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b;")
 
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
@@ -830,8 +946,12 @@ class GenizahGUI(QMainWindow):
         results_container = QWidget()
         results_container.setLayout(self.results_stack)
         layout.addWidget(results_container)
-        
+
         bot = QHBoxLayout()
+        self.connectivity_label = QLabel(tr("Checking connectivity..."))
+        self.connectivity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.connectivity_label.setMinimumWidth(150)
+        self.connectivity_label.setStyleSheet("padding:6px; border-radius:6px; color: white; background-color: #f39c12;")
         self.status_label = QLabel(tr("Ready."))
         lbl_export = QLabel(tr("Export Results") + ":")
         
@@ -864,6 +984,7 @@ class GenizahGUI(QMainWindow):
         self.btn_stop_meta.setEnabled(False)
 
         # Add controls to status row
+        bot.addWidget(self.connectivity_label)
         bot.addWidget(self.status_label, 1)
         bot.addWidget(self.btn_reload_meta)
         bot.addWidget(self.btn_stop_meta)

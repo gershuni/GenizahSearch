@@ -2,6 +2,7 @@
 
 # -*- coding: utf-8 -*-
 # genizah_core.py
+import logging
 import os
 import sys
 import re
@@ -9,10 +10,11 @@ import shutil
 import pickle
 import requests
 import threading
-import time 
+import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from logging.handlers import RotatingFileHandler
 from typing import Mapping
 import itertools
 import json
@@ -59,6 +61,7 @@ class Config:
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
+    LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
     
     # Settings
     TANTIVY_CLAUSE_LIMIT = 5000
@@ -67,13 +70,60 @@ class Config:
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
 
+# ==============================================================================
+#  LOGGING
+# ==============================================================================
+
+
+def configure_logger():
+    """Configure a rotating file logger for the app (quiet for users, verbose for devs)."""
+    logger = logging.getLogger("genizah")
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(logging.DEBUG)
+    os.makedirs(Config.INDEX_DIR, exist_ok=True)
+
+    file_handler = RotatingFileHandler(Config.LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s"))
+    file_handler.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    console.setLevel(logging.INFO)
+    logger.addHandler(console)
+
+    logger.propagate = False
+    return logger
+
+
+def get_logger(name=None):
+    base_logger = configure_logger()
+    return base_logger.getChild(name) if name else base_logger
+
+
+LOGGER = get_logger(__name__)
+
+SERVICE_ENDPOINTS = {
+    'network': 'https://www.google.com/generate_204',
+    'nli': 'https://iiif.nli.org.il/IIIFv21/',
+}
+
+AI_PROVIDER_ENDPOINTS = {
+    "Google Gemini": "https://generativelanguage.googleapis.com",
+    "OpenAI": "https://api.openai.com/v1/models",
+    "Anthropic Claude": "https://api.anthropic.com/v1/models",
+}
+
 def load_language():
     """Load language preference. Returns 'en' or 'he'."""
     try:
         if os.path.exists(Config.LANGUAGE_FILE):
             with open(Config.LANGUAGE_FILE, 'rb') as f:
                 return pickle.load(f)
-    except: pass
+    except Exception as e:
+        LOGGER.warning("Failed to load language preference from %s: %s", Config.LANGUAGE_FILE, e)
     return 'en'
 
 def save_language(lang):
@@ -82,7 +132,8 @@ def save_language(lang):
         if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
         with open(Config.LANGUAGE_FILE, 'wb') as f:
             pickle.dump(lang, f)
-    except: pass
+    except Exception as e:
+        LOGGER.error("Failed to save language preference to %s: %s", Config.LANGUAGE_FILE, e)
 
 # Global language state
 CURRENT_LANG = load_language()
@@ -92,6 +143,33 @@ def tr(text):
     if CURRENT_LANG == 'he':
         return TRANSLATIONS.get(text, text)
     return text
+
+def check_external_services(extra_endpoints=None, timeout=3):
+    """Check whether core external services respond within a short timeout."""
+    endpoints = dict(SERVICE_ENDPOINTS)
+    if extra_endpoints:
+        endpoints.update(extra_endpoints)
+
+    results = {}
+    for name, url in endpoints.items():
+        detail = {"reachable": False, "status_code": None, "note": None}
+        try:
+            if name == "network":
+                resp = requests.get(url, timeout=timeout, allow_redirects=True, stream=True)
+            else:
+                resp = requests.head(url, timeout=timeout, allow_redirects=True)
+            detail["status_code"] = resp.status_code
+            detail["reachable"] = resp.status_code < 500
+            if resp.status_code in (401, 403):
+                detail["note"] = "reachable but unauthorized"
+            if name == "network":
+                resp.close()
+        except Exception as e:
+            LOGGER.warning("Health check failed for %s at %s: %s", name, url, e)
+            detail["note"] = str(e)
+            detail["reachable"] = False
+        results[name] = detail
+    return results
 
 # ==============================================================================
 #  AI MANAGER
@@ -103,12 +181,14 @@ class AIManager:
         self.model_name = "gemini-1.5-flash"
         self.api_key = ""
         self.chat = None
-        
+
         # Ensure dir exists
         if not os.path.exists(Config.INDEX_DIR):
-            try: os.makedirs(Config.INDEX_DIR)
-            except: pass
-            
+            try:
+                os.makedirs(Config.INDEX_DIR)
+            except Exception as e:
+                LOGGER.error("Failed to create index directory for AI config at %s: %s", Config.INDEX_DIR, e)
+
         if os.path.exists(Config.CONFIG_FILE):
             try:
                 with open(Config.CONFIG_FILE, 'rb') as f:
@@ -120,7 +200,12 @@ class AIManager:
                         self.api_key = cfg.get('api_key', '')
                         self.provider = cfg.get('provider', 'Google Gemini')
                         self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
-            except: pass
+            except Exception as e:
+                LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
+
+    def get_healthcheck_endpoint(self):
+        """Return the connectivity probe endpoint for the configured provider."""
+        return AI_PROVIDER_ENDPOINTS.get(self.provider)
 
     def save_config(self, provider, model_name, key):
         self.provider = provider
@@ -373,11 +458,13 @@ class MetadataManager:
         self.csv_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
-        
+
         # Ensure index dir exists for caches
         if not os.path.exists(Config.INDEX_DIR):
-            try: os.makedirs(Config.INDEX_DIR)
-            except: pass
+            try:
+                os.makedirs(Config.INDEX_DIR)
+            except Exception as e:
+                LOGGER.error("Failed to create index directory for metadata at %s: %s", Config.INDEX_DIR, e)
 
         # Load small caches immediately
         self._load_small_caches()
@@ -391,11 +478,13 @@ class MetadataManager:
         if os.path.exists(Config.CACHE_NLI):
             try:
                 with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
-            except: pass
+            except Exception as e:
+                LOGGER.warning("Failed to load NLI cache from %s: %s", Config.CACHE_NLI, e)
         if os.path.exists(Config.CACHE_META):
             try:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
-            except: pass
+            except Exception as e:
+                LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
 
     def _load_heavy_caches_bg(self):
         self._load_csv_bank()
@@ -412,7 +501,8 @@ class MetadataManager:
                 next(reader, None) # Skip header
 
                 for row in reader:
-                    if not row or len(row) < 2: continue
+                    if not row or len(row) < 2:
+                        continue
                     # Format: system_number | call_numbers | ... | titles
                     sys_id = row[0].strip()
 
@@ -433,7 +523,7 @@ class MetadataManager:
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
         except Exception as e:
-            print(f"Error loading CSV bank: {e}")
+            LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 
     def get_meta_for_id(self, sys_id):
         """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
@@ -469,10 +559,11 @@ class MetadataManager:
     def save_caches(self):
         try:
             with open(Config.CACHE_NLI, 'wb') as f: pickle.dump(self.nli_cache, f)
-        except: pass
+        except Exception as e:
+            LOGGER.error("Failed to persist NLI cache to %s: %s", Config.CACHE_NLI, e)
 
     def _build_file_map_background(self):
-        if self.meta_map: return 
+        if self.meta_map: return
         if not os.path.exists(Config.FILE_V7): return
         temp_map = {}
         try:
@@ -485,7 +576,8 @@ class MetadataManager:
                             if len(parts) > 1: temp_map[uid] = parts[1].strip()
             self.meta_map = temp_map
             with open(Config.CACHE_META, 'wb') as f: pickle.dump(self.meta_map, f)
-        except: pass
+        except Exception as e:
+            LOGGER.warning("Failed to build or save file map cache from %s: %s", Config.FILE_V7, e)
 
     def extract_unique_id(self, text):
         match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
@@ -842,7 +934,8 @@ class SearchEngine:
                 self.index = tantivy.Index.open(db_path)
                 self.searcher = self.index.searcher()
                 return True
-            except: pass
+            except Exception as e:
+                LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
 
     def build_tantivy_query(self, terms, mode):
@@ -1063,14 +1156,17 @@ class SearchEngine:
         try:
             query = self.index.parse_query(t_query_str, ["content"])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
-        except Exception: return []
+        except Exception as e:
+            LOGGER.warning("Search query failed to parse/execute for pattern %s: %s", t_query_str, e)
+            return []
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
         results = []
-        
+
         for i, (score, doc_addr) in enumerate(hits):
-            if progress_callback and i % 50 == 0: progress_callback(i, total_hits)
+            if progress_callback and i % 50 == 0:
+                progress_callback(i, total_hits)
             try:
                 doc = self.searcher.doc(doc_addr)
                 content = doc['content'][0]
@@ -1083,7 +1179,8 @@ class SearchEngine:
                         'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
                         'raw_file_hl': hl_f, 'highlight_pattern': pattern_str
                     })
-            except: pass
+            except Exception as e:
+                LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         return self._deduplicate(results)
 
     def _deduplicate(self, results):
@@ -1134,7 +1231,8 @@ class SearchEngine:
                         rec['matches'].append(regex.search(content).span())
                         rec['src_indices'].update(range(i, i + chunk_size))
                         rec['patterns'].add(regex.pattern)
-            except: pass
+            except Exception as e:
+                LOGGER.warning("Failed composition chunk processing at token %s: %s", i, e)
 
         def build_items(hits_dict):
             final_items = []
@@ -1243,7 +1341,8 @@ class SearchEngine:
             q = self.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
             res = self.searcher.search(q, 1)
             if res.hits: return self.searcher.doc(res.hits[0][1])['content'][0]
-        except: pass
+        except Exception as e:
+            LOGGER.warning("Failed to retrieve full text for uid %s: %s", uid, e)
         return None
 
     def get_full_manuscript(self, sys_id):
