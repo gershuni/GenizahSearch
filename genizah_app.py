@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
-                             QProgressDialog) 
+                             QProgressDialog, QStackedLayout) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
@@ -719,6 +719,7 @@ class GenizahGUI(QMainWindow):
 
         # Step 2: Start heavy initialization in background
         self.status_label.setText(tr("Initializing components... Please wait."))
+        self.set_results_loading(True)
         QTimer.singleShot(100, self.start_background_init)
 
     def start_background_init(self):
@@ -839,6 +840,7 @@ class GenizahGUI(QMainWindow):
             self.btn_build_index.setEnabled(True)
             
             self.status_label.setText(tr("Components loaded. Ready."))
+            self.set_results_loading(False)
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
@@ -928,11 +930,22 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(0, 135) 
         self.results_table.setColumnWidth(1, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
-        layout.addWidget(self.results_table)
+        
+        self.results_placeholder = QLabel(tr("Please wait while components load..."))
+        self.results_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.results_placeholder.setWordWrap(True)
+        self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b;")
+
+        self.results_stack = QStackedLayout()
+        self.results_stack.addWidget(self.results_placeholder)
+        self.results_stack.addWidget(self.results_table)
+
+        results_container = QWidget()
+        results_container.setLayout(self.results_stack)
+        layout.addWidget(results_container)
 
         bot = QHBoxLayout()
         self.connectivity_label = QLabel(tr("Checking connectivity..."))
@@ -986,6 +999,12 @@ class GenizahGUI(QMainWindow):
         layout.addLayout(bot)
         panel.setLayout(layout)
         return panel
+
+    def set_results_loading(self, is_loading: bool):
+        """Toggle the search results placeholder while components initialize."""
+        if hasattr(self, "results_stack") and hasattr(self, "results_placeholder") and hasattr(self, "results_table"):
+            target = self.results_placeholder if is_loading else self.results_table
+            self.results_stack.setCurrentWidget(target)
 
     def create_composition_tab(self):
         panel = QWidget(); layout = QVBoxLayout(); splitter = QSplitter(Qt.Orientation.Vertical)
