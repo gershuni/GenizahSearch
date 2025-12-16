@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import time
 import threading
 import requests
 import urllib3
@@ -712,6 +713,7 @@ class GenizahGUI(QMainWindow):
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
         self._connectivity_lock = threading.Lock()
+        self._connectivity_ts = 0
         self._last_connectivity_state = None
         self._last_connectivity_ui_state = {"status": "degraded", "details": [tr("Checking connectivity...")]}
 
@@ -742,10 +744,24 @@ class GenizahGUI(QMainWindow):
 
     def refresh_connectivity_status(self):
         if not self._connectivity_lock.acquire(blocking=False):
-            return
-        threading.Thread(target=self._check_services_and_update, daemon=True).start()
+            # If locked, check if it's stuck (timeout > 30s)
+            if time.time() - self._connectivity_ts > 30:
+                logger.warning("Connectivity check stuck (>30s). Forcing reset.")
+                self._connectivity_lock = threading.Lock()
+                # Try acquiring new lock immediately to proceed
+                if not self._connectivity_lock.acquire(blocking=False):
+                    return
+            else:
+                return
 
-    def _check_services_and_update(self):
+        # Lock acquired (either normally or after reset)
+        self._connectivity_ts = time.time()
+        current_lock = self._connectivity_lock
+        threading.Thread(target=self._check_services_and_update, args=(current_lock,), daemon=True).start()
+
+    def _check_services_and_update(self, lock_obj):
+        # Default state in case of crash
+        state = getattr(self, "_last_connectivity_ui_state", {"status": "degraded", "details": [tr("Check failed.")]})
         try:
             extra = {}
             if self.ai_mgr:
@@ -759,17 +775,23 @@ class GenizahGUI(QMainWindow):
             state = self._summarize_connectivity(statuses)
             self._last_connectivity_ui_state = state
 
-
             state_key = (state['status'], tuple(state['details']))
             if state_key != self._last_connectivity_state:
                 self._last_connectivity_state = state_key
                 readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
                 logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
 
-            QTimer.singleShot(0, lambda s=state: self._update_connectivity_ui(s))
+        except Exception as e:
+            logger.error("Connectivity check crashed: %s", e)
+            state = {"status": "degraded", "details": [tr("Check failed: ") + str(e)]}
 
         finally:
-            self._connectivity_lock.release()
+            # Ensure UI is updated and lock released
+            QTimer.singleShot(0, lambda s=state: self._update_connectivity_ui(s))
+            try:
+                lock_obj.release()
+            except RuntimeError:
+                pass  # Lock might be already released or replaced
 
     def _summarize_connectivity(self, statuses):
         def is_reachable(obj, default=False):
