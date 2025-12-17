@@ -22,11 +22,6 @@ import json
 from genizah_translations import TRANSLATIONS
 
 try:
-    import tantivy
-except ImportError:
-    raise ImportError(tr("Tantivy library missing. Please install it."))
-
-try:
     import google.generativeai as genai
     HAS_GENAI = True
 except ImportError:
@@ -143,6 +138,11 @@ def tr(text):
     if CURRENT_LANG == 'he':
         return TRANSLATIONS.get(text, text)
     return text
+
+try:
+    import tantivy
+except ImportError:
+    raise ImportError(tr("Tantivy library missing. Please install it."))
 
 def check_external_services(extra_endpoints=None, timeout=3):
     """Check whether core external services respond within a short timeout."""

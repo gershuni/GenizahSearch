@@ -24,7 +24,22 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
-from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+_CORE_IMPORT_ERROR = None
+try:
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+except ImportError as import_error:
+    _CORE_IMPORT_ERROR = import_error
+
+if _CORE_IMPORT_ERROR:
+    def _show_core_import_error(err):
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.critical(None, "Missing dependency", str(err))
+
+    if __name__ == "__main__":
+        _show_core_import_error(_CORE_IMPORT_ERROR)
+        sys.exit(1)
+    else:
+        raise _CORE_IMPORT_ERROR
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
 from filter_text_dialog import FilterTextDialog
 
