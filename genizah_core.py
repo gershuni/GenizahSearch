@@ -35,6 +35,9 @@ except ImportError:
 # ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
+APP_VERSION = "3.2"
+
+
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
     # 1. Base Directory (Where the EXE/Script is)
@@ -62,6 +65,7 @@ class Config:
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
     LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
+    GITHUB_REPO = "HillelGershuni/GenizahSearch"
     
     # Settings
     TANTIVY_CLAUSE_LIMIT = 5000
@@ -104,6 +108,51 @@ def get_logger(name=None):
 
 
 LOGGER = get_logger(__name__)
+
+
+class AppConfig:
+    """Centralized load/save helpers for user configuration stored in a pickle file."""
+    DEFAULTS = {
+        "provider": "Google Gemini",
+        "model_name": "gemini-1.5-flash",
+        "api_key": "",
+        "check_updates_on_startup": True,
+    }
+
+    @classmethod
+    def load(cls):
+        cfg = dict(cls.DEFAULTS)
+        if os.path.exists(Config.CONFIG_FILE):
+            try:
+                with open(Config.CONFIG_FILE, 'rb') as f:
+                    raw = pickle.load(f)
+                    if isinstance(raw, dict):
+                        if 'gemini_key' in raw and 'api_key' not in raw:
+                            raw['api_key'] = raw.get('gemini_key', '')
+                        cfg.update(raw)
+                    else:
+                        LOGGER.warning("Config file %s is not a dict; ignoring.", Config.CONFIG_FILE)
+            except Exception as e:
+                LOGGER.warning("Failed to load configuration from %s: %s", Config.CONFIG_FILE, e)
+        return cfg
+
+    @classmethod
+    def _write(cls, cfg):
+        if not os.path.exists(Config.INDEX_DIR):
+            os.makedirs(Config.INDEX_DIR)
+        with open(Config.CONFIG_FILE, 'wb') as f:
+            pickle.dump(cfg, f)
+        return cfg
+
+    @classmethod
+    def save_settings(cls, updates):
+        cfg = cls.load()
+        cfg.update(updates)
+        return cls._write(cfg)
+
+    @classmethod
+    def save_setting(cls, key, value):
+        return cls.save_settings({key: value})
 
 SERVICE_ENDPOINTS = {
     'network': 'https://www.google.com/generate_204',
@@ -177,9 +226,10 @@ def check_external_services(extra_endpoints=None, timeout=3):
 class AIManager:
     """Manage AI configuration (Provider, Model, Key) and prompt sessions."""
     def __init__(self):
-        self.provider = "Google Gemini"
-        self.model_name = "gemini-1.5-flash"
-        self.api_key = ""
+        cfg = AppConfig.load()
+        self.provider = cfg.get("provider", "Google Gemini")
+        self.model_name = cfg.get("model_name", "gemini-1.5-flash")
+        self.api_key = cfg.get("api_key", "")
         self.chat = None
 
         # Ensure dir exists
@@ -188,20 +238,6 @@ class AIManager:
                 os.makedirs(Config.INDEX_DIR)
             except Exception as e:
                 LOGGER.error("Failed to create index directory for AI config at %s: %s", Config.INDEX_DIR, e)
-
-        if os.path.exists(Config.CONFIG_FILE):
-            try:
-                with open(Config.CONFIG_FILE, 'rb') as f:
-                    cfg = pickle.load(f)
-                    # Support legacy key
-                    if 'gemini_key' in cfg and 'api_key' not in cfg:
-                        self.api_key = cfg.get('gemini_key', '')
-                    else:
-                        self.api_key = cfg.get('api_key', '')
-                        self.provider = cfg.get('provider', 'Google Gemini')
-                        self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
-            except Exception as e:
-                LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
 
     def get_healthcheck_endpoint(self):
         """Return the connectivity probe endpoint for the configured provider."""
@@ -212,13 +248,11 @@ class AIManager:
         self.model_name = model_name
         self.api_key = key.strip()
 
-        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
-        with open(Config.CONFIG_FILE, 'wb') as f:
-            pickle.dump({
-                'provider': self.provider,
-                'model_name': self.model_name,
-                'api_key': self.api_key
-            }, f)
+        AppConfig.save_settings({
+            'provider': self.provider,
+            'model_name': self.model_name,
+            'api_key': self.api_key
+        })
         # Reset session
         self.chat = None
 
@@ -1408,3 +1442,42 @@ class SearchEngine:
             'full_header': target_page['full_header'], 'text': text,
             'total_pages': len(pages), 'current_idx': new_idx + 1
         }
+
+
+class UpdateChecker:
+    """Utility to check GitHub releases for newer versions."""
+    def __init__(self, repo_slug, current_version):
+        self.repo_slug = repo_slug
+        self.current_version = current_version
+
+    @staticmethod
+    def _normalize_version(ver):
+        if not ver:
+            return ()
+        ver = str(ver).strip().lstrip("vV")
+        parts = re.split(r"[._-]", ver)
+        normalized = []
+        for p in parts:
+            if p.isdigit():
+                normalized.append(int(p))
+            else:
+                m = re.match(r"(\d+)", p)
+                if m:
+                    normalized.append(int(m.group(1)))
+        return tuple(normalized)
+
+    def is_newer(self, latest_version):
+        return self._normalize_version(latest_version) > self._normalize_version(self.current_version)
+
+    def fetch_latest_release(self, timeout=5):
+        url = f"https://api.github.com/repos/{self.repo_slug}/releases/latest"
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code != 200:
+                return None, f"HTTP {resp.status_code}"
+            data = resp.json()
+            latest_version = data.get("tag_name") or data.get("name")
+            release_url = data.get("html_url") or f"https://github.com/{self.repo_slug}/releases"
+            return {"version": latest_version, "url": release_url}, None
+        except Exception as e:
+            return None, str(e)

@@ -24,7 +24,22 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
-from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+from genizah_core import (
+    APP_VERSION,
+    AppConfig,
+    Config,
+    MetadataManager,
+    VariantManager,
+    SearchEngine,
+    Indexer,
+    AIManager,
+    UpdateChecker,
+    tr,
+    save_language,
+    CURRENT_LANG,
+    check_external_services,
+    get_logger,
+)
 from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
 from filter_text_dialog import FilterTextDialog
 
@@ -32,6 +47,7 @@ logger = get_logger(__name__)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _TLS_NOTICE_LOGGED = False
+GITHUB_REPO_SLUG = Config.GITHUB_REPO
 
 
 def log_tls_relaxation_notice():
@@ -673,9 +689,12 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Genizah Search Pro V3.2")
+        self.setWindowTitle(f"Genizah Search Pro V{APP_VERSION}")
         self.resize(1300, 850)
         log_tls_relaxation_notice()
+
+        self.app_config = AppConfig.load()
+        self.update_checker = UpdateChecker(GITHUB_REPO_SLUG, APP_VERSION)
 
         self.meta_mgr = None
         self.var_mgr = None
@@ -855,6 +874,9 @@ class GenizahGUI(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
+
+            if self.app_config.get("check_updates_on_startup", True):
+                QTimer.singleShot(0, lambda: self.check_for_updates(manual=False))
 
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
@@ -1315,9 +1337,24 @@ class GenizahGUI(QMainWindow):
 
         al.addLayout(row1); al.addLayout(row2)
         gb_ai.setLayout(al); layout.addWidget(gb_ai)
+
+        gb_updates = QGroupBox(tr("Updates"))
+        ul = QVBoxLayout()
+        self.chk_auto_update = QCheckBox(tr("Check for updates on startup"))
+        self.chk_auto_update.setChecked(self.app_config.get("check_updates_on_startup", True))
+        self.chk_auto_update.stateChanged.connect(self.on_auto_update_changed)
+        ul.addWidget(self.chk_auto_update)
+
+        self.btn_check_updates = QPushButton(tr("Check for Updates"))
+        self.btn_check_updates.clicked.connect(lambda: self.check_for_updates(manual=True))
+        ul.addWidget(self.btn_check_updates)
+
+        gb_updates.setLayout(ul)
+        layout.addWidget(gb_updates)
         
         gb_about = QGroupBox(tr("About"))
         abl = QVBoxLayout()
+        version_heading = f"Genizah Search Pro {APP_VERSION}"
         about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else """
         <style>
             h3 { margin-bottom: 0px; margin-top: 10px; }
@@ -1326,7 +1363,7 @@ class GenizahGUI(QMainWindow):
         </style>
         <div style='font-family: Arial; font-size: 13px;'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.2</h2>
+                <h2 style='margin-bottom:5px;'>%s</h2>
                 <p style='color: #7f8c8d;'>Developed by Hillel Gershuni (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
@@ -1346,7 +1383,7 @@ class GenizahGUI(QMainWindow):
             <h3>Citation</h3>
             <p>If you use these results in your research, please cite the creators of the dataset: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. You can also mention you used this program: Genizah Search Pro by Hillel Gershuni.</p>
         </div>
-        """
+        """ % version_heading
         
         txt_about = QTextBrowser()
         txt_about.setHtml(about_txt)
@@ -1395,6 +1432,48 @@ class GenizahGUI(QMainWindow):
             return
         self.ai_mgr.save_config(provider, model, key)
         QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(provider))
+
+    def on_auto_update_changed(self, state):
+        enabled = state == Qt.CheckState.Checked
+        self.app_config['check_updates_on_startup'] = enabled
+        AppConfig.save_setting('check_updates_on_startup', enabled)
+
+    def check_for_updates(self, manual=True):
+        if not self.update_checker:
+            return
+
+        if manual:
+            self.status_label.setText(tr("Checking for updates..."))
+        threading.Thread(target=self._run_update_check, args=(manual,), daemon=True).start()
+
+    def _run_update_check(self, manual):
+        latest, err = self.update_checker.fetch_latest_release()
+        QTimer.singleShot(0, lambda: self._handle_update_result(manual, latest, err))
+
+    def _handle_update_result(self, manual, latest, err):
+        if manual:
+            self.status_label.setText(tr("Ready."))
+
+        if err or not latest:
+            logger.warning("Update check failed: %s", err or "Unknown error")
+            if manual:
+                QMessageBox.warning(self, tr("Update Check"), tr("Failed to check for updates:\n{}").format(err or tr("Unknown error")))
+            return
+
+        latest_version = latest.get("version")
+        release_url = latest.get("url") or f"https://github.com/{GITHUB_REPO_SLUG}/releases"
+        if latest_version and self.update_checker.is_newer(latest_version):
+            msg = tr("New version available: {}. Open the GitHub releases page?").format(latest_version)
+            reply = QMessageBox.question(
+                self,
+                tr("Update Available"),
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(release_url))
+        elif manual:
+            QMessageBox.information(self, tr("Update Check"), tr("You are running the latest version ({}).").format(APP_VERSION))
 
     def copy_citation(self):
         citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
