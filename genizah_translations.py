@@ -147,7 +147,7 @@ TRANSLATIONS = {
     "Save Manuscript": "שמור כתב יד",
     "Saved": "נשמר",
     "Manuscript saved to:\n{}": "כתב היד נשמר אל:\n{}",
-    "<< Prev": ">> הקודם", # RTL Logic: Prev logic is "Next" visually in RTL? No, stick to logical arrows.
+    "<< Prev": ">> הקודם", 
     "Next >>": "הבא <<",
     "Page / Image": "עמוד / תמונה", 
     "Image": "תמונה",
@@ -185,16 +185,13 @@ TRANSLATIONS = {
 
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
-    "Result {} of {}": "תוצאה {} מתוך {}", # Updated
-    "Go to Ktiv": "עיון בכתיב", # Updated
-    "Sys": "מס' מערכת", # New
-    "FL": "מס' קובץ", # New
-    "Image:": "תמונה:", # New
-    "Manuscript Text": "טקסט כתב היד", # Confirmed
+    "Result {} of {}": "תוצאה {} מתוך {}", 
+    "Go to Ktiv": "עיון בכתיב", 
+    "Sys": "מס' מערכת", 
+    "FL": "מס' קובץ", 
+    "Image:": "תמונה:", 
+    "Manuscript Text": "טקסט כתב היד", 
 
-    # Arrows for RTL:
-    # "Next Result" -> Point Left in RTL. Icon should be Left Arrow.
-    # "Prev Result" -> Point Right in RTL. Icon should be Right Arrow.
     "◀ Prev Result": "▶ לתוצאה קודמת",
     "Next Result ▶": "לתוצאה הבאה ◀",
 
@@ -298,7 +295,7 @@ TRANSLATIONS = {
         """,
 
     "Restart Required": "נדרש אתחול מחדש",
-    "Please restart the application for the language change to take effect.": "אנא הפעל מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף.",
+    "Please restart the application for the language change to take effect.": "אנא הפעילו מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף.",
     "Language": "שפה",
     
     # --- Report Headers ---
