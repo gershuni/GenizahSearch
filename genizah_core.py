@@ -70,6 +70,10 @@ class Config:
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
 
+    # Version
+    VERSION = "V3.2"
+    CHECK_UPDATES_ON_STARTUP = True
+
 # ==============================================================================
 #  LOGGING
 # ==============================================================================
@@ -135,6 +139,30 @@ def save_language(lang):
     except Exception as e:
         LOGGER.error("Failed to save language preference to %s: %s", Config.LANGUAGE_FILE, e)
 
+def load_config_dict():
+    """Load the full configuration dictionary."""
+    if os.path.exists(Config.CONFIG_FILE):
+        try:
+            with open(Config.CONFIG_FILE, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            LOGGER.warning("Failed to load config from %s: %s", Config.CONFIG_FILE, e)
+    return {}
+
+def save_config_dict(new_data):
+    """Update the configuration dictionary with new data, preserving existing keys."""
+    try:
+        current_data = load_config_dict()
+        current_data.update(new_data)
+
+        if not os.path.exists(Config.INDEX_DIR):
+            os.makedirs(Config.INDEX_DIR)
+
+        with open(Config.CONFIG_FILE, 'wb') as f:
+            pickle.dump(current_data, f)
+    except Exception as e:
+        LOGGER.error("Failed to save config to %s: %s", Config.CONFIG_FILE, e)
+
 # Global language state
 CURRENT_LANG = load_language()
 
@@ -189,19 +217,15 @@ class AIManager:
             except Exception as e:
                 LOGGER.error("Failed to create index directory for AI config at %s: %s", Config.INDEX_DIR, e)
 
-        if os.path.exists(Config.CONFIG_FILE):
-            try:
-                with open(Config.CONFIG_FILE, 'rb') as f:
-                    cfg = pickle.load(f)
-                    # Support legacy key
-                    if 'gemini_key' in cfg and 'api_key' not in cfg:
-                        self.api_key = cfg.get('gemini_key', '')
-                    else:
-                        self.api_key = cfg.get('api_key', '')
-                        self.provider = cfg.get('provider', 'Google Gemini')
-                        self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
-            except Exception as e:
-                LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
+        cfg = load_config_dict()
+        if cfg:
+            # Support legacy key
+            if 'gemini_key' in cfg and 'api_key' not in cfg:
+                self.api_key = cfg.get('gemini_key', '')
+            else:
+                self.api_key = cfg.get('api_key', '')
+                self.provider = cfg.get('provider', 'Google Gemini')
+                self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
 
     def get_healthcheck_endpoint(self):
         """Return the connectivity probe endpoint for the configured provider."""
@@ -212,13 +236,11 @@ class AIManager:
         self.model_name = model_name
         self.api_key = key.strip()
 
-        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
-        with open(Config.CONFIG_FILE, 'wb') as f:
-            pickle.dump({
-                'provider': self.provider,
-                'model_name': self.model_name,
-                'api_key': self.api_key
-            }, f)
+        save_config_dict({
+            'provider': self.provider,
+            'model_name': self.model_name,
+            'api_key': self.api_key
+        })
         # Reset session
         self.chat = None
 
