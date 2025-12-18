@@ -222,11 +222,12 @@ class HelpDialog(QDialog):
                 return
             except Exception as e:
                 logger.warning("Failed to load help file %s: %s", source_path, e)
-        notice = (
-            "<p style='color:#c0392b;'><b>Help file is missing or could not be loaded.</b></p>"
-            if source_path else ""
-        )
-        self.text.setHtml(notice + fallback_html)
+        # Fallback: prefer clean content without warning if we have a fallback HTML snippet
+        if fallback_html:
+            self.text.setHtml(fallback_html)
+        else:
+            notice = "<p style='color:#c0392b;'><b>Help file is missing or could not be loaded.</b></p>"
+            self.text.setHtml(notice)
         if anchor:
             QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
 
