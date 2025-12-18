@@ -189,21 +189,41 @@ class ImageLoaderThread(QThread):
             return None
                 
 class HelpDialog(QDialog):
-    """Display static HTML help content inside a simple dialog."""
-    def __init__(self, parent, title, content):
+    """Display HTML help content from the bundled Help.html file with graceful fallback."""
+    def __init__(self, parent, title, source_path=None, anchor=None, fallback_html=""):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(QIcon(os.path.join(Config.BASE_DIR, "icon.ico")))
-        self.resize(500, 400)
+        self.resize(900, 700)
         layout = QVBoxLayout()
-        text = QTextBrowser()
-        text.setHtml(content)
-        text.setOpenExternalLinks(True)
-        layout.addWidget(text)
+        self.text = QTextBrowser()
+        self.text.setOpenExternalLinks(True)
+        layout.addWidget(self.text)
+
+        self._load_content(source_path, anchor, fallback_html)
+
         btn = QPushButton(tr("Close"))
         btn.clicked.connect(self.close)
         layout.addWidget(btn)
         self.setLayout(layout)
+
+    def _load_content(self, source_path, anchor, fallback_html):
+        if source_path and os.path.exists(source_path):
+            try:
+                url = QUrl.fromLocalFile(source_path)
+                if anchor:
+                    url.setFragment(anchor)
+                self.text.setSource(url)
+                return
+            except Exception as e:
+                logger.warning("Failed to load help file %s: %s", source_path, e)
+        notice = (
+            "<p style='color:#c0392b;'><b>Help file is missing or could not be loaded.</b></p>"
+            if source_path else ""
+        )
+        self.text.setHtml(notice + fallback_html)
+        if anchor:
+            QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
 
 class AIDialog(QDialog):
     """Chat interface for requesting regex suggestions from the AI manager."""
@@ -934,7 +954,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: HelpDialog(self, tr("Search Help"), self.get_search_help_text()).exec())
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
 
         top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
         top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
@@ -1040,7 +1060,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: HelpDialog(self, tr("Composition Help"), self.get_comp_help_text()).exec())
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor="composition"))
         top_row.addWidget(btn_help)
         
         in_l.addLayout(top_row)
@@ -1170,6 +1190,12 @@ class GenizahGUI(QMainWindow):
         btn_row.addWidget(self.btn_b_save)
         btn_row.addStretch()
 
+        btn_browse_help = QPushButton("?")
+        btn_browse_help.setFixedWidth(30)
+        btn_browse_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_browse_help.clicked.connect(lambda: self.open_help_center(anchor="browse"))
+        btn_row.addWidget(btn_browse_help)
+
         left_col.addLayout(search_row)
         left_col.addWidget(self.browse_info_lbl)
         left_col.addLayout(btn_row)
@@ -1293,6 +1319,15 @@ class GenizahGUI(QMainWindow):
     
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
+
+        settings_header = QHBoxLayout()
+        settings_header.addStretch()
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(30)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor="settings"))
+        settings_header.addWidget(btn_help)
+        layout.addLayout(settings_header)
         
         gb_data = QGroupBox(tr("Data & Index"))
         dl = QVBoxLayout()
@@ -1419,13 +1454,54 @@ class GenizahGUI(QMainWindow):
         QMessageBox.information(self, tr("Copied"), tr("Citation copied to clipboard!"))
 
     # --- HELP TEXTS ---
+    def open_help_center(self, anchor=None):
+        """Open the bundled Help.html with optional anchor scrolling and fallback content."""
+        help_path = Config.HELP_FILE
+        dlg = HelpDialog(
+            self,
+            tr("Genizah Help"),
+            source_path=help_path,
+            anchor=anchor,
+            fallback_html=self._build_help_fallback_html(),
+        )
+        dlg.exec()
+
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
         return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns (Use AI mode for help, or consult your preferable AI engine).</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
-        return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases appearing > X times.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
+        return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
+
+    def get_browse_help_text(self):
+        if CURRENT_LANG == 'he': return tr("BROWSE_HELP_HTML")
+        return """<h3>Browse Manuscripts</h3><ul><li><b>System ID:</b> Enter an ID to load a manuscript.</li><li><b>View All:</b> Switch to continuous view of the full text.</li><li><b>Save:</b> Export the manuscript text to a file.</li></ul>"""
+
+    def get_settings_help_text(self):
+        if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
+        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates.</li><li><b>AI Settings:</b> Configure provider, model, and key for regex assistance.</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
+
+    def _build_help_fallback_html(self):
+        sections = [
+            ("search", tr("Search Help")),
+            self.get_search_help_text(),
+            ("composition", tr("Composition Help")),
+            self.get_comp_help_text(),
+            ("browse", tr("Browse Help")),
+            self.get_browse_help_text(),
+            ("settings", tr("Settings Help")),
+            self.get_settings_help_text(),
+        ]
+        html_parts = ["<div style='font-family: Arial; font-size: 13px;'>"]
+        for i in range(0, len(sections), 2):
+            anchor, heading = sections[i]
+            body = sections[i + 1]
+            html_parts.append(f"<h2 id='{anchor}'>{heading}</h2>")
+            html_parts.append(body)
+            html_parts.append("<hr>")
+        html_parts.append("</div>")
+        return "".join(html_parts)
 
     def _sanitize_filename(self, text, fallback):
         clean = re.sub(r"[^\w\u0590-\u05FF\s-]", "", text or "")

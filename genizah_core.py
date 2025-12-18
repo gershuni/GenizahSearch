@@ -65,6 +65,12 @@ class Config:
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
 
+    @staticmethod
+    def resource_path(relative_path: str) -> str:
+        """Return absolute path to bundled resources, supporting PyInstaller onedir/onefile modes."""
+        base_path = getattr(sys, "_MEIPASS", Config.BASE_DIR)
+        return os.path.join(base_path, relative_path)
+
 # ==============================================================================
 #  LOGGING
 # ==============================================================================
@@ -110,6 +116,9 @@ AI_PROVIDER_ENDPOINTS = {
     "OpenAI": "https://api.openai.com/v1/models",
     "Anthropic Claude": "https://api.anthropic.com/v1/models",
 }
+
+# Paths resolved through PyInstaller-friendly helper
+Config.HELP_FILE = Config.resource_path("Help.html")
 
 def load_language():
     """Load language preference. Returns 'en' or 'he'."""
