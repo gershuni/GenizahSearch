@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
+from version import APP_VERSION
 
 TRANSLATIONS = {
     # --- General ---
-    "Genizah Search Pro V3.2": "Genizah Search Pro V3.2",
+    f"Genizah Search Pro V{APP_VERSION}": f"Genizah Search Pro V{APP_VERSION}",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
     "Fatal Error": "שגיאה קריטית",
     "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
@@ -265,20 +266,20 @@ TRANSLATIONS = {
     </ul></div>""",
 
     # --- HTML About ---
-    "ABOUT_HTML": """
+    "ABOUT_HTML": f"""
         <style>
-            h3 { margin-bottom: 0px; margin-top: 10px; }
-            p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
-            a { color: #2980b9; text-decoration: none; }
+            h3 {{ margin-bottom: 0px; margin-top: 10px; }}
+            p {{ margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }}
+            a {{ color: #2980b9; text-decoration: none; }}
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 s1yle='margin-bottom:5px;'>Genizah Search Pro 3.2</h2>
+                <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
 
-            <h3>מוקדש לזכרו של מורנו האהוב, פרופ' מנחם כהנא ז"ל</h3>
+            <h3>מוקדש לזכרו של מורנו האהוב, פרופ' מנחם כהנא ז\"ל</h3>
             <h3>קרדיטים</h3>
             <p>כלי זה פותח בסיוע <b>Gemini 3.0</b> ו-<b>GPT 5.1</b>. תודתי נתונה לאבי שמידמן, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן ואלנתן חן על עצותיהם ותמיכתם.</p>
 

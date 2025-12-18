@@ -1,6 +1,6 @@
 **עברית למטה**
 
-# 📜 Genizah Search Pro 3.2
+# 📜 Genizah Search Pro 3.2.1
 
 **The Ultimate Search & Analysis Tool for the Cairo Genizah Corpus**
 
@@ -13,6 +13,10 @@ Genizah Search Pro is a powerful desktop application designed for researchers wo
 > This is required to support the new line-by-line display and metadata search features.
 
 ---
+
+## 🚀 What's New in Version 3.2.1?
+* **🧪 More reliable packaging checks:** Test runs now locate the app modules even when using pytest's importlib mode, ensuring missing dependencies like Tantivy surface with clear messaging before creating the EXE.
+* **🏷️ Version sync:** The app title, About panel, and Windows App ID now pull from a single version constant for consistent EXE metadata.
 
 ## 🚀 What's New in Version 3.2?
 * **📊 Expanded Export Options:** You can now export search results and composition reports directly to **Excel (.xlsx)** and **CSV** formats, in addition to standard Text files.
@@ -63,7 +67,7 @@ Genizah Search Pro is a powerful desktop application designed for researchers wo
 
 ## 🛠 Installation
 
-1.  **Download:** Get the latest `GenizahSearchPro_v3.2.zip` from the releases page.
+1.  **Download:** Get the latest `GenizahSearchPro_v3.2.1.zip` from the releases page.
 2.  **Extract:** Unzip to the folder where the Transcriptions.txt file exists (see below).
 3.  **Required Data Files:**
     Ensure the following files are inside the folder next to `GenizahPro.exe`:
@@ -127,7 +131,7 @@ This tool relies on the **MiDRASH** project dataset:
 This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
 
 ---
-# 📜 Genizah Search Pro 3.2
+# 📜 Genizah Search Pro 3.2.1
 
 **כלי החיפוש והניתוח האולטימטיבי לקורפוס הגניזה הקהירית**
 
@@ -140,6 +144,10 @@ Genizah Search Pro היא אפליקציית שולחן עבודה עוצמתי�
 > פעולה זו נדרשת כדי לתמוך בתצוגה החדשה שורה-אחר-שורה ובאפשרויות החיפוש במטא-דאטה.
 
 ---
+
+## 🚀 מה חדש בגרסה 3.2.1?
+* **🧪 אמינות בדיקות:** הרצת הבדיקות מאתרת את מודולי האפליקציה גם במצב ה-importlib של pytest, כך שהודעות חסר (למשל Tantivy) יופיעו בבירור לפני יצירת ה-EXE.
+* **🏷️ סנכרון גרסה:** כותרת האפליקציה, מסך האודות ו-App ID ב-Windows משתמשים כעת בערך גרסה אחד כדי לשמור על עקביות באריזה.
 
 ## 🚀 מה חדש בגרסה 3.2?
 * **📊 אפשרויות ייצוא מורחבות:** כעת ניתן לייצא את תוצאות החיפוש ודוחות חיפוש החיבורים ישירות לפורמטים **Excel (.xlsx)** ו-**CSV**, בנוסף לקבצי טקסט רגילים.
@@ -190,7 +198,7 @@ Genizah Search Pro היא אפליקציית שולחן עבודה עוצמתי�
 
 ## 🛠 התקנה
 
-1.  **הורדה:** הורידו את `GenizahSearchPro_v3.2.zip` העדכני מדף השחרורים (Releases).
+1.  **הורדה:** הורידו את `GenizahSearchPro_v3.2.1.zip` העדכני מדף השחרורים (Releases).
 2.  **חילוץ:** חלצו את ה-zip לתיקייה שבה נמצא הקובץ Transcriptions.txt (ראו למטה).
 3.  **קבצי נתונים נדרשים:**
     ודאו שהקבצים הבאים נמצאים בתיקייה לצד `GenizahPro.exe`:

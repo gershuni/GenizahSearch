@@ -24,6 +24,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
+from version import APP_VERSION
+
 _CORE_IMPORT_ERROR = None
 try:
     from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
@@ -688,7 +690,7 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Genizah Search Pro V3.2")
+        self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
         self.resize(1300, 850)
         log_tls_relaxation_notice()
 
@@ -1341,7 +1343,7 @@ class GenizahGUI(QMainWindow):
         </style>
         <div style='font-family: Arial; font-size: 13px;'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro 3.2</h2>
+                <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
                 <p style='color: #7f8c8d;'>Developed by Hillel Gershuni (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
@@ -2801,7 +2803,7 @@ if __name__ == "__main__":
     try:
         import ctypes
         if hasattr(ctypes, 'windll'):
-            myappid = 'genizah.search.pro.3.2'
+            myappid = f'genizah.search.pro.{APP_VERSION}'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except (ImportError, AttributeError):
         pass
