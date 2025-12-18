@@ -53,18 +53,40 @@
         direction: rtl;
         text-align: right;
     }
+    body[data-lang="he"] .lang-en { display: none; }
+    body[data-lang="en"] .lang-he { display: none; }
 </style>
 </head>
-<body>
+<body data-lang="en">
 
 <h1>Genizah Search Pro – Help</h1>
 <div class="subtitle">User Guide | מדריך שימוש</div>
 
+<div class="box" style="max-width: 900px; margin: 0 auto 24px auto;">
+<div class="lang-en">
+<h3>Quick Navigation</h3>
+<ul>
+    <li><a href="#search">Main Search Tab</a></li>
+    <li><a href="#composition">Composition Search</a></li>
+    <li><a href="#browse">Browse Manuscript</a></li>
+    <li><a href="#settings">Settings & About</a></li>
+</ul>
+</div>
+<div class="lang-he rtl">
+<h3>ניווט מהיר</h3>
+<ul>
+    <li><a href="#search">לשונית חיפוש</a></li>
+    <li><a href="#composition">חיפוש חיבורים</a></li>
+    <li><a href="#browse">עיון בכתב יד</a></li>
+    <li><a href="#settings">הגדרות ואודות</a></li>
+</ul>
+</div>
+</div>
+
 <div class="section">
-<h2>Main Search Tab / לשונית חיפוש</h2>
+<h2 id="search">Main Search Tab / לשונית חיפוש</h2>
 <div class="columns">
-<div class="box">
-<h3>English</h3>
+<div class="box lang-en">
 <p>The <b>Search</b> tab is the main entry point for exploring the Genizah corpus.</p>
 <ul>
 <li><b>Query:</b> Enter words, shelfmarks, or titles.</li>
@@ -85,8 +107,7 @@
 </ul>
 </div>
 
-<div class="box rtl">
-<h3>עברית</h3>
+<div class="box rtl lang-he">
 <p>לשונית <b>חיפוש</b> היא נקודת הכניסה הראשית לעבודה עם קורפוס הגניזה.</p>
 <ul>
 <li><b>שאילתא:</b> הזנת מילים, מספרי מדף או כותרות.</li>
@@ -110,10 +131,9 @@
 </div>
 
 <div class="section">
-<h2>Composition Search / חיפוש חיבורים</h2>
+<h2 id="composition">Composition Search / חיפוש חיבורים</h2>
 <div class="columns">
-<div class="box">
-<h3>English</h3>
+<div class="box lang-en">
 <p>The <b>Composition Search</b> tool finds parallels between a source text and the Genizah corpus.</p>
 <ul>
 <li>Paste or load a source text.</li>
@@ -125,8 +145,7 @@
 </ul>
 </div>
 
-<div class="box rtl">
-<h3>עברית</h3>
+<div class="box rtl lang-he">
 <p>לשונית <b>חיפוש חיבורים</b> מיועדת לאיתור מקבילות בין טקסט מקור לבין קורפוס הגניזה.</p>
 <ul>
 <li>הדבקת טקסט מקור או טעינתו מקובץ.</li>
@@ -141,10 +160,9 @@
 </div>
 
 <div class="section">
-<h2>Browse Manuscript / עיון בכתב יד</h2>
+<h2 id="browse">Browse Manuscript / עיון בכתב יד</h2>
 <div class="columns">
-<div class="box">
-<h3>English</h3>
+<div class="box lang-en">
 <p>The <b>Browse Manuscript</b> tab is used for reading full manuscripts.</p>
 <ul>
 <li>Enter a <b>System ID</b> to load a manuscript.</li>
@@ -154,8 +172,7 @@
 </ul>
 </div>
 
-<div class="box rtl">
-<h3>עברית</h3>
+<div class="box rtl lang-he">
 <p>לשונית <b>עיון בכתב יד</b> מאפשרת קריאה רציפה של כתבי יד.</p>
 <ul>
 <li>הזנת <b>מספר מערכת</b> לטעינת כתב יד.</li>
@@ -168,10 +185,9 @@
 </div>
 
 <div class="section">
-<h2>Settings & About / הגדרות ואודות</h2>
+<h2 id="settings">Settings & About / הגדרות ואודות</h2>
 <div class="columns">
-<div class="box">
-<h3>English</h3>
+<div class="box lang-en">
 <ul>
 <li><b>Build / Rebuild Index:</b> Creates the search index (required on first run).</li>
 <li><b>AI Configuration:</b> Configure optional AI assistance.</li>
@@ -179,8 +195,7 @@
 </ul>
 </div>
 
-<div class="box rtl">
-<h3>עברית</h3>
+<div class="box rtl lang-he">
 <ul>
 <li><b>בנה / בנייה מחדש של אינדקס:</b> יצירת האינדקס (נדרש בהפעלה הראשונה).</li>
 <li><b>הגדרות AI:</b> הגדרת סיוע בינה מלאכותית (אופציונלי).</li>
