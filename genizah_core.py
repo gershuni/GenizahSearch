@@ -557,20 +557,24 @@ class MetadataManager:
         title = ""
 
         # 1. Check CSV (Fastest & Most reliable for basic info)
-        # Note: Accessing self.csv_bank is generally thread-safe for reading in Python
-        # (GIL handles atomic dict reads), even if being populated.
         if sys_id in self.csv_bank:
-            return self.csv_bank[sys_id]['shelfmark'], self.csv_bank[sys_id]['title']
+            shelf = self.csv_bank[sys_id]['shelfmark']
+            title = self.csv_bank[sys_id]['title']
 
-        # 2. Check NLI Cache (If we fetched it before)
+        # 2. Check NLI Cache (Fallback/Enrichment)
         if sys_id in self.nli_cache:
             m = self.nli_cache[sys_id]
-            return m.get('shelfmark', 'Unknown'), m.get('title', '')
+            cached_shelf = m.get('shelfmark')
+            cached_title = m.get('title')
 
-        LOGGER.debug(
-            "CSV miss for sys_id=%s (csv_bank size=%d). nli_cache_hit=%s",
-            sys_id, len(self.csv_bank), sys_id in self.nli_cache
-            )
+            # If CSV missed shelfmark, try cache
+            if shelf == "Unknown" or not shelf:
+                if cached_shelf and cached_shelf != "Unknown":
+                    shelf = cached_shelf
+
+            # If CSV missed title, try cache (crucial fix for missing titles)
+            if not title and cached_title:
+                title = cached_title
 
         return shelf, title
 
@@ -1311,8 +1315,58 @@ class SearchEngine:
 
         return {'main': main_list, 'filtered': filtered_list}
 
-    def group_composition_results(self, items, threshold=5, progress_callback=None):
-        ids = [self.meta_mgr.parse_header_smart(i['raw_header'])[0] for i in items]
+    def group_pages_by_manuscript(self, pages_list):
+        """Aggregate individual page results into manuscript-level items."""
+        grouped = defaultdict(list)
+
+        # 1. Bucket pages by System ID
+        for p in pages_list:
+            sid, _ = self.meta_mgr.parse_header_smart(p['raw_header'])
+            if sid:
+                grouped[sid].append(p)
+            else:
+                # Fallback for pages without valid ID (should be rare)
+                grouped["UNKNOWN"].append(p)
+
+        manuscripts = []
+
+        for sid, pages in grouped.items():
+            if not pages: continue
+
+            # Aggregate Score
+            total_score = sum(p['score'] for p in pages)
+
+            # Use the first page's header as the representative one for metadata parsing
+            # (Ideally find the best page or just use the first)
+            pages.sort(key=lambda x: x['score'], reverse=True)
+            rep_page = pages[0]
+
+            manuscript_item = {
+                'type': 'manuscript',
+                'sys_id': sid,
+                'score': total_score,
+                'pages': pages, # Keep all pages as children
+                'raw_header': rep_page['raw_header'], # For metadata compatibility
+                'text': rep_page['text'], # Representative text
+                'source_ctx': rep_page.get('source_ctx', ''),
+                'highlight_pattern': rep_page.get('highlight_pattern', '')
+            }
+            manuscripts.append(manuscript_item)
+
+        # Sort manuscripts by aggregated score
+        manuscripts.sort(key=lambda x: x['score'], reverse=True)
+        return manuscripts
+
+    def group_composition_results(self, items, threshold=5, progress_callback=None, check_cancel=None):
+        ids = []
+        for i in items:
+            if check_cancel and check_cancel(): return None, None, None
+            # Check if it's a manuscript object with pre-parsed ID
+            if i.get('type') == 'manuscript' and i.get('sys_id'):
+                ids.append(i['sys_id'])
+            else:
+                ids.append(self.meta_mgr.parse_header_smart(i['raw_header'])[0])
+
         self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x])
 
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
@@ -1330,7 +1384,11 @@ class SearchEngine:
 
         wrapped = []
         for item in items:
-            sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if item.get('type') == 'manuscript' and item.get('sys_id'):
+                sid = item['sys_id']
+            else:
+                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+
             meta = self.meta_mgr.nli_cache.get(sid, {})
             t = meta.get('title', '').strip()
             shelfmark = self.meta_mgr.get_shelfmark_from_header(item['raw_header']) or meta.get('shelfmark', 'Unknown')
@@ -1345,6 +1403,7 @@ class SearchEngine:
         total = len(wrapped)
 
         for i, root in enumerate(wrapped):
+            if check_cancel and check_cancel(): return None, None, None
             if progress_callback and total:
                 progress_callback(i, total)
             if root['grouped']: continue

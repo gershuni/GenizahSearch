@@ -1117,7 +1117,19 @@ class GenizahGUI(QMainWindow):
         
         res_w = QWidget(); rl = QVBoxLayout()
         self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
-        self.comp_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+
+        # Configure columns width
+        header = self.comp_tree.header()
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
+
+        self.comp_tree.setColumnWidth(0, 160) # Score - widened
+
+        # Title column (~25 chars)
+        title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
+        self.comp_tree.setColumnWidth(2, int(title_width))
+
         self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
         rl.addWidget(self.comp_tree)
         
@@ -2044,11 +2056,21 @@ class GenizahGUI(QMainWindow):
     def toggle_composition(self):
         if self.is_comp_running:
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-                self.group_thread.terminate()
+                # Disconnect signals to prevent race conditions during stop
+                try: self.group_thread.finished_signal.disconnect()
+                except: pass
+                try: self.group_thread.error_signal.disconnect()
+                except: pass
+
+                self.group_thread.requestInterruption()
+                self.group_thread.wait()
+
                 QMessageBox.information(self, tr("Stopped"), tr("Grouping stopped. Showing ungrouped results."))
-                self.display_comp_results(self.comp_raw_items or [], {}, {})
+                # Pass explicit empty dicts for other arguments to avoid crashes
+                self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
             elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
                 self.comp_thread.terminate()
+                self.comp_thread.wait()
             self.is_comp_running = False
             self.reset_comp_ui()
         else:
@@ -2099,25 +2121,18 @@ class GenizahGUI(QMainWindow):
             items = result_obj or []
             filtered_items = []
 
-        self.comp_raw_items = items
-        self.comp_raw_filtered = filtered_items
+        # Immediate Grouping by Manuscript
+        manuscripts = self.searcher.group_pages_by_manuscript(items)
+        filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
 
-        if not items and not filtered_items:
+        self.comp_raw_items = manuscripts
+        self.comp_raw_filtered = filtered_manuscripts
+
+        if not manuscripts and not filtered_manuscripts:
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             return
 
-        msg = QMessageBox.question(
-            self,
-            tr("Group Results?"),
-            tr("Grouping may take longer and relies on NLI metadata. Group now?"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if msg == QMessageBox.StandardButton.Yes:
-            self.start_grouping(items, filtered_items)
-        else:
-            # Pass empty grouping info
-            self.display_comp_results(items, {}, {}, filtered_items, {}, {})
+        self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
         self.is_comp_running = True
@@ -2178,8 +2193,12 @@ class GenizahGUI(QMainWindow):
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
-                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                if sid: all_ids.append(sid)
+                # If item is manuscript, we have direct sys_id
+                if item.get('type') == 'manuscript' and item.get('sys_id'):
+                    all_ids.append(item['sys_id'])
+                else:
+                    sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+                    if sid: all_ids.append(sid)
 
         collect_ids(clean_main)
         for group_items in clean_appx.values():
@@ -2204,41 +2223,95 @@ class GenizahGUI(QMainWindow):
             lbl = QLabel(f"<div dir='rtl' style='margin:2px;'>{html}</div>")
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             return lbl
+
+        def add_manuscript_node(parent, ms_item):
+            # Parse meta using the representative header OR just use sys_id
+            if ms_item.get('type') == 'manuscript':
+                sid = ms_item['sys_id']
+
+                # Use unified metadata retrieval (CSV > Cache)
+                shelf, t = self.meta_mgr.get_meta_for_id(sid)
+
+                # Fallback to header parsing if still unknown
+                if not shelf or shelf == "Unknown":
+                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                    if header_shelf: shelf = header_shelf
+
+                # Manuscript Node
+                ms_node = QTreeWidgetItem(parent)
+                ms_node.setText(0, str(ms_item.get('score', 0)))
+                ms_node.setText(1, shelf or tr("Unknown Shelfmark"))
+                ms_node.setText(2, t or "")
+                ms_node.setText(3, sid)
+
+                # Store full MS item in UserRole
+                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+                pages = ms_item.get('pages', [])
+
+                # Case A: Single Page -> Display inline
+                if len(pages) == 1:
+                    p_item = pages[0]
+                    _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+
+                    # Update Shelfmark to include Image info
+                    ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+
+                    # Show snippet in Context column
+                    lbl = make_snippet_label(p_item.get('text', ''))
+                    self.comp_tree.setItemWidget(ms_node, 4, lbl)
+
+                # Case B: Multiple Pages -> Add children
+                else:
+                    # Update parent with first page image info and snippet
+                    if pages:
+                        p0 = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        lbl_main = make_snippet_label(p0.get('text', ''))
+                        self.comp_tree.setItemWidget(ms_node, 4, lbl_main)
+
+                    for p_item in pages:
+                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+
+                        page_node = QTreeWidgetItem(ms_node)
+                        page_node.setText(0, str(p_item.get('score', '')))
+                        page_node.setText(1, f"{tr('Image')} {p_num}")
+                        page_node.setText(2, "") # No Title needed for page
+                        page_node.setText(3, "") # No SysID needed for page
+
+                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+
+                        # Snippet for Page
+                        lbl = make_snippet_label(p_item.get('text', ''))
+                        self.comp_tree.setItemWidget(page_node, 4, lbl)
+
+            else:
+                # Fallback for raw items (should not happen with new logic, but safe to keep)
+                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                node = QTreeWidgetItem(parent)
+                node.setText(0, str(ms_item.get('score', '')))
+                node.setText(1, shelf)
+                node.setText(2, title)
+                node.setText(3, sid)
+                node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+                lbl = make_snippet_label(ms_item.get('text', ''))
+                self.comp_tree.setItemWidget(node, 4, lbl)
+
         # ----------------------------------------
 
         # 1. Main Results
         root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
-        for i in clean_main:
-            sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
-            node = QTreeWidgetItem(root)
-            node.setText(0, str(i.get('score', '')))
-            node.setText(1, shelf)
-            node.setText(2, title)
-            node.setText(3, sid)
-            
-            node.setData(0, Qt.ItemDataRole.UserRole, i)
-            
-            # Set HTML Widget
-            lbl = make_snippet_label(i.get('text', ''))
-            self.comp_tree.setItemWidget(node, 4, lbl)
+        for item in clean_main:
+            add_manuscript_node(root, item)
 
         # 2. Appendix Results
         if clean_appx:
             root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
             for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
-                for i in items:
-                    sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
-                    ch = QTreeWidgetItem(gn)
-                    ch.setText(0, str(i.get('score', '')))
-                    ch.setText(1, shelf)
-                    ch.setText(2, title)
-                    ch.setText(3, sid)
-                    ch.setData(0, Qt.ItemDataRole.UserRole, i)
-                    
-                    # Set HTML Widget
-                    lbl = make_snippet_label(i.get('text', ''))
-                    self.comp_tree.setItemWidget(ch, 4, lbl)
+                for item in items:
+                    add_manuscript_node(gn, item)
 
         # 3. Filtered by Text (New Category with Sub-Grouping)
         total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
@@ -2249,104 +2322,117 @@ class GenizahGUI(QMainWindow):
             if clean_filt:
                 f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
                 f_main_node.setExpanded(True)
-                for i in clean_filt:
-                    sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
-                    node = QTreeWidgetItem(f_main_node)
-                    node.setText(0, str(i.get('score', '')))
-                    node.setText(1, shelf)
-                    node.setText(2, title)
-                    node.setText(3, sid or '')
-                    node.setData(0, Qt.ItemDataRole.UserRole, i)
-                    lbl = make_snippet_label(i.get('text', ''))
-                    self.comp_tree.setItemWidget(node, 4, lbl)
+                for item in clean_filt:
+                    add_manuscript_node(f_main_node, item)
 
             # 3b. Filtered Appendix
             if clean_filt_appx:
                 f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
                 for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
-                    for i in items:
-                        sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
-                        ch = QTreeWidgetItem(gn)
-                        ch.setText(0, str(i.get('score', '')))
-                        ch.setText(1, shelf)
-                        ch.setText(2, title)
-                        ch.setText(3, sid)
-                        ch.setData(0, Qt.ItemDataRole.UserRole, i)
-                        lbl = make_snippet_label(i.get('text', ''))
-                        self.comp_tree.setItemWidget(ch, 4, lbl)
+                    for item in items:
+                        add_manuscript_node(gn, item)
 
         # 4. Known / Excluded Results
         if known:
             root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
-            for i in known:
-                sid, _, shelf, title = self._get_meta_for_header(i['raw_header'])
-                node = QTreeWidgetItem(root_k)
-                node.setText(0, str(i.get('score', '')))
-                node.setText(1, shelf)
-                node.setText(2, title)
-                node.setText(3, sid or '')
-                node.setData(0, Qt.ItemDataRole.UserRole, i)
-                
-                # Set HTML Widget
-                lbl = make_snippet_label(i.get('text', ''))
-                self.comp_tree.setItemWidget(node, 4, lbl)
+            for item in known:
+                add_manuscript_node(root_k, item)
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data: return # It's a folder, ignore
+        if not data: return # It's a structural node, ignore
         
-        # 2. Flatten the Tree to create a navigation list
+        # 2. Flatten the Tree to create a navigation list (PAGES ONLY)
         flat_list = []
         clicked_index = -1
         
-        # Helper to process a node
-        def process_node(node):
-            node_data = node.data(0, Qt.ItemDataRole.UserRole)
-            if node_data: # It's a leaf item
-                sid, p, shelf, title = self._get_meta_for_header(node_data['raw_header'])
+        # If user clicked a Manuscript Node (top level), check if it's single page or multi
+        target_item = item
+        if data.get('type') == 'manuscript':
+            if item.childCount() > 0:
+                # Multi-page: Auto-select first child
+                target_item = item.child(0)
+            else:
+                # Single-page: The manuscript node IS the target
+                pass
 
-                ready_data = {
-                    'uid': node_data['uid'],
-                    'raw_header': node_data['raw_header'],
-                    'text': node_data['text'], # Snippet
-                    'full_text': None, # Will be fetched by Dialog on load
-                    'source_ctx': node_data.get('source_ctx', ''),
-                    'highlight_pattern': node_data.get('highlight_pattern'),
-                    'display': {
-                        'shelfmark': shelf,
-                        'title': title,
-                        'img': p,
-                        'source': node_data['src_lbl']
-                    }
+        # Helper to process a page node or a single-page manuscript
+        def process_page_data(node_data, node_ref):
+            # If it's a manuscript node (single page), extract the single page data
+            if node_data.get('type') == 'manuscript':
+                pages = node_data.get('pages', [])
+                if len(pages) == 1:
+                    node_data = pages[0]
+                else:
+                    return # Should not happen for leaf traversal
+
+            sid, p, shelf, title = self._get_meta_for_header(node_data['raw_header'])
+
+            ready_data = {
+                'uid': node_data['uid'],
+                'raw_header': node_data['raw_header'],
+                'text': node_data['text'], # Snippet
+                'full_text': None, # Will be fetched by Dialog on load
+                'source_ctx': node_data.get('source_ctx', ''),
+                'highlight_pattern': node_data.get('highlight_pattern'),
+                'display': {
+                    'shelfmark': shelf,
+                    'title': title,
+                    'img': p,
+                    'source': node_data.get('src_lbl', 'Source')
                 }
-                flat_list.append(ready_data)
-                
-                if node is item:
-                    nonlocal clicked_index
-                    clicked_index = len(flat_list) - 1
+            }
+            flat_list.append(ready_data)
 
-        # Traverse Top Level Items
+            if node_ref is target_item:
+                nonlocal clicked_index
+                clicked_index = len(flat_list) - 1
+
+        # Traverse Tree Logic for Manuscript Grouping
         root = self.comp_tree.invisibleRootItem()
         for i in range(root.childCount()):
-            group = root.child(i) # "Main" or "Appendix"
-            # Traverse children of group
-            for j in range(group.childCount()):
-                sub = group.child(j)
-                # Check if sub is a folder (Group in Appendix) or Item (in Main)
-                if sub.childCount() > 0:
-                    for k in range(sub.childCount()):
-                        process_node(sub.child(k))
+            category_node = root.child(i) # "Main", "Appendix", etc.
+
+            # Recurse into category
+            for j in range(category_node.childCount()):
+                sub_node = category_node.child(j)
+
+                # sub_node is either a Manuscript (Main) or a Group (Appendix)
+                # Check based on child count or data
+                # Appendix groups act as folders containing Manuscripts
+                if sub_node.childCount() > 0:
+                    # Could be Appendix Group OR Manuscript
+                    # Check if children are Manuscripts or Pages?
+                    # Manuscript nodes hold "type": "manuscript"
+                    d = sub_node.data(0, Qt.ItemDataRole.UserRole)
+                    if d and d.get('type') == 'manuscript':
+                        # It is a Manuscript with multiple pages
+                        for k in range(sub_node.childCount()):
+                            page_node = sub_node.child(k)
+                            process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
+                    else:
+                        # It is an Appendix Group
+                        for k in range(sub_node.childCount()):
+                            ms_node = sub_node.child(k)
+                            # Check if multi-page or single-page
+                            if ms_node.childCount() > 0:
+                                for m in range(ms_node.childCount()):
+                                    page_node = ms_node.child(m)
+                                    process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
+                            else:
+                                # Single page manuscript in Appendix
+                                process_page_data(ms_node.data(0, Qt.ItemDataRole.UserRole), ms_node)
                 else:
-                    process_node(sub)
+                    # Leaf Manuscript (Single Page) in Main
+                    d = sub_node.data(0, Qt.ItemDataRole.UserRole)
+                    if d and d.get('type') == 'manuscript':
+                        process_page_data(d, sub_node)
 
         if clicked_index == -1: return
 
         # 3. Open Dialog with List
-        current_data = flat_list[clicked_index]
-        current_data['full_text'] = self.searcher.get_full_text_by_id(current_data['uid']) or current_data['text']
-
         ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
 
     def _refresh_comp_tree_metadata(self):
@@ -2387,8 +2473,11 @@ class GenizahGUI(QMainWindow):
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
-                sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                if sid: all_ids.append(sid)
+                if item.get('type') == 'manuscript' and item.get('sys_id'):
+                    all_ids.append(item['sys_id'])
+                else:
+                    sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+                    if sid: all_ids.append(sid)
 
         collect_ids(self.comp_main)
         for group_items in self.comp_appendix.values(): collect_ids(group_items)
@@ -2397,20 +2486,6 @@ class GenizahGUI(QMainWindow):
 
         cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title=tr("Fetching metadata before export..."))
         if cancelled: return
-
-        missing_ids = []
-        check_list = self.comp_main + self.comp_known + all_filtered
-        for item in check_list:
-            sys_id, p_num, shelf, title = self._get_meta_for_header(item['raw_header'])
-            if not shelf or shelf == 'Unknown' or not title or not p_num or p_num == 'Unknown':
-                if sys_id: missing_ids.append(sys_id)
-
-        if missing_ids:
-            prompt = tr("Shelfmark/Title/Page info missing for some items.\nContinue using system IDs? Choose No to load metadata first.")
-            choice = QMessageBox.question(self, tr("Metadata Missing"), prompt, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-            if choice == QMessageBox.StandardButton.No:
-                cancelled = self._fetch_metadata_with_dialog(list(set(missing_ids)), title=tr("Loading missing metadata..."))
-                if not cancelled: self._refresh_comp_tree_metadata()
 
         # 3. Choose export path
         comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
@@ -2436,19 +2511,47 @@ class GenizahGUI(QMainWindow):
         if fmt in ['xlsx', 'csv']:
             table_rows = []
             def add_rows(items, category, group_name=""):
-                for item in items:
-                    sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
-                    table_rows.append([
-                        category,
-                        group_name,
-                        sid or "",
-                        shelf or "",
-                        title or "",
-                        str(p_num or ""),
-                        str(item.get('score', 0)),
-                        (item.get('source_ctx', '') or '').strip(),  # Includes highlight markers
-                        (item.get('text', '') or '').strip()         # Includes highlight markers
-                    ])
+                # We iterate MANUSCRIPTS here, but the rows should be PAGES
+                for ms_item in items:
+                    # Resolve MS Metadata
+                    if ms_item.get('type') == 'manuscript':
+                        sid = ms_item['sys_id']
+
+                        # Use unified retrieval
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                             shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                        ms_score = ms_item.get('score', 0)
+
+                        # Iterate Pages
+                        for page in ms_item.get('pages', []):
+                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             table_rows.append([
+                                category,
+                                group_name,
+                                sid or "",
+                                shelf or "",
+                                title or "",
+                                str(p_num or ""),
+                                f"{ms_score} (P:{page.get('score',0)})", # Show MS Score (Page Score)
+                                (page.get('source_ctx', '') or '').strip(),
+                                (page.get('text', '') or '').strip()
+                             ])
+                    else:
+                        # Fallback for pages
+                        sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                        table_rows.append([
+                            category,
+                            group_name,
+                            sid or "",
+                            shelf or "",
+                            title or "",
+                            str(p_num or ""),
+                            str(ms_item.get('score', 0)),
+                            (ms_item.get('source_ctx', '') or '').strip(),
+                            (ms_item.get('text', '') or '').strip()
+                        ])
 
             add_rows(self.comp_main, "Main Manuscripts")
             for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
@@ -2494,7 +2597,7 @@ class GenizahGUI(QMainWindow):
                     curr_row += 1
 
                     # Table headers
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score (MS/Page)", "Source Context", "Manuscript Text"]
                     for idx, h in enumerate(headers, 1):
                         c = ws.cell(row=curr_row, column=idx, value=h)
                         c.font = Font(bold=True, color="FFFFFF")
@@ -2547,78 +2650,97 @@ class GenizahGUI(QMainWindow):
         else:
             try:
                 sep = "=" * 80
+
+                # Count Manuscripts
                 appendix_count = sum(len(v) for v in self.comp_appendix.values())
                 filtered_total = len(self.comp_filtered_main) + sum(len(v) for v in self.comp_filtered_appendix.values())
                 known_count = len(self.comp_known)
                 total_count = len(self.comp_main) + appendix_count + known_count + filtered_total
 
-                def _fmt_item(item):
-                    sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
-                    return [
-                        sep,
-                        f"{shelf or sid} | {title or 'Untitled'} | Img: {p_num} | Version: {item.get('src_lbl','')} | ID: {item.get('uid', sid)} (Score: {item.get('score', 0)})",
-                        tr("Source Context") + ":", (item.get('source_ctx', '') or "").strip(), "",
-                        tr("Manuscript") + ":", (item.get('text', '') or "").strip(), ""
-                    ]
+                def _fmt_ms_entry(ms_item):
+                    # MS Header
+                    if ms_item.get('type') == 'manuscript':
+                        sid = ms_item['sys_id']
+
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                            shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                        ms_block = [sep, f"MANUSCRIPT: {shelf} | {title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
+
+                        # Iterate Pages
+                        for page in ms_item.get('pages', []):
+                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
+                             ms_block.append(tr("Source Context") + ":\n" + (page.get('source_ctx', '') or "").strip())
+                             ms_block.append(tr("Manuscript") + ":\n" + (page.get('text', '') or "").strip())
+
+                        return ms_block
+                    else:
+                        return self._fmt_item_legacy(ms_item) # Fallback
 
                 def _append_group_summ(target, appx_data, summary_data, label):
                     target.extend([sep, label, sep])
                     if appx_data:
                         for sig, items in sorted(appx_data.items(), key=lambda x: len(x[1]), reverse=True):
-                            fallback = []
-                            s_entries = summary_data.get(sig, [])
-                            for idx, itm in enumerate(items):
-                                val = s_entries[idx] if idx < len(s_entries) else ""
-                                if not val or val.lower() == 'unknown':
-                                    sid, _, shelf, _ = self._get_meta_for_header(itm.get('raw_header', ''))
-                                    val = shelf or sid or "Unknown"
-                                fallback.append(val)
-                            target.append(f"{sig} ({len(items)}): {', '.join(fallback)}")
+                            # items are now Manuscripts
+                            # We can list shelfmarks
+                            shelfmarks = []
+                            for ms in items:
+                                if ms.get('type') == 'manuscript':
+                                    s, _ = self.meta_mgr.get_meta_for_id(ms['sys_id'])
+                                    shelfmarks.append(s if s and s != "Unknown" else ms['sys_id'])
+                                else:
+                                    shelfmarks.append("Unknown")
+
+                            target.append(f"{sig} ({len(items)}): {', '.join(shelfmarks)}")
                     else:
                         target.append(tr("No items."))
 
                 summary_lines = [
                     sep, tr("COMPOSITION REPORT SUMMARY"), sep,
                     f"Title: {comp_title}",
-                    f"{tr('Total Results')}: {total_count}",
+                    f"{tr('Total Manuscripts Found')}: {total_count}",
                     f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
-                    f"{tr('Main Appendix')}: {appendix_count}",
-                    f"{tr('Filtered by Text')}: {filtered_total}",
-                    f"{tr('Known Manuscripts')}: {known_count}"
+                    f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
+                    f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                    f"{tr('Known/Excluded Manuscripts')}: {known_count}"
                 ]
                 _append_group_summ(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
-                _append_group_summ(summary_lines, self.comp_filtered_appendix, self.comp_filtered_summary, tr("FILTERED APPENDIX SUMMARY"))
                 
                 summary_lines.extend([sep, tr("KNOWN MANUSCRIPTS SUMMARY"), sep])
                 if self.comp_known:
                     for item in self.comp_known:
-                        _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
-                        summary_lines.append(f"- {shelf or 'Unknown'}")
+                        if item.get('type') == 'manuscript':
+                            s, _ = self.meta_mgr.get_meta_for_id(item['sys_id'])
+                            summary_lines.append(f"- {s or 'Unknown'}")
+                        else:
+                            summary_lines.append("- Unknown")
                 else:
                     summary_lines.append(tr("No known manuscripts were excluded."))
 
                 detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                for item in self.comp_main: detail_lines.extend(_fmt_item(item))
+                for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
 
                 if self.comp_filtered_main:
                     detail_lines.extend([sep, tr("FILTERED BY TEXT") + " (Main)", sep])
-                    for item in self.comp_filtered_main: detail_lines.extend(_fmt_item(item))
+                    for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
 
                 if self.comp_known:
                     detail_lines.extend([sep, tr("KNOWN MANUSCRIPTS"), sep])
-                    for item in self.comp_known: detail_lines.extend(_fmt_item(item))
+                    for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
 
                 if self.comp_appendix:
                     detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
                     for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                        detail_lines.append(f"{sig} ({len(items)} items)")
-                        for item in items: detail_lines.extend(_fmt_item(item))
+                        detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                        for item in items: detail_lines.extend(_fmt_ms_entry(item))
 
                 if self.comp_filtered_appendix:
                     detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
                     for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                        detail_lines.append(f"{sig} ({len(items)} items)")
-                        for item in items: detail_lines.extend(_fmt_item(item))
+                        detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                        for item in items: detail_lines.extend(_fmt_ms_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
@@ -2629,6 +2751,16 @@ class GenizahGUI(QMainWindow):
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
+
+    def _fmt_item_legacy(self, item):
+        # Fallback for old page style if needed
+        sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+        return [
+            "=" * 80,
+            f"{shelf or sid} | {title or 'Untitled'} | Img: {p_num} | Version: {item.get('src_lbl','')} | ID: {item.get('uid', sid)} (Score: {item.get('score', 0)})",
+            tr("Source Context") + ":", (item.get('source_ctx', '') or "").strip(), "",
+            tr("Manuscript") + ":", (item.get('text', '') or "").strip(), ""
+        ]
 
     def _format_comp_entry(self, item):
         sys_id, page, shelfmark, title = self._resolve_meta_labels(item['raw_header'])
