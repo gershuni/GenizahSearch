@@ -2245,21 +2245,36 @@ class GenizahGUI(QMainWindow):
                 # Store full MS item in UserRole
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
-                # Add Pages as children
-                for p_item in ms_item.get('pages', []):
+                pages = ms_item.get('pages', [])
+
+                # Case A: Single Page -> Display inline
+                if len(pages) == 1:
+                    p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
 
-                    page_node = QTreeWidgetItem(ms_node)
-                    page_node.setText(0, str(p_item.get('score', '')))
-                    page_node.setText(1, tr("Image") + f": {p_num}")
-                    page_node.setText(2, "") # No Title needed for page
-                    page_node.setText(3, "") # No SysID needed for page
+                    # Update Shelfmark to include Image info
+                    ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')}: {p_num})")
 
-                    page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-
-                    # Snippet for Page
+                    # Show snippet in Context column
                     lbl = make_snippet_label(p_item.get('text', ''))
-                    self.comp_tree.setItemWidget(page_node, 4, lbl)
+                    self.comp_tree.setItemWidget(ms_node, 4, lbl)
+
+                # Case B: Multiple Pages -> Add children
+                else:
+                    for p_item in pages:
+                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+
+                        page_node = QTreeWidgetItem(ms_node)
+                        page_node.setText(0, str(p_item.get('score', '')))
+                        page_node.setText(1, tr("Image") + f": {p_num}")
+                        page_node.setText(2, "") # No Title needed for page
+                        page_node.setText(3, "") # No SysID needed for page
+
+                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+
+                        # Snippet for Page
+                        lbl = make_snippet_label(p_item.get('text', ''))
+                        self.comp_tree.setItemWidget(page_node, 4, lbl)
 
             else:
                 # Fallback for raw items (should not happen with new logic, but safe to keep)
@@ -2323,40 +2338,47 @@ class GenizahGUI(QMainWindow):
         flat_list = []
         clicked_index = -1
         
-        # If user clicked a Manuscript Node (top level), select its first page
+        # If user clicked a Manuscript Node (top level), check if it's single page or multi
         target_item = item
         if data.get('type') == 'manuscript':
             if item.childCount() > 0:
+                # Multi-page: Auto-select first child
                 target_item = item.child(0)
             else:
-                return # No pages?
+                # Single-page: The manuscript node IS the target
+                pass
 
-        # Helper to process a page node
-        def process_page_node(node):
-            node_data = node.data(0, Qt.ItemDataRole.UserRole)
-            # Only process leaf pages, not manuscript containers
-            if node_data and node_data.get('type') != 'manuscript':
-                sid, p, shelf, title = self._get_meta_for_header(node_data['raw_header'])
+        # Helper to process a page node or a single-page manuscript
+        def process_page_data(node_data, node_ref):
+            # If it's a manuscript node (single page), extract the single page data
+            if node_data.get('type') == 'manuscript':
+                pages = node_data.get('pages', [])
+                if len(pages) == 1:
+                    node_data = pages[0]
+                else:
+                    return # Should not happen for leaf traversal
 
-                ready_data = {
-                    'uid': node_data['uid'],
-                    'raw_header': node_data['raw_header'],
-                    'text': node_data['text'], # Snippet
-                    'full_text': None, # Will be fetched by Dialog on load
-                    'source_ctx': node_data.get('source_ctx', ''),
-                    'highlight_pattern': node_data.get('highlight_pattern'),
-                    'display': {
-                        'shelfmark': shelf,
-                        'title': title,
-                        'img': p,
-                        'source': node_data.get('src_lbl', 'Source')
-                    }
+            sid, p, shelf, title = self._get_meta_for_header(node_data['raw_header'])
+
+            ready_data = {
+                'uid': node_data['uid'],
+                'raw_header': node_data['raw_header'],
+                'text': node_data['text'], # Snippet
+                'full_text': None, # Will be fetched by Dialog on load
+                'source_ctx': node_data.get('source_ctx', ''),
+                'highlight_pattern': node_data.get('highlight_pattern'),
+                'display': {
+                    'shelfmark': shelf,
+                    'title': title,
+                    'img': p,
+                    'source': node_data.get('src_lbl', 'Source')
                 }
-                flat_list.append(ready_data)
-                
-                if node is target_item:
-                    nonlocal clicked_index
-                    clicked_index = len(flat_list) - 1
+            }
+            flat_list.append(ready_data)
+
+            if node_ref is target_item:
+                nonlocal clicked_index
+                clicked_index = len(flat_list) - 1
 
         # Traverse Tree Logic for Manuscript Grouping
         root = self.comp_tree.invisibleRootItem()
@@ -2376,19 +2398,27 @@ class GenizahGUI(QMainWindow):
                     # Manuscript nodes hold "type": "manuscript"
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
                     if d and d.get('type') == 'manuscript':
-                        # It is a Manuscript, its children are Pages
+                        # It is a Manuscript with multiple pages
                         for k in range(sub_node.childCount()):
-                            process_page_node(sub_node.child(k))
+                            page_node = sub_node.child(k)
+                            process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
                     else:
-                        # It is an Appendix Group, its children are Manuscripts
+                        # It is an Appendix Group
                         for k in range(sub_node.childCount()):
                             ms_node = sub_node.child(k)
-                            # Iterate pages of this manuscript
-                            for m in range(ms_node.childCount()):
-                                process_page_node(ms_node.child(m))
+                            # Check if multi-page or single-page
+                            if ms_node.childCount() > 0:
+                                for m in range(ms_node.childCount()):
+                                    page_node = ms_node.child(m)
+                                    process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
+                            else:
+                                # Single page manuscript in Appendix
+                                process_page_data(ms_node.data(0, Qt.ItemDataRole.UserRole), ms_node)
                 else:
-                    # Leaf? Should not happen in new structure (always MS -> Pages)
-                    pass
+                    # Leaf Manuscript (Single Page) in Main
+                    d = sub_node.data(0, Qt.ItemDataRole.UserRole)
+                    if d and d.get('type') == 'manuscript':
+                        process_page_data(d, sub_node)
 
         if clicked_index == -1: return
 
