@@ -2217,12 +2217,14 @@ class GenizahGUI(QMainWindow):
             # Parse meta using the representative header OR just use sys_id
             if ms_item.get('type') == 'manuscript':
                 sid = ms_item['sys_id']
-                # If cached, getting meta is fast
-                meta = self.meta_mgr.nli_cache.get(sid, {})
-                t = meta.get('title', '')
-                shelf = meta.get('shelfmark')
-                if not shelf:
-                    shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                # Use unified metadata retrieval (CSV > Cache)
+                shelf, t = self.meta_mgr.get_meta_for_id(sid)
+
+                # Fallback to header parsing if still unknown
+                if not shelf or shelf == "Unknown":
+                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                    if header_shelf: shelf = header_shelf
 
                 # Manuscript Node
                 ms_node = QTreeWidgetItem(parent)
@@ -2252,7 +2254,7 @@ class GenizahGUI(QMainWindow):
 
             else:
                 # Fallback for raw items (should not happen with new logic, but safe to keep)
-                sid, _, shelf, title = self._get_meta_for_header(ms_item['raw_header'])
+                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                 node = QTreeWidgetItem(parent)
                 node.setText(0, str(ms_item.get('score', '')))
                 node.setText(1, shelf)
@@ -2465,9 +2467,11 @@ class GenizahGUI(QMainWindow):
                     # Resolve MS Metadata
                     if ms_item.get('type') == 'manuscript':
                         sid = ms_item['sys_id']
-                        meta = self.meta_mgr.nli_cache.get(sid, {})
-                        shelf = meta.get('shelfmark') or self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        title = meta.get('title', '')
+
+                        # Use unified retrieval
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                             shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
 
                         ms_score = ms_item.get('score', 0)
 
@@ -2608,9 +2612,10 @@ class GenizahGUI(QMainWindow):
                     # MS Header
                     if ms_item.get('type') == 'manuscript':
                         sid = ms_item['sys_id']
-                        meta = self.meta_mgr.nli_cache.get(sid, {})
-                        shelf = meta.get('shelfmark') or self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        title = meta.get('title', '')
+
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                            shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
 
                         ms_block = [sep, f"MANUSCRIPT: {shelf} | {title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
 
@@ -2634,8 +2639,8 @@ class GenizahGUI(QMainWindow):
                             shelfmarks = []
                             for ms in items:
                                 if ms.get('type') == 'manuscript':
-                                    meta = self.meta_mgr.nli_cache.get(ms['sys_id'], {})
-                                    shelfmarks.append(meta.get('shelfmark', ms['sys_id']))
+                                    s, _ = self.meta_mgr.get_meta_for_id(ms['sys_id'])
+                                    shelfmarks.append(s if s and s != "Unknown" else ms['sys_id'])
                                 else:
                                     shelfmarks.append("Unknown")
 
@@ -2658,8 +2663,8 @@ class GenizahGUI(QMainWindow):
                 if self.comp_known:
                     for item in self.comp_known:
                         if item.get('type') == 'manuscript':
-                            meta = self.meta_mgr.nli_cache.get(item['sys_id'], {})
-                            summary_lines.append(f"- {meta.get('shelfmark', 'Unknown')}")
+                            s, _ = self.meta_mgr.get_meta_for_id(item['sys_id'])
+                            summary_lines.append(f"- {s or 'Unknown'}")
                         else:
                             summary_lines.append("- Unknown")
                 else:
