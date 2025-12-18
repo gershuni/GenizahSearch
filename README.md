@@ -1,4 +1,4 @@
-## 📜 Genizah Search Pro 3.2.1
+## 📜 Genizah Search Pro 3.2.2
 
 **The Ultimate Search & Analysis Tool for the Cairo Genizah Corpus**
 
@@ -12,6 +12,37 @@ Genizah Search Pro is a powerful desktop application designed for researchers wo
 > **⚠️ IMPORTANT – FIRST RUN / AFTER UPGRADES**
 > After installing or upgrading to version 3, go to **Settings & About** and click **Build / Rebuild Index**.
 > Rebuilding the index is required to enable line-by-line display and metadata-based search.
+
+---
+
+## 🚀 What's New in Version 3.2.2?
+
+* **🧭 More reliable connectivity status:**
+  Improved detection and reporting of online, offline, and partially available services, fixing cases where the connectivity indicator or tooltip could get stuck.
+
+* **⏳ Clear startup loading feedback:**
+  A visible loading indicator is now shown while search components initialize, improving clarity during application startup.
+
+* **📚 Improved Composition Search results:**
+  Composition Search results are now grouped by manuscript, making parallel texts easier to scan and interpret.
+
+* **🖼️ Refined image loading and highlighting:**
+  Internal refactoring improves robustness and consistency of image loading and text highlighting behavior.
+
+* **💾 Smarter default filenames:**
+  When saving full manuscripts, the default filename now uses the Shelfmark instead of a generic identifier.
+
+* **📦 Better dependency handling:**
+  Missing optional dependencies (such as Tantivy) are now handled more gracefully, with clearer messages instead of hard failures.
+
+* **❓ Integrated in-app help:**
+  The bundled Help.html file is now fully integrated into the application’s Help dialogs, with contextual sections opened directly from each tab.
+
+* **🪟 Improved window behavior:**
+  The application now opens maximized by default for a better first-use experience.
+
+* **🛠️ Stability fixes and internal cleanup:**
+  Multiple bug fixes (including a Browse view rendering issue) and standardized, clearer English code comments.
 
 ---
 
@@ -165,7 +196,7 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ---
 
-# 📜 Genizah Search Pro 3.2.1 (עברית)
+# 📜 Genizah Search Pro 3.2.2 (עברית)
 
 **כלי חיפוש וניתוח מתקדם לכתבי היד של הגניזה הקהירית**
 
@@ -180,37 +211,6 @@ Genizah Search Pro היא אפליקציית שולחן עבודה למחקר ב
 **הגדרות ואודות** → **בנה / בנייה מחדש של אינדקס**.
 
 פעולה זו נדרשת כדי לאפשר חיפוש, תצוגה שורה־אחר־שורה ושימוש במטא־דאטה.
-
----
-
-## 🚀 מה חדש בגרסה 3.2.1
-
-* **בדיקות אמינות משופרות:** איתור שגיאות חבילה ותלויות חסרות לפני יצירת קובץ ההפעלה.
-* **סנכרון גרסה:** כותרת התוכנה, מסך האודות ומזהה האפליקציה ב-Windows משתמשים בערך גרסה אחיד.
-
-## 🚀 מה חדש בגרסה 3.2
-
-* **אפשרויות ייצוא מורחבות:** ייצוא תוצאות חיפוש ודוחות חיפוש חיבורים לפורמטים
-  **Excel (.xlsx)** ו-**CSV**, בנוסף לקובצי טקסט.
-
-## 🚀 מה חדש בגרסה 3.1
-
-* **תמיכה מלאה בעברית:** ממשק מתורגם, כולל כיווניות מימין לשמאל.
-* **חיפוש וריאנטים משופר:** טיפול מתקדם בשגיאות OCR וחילופי אותיות.
-* **דוחות מקצועיים:** כל קובצי הייצוא כוללים כותרת ציטוט סטנדרטית.
-* **שיפורי יציבות ותיקוני תצוגת מטא־דאטה.**
-
----
-
-## 🚀 חידושי גרסה 3.0
-
-* **מטא־דאטה אופליין מיידי:** הצגת **מספר מדף** ו-**כותרת** מתוך `libraries.csv`
-  (מעל 216,000 רשומות) ישירות בטבלת התוצאות.
-* **חיפוש במטא־דאטה:** חיפוש לפי **כותרת** או **מספר מדף** משורת החיפוש הראשית.
-* **תצוגה שורה־אחר־שורה:** הטקסט מוצג לפי שבירת השורות המקורית של התעתיק.
-* **תוצאות ניתנות למיון:** מיון לפי מספר מדף, כותרת או רלוונטיות.
-* **תצוגה רציפה:** קריאת כתב יד שלם בגלילה אחת באמצעות **הכל**.
-* **שמירת כתב יד:** ייצוא הטקסט המלא של כתב יד לקובץ.
 
 ---
 
