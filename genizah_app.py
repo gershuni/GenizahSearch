@@ -1124,6 +1124,8 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
+        self.comp_tree.setColumnWidth(0, 160) # Score - widened
+
         # Title column (~25 chars)
         title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
         self.comp_tree.setColumnWidth(2, int(title_width))
@@ -2253,7 +2255,7 @@ class GenizahGUI(QMainWindow):
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
 
                     # Update Shelfmark to include Image info
-                    ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')}: {p_num})")
+                    ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
 
                     # Show snippet in Context column
                     lbl = make_snippet_label(p_item.get('text', ''))
@@ -2261,12 +2263,20 @@ class GenizahGUI(QMainWindow):
 
                 # Case B: Multiple Pages -> Add children
                 else:
+                    # Update parent with first page image info and snippet
+                    if pages:
+                        p0 = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        lbl_main = make_snippet_label(p0.get('text', ''))
+                        self.comp_tree.setItemWidget(ms_node, 4, lbl_main)
+
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
 
                         page_node = QTreeWidgetItem(ms_node)
                         page_node.setText(0, str(p_item.get('score', '')))
-                        page_node.setText(1, tr("Image") + f": {p_num}")
+                        page_node.setText(1, f"{tr('Image')} {p_num}")
                         page_node.setText(2, "") # No Title needed for page
                         page_node.setText(3, "") # No SysID needed for page
 
