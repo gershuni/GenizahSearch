@@ -2055,10 +2055,13 @@ class GenizahGUI(QMainWindow):
         if self.is_comp_running:
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
                 self.group_thread.terminate()
+                self.group_thread.wait()
                 QMessageBox.information(self, tr("Stopped"), tr("Grouping stopped. Showing ungrouped results."))
-                self.display_comp_results(self.comp_raw_items or [], {}, {})
+                # Pass explicit empty dicts for other arguments to avoid crashes
+                self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
             elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
                 self.comp_thread.terminate()
+                self.comp_thread.wait()
             self.is_comp_running = False
             self.reset_comp_ui()
         else:
@@ -2120,18 +2123,7 @@ class GenizahGUI(QMainWindow):
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             return
 
-        msg = QMessageBox.question(
-            self,
-            tr("Group Results?"),
-            tr("Group common titles into an Appendix?"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if msg == QMessageBox.StandardButton.Yes:
-            self.start_grouping(manuscripts, filtered_manuscripts)
-        else:
-            # Pass empty grouping info, but items are now Manuscripts
-            self.display_comp_results(manuscripts, {}, {}, filtered_manuscripts, {}, {})
+        self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
         self.is_comp_running = True
