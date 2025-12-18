@@ -107,6 +107,7 @@ TRANSLATIONS = {
     "Scanning chunks...": "סורק...", 
     "No composition matches found.": "לא נמצאו התאמות.",
     "Group Results?": "לקבץ תוצאות?",
+    "Group common titles into an Appendix?": "לקבץ כותרות נפוצות לנספח?",
     "Grouping may take longer and relies on NLI metadata. Group now?": "הקיבוץ עשוי להימשך זמן מה ומתבסס על נתוני הספרייה הלאומית. לקבץ כעת?",
     "Grouping compositions...": "מקבץ חיבורים...",
     "Grouping Error": "שגיאה בקיבוץ",
