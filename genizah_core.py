@@ -557,20 +557,24 @@ class MetadataManager:
         title = ""
 
         # 1. Check CSV (Fastest & Most reliable for basic info)
-        # Note: Accessing self.csv_bank is generally thread-safe for reading in Python
-        # (GIL handles atomic dict reads), even if being populated.
         if sys_id in self.csv_bank:
-            return self.csv_bank[sys_id]['shelfmark'], self.csv_bank[sys_id]['title']
+            shelf = self.csv_bank[sys_id]['shelfmark']
+            title = self.csv_bank[sys_id]['title']
 
-        # 2. Check NLI Cache (If we fetched it before)
+        # 2. Check NLI Cache (Fallback/Enrichment)
         if sys_id in self.nli_cache:
             m = self.nli_cache[sys_id]
-            return m.get('shelfmark', 'Unknown'), m.get('title', '')
+            cached_shelf = m.get('shelfmark')
+            cached_title = m.get('title')
 
-        LOGGER.debug(
-            "CSV miss for sys_id=%s (csv_bank size=%d). nli_cache_hit=%s",
-            sys_id, len(self.csv_bank), sys_id in self.nli_cache
-            )
+            # If CSV missed shelfmark, try cache
+            if shelf == "Unknown" or not shelf:
+                if cached_shelf and cached_shelf != "Unknown":
+                    shelf = cached_shelf
+
+            # If CSV missed title, try cache (crucial fix for missing titles)
+            if not title and cached_title:
+                title = cached_title
 
         return shelf, title
 
