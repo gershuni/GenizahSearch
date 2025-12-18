@@ -1117,7 +1117,17 @@ class GenizahGUI(QMainWindow):
         
         res_w = QWidget(); rl = QVBoxLayout()
         self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
-        self.comp_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+
+        # Configure columns width
+        header = self.comp_tree.header()
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
+
+        # Title column (~25 chars)
+        title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
+        self.comp_tree.setColumnWidth(2, int(title_width))
+
         self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
         rl.addWidget(self.comp_tree)
         
