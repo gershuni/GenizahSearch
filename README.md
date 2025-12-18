@@ -1,262 +1,293 @@
-**עברית למטה**
-
-# 📜 Genizah Search Pro 3.2.1
+## 📜 Genizah Search Pro 3.2.1
 
 **The Ultimate Search & Analysis Tool for the Cairo Genizah Corpus**
 
-Genizah Search Pro is a powerful desktop application designed for researchers working with Cairo Genizah manuscripts, especially with the transcriptions made available by the MiDRASH Project. **Version 3** introduces a complete overhaul of the user experience, focusing on speed, metadata accessibility, and reading continuity.
+Genizah Search Pro is a powerful desktop application designed for researchers working with Cairo Genizah manuscripts, especially with the transcriptions made available by the MiDRASH Project.
+**Version 3** introduces a major redesign focused on speed, instant metadata access, and continuous manuscript reading.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **⚠️ IMPORTANT: FIRST RUN**  
-> After installing or upgrading to version 3, you must go to the **Settings & About** tab and click **"Build / Rebuild Index"**.  
-> This is required to support the new line-by-line display and metadata search features.
+---
+
+> **⚠️ IMPORTANT – FIRST RUN / AFTER UPGRADES**
+> After installing or upgrading to version 3, go to **Settings & About** and click **Build / Rebuild Index**.
+> Rebuilding the index is required to enable line-by-line display and metadata-based search.
 
 ---
 
-## 🚀 What's New in Version 3.2.1?
-* **🧪 More reliable packaging checks:** Test runs now locate the app modules even when using pytest's importlib mode, ensuring missing dependencies like Tantivy surface with clear messaging before creating the EXE.
-* **🏷️ Version sync:** The app title, About panel, and Windows App ID now pull from a single version constant for consistent EXE metadata.
+## 🚀 What’s New in Version 3.2.1
 
-## 🚀 What's New in Version 3.2?
-* **📊 Expanded Export Options:** You can now export search results and composition reports directly to **Excel (.xlsx)** and **CSV** formats, in addition to standard Text files.
+* **🧪 Improved reliability:** Clearer startup diagnostics and logging for missing dependencies and configuration issues.
+* **🏷️ Version consistency:** Application title, About panel, and Windows App ID are now synchronized from a single version source.
 
----
+## 🚀 What’s New in Version 3.2
 
-##🚀 What's New in Version 3.1?
-* **🇮🇱 Full Hebrew Support:** The software is now fully localized! The interface can be switched to Hebrew (including optimized Right-to-Left layout).
-* **🔠 Enhanced Variants Search:** The search algorithms have been significantly refined to better handle complex OCR errors and character swaps, providing more accurate and comprehensive results in "Variants" modes.
-* **📄 Professional Reports:** All exported files (Search Results, Manuscripts, Composition Reports) now automatically include standardized citation headers, making it easier to credit the MiDRASH project in your research.
-* **🛠️ Stability & Bug Fixes:** Includes general performance improvements and fixes for metadata display issues.
+* **📊 Expanded export options:** Export search results and composition reports to **Excel (.xlsx)** and **CSV**, in addition to plain text.
 
----
+## 🚀 What’s New in Version 3.1
 
-## 🚀 What's New in Version 3.0?
+* **🇮🇱 Full Hebrew UI:** Complete Hebrew localization, including optimized Right-to-Left layout.
+* **🔠 Improved Variants Search:** Better handling of OCR noise and character substitutions.
+* **📄 Professional reports:** All exports include standardized citation headers for MiDRASH.
+* **🛠 Stability improvements:** General bug fixes and performance tuning.
 
-*   **⚡ Instant Offline Metadata:** The software now includes an internal database (`libraries.csv`) with over 216,000 records, displaying Shelfmarks and Titles **instantly** alongside search results.
-*   **🔎 Metadata Search:** You can now search directly for a **Shelfmark** (e.g., "T-S NS 306.15") or a **Composition Title** directly from the main search bar.
-*   **📐 Original Line Breaks:** Manuscript text is now displayed line-by-line, exactly as it appears in the original transcription, rather than as a continuous block of text.
-*   **📊 Sortable Results:** Click on table headers to sort search results by Shelfmark, Title, or Relevance.
-*   **🖼️ Visual Preview:** Manuscript images are now displayed directly in the Search Results and Browse tabs (with smart caching for instant loading).
-*   **📜 Continuous Manuscript View:** Read a manuscript naturally. The new **"View All"** feature loads all pages of a manuscript into a single, continuous scrolling view.
-*   **💾 Save Entire Manuscript:** Export the full text of a multi-page manuscript into a single text file for offline study.
+## 🚀 What’s New in Version 3.0
+
+* **⚡ Instant offline metadata:** Includes an internal metadata database (`libraries.csv`) with over **216,000 records**, showing **Shelfmarks and Titles instantly** in search results.
+* **🔎 Metadata search:** Search directly by **Shelfmark** or **Composition Title** from the main search bar.
+* **📐 Original line breaks:** Manuscript text is displayed line-by-line as in the original transcription.
+* **📊 Sortable results:** Sort by Shelfmark, Title, or relevance.
+* **🖼️ Image previews:** Thumbnails are retrieved from NLI services and cached locally.
+* **📜 Continuous manuscript view:** Read all pages of a manuscript in a single scrolling view.
+* **💾 Save full manuscripts:** Export multi-page manuscripts into one text file.
 
 ---
 
 ## ✨ Key Features
 
 ### 🔍 Advanced Search Engine
-*   **Ultra-fast Search:** Powered by [Tantivy](https://github.com/quickwit-oss/tantivy) (Rust-based) for sub-second results.
-*   **Search Modes:**
-    *   **Text Search:** Exact, Fuzzy (Levenshtein), Regex, and **Variants** (Hebrew-optimized OCR correction).
-    *   **Metadata Search:** Dedicated modes for **Title** and **Shelfmark** lookup.
-*   **Rich Result Table:** Sortable columns, instant metadata, text snippets, and image previews.
+
+* **Ultra-fast search:** Powered by [Tantivy](https://github.com/quickwit-oss/tantivy).
+* **Search modes:**
+
+  * **Exact**
+  * **Variants** (Hebrew-optimized OCR correction)
+  * **Fuzzy**
+  * **Regex**
+  * **Shelfmark / Title** (metadata search)
+* **Rich results table:** Sortable columns, instant metadata, snippets, and image previews.
 
 ### 🧩 Composition Analysis (Source Matching)
-*   **Find Parallels:** Paste a source text (e.g., a known poem or Halakhic text) to find all its occurrences in the Genizah.
-*   **Smart Grouping:** Automatically groups results by manuscript title (e.g., "Mishneh Torah") and other results that are probably less relevant to the user, to the Appendix.
-*   **Advanced Filtering:** Filter results by specific words before or after the analysis.
-*   **Split-Screen View:** Compare the Genizah fragment against your source text side-by-side with synchronized red highlighting.
+
+* **Find parallels:** Paste a source text to locate all its occurrences in the corpus.
+* **Smart grouping:** Automatically groups likely matches and pushes noisy results to an Appendix.
+* **Advanced filtering:** Filter results before or after analysis.
+* **Split-screen comparison:** Source text vs. Genizah fragment with synchronized highlighting.
 
 ### 📚 Manuscript Browser
-*   **Unified Search:** Enter a System ID (`99...`) or a File ID (`FL...`) to jump directly to a specific page.
-*   **Smart Image Engine:** Automatically retrieves the best available image (using NLI's IIIF/Rosetta servers) and caches it locally.
-*   **Deep Links:** One-click access to the Ktiv catalog and high-res viewer.
+
+* **Direct access:** Enter a **System ID (`99…`)** to open a manuscript.
+* **Smart image engine:** Retrieves the best available image from NLI IIIF/Rosetta services and caches it locally.
+* **Deep links:** One-click access to the Ktiv catalog and high-resolution viewer.
+
+> ⚠️ **Note:** Direct navigation by FL ID is **not currently supported**.
 
 ---
 
-## 🛠 Installation
+## 🛠 Installation (Windows)
 
-1.  **Download:** Get the latest `GenizahSearchPro_v3.2.1.zip` from the releases page.
-2.  **Extract:** Unzip to the folder where the Transcriptions.txt file exists (see below).
-3.  **Required Data Files:**
-    Ensure the following files are inside the folder next to `GenizahPro.exe`:
-    *   `Transcriptions.txt` (The MiDRASH dataset, https://doi.org/10.5281/zenodo.17734473).
-    *   `libraries.csv` (The metadata mapping file - **New in v3**).
-4.  **Run:** Double-click `GenizahSearchPro.exe`.
-5.	**On the first run, build the index. It will take a few minutes.
+1. **Download**
+   Download the latest `GenizahSearchPro-3.2.1.zip` from the Releases page.
+
+2. **Extract**
+   Unzip to a **new folder**.
+   **Keep all files together. Do not run the EXE from inside the ZIP.**
+
+3. **Required data file**
+   Place the following file **in the same folder as `GenizahSearchPro.exe`**:
+
+   * `Transcriptions.txt`
+     MiDRASH dataset: [https://doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473)
+
+4. **Bundled files (included in the ZIP)**
+
+   * `libraries.csv`
+   * `README.txt`
+   * `LICENSE`
+   * `PLACE THE PROGRAM NEXT TO TRANSCRIPTIONS FILE.txt`
+
+5. **Run**
+   Double-click `GenizahSearchPro.exe`.
+
+6. **First run**
+   Go to **Settings & About → Build / Rebuild Index**
+   (Indexing takes a few minutes.)
 
 ---
 
 ## 📖 Usage Guide
 
 ### 1. Standard Search
-*   **Query:** Type words, shelfmarks, or titles.
-*   **Mode:**
-	*	**Exact:** Search for words as they are. You can set **Gap** between words.
-    *   **Variants:** Best for general text search (handles OCR errors).
-	*	**Fuzzy:** Other method to overcome OCR errors.
-	*	**Regex:** Search with sophisticated Regular Expressions.
-    *   **Shelfmark / Title:** Specific metadata lookup.
-*   **Sort:** Click the "Shelfmark" or "Title" headers to organize results lexicographically.
-*   **View:** Double-click a result to open the full Viewer, showing the manuscript image, text, and metadata.
+
+* **Query:** Enter words, shelfmarks, or titles.
+* **Mode:**
+
+  * **Exact** – exact word match (supports Gap).
+  * **Variants** – recommended for OCR-noisy text.
+  * **Fuzzy**
+  * **Regex**
+  * **Shelfmark / Title** – metadata lookup.
+* **Sort:** Click column headers.
+* **View:** Double-click a result to open the full viewer.
 
 ### 2. Composition Search (Finding Parallels)
-This tool breaks your source text into small "chunks" and searches for them in the corpus.
-1.  **Input:** Paste your source text into the large text box, or click **Load Text File**.
-2.  **Settings:**
-    *   **Chunk:** Number of words per search block (Recommended: 4-7).
-    *   **Max Freq:** Ignore common phrases that appear more than X times (reduces noise).
-    *   **Filter >:** Move titles that appear many times to the "Appendix" group.
-3.	**Exclude Manuscripts (Optional):** Enter known system numbers or shelfmarks of manuscripts that you want to filter.
-3.  **Filter Text (Optional):** Click **Filter Text** to sort out known texts such as Bible or Mishna and Talmud.
-4.  **Analyze:** Click the button to start. Results will appear in a tree structure.
-5.  **Export:** Click **Save Report** to generate a detailed text file with all matches.
+
+1. Paste source text or load a text file.
+2. Configure:
+
+   * **Chunk size** (recommended: 4–7 words)
+   * **Max frequency**
+   * **Appendix threshold**
+3. *(Optional)* Exclude known manuscripts.
+4. *(Optional)* Filter known texts (Bible, Mishna, Talmud).
+5. Run analysis and explore grouped results.
+6. Export a detailed report.
 
 ### 3. Browsing & Reading
-*   Go to the **Browse Manuscript** tab.
-*   Enter a **System ID** to load the manuscript cover, or an **FL ID** to jump to a specific image.
-*   **View All:** Loads the entire manuscript text (all pages) into one scrollable window.
-*   **Save:** Downloads the full text of the manuscript to your computer.
+
+* Go to **Browse Manuscript**.
+* Enter a **System ID (`99…`)**.
+* Use **View All** to read the entire manuscript.
+* Save the full manuscript text locally.
 
 ---
 
 ## 🎓 Credits & Acknowledgments
 
-**Developed by:** Hillel Gershuni.
+**Developed by:** Hillel Gershuni
 
-**Data Source:**
-This tool relies on the **MiDRASH** project dataset:
-> Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments* [Data set]. Zenodo. https://doi.org/10.5281/zenodo.17734473
+**Data source – MiDRASH Project:**
+Stoekl Ben Ezra et al. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments*.
+[https://doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473)
 
-**Libraries Used:**
-*   PyQt6 (GUI Framework)
-*   Tantivy (High-performance Search)
-*   Requests & Urllib3 (Networking)
+**Libraries used:**
+
+* PyQt6
+* Tantivy
+* Requests / urllib3
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
----
-# 📜 Genizah Search Pro 3.2.1
-
-**כלי החיפוש והניתוח האולטימטיבי לקורפוס הגניזה הקהירית**
-
-Genizah Search Pro היא אפליקציית שולחן עבודה עוצמתית שתוכננה עבור חוקרים העובדים עם כתבי יד מהגניזה הקהירית, ובמיוחד עם התעתיקים שהונגשו על ידי פרויקט MiDRASH. **גרסה 3** מציגה שיפור מקיף של חווית המשתמש, עם התמקדות במהירות, נגישות לנתונים (metadata) ורצף קריאה.
-
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green)
-
-> **⚠️ חשוב: הפעלה ראשונה**
-> לאחר ההתקנה או השדרוג לגרסה 3, חובה לגשת ללשונית **Settings & About** (הגדרות ואודות) וללחוץ על **"Build / Rebuild Index"** (בניית אינדקס).
-> פעולה זו נדרשת כדי לתמוך בתצוגה החדשה שורה-אחר-שורה ובאפשרויות החיפוש במטא-דאטה.
 
 ---
 
-## 🚀 מה חדש בגרסה 3.2.1?
-* **🧪 אמינות בדיקות:** הרצת הבדיקות מאתרת את מודולי האפליקציה גם במצב ה-importlib של pytest, כך שהודעות חסר (למשל Tantivy) יופיעו בבירור לפני יצירת ה-EXE.
-* **🏷️ סנכרון גרסה:** כותרת האפליקציה, מסך האודות ו-App ID ב-Windows משתמשים כעת בערך גרסה אחד כדי לשמור על עקביות באריזה.
+# 📜 Genizah Search Pro 3.2.1 (עברית)
 
-## 🚀 מה חדש בגרסה 3.2?
-* **📊 אפשרויות ייצוא מורחבות:** כעת ניתן לייצא את תוצאות החיפוש ודוחות חיפוש החיבורים ישירות לפורמטים **Excel (.xlsx)** ו-**CSV**, בנוסף לקבצי טקסט רגילים.
+**כלי חיפוש וניתוח מתקדם לכתבי היד של הגניזה הקהירית**
 
----
-
-## 🚀 מה חדש בגרסה 3.1?
-* **🇮🇱 תמיכה מלאה בעברית:** התוכנה כעת עברה לוקליזציה מלאה! ניתן להעביר את הממשק לעברית (כולל התאמה אופטימלית לכיווניות מימין-לשמאל).
-* **🔠 חיפוש וריאנטים משופר:** אלגוריתמי החיפוש שוכללו משמעותית כדי להתמודד טוב יותר עם שגיאות OCR מורכבות וחילופי תווים, מה שמספק תוצאות מדויקות ומקיפות יותר במצבי "Variants".
-* **📄 דוחות מקצועיים:** כל הקבצים המיוצאים (תוצאות חיפוש, כתבי יד, דוחות חיפוש מקבילות) כוללים כעת אוטומטית כותרות ציטוט סטנדרטיות, מה שמקל על מתן קרדיט לפרויקט MiDRASH במחקר שלכם.
-* **🛠️ יציבות ותיקוני באגים:** כולל שיפורי ביצועים כלליים ותיקונים לבעיות תצוגת מטא-דאטה.
+Genizah Search Pro היא אפליקציית שולחן עבודה למחקר בקורפוס הגניזה הקהירית, המבוססת על תעתיקי **פרויקט MiDRASH**.
+גרסה 3 מתמקדת במהירות, בנגישות למטא־דאטה ובחוויית קריאה רציפה וברורה.
 
 ---
 
-## 🚀 מה חדש בגרסה 3.0?
+## ⚠️ חשוב: הפעלה ראשונה / לאחר עדכון
 
-* **⚡ מטא-דאטה אופליין מיידי:** התוכנה כוללת כעת מסד נתונים פנימי (`libraries.csv`) עם מעל 216,000 רשומות, המציג מספרי מדף (Shelfmarks) וכותרות **באופן מיידי** לצד תוצאות החיפוש.
-* **🔎 חיפוש מטא-דאטה:** ניתן לחפש ישירות **מספר מדף** (למשל, "T-S NS 306.15") או **כותרת חיבור** ישירות משורת החיפוש הראשית.
-* **📐 שבירת שורות מקורית:** טקסט כתב היד מוצג כעת שורה-אחר-שורה, בדיוק כפי שהוא מופיע בתעתיק המקורי, במקום כגוש טקסט רציף.
-* **📊 תוצאות ניתנות למיון:** לחצו על כותרות הטבלה כדי למיין את התוצאות לפי מספר מדף, כותרת או רלוונטיות.
-* **🖼️ תצוגה מקדימה ויזואלית:** תמונות כתב היד מוצגות כעת ישירות בתוצאות החיפוש ובלשונית העיון (עם מטמון חכם לטעינה מיידית).
-* **📜 תצוגת כתב יד רציפה:** קראו את כתב היד בצורה טבעית. התכונה החדשה **"View All"** טוענת את כל עמודי כתב היד לתצוגת גלילה רציפה אחת.
-* **💾 שמירת כתב יד שלם:** ייצוא הטקסט המלא של כתב יד מרובה-עמודים לקובץ טקסט יחיד ללמידה אופליין.
+לאחר התקנה ראשונה **או עדכון גרסה**, יש לגשת ללשונית
+**הגדרות ואודות** → **בנה / בנייה מחדש של אינדקס**.
+
+פעולה זו נדרשת כדי לאפשר חיפוש, תצוגה שורה־אחר־שורה ושימוש במטא־דאטה.
+
+---
+
+## 🚀 מה חדש בגרסה 3.2.1
+
+* **בדיקות אמינות משופרות:** איתור שגיאות חבילה ותלויות חסרות לפני יצירת קובץ ההפעלה.
+* **סנכרון גרסה:** כותרת התוכנה, מסך האודות ומזהה האפליקציה ב-Windows משתמשים בערך גרסה אחיד.
+
+## 🚀 מה חדש בגרסה 3.2
+
+* **אפשרויות ייצוא מורחבות:** ייצוא תוצאות חיפוש ודוחות חיפוש חיבורים לפורמטים
+  **Excel (.xlsx)** ו-**CSV**, בנוסף לקובצי טקסט.
+
+## 🚀 מה חדש בגרסה 3.1
+
+* **תמיכה מלאה בעברית:** ממשק מתורגם, כולל כיווניות מימין לשמאל.
+* **חיפוש וריאנטים משופר:** טיפול מתקדם בשגיאות OCR וחילופי אותיות.
+* **דוחות מקצועיים:** כל קובצי הייצוא כוללים כותרת ציטוט סטנדרטית.
+* **שיפורי יציבות ותיקוני תצוגת מטא־דאטה.**
+
+---
+
+## 🚀 חידושי גרסה 3.0
+
+* **מטא־דאטה אופליין מיידי:** הצגת **מספר מדף** ו-**כותרת** מתוך `libraries.csv`
+  (מעל 216,000 רשומות) ישירות בטבלת התוצאות.
+* **חיפוש במטא־דאטה:** חיפוש לפי **כותרת** או **מספר מדף** משורת החיפוש הראשית.
+* **תצוגה שורה־אחר־שורה:** הטקסט מוצג לפי שבירת השורות המקורית של התעתיק.
+* **תוצאות ניתנות למיון:** מיון לפי מספר מדף, כותרת או רלוונטיות.
+* **תצוגה רציפה:** קריאת כתב יד שלם בגלילה אחת באמצעות **הכל**.
+* **שמירת כתב יד:** ייצוא הטקסט המלא של כתב יד לקובץ.
 
 ---
 
 ## ✨ תכונות עיקריות
 
-### 🔍 מנוע חיפוש מתקדם
-* **חיפוש מהיר במיוחד:** מופעל על ידי [Tantivy](https://github.com/quickwit-oss/tantivy) (מבוסס Rust) לתוצאות בפחות משנייה.
-* **מצבי חיפוש:**
-    * **חיפוש טקסט:** מדויק (Exact), עמום (Fuzzy/Levenshtein), ביטוי רגולרי (Regex), ו-**Variants** (תיקון OCR מותאם לעברית).
-    * **חיפוש מטא-דאטה:** מצבים ייעודיים לחיפוש **כותרת** ו**מספר מדף**.
-* **טבלת תוצאות עשירה:** עמודות ניתנות למיון, מטא-דאטה מיידי, קטעי טקסט (Snippets) ותצוגה מקדימה של תמונות.
+### 🔍 חיפוש
 
-### 🧩 חיפוש חיבורים (Composition Analysis)
-* **מציאת חיבורים:** הדביקו טקסט מקור (למשל, פיוט ידוע או טקסט תלמודי) כדי למצוא את כל המופעים שלו בגניזה.
-* **קיבוץ חכם:** מקבץ תוצאות אוטומטית לפי כותרת כתב היד (למשל, "משנה תורה") ומעביר לנספח התאמות שכנראה פחות יעניינו את המשתמש.
-* **סינון מתקדם:** סינון תוצאות לפי מילים ספציפיות לפני או אחרי הניתוח.
-* **תצוגת מסך מפוצל:** השוואת קטע הגניזה מול טקסט המקור שלכם זה לצד זה עם הדגשה אדומה מסונכרנת.
+* **חיפוש מהיר במיוחד** באמצעות Tantivy.
+* **מצבי חיפוש** (לפי שמות הממשק):
 
-### 📚 דפדפן כתבי יד
-* **חיפוש אחוד:** הזינו מספר מערכת (`...99`) או מזהה קובץ (`...FL`) כדי לקפוץ ישירות לעמוד ספציפי.
-* **מנוע תמונות חכם:** מאחזר אוטומטית את התמונה הטובה ביותר הזמינה (באמצעות שרתי IIIF/Rosetta של הספרייה הלאומית) ושומר אותה במטמון מקומי.
-* **קישורי עומק:** גישה בלחיצה אחת לקטלוג "כתיב" ולצפיין ברזולוציה גבוהה.
+  * **מדויק**
+  * **וריאנטים (?)**
+  * **מורחב (??)**
+  * **מקסימלי (???)**
+  * **עמום (~)**
+  * **ביטוי רגולרי**
+  * **כותרת**
+  * **מספר מדף**
+* **טבלת תוצאות עשירה:** מספר מערכת, מספר מדף, כותרת, קטע, תמונה ומקור.
+
+---
+
+### 🧩 חיפוש חיבורים
+
+כלי לאיתור מקבילות בין טקסט מקור לבין הקורפוס.
+
+1. **כותרת החיבור** – אופציונלי.
+2. הדבקת טקסט בתיבה **הדבק טקסט מקור...** או לחיצה על **טען קובץ טקסט**.
+3. הגדרות:
+
+   * **גוש** – מספר מילים בכל יחידת חיפוש.
+   * **תדירות מקס'** – סינון ביטויים נפוצים.
+   * **סינון >** – העברת כותרות נפוצות ל-**נספח**.
+4. אופציונלי:
+
+   * **החרג כתבי יד**
+   * **סנן טקסט**
+5. לחיצה על **נתח**.
+6. ייצוא באמצעות **שמור דוח**.
+
+---
+
+### 📚 עיון בכתב יד
+
+* מעבר ללשונית **עיון בכתב יד**.
+* הזנת **מספר מערכת** ולחיצה על **עבור**.
+* אפשרויות:
+
+  * **הכל** – תצוגה רציפה של כל כתב היד.
+  * **שמור** – שמירת כתב היד לקובץ.
+  * **פתח באתר 'כתיב'** – צפייה בקטלוג הספרייה הלאומית.
+
+> ⚠️ נכון לגרסה זו, העיון מתבצע **לפי מספר מערכת בלבד**.
 
 ---
 
 ## 🛠 התקנה
 
-1.  **הורדה:** הורידו את `GenizahSearchPro_v3.2.1.zip` העדכני מדף השחרורים (Releases).
-2.  **חילוץ:** חלצו את ה-zip לתיקייה שבה נמצא הקובץ Transcriptions.txt (ראו למטה).
-3.  **קבצי נתונים נדרשים:**
-    ודאו שהקבצים הבאים נמצאים בתיקייה לצד `GenizahPro.exe`:
-    * `Transcriptions.txt` (מערך הנתונים של MiDRASH, https://doi.org/10.5281/zenodo.17734473).
-    * `libraries.csv` (קובץ מיפוי המטא-דאטה - **חדש בגרסה 3**).
-4.  **הפעלה:** לחצו פעמיים על `GenizahSearchPro.exe`.
-5.  **בהפעלה הראשונה, בצעו בניית אינדקס. זה ייקח מספר דקות.**
+1. **הורדה:** הורידו את קובץ ה-ZIP העדכני מדף השחרורים.
+2. **חילוץ:** חלצו את כל הקבצים **לתיקייה אחת חדשה**.
+3. **קובץ נדרש:**
 
----
-
-## 📖 מדריך שימוש
-
-### 1. חיפוש רגיל (Standard Search)
-* **Query (שאילתה):** הקלידו מילים, מספרי מדף או כותרות.
-* **Mode (מצב):**
-    * **Exact:** חיפוש מילים כפי שהן. ניתן להגדיר **Gap** (מרחק) בין מילים.
-    * **Variants:** הטוב ביותר לחיפוש טקסט כללי (מתמודד עם שגיאות OCR).
-    * **Fuzzy:** שיטה נוספת להתגברות על שגיאות OCR.
-    * **Regex:** חיפוש באמצעות ביטויים רגולריים מתוחכמים.
-    * **Shelfmark / Title:** חיפוש מטא-דאטה ספציפי.
-* **Sort (מיון):** לחצו על כותרות "Shelfmark" או "Title" כדי לארגן את התוצאות בצורה לקסיקוגרפית.
-* **View (צפייה):** לחצו פעמיים על תוצאה כדי לפתוח את הצפיין המלא, המציג את תמונת כתב היד, הטקסט והמטא-דאטה.
-
-### 2. חיפוש חיבורים (מציאת מקבילות)
-כלי זה מפרק את טקסט המקור שלכם ל"גושים" קטנים ומחפש אותם בקורפוס.
-1.  **קלט:** הדביקו את טקסט המקור בתיבת הטקסט הגדולה, או לחצו על **Load Text File** (טען קובץ טקסט).
-2.  **הגדרות:**
-    * **Chunk:** מספר המילים בכל גוש חיפוש (מומלץ: 4-7).
-    * **Max Freq:** התעלמות מביטויים נפוצים המופיעים יותר מ-X פעמים (מפחית רעש).
-    * **Filter >:** העברת כותרות המופיעות פעמים רבות לקבוצת "Appendix" (נספח).
-3.  **Exclude Manuscripts (אופציונלי):** הזינו מספרי מערכת או מספרי מדף ידועים שברצונכם לסנן.
-4.  **Filter Text (אופציונלי):** לחצו על **Filter Text** כדי לסנן טקסטים ידועים כגון תנ"ך או משנה ותלמוד.
-5.  **Analyze (נתח):** לחצו על הכפתור להתחלה. התוצאות יופיעו במבנה עץ.
-6.  **Export (ייצוא):** לחצו על **Save Report** כדי לייצר קובץ טקסט מפורט עם כל ההתאמות.
-
-### 3. עיון וקריאה
-* עברו ללשונית **Browse Manuscript**.
-* הזינו **System ID** כדי לטעון את כריכת כתב היד, או **FL ID** כדי לקפוץ לתמונה ספציפית.
-* **View All:** טוען את כל טקסט כתב היד (כל העמודים) לחלון גלילה רציף אחד.
-* **Save:** מוריד את הטקסט המלא של כתב היד למחשב שלכם.
+   * `Transcriptions.txt` – חייב להימצא **באותה תיקייה** כמו `GenizahSearchPro.exe`.
+4. **הפעלה:** לחצו פעמיים על `GenizahSearchPro.exe`.
+5. **בהפעלה הראשונה:** בנו אינדקס דרך **הגדרות ואודות**.
 
 ---
 
 ## 🎓 קרדיטים ותודות
 
-**פותח ע"י:** הלל גרשוני.
-
-**מקור הנתונים:**
-כלי זה מסתמך על מערך הנתונים של פרויקט **MiDRASH**:
-> Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments* [Data set]. Zenodo. https://doi.org/10.5281/zenodo.17734473
-
-**ספריות בשימוש:**
-* PyQt6 (GUI Framework)
-* Tantivy (High-performance Search)
-* Requests & Urllib3 (Networking)
+פותח ע"י **הלל גרשוני**.
+מבוסס על תעתיקי **פרויקט MiDRASH** (Zenodo, 2025).
 
 ---
 
 ## 📄 רישיון
 
-פרויקט זה מופץ תחת רישיון **MIT License** - ראו קובץ [LICENSE](LICENSE) לפרטים.
+התוכנה מופצת תחת רישיון **MIT**.
+מאגר התעתיקים מופץ תחת **CC BY 4.0**.
+

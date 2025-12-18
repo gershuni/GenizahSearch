@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Genizah Search Pro – Help</title>
+<style>
+    body {
+        font-family: Arial, Helvetica, sans-serif;
+        margin: 24px;
+        color: #2c3e50;
+        background-color: #ffffff;
+    }
+    h1, h2, h3 {
+        color: #1a5276;
+        margin-top: 1.2em;
+    }
+    h1 {
+        text-align: center;
+        margin-bottom: 0.5em;
+    }
+    .subtitle {
+        text-align: center;
+        color: #555;
+        margin-bottom: 2em;
+    }
+    .section {
+        margin-bottom: 40px;
+    }
+    .columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        align-items: start;
+    }
+    .box {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 16px 18px;
+        background-color: #fafafa;
+    }
+    .box h3 {
+        margin-top: 0;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 6px;
+    }
+    ul {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 6px;
+    }
+    .rtl {
+        direction: rtl;
+        text-align: right;
+    }
+</style>
+</head>
+<body>
+
+<h1>Genizah Search Pro – Help</h1>
+<div class="subtitle">User Guide | מדריך שימוש</div>
+
+<div class="section">
+<h2>Main Search Tab / לשונית חיפוש</h2>
+<div class="columns">
+<div class="box">
+<h3>English</h3>
+<p>The <b>Search</b> tab is the main entry point for exploring the Genizah corpus.</p>
+<ul>
+<li><b>Query:</b> Enter words, shelfmarks, or titles.</li>
+<li><b>Mode:</b> Choose how the text is matched:
+    <ul>
+        <li><b>Exact</b> – exact word matches.</li>
+        <li><b>Variants</b> – Hebrew-aware OCR variants.</li>
+        <li><b>Extended / Maximum</b> – broader variant substitutions.</li>
+        <li><b>Fuzzy</b> – Levenshtein-distance matching.</li>
+        <li><b>Regex</b> – advanced pattern matching.</li>
+        <li><b>Title</b> – search composition titles.</li>
+        <li><b>Shelfmark</b> – search shelfmarks.</li>
+    </ul>
+</li>
+<li><b>Gap:</b> Maximum distance between query words.</li>
+<li><b>Results Table:</b> Displays System ID, Shelfmark, Title, snippet, and source.</li>
+<li>Double-click a row to open the Manuscript Viewer.</li>
+</ul>
+</div>
+
+<div class="box rtl">
+<h3>עברית</h3>
+<p>לשונית <b>חיפוש</b> היא נקודת הכניסה הראשית לעבודה עם קורפוס הגניזה.</p>
+<ul>
+<li><b>שאילתא:</b> הזנת מילים, מספרי מדף או כותרות.</li>
+<li><b>מצב:</b> בחירת אופן החיפוש:
+    <ul>
+        <li><b>מדויק</b> – התאמה מדויקת של מילים.</li>
+        <li><b>וריאנטים</b> – התאמות מותאמות לשגיאות OCR בעברית.</li>
+        <li><b>מורחב / מקסימלי</b> – חיפוש רחב יותר עם חילופי תווים.</li>
+        <li><b>עמום</b> – חיפוש לפי מרחק לווינשטיין.</li>
+        <li><b>ביטוי רגולרי</b> – חיפוש מתקדם באמצעות תבניות.</li>
+        <li><b>כותרת</b> – חיפוש בכותרות חיבורים.</li>
+        <li><b>מספר מדף</b> – חיפוש לפי מספרי מדף.</li>
+    </ul>
+</li>
+<li><b>מרחק:</b> המרחק המרבי בין מילות החיפוש.</li>
+<li><b>טבלת תוצאות:</b> מציגה מספר מערכת, מספר מדף, כותרת וקטע טקסט.</li>
+<li>לחיצה כפולה על שורה פותחת את צפיין כתב היד.</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>Composition Search / חיפוש חיבורים</h2>
+<div class="columns">
+<div class="box">
+<h3>English</h3>
+<p>The <b>Composition Search</b> tool finds parallels between a source text and the Genizah corpus.</p>
+<ul>
+<li>Paste or load a source text.</li>
+<li><b>Chunk:</b> Number of words per search block.</li>
+<li><b>Max Freq:</b> Filters out very common phrases.</li>
+<li><b>Filter & Exclude:</b> Remove known manuscripts or texts.</li>
+<li>Results are grouped into Main results and Appendix.</li>
+<li>Export a full report using <b>Save Report</b>.</li>
+</ul>
+</div>
+
+<div class="box rtl">
+<h3>עברית</h3>
+<p>לשונית <b>חיפוש חיבורים</b> מיועדת לאיתור מקבילות בין טקסט מקור לבין קורפוס הגניזה.</p>
+<ul>
+<li>הדבקת טקסט מקור או טעינתו מקובץ.</li>
+<li><b>גוש:</b> מספר המילים בכל יחידת חיפוש.</li>
+<li><b>תדירות מקס'</b>: סינון ביטויים נפוצים מאוד.</li>
+<li><b>סינון והחרגה:</b> הסרת כתבי יד או טקסטים ידועים.</li>
+<li>התוצאות מקובצות לראשי ולנספח.</li>
+<li>ניתן לייצא דוח מלא באמצעות <b>שמור דוח</b>.</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>Browse Manuscript / עיון בכתב יד</h2>
+<div class="columns">
+<div class="box">
+<h3>English</h3>
+<p>The <b>Browse Manuscript</b> tab is used for reading full manuscripts.</p>
+<ul>
+<li>Enter a <b>System ID</b> to load a manuscript.</li>
+<li>View page images and transcribed text.</li>
+<li><b>View All</b> shows the manuscript as one continuous text.</li>
+<li><b>Save</b> exports the full manuscript to a text file.</li>
+</ul>
+</div>
+
+<div class="box rtl">
+<h3>עברית</h3>
+<p>לשונית <b>עיון בכתב יד</b> מאפשרת קריאה רציפה של כתבי יד.</p>
+<ul>
+<li>הזנת <b>מספר מערכת</b> לטעינת כתב יד.</li>
+<li>צפייה בתמונות ובטקסט המתועתק.</li>
+<li><b>הכל</b> מציג את כתב היד כולו ברצף.</li>
+<li><b>שמור</b> מייצא את כתב היד לקובץ טקסט.</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>Settings & About / הגדרות ואודות</h2>
+<div class="columns">
+<div class="box">
+<h3>English</h3>
+<ul>
+<li><b>Build / Rebuild Index:</b> Creates the search index (required on first run).</li>
+<li><b>AI Configuration:</b> Configure optional AI assistance.</li>
+<li><b>About:</b> Version, credits, and citation information.</li>
+</ul>
+</div>
+
+<div class="box rtl">
+<h3>עברית</h3>
+<ul>
+<li><b>בנה / בנייה מחדש של אינדקס:</b> יצירת האינדקס (נדרש בהפעלה הראשונה).</li>
+<li><b>הגדרות AI:</b> הגדרת סיוע בינה מלאכותית (אופציונלי).</li>
+<li><b>אודות:</b> גרסה, קרדיטים ומידע לציטוט.</li>
+</ul>
+</div>
+</div>
+</div>
+
+</body>
+</html>
