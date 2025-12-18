@@ -190,7 +190,7 @@ class ImageLoaderThread(QThread):
                 
 class HelpDialog(QDialog):
     """Display HTML help content from the bundled Help.html file with graceful fallback."""
-    def __init__(self, parent, title, source_path=None, anchor=None, fallback_html=""):
+    def __init__(self, parent, title, source_path=None, anchor=None, fallback_html="", lang="en"):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowIcon(QIcon(os.path.join(Config.BASE_DIR, "icon.ico")))
@@ -200,20 +200,25 @@ class HelpDialog(QDialog):
         self.text.setOpenExternalLinks(True)
         layout.addWidget(self.text)
 
-        self._load_content(source_path, anchor, fallback_html)
+        self._load_content(source_path, anchor, fallback_html, lang)
 
         btn = QPushButton(tr("Close"))
         btn.clicked.connect(self.close)
         layout.addWidget(btn)
         self.setLayout(layout)
 
-    def _load_content(self, source_path, anchor, fallback_html):
+    def _load_content(self, source_path, anchor, fallback_html, lang):
         if source_path and os.path.exists(source_path):
             try:
-                url = QUrl.fromLocalFile(source_path)
+                with open(source_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                # Inject language attribute to control visibility of bilingual sections
+                if "<body" in content:
+                    content = content.replace("<body", f"<body data-lang='{lang}'", 1)
+                base_url = QUrl.fromLocalFile(source_path)
+                self.text.setHtml(content, base_url)
                 if anchor:
-                    url.setFragment(anchor)
-                self.text.setSource(url)
+                    QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
                 return
             except Exception as e:
                 logger.warning("Failed to load help file %s: %s", source_path, e)
@@ -1463,6 +1468,7 @@ class GenizahGUI(QMainWindow):
             source_path=help_path,
             anchor=anchor,
             fallback_html=self._build_help_fallback_html(),
+            lang=CURRENT_LANG,
         )
         dlg.exec()
 
