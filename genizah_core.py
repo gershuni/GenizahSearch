@@ -1357,9 +1357,10 @@ class SearchEngine:
         manuscripts.sort(key=lambda x: x['score'], reverse=True)
         return manuscripts
 
-    def group_composition_results(self, items, threshold=5, progress_callback=None):
+    def group_composition_results(self, items, threshold=5, progress_callback=None, check_cancel=None):
         ids = []
         for i in items:
+            if check_cancel and check_cancel(): return None, None, None
             # Check if it's a manuscript object with pre-parsed ID
             if i.get('type') == 'manuscript' and i.get('sys_id'):
                 ids.append(i['sys_id'])
@@ -1402,6 +1403,7 @@ class SearchEngine:
         total = len(wrapped)
 
         for i, root in enumerate(wrapped):
+            if check_cancel and check_cancel(): return None, None, None
             if progress_callback and total:
                 progress_callback(i, total)
             if root['grouped']: continue

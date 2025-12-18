@@ -2054,8 +2054,15 @@ class GenizahGUI(QMainWindow):
     def toggle_composition(self):
         if self.is_comp_running:
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-                self.group_thread.terminate()
+                # Disconnect signals to prevent race conditions during stop
+                try: self.group_thread.finished_signal.disconnect()
+                except: pass
+                try: self.group_thread.error_signal.disconnect()
+                except: pass
+
+                self.group_thread.requestInterruption()
                 self.group_thread.wait()
+
                 QMessageBox.information(self, tr("Stopped"), tr("Grouping stopped. Showing ungrouped results."))
                 # Pass explicit empty dicts for other arguments to avoid crashes
                 self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
