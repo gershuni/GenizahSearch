@@ -2268,8 +2268,10 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run.setText(tr("Stop"))
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True)
-        total_items = (len(items) if items else 0) + (len(filtered_items) if filtered_items else 0)
-        self.comp_progress.setRange(0, total_items)
+        total_steps = self.searcher.group_composition_total_steps(items)
+        if filtered_items:
+            total_steps += self.searcher.group_composition_total_steps(filtered_items)
+        self.comp_progress.setRange(0, total_steps)
         self.comp_progress.setValue(0)
         self.comp_progress.setFormat(tr("Grouping compositions..."))
 

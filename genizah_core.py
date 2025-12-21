@@ -1419,7 +1419,25 @@ class SearchEngine:
         manuscripts.sort(key=lambda x: x['score'], reverse=True)
         return manuscripts
 
-    def group_composition_results(self, items, threshold=5, progress_callback=None, check_cancel=None):
+    def group_composition_results(
+        self,
+        items,
+        threshold=5,
+        progress_callback=None,
+        check_cancel=None,
+        progress_offset=0,
+        progress_total=None,
+    ):
+        total_steps = self.group_composition_total_steps(items)
+        progress_total = progress_total or (progress_offset + total_steps)
+        progress = progress_offset
+
+        def bump_progress():
+            nonlocal progress
+            progress += 1
+            if progress_callback and progress_total:
+                progress_callback(progress, progress_total)
+
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
@@ -1428,8 +1446,10 @@ class SearchEngine:
                 ids.append(i['sys_id'])
             else:
                 ids.append(self.meta_mgr.parse_header_smart(i['raw_header'])[0])
+            bump_progress()
 
         self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x])
+        bump_progress()
 
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
 
@@ -1458,6 +1478,7 @@ class SearchEngine:
                 'item': item, 'title': t, 'clean': " ".join(_get_clean_words(t)),
                 'grouped': False, 'shelfmark': shelfmark
             })
+            bump_progress()
 
         wrapped.sort(key=lambda x: len(x['title']))
         appendix = defaultdict(list)
@@ -1466,8 +1487,6 @@ class SearchEngine:
 
         for i, root in enumerate(wrapped):
             if check_cancel and check_cancel(): return None, None, None
-            if progress_callback and total:
-                progress_callback(i, total)
             if root['grouped']: continue
             sig = _get_signature(root['title'])
             if not sig: continue
@@ -1480,13 +1499,18 @@ class SearchEngine:
                     m['grouped'] = True
                     appendix[sig].append(m['item'])
                     summary[sig].append(m['shelfmark'])
+            bump_progress()
         
-        if progress_callback and total:
-            progress_callback(total, total)
+        if progress_callback and progress_total:
+            progress_callback(progress_offset + total_steps, progress_total)
 
         main_list = [w['item'] for w in wrapped if not w['grouped']]
         main_list.sort(key=lambda x: x['score'], reverse=True)
         return main_list, appendix, summary
+
+    def group_composition_total_steps(self, items):
+        item_count = len(items) if items else 0
+        return (item_count * 3) + 1
 
     def get_full_text_by_id(self, uid):
         try:

@@ -115,9 +115,17 @@ class GroupingThread(QThread):
             # 1. Group Main Items
             def cb1(curr, total): self.progress_signal.emit(curr, total)
             self.status_signal.emit("Grouping main results...")
+            main_steps = self.searcher.group_composition_total_steps(self.items)
+            filt_steps = self.searcher.group_composition_total_steps(self.filtered_items)
+            total_steps = main_steps + filt_steps
 
             result_main = self.searcher.group_composition_results(
-                self.items, self.threshold, progress_callback=cb1, check_cancel=check
+                self.items,
+                self.threshold,
+                progress_callback=cb1,
+                check_cancel=check,
+                progress_offset=0,
+                progress_total=total_steps,
             )
             if not result_main or result_main[0] is None:
                 return # Cancelled
@@ -131,7 +139,12 @@ class GroupingThread(QThread):
                 def cb2(curr, total): self.progress_signal.emit(curr, total)
 
                 result_filt = self.searcher.group_composition_results(
-                    self.filtered_items, self.threshold, progress_callback=cb2, check_cancel=check
+                    self.filtered_items,
+                    self.threshold,
+                    progress_callback=cb2,
+                    check_cancel=check,
+                    progress_offset=main_steps,
+                    progress_total=total_steps,
                 )
                 if not result_filt or result_filt[0] is None:
                     return # Cancelled
