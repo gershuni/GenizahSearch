@@ -69,6 +69,9 @@ TRANSLATIONS = {
     "Metadata Error": "שגיאת נתונים",
     "Metadata load cancelled. Loaded {}/{}.": "טעינת נתונים בוטלה. נטענו {}/{}.",
     "Loaded {} items.": "נטענו {} פריטים.",
+    "View full transcription": "צפה בתעתיק מלא",
+    "Search for parallels": "חפש מקבילות",
+    "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",

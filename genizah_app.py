@@ -409,7 +409,16 @@ class ResultDialog(QDialog):
         self.lbl_total = QLabel("/ ?")
         nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row)
+        action_row = QHBoxLayout()
+        self.btn_view_transcription = QPushButton(tr("View full transcription"))
+        self.btn_view_transcription.clicked.connect(self.open_full_transcription)
+        self.btn_search_parallels = QPushButton(tr("Search for parallels"))
+        self.btn_search_parallels.clicked.connect(self.search_for_parallels)
+        action_row.addWidget(self.btn_view_transcription)
+        action_row.addWidget(self.btn_search_parallels)
+        action_row.addStretch()
+
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row)
         
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
@@ -450,6 +459,16 @@ class ResultDialog(QDialog):
         if 0 <= new_idx < len(self.all_results):
             self.current_result_idx = new_idx
             self.load_result_by_index(new_idx)
+
+    def open_full_transcription(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "open_result_in_browse"):
+            parent.open_result_in_browse(self.data, shelfmark=self.lbl_shelf.text(), title=self.lbl_title.text())
+
+    def search_for_parallels(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "send_result_to_composition"):
+            parent.send_result_to_composition(self.data)
 
     def _htmlify(self, text):
         if not text: return ""
@@ -907,10 +926,14 @@ class GenizahGUI(QMainWindow):
             QApplication.instance().setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_search_tab(), tr("Search"))
-        self.tabs.addTab(self.create_composition_tab(), tr("Composition Search"))
-        self.tabs.addTab(self.create_browse_tab(), tr("Browse Manuscript"))
-        self.tabs.addTab(self.create_settings_tab(), tr("Settings & About"))
+        self.search_tab = self.create_search_tab()
+        self.composition_tab = self.create_composition_tab()
+        self.browse_tab = self.create_browse_tab()
+        self.settings_tab = self.create_settings_tab()
+        self.tabs.addTab(self.search_tab, tr("Search"))
+        self.tabs.addTab(self.composition_tab, tr("Composition Search"))
+        self.tabs.addTab(self.browse_tab, tr("Browse Manuscript"))
+        self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
         # Language Toggle
         lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
@@ -1810,6 +1833,28 @@ class GenizahGUI(QMainWindow):
             sorted_results = self.last_results
 
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+
+    def open_result_in_browse(self, res, shelfmark=None, title=None):
+        sid = res['display'].get('id')
+        if not sid:
+            QMessageBox.warning(self, tr("Error"), tr("No System ID found for this result."))
+            return
+        if shelfmark:
+            info_text = f"<b>{shelfmark}</b>"
+            if title:
+                info_text += f"<br>{title}"
+            self.browse_info_lbl.setText(info_text)
+        self.browse_sys_input.setText(sid)
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self.browse_load()
+
+    def send_result_to_composition(self, res):
+        if not res.get('full_text'):
+            res['full_text'] = self.searcher.get_full_text_by_id(res['uid']) or res.get('text', '')
+        source_text = res.get('full_text') or res.get('text', '')
+        self.comp_text_area.setPlainText(source_text)
+        self.tabs.setCurrentWidget(self.composition_tab)
+        self.comp_text_area.setFocus()
 
     def export_results(self, fmt='xlsx'):
         """
