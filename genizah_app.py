@@ -1869,7 +1869,17 @@ class GenizahGUI(QMainWindow):
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
-        sid = res['display'].get('id')
+        sid = None
+        if isinstance(res, dict):
+            display = res.get('display')
+            if isinstance(display, dict):
+                sid = display.get('id')
+            if not sid:
+                sid = res.get('sys_id')
+            if not sid:
+                raw_header = res.get('raw_header') or res.get('full_header')
+                if raw_header:
+                    sid, _ = self.meta_mgr.parse_header_smart(raw_header)
         if not sid:
             QMessageBox.warning(self, tr("Error"), tr("No System ID found for this result."))
             return
