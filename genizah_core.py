@@ -26,24 +26,45 @@ try:
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
+    
+try:
+    import tantivy
+except ImportError:
+    raise ImportError("Tantivy library missing. Please install it.")
 
 # ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
-    
+
+    @staticmethod
+    def _pick_writable_dir(primary: str, fallback: str) -> str:
+        """
+        Prefer primary; if we cannot create/write there, use fallback.
+        Returns a directory path that is guaranteed (best-effort) to exist and be writable.
+        """
+        # Try primary
+        try:
+            os.makedirs(primary, exist_ok=True)
+            test_path = os.path.join(primary, ".__write_test__")
+            with open(test_path, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_path)
+            return primary
+        except Exception:
+            pass
+
+        # Fallback
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+
     # 1. Determine Base Paths
-    if getattr(sys, 'frozen', False):
-        # --- Running as Compiled EXE (PyInstaller Onedir/Onefile) ---
-        # BASE_DIR: Where the .exe file is located. (For external user files like Transcriptions.txt)
+    if getattr(sys, "frozen", False):
         BASE_DIR = os.path.dirname(sys.executable)
-        
-        # INTERNAL_DIR: Where bundled resources are located (inside _internal or temp)
-        # We find it using the location of this script file inside the bundle.
-        INTERNAL_DIR = os.path.dirname(os.path.abspath(__file__))
+        _cand = os.path.join(BASE_DIR, "_internal")
+        INTERNAL_DIR = _cand if os.path.isdir(_cand) else getattr(sys, "_MEIPASS", BASE_DIR)
     else:
-        # --- Running as Python Script ---
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         INTERNAL_DIR = BASE_DIR
 
@@ -51,40 +72,52 @@ class Config:
     FILE_V8 = os.path.join(BASE_DIR, "Transcriptions.txt")
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
     INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
-    RESULTS_DIR = os.path.join(BASE_DIR, "Results")
-    REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
 
     # 3. User Data Directory (Index, Caches) - Smart Logic
-    # We prefer the new portable location, but respect the old one if it exists to keep user data.
-    _OLD_INDEX_PATH = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
-    _NEW_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
-    
-    _OLD_DB_CHECK = os.path.join(_OLD_INDEX_PATH, "tantivy_db")
-    _NEW_DB_CHECK = os.path.join(_NEW_INDEX_PATH, "tantivy_db")
-    
-    has_new_db = os.path.exists(_NEW_DB_CHECK) and os.listdir(_NEW_DB_CHECK)
-    has_old_db = os.path.exists(_OLD_DB_CHECK) and os.listdir(_OLD_DB_CHECK)
+    _PORTABLE_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
+    _APPDATA_PATH = os.path.join(
+        os.getenv("LOCALAPPDATA", os.path.expanduser("~")),
+        "GenizahSearchPro",
+        "Index",
+    )
+    _LEGACY_PATH = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
 
-    if has_new_db:
-        INDEX_DIR = _NEW_INDEX_PATH
-    elif has_old_db:
-        INDEX_DIR = _OLD_INDEX_PATH
+    if os.path.exists(_PORTABLE_INDEX_PATH):
+        INDEX_DIR = _PORTABLE_INDEX_PATH
+    elif os.path.exists(_LEGACY_PATH) and not os.path.exists(_APPDATA_PATH):
+        INDEX_DIR = _LEGACY_PATH
     else:
-        INDEX_DIR = _NEW_INDEX_PATH
+        INDEX_DIR = _APPDATA_PATH
+
+    # Ensure the directory is created
+    try:
+        os.makedirs(INDEX_DIR, exist_ok=True)
+    except Exception:
+        INDEX_DIR = _PORTABLE_INDEX_PATH
+        os.makedirs(INDEX_DIR, exist_ok=True)
+
+    # 4. Output folders: try BASE_DIR first; fallback to INDEX_DIR
+    RESULTS_DIR = _pick_writable_dir(
+        os.path.join(BASE_DIR, "Results"),
+        os.path.join(INDEX_DIR, "Results"),
+    )
+    REPORTS_DIR = _pick_writable_dir(
+        os.path.join(BASE_DIR, "Reports"),
+        os.path.join(INDEX_DIR, "Reports"),
+    )
 
     IMAGE_CACHE_DIR = os.path.join(INDEX_DIR, "images_cache")
-    
-    # 4. Generated Files locations (Logs, Configs, Caches - inside Index Dir)
+
+    # 5. Generated Files (Logs, Configs, Caches - inside Index Dir)
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
     CACHE_NLI = os.path.join(INDEX_DIR, "nli_cache.pkl")
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
-    LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl") # <--- RESTORED
+    LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
     FL_MAP = os.path.join(INDEX_DIR, "fl_lookup.pkl")
-    LOG_FILE = os.path.join(INDEX_DIR, "genizah.log") # <--- Kept in INDEX_DIR
-    
-    # 5. Bundled Internal Resources (Packaged inside the EXE/_internal)
-    # These must be added via --add-data in PyInstaller
+    LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
+
+    # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
     LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")
     HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
 
@@ -93,13 +126,12 @@ class Config:
     SEARCH_LIMIT = 5000
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
-    WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
+    WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
     
     @staticmethod
     def resource_path(relative_path: str) -> str:
-        """Return absolute path to bundled resources, supporting PyInstaller onedir/onefile modes."""
-        base_path = getattr(sys, "_MEIPASS", Config.BASE_DIR)
-        return os.path.join(base_path, relative_path)
+        """Return absolute path to bundled resources."""
+        return os.path.join(Config.INTERNAL_DIR, relative_path)
 
 # ==============================================================================
 #  LOGGING
