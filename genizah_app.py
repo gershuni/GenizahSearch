@@ -20,8 +20,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QGridLayout,
                              QProgressDialog, QStackedLayout) 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop 
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
 
 from version import APP_VERSION
@@ -302,15 +303,46 @@ class ExcludeDialog(QDialog):
         self.resize(500, 400)
         layout = QVBoxLayout()
 
-        help_lbl = QLabel(tr("Enter system IDs or shelfmarks to exclude (one per line)."))
+        help_lbl = QLabel(tr("Enter system IDs or shelfmarks to exclude (one per line). Matching values are filled automatically."))
         help_lbl.setWordWrap(True)
         layout.addWidget(help_lbl)
 
-        self.text_area = QPlainTextEdit()
-        self.text_area.setPlaceholderText("123456\nT-S NS 123.45\nJer 123")
+        self._syncing = False
+        self._shelf_to_sys = None
+        self._last_edited = None
+        self.meta_mgr = getattr(parent, "meta_mgr", None)
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel(tr("System IDs")), 0, 0)
+        grid.addWidget(QLabel(tr("Shelfmarks")), 0, 1)
+
+        self.sys_text_area = QPlainTextEdit()
+        self.sys_text_area.setPlaceholderText("123456\n9900123456")
+        self.sys_text_area.textChanged.connect(self._on_sys_text_changed)
+
+        self.shelf_text_area = QPlainTextEdit()
+        self.shelf_text_area.setPlaceholderText("T-S NS 123.45\nJer 123")
+        self.shelf_text_area.textChanged.connect(self._on_shelf_text_changed)
+
+        self.sys_text_area.installEventFilter(self)
+        self.shelf_text_area.installEventFilter(self)
+
+        grid.addWidget(self.sys_text_area, 1, 0)
+        grid.addWidget(self.shelf_text_area, 1, 1)
+        layout.addLayout(grid)
+
         if existing_entries:
-            self.text_area.setPlainText("\n".join(existing_entries))
-        layout.addWidget(self.text_area)
+            sys_entries, shelf_entries = self._split_existing_entries(existing_entries)
+            if sys_entries:
+                self.sys_text_area.setPlainText("\n".join(sys_entries))
+            if shelf_entries:
+                self.shelf_text_area.setPlainText("\n".join(shelf_entries))
+            if sys_entries and not shelf_entries:
+                self._last_edited = "sys"
+                self._sync_from_sys()
+            elif shelf_entries and not sys_entries:
+                self._last_edited = "shelf"
+                self._sync_from_shelf()
 
         btn_row = QHBoxLayout()
         self.btn_load = QPushButton(tr("Load from File"))
@@ -328,14 +360,136 @@ class ExcludeDialog(QDialog):
 
         self.setLayout(layout)
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.FocusIn:
+            if obj is self.sys_text_area:
+                self._last_edited = "sys"
+            elif obj is self.shelf_text_area:
+                self._last_edited = "shelf"
+        return super().eventFilter(obj, event)
+
+    def _split_existing_entries(self, entries):
+        sys_entries = []
+        shelf_entries = []
+        for entry in entries:
+            cleaned = re.sub(r"\s+", "", entry or "")
+            digits_only = re.sub(r"\D", "", cleaned)
+            if digits_only and digits_only == cleaned:
+                sys_entries.append(cleaned)
+            else:
+                stripped = (entry or "").strip()
+                if stripped:
+                    shelf_entries.append(stripped)
+        return sys_entries, shelf_entries
+
+    def _on_sys_text_changed(self):
+        if self._syncing or self._last_edited != "sys":
+            return
+        self._sync_from_sys()
+
+    def _on_shelf_text_changed(self):
+        if self._syncing or self._last_edited != "shelf":
+            return
+        self._sync_from_shelf()
+
+    def _sync_from_sys(self):
+        self._syncing = True
+        sys_lines = self._get_lines(self.sys_text_area.toPlainText())
+        shelves = self._resolve_shelves_from_sys(sys_lines)
+        self.shelf_text_area.setPlainText("\n".join(shelves))
+        self._syncing = False
+
+    def _sync_from_shelf(self):
+        self._syncing = True
+        shelf_lines = self._get_lines(self.shelf_text_area.toPlainText())
+        sys_ids = self._resolve_sys_from_shelves(shelf_lines)
+        self.sys_text_area.setPlainText("\n".join(sys_ids))
+        self._syncing = False
+
+    def _get_lines(self, text):
+        return text.splitlines()
+
+    def _resolve_shelves_from_sys(self, sys_lines):
+        shelves = []
+        for line in sys_lines:
+            cleaned = re.sub(r"\D", "", line or "")
+            if not cleaned or not self.meta_mgr:
+                shelves.append("")
+                continue
+            shelf, _ = self.meta_mgr.get_meta_for_id(cleaned)
+            shelves.append("" if shelf == "Unknown" else shelf)
+        return shelves
+
+    def _ensure_shelf_map(self):
+        if self._shelf_to_sys is not None:
+            return
+        self._shelf_to_sys = {}
+        if not self.meta_mgr:
+            return
+        for sys_id, meta in self.meta_mgr.csv_bank.items():
+            self._add_shelf_map(meta.get("shelfmark"), sys_id)
+        for sys_id, meta in self.meta_mgr.nli_cache.items():
+            self._add_shelf_map(meta.get("shelfmark"), sys_id)
+
+    def _add_shelf_map(self, shelf, sys_id):
+        norm = self._normalize_shelfmark(shelf)
+        if norm and norm not in self._shelf_to_sys:
+            self._shelf_to_sys[norm] = sys_id
+
+    def _resolve_sys_from_shelves(self, shelf_lines):
+        self._ensure_shelf_map()
+        sys_ids = []
+        for line in shelf_lines:
+            norm = self._normalize_shelfmark(line)
+            sys_ids.append(self._shelf_to_sys.get(norm, "") if norm else "")
+        return sys_ids
+
+    def _normalize_shelfmark(self, shelf):
+        if not shelf:
+            return ""
+        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", shelf, flags=re.IGNORECASE)
+        cleaned = re.sub(r"[^\w]", "", without_prefix).lower()
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
+
     def load_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text (*.txt)")
         if path:
             with open(path, 'r', encoding='utf-8') as f:
-                self.text_area.setPlainText(f.read())
+                content = f.read()
+            entries = [line for line in content.splitlines() if line.strip()]
+            sys_entries, shelf_entries = self._split_existing_entries(entries)
+            self._syncing = True
+            self.sys_text_area.setPlainText("\n".join(sys_entries))
+            self.shelf_text_area.setPlainText("\n".join(shelf_entries))
+            self._syncing = False
+            if sys_entries and not shelf_entries:
+                self._last_edited = "sys"
+                self._sync_from_sys()
+            elif shelf_entries and not sys_entries:
+                self._last_edited = "shelf"
+                self._sync_from_shelf()
 
     def get_entries_text(self):
-        return self.text_area.toPlainText()
+        entries = []
+        seen = set()
+
+        sys_lines = self._get_lines(self.sys_text_area.toPlainText())
+        for line in sys_lines:
+            cleaned = re.sub(r"\D", "", line or "")
+            if cleaned and cleaned not in seen:
+                entries.append(cleaned)
+                seen.add(cleaned)
+
+        shelf_lines = self._get_lines(self.shelf_text_area.toPlainText())
+        for line in shelf_lines:
+            stripped = (line or "").strip()
+            if stripped and stripped not in seen:
+                entries.append(stripped)
+                seen.add(stripped)
+
+        return "\n".join(entries)
 
 class ResultDialog(QDialog):
     """Allow browsing a single search result and its surrounding pages."""
