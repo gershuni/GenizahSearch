@@ -1432,9 +1432,9 @@ class SearchEngine:
         progress_total = progress_total or (progress_offset + total_steps)
         progress = progress_offset
 
-        def bump_progress():
+        def bump_progress(amount=1):
             nonlocal progress
-            progress += 1
+            progress += amount
             if progress_callback and progress_total:
                 progress_callback(progress, progress_total)
 
@@ -1485,6 +1485,8 @@ class SearchEngine:
         summary = defaultdict(list)
         total = len(wrapped)
 
+        compare_batch = 0
+        compare_batch_size = 200
         for i, root in enumerate(wrapped):
             if check_cancel and check_cancel(): return None, None, None
             if root['grouped']: continue
@@ -1494,12 +1496,19 @@ class SearchEngine:
             for j, cand in enumerate(wrapped):
                 if i == j or cand['grouped']: continue
                 if sig in cand['clean']: matches.append(cand)
+                compare_batch += 1
+                if compare_batch >= compare_batch_size:
+                    bump_progress(compare_batch)
+                    compare_batch = 0
             if len(matches) > threshold:
                 for m in matches:
                     m['grouped'] = True
                     appendix[sig].append(m['item'])
                     summary[sig].append(m['shelfmark'])
             bump_progress()
+
+        if compare_batch:
+            bump_progress(compare_batch)
         
         if progress_callback and progress_total:
             progress_callback(progress_offset + total_steps, progress_total)
@@ -1510,7 +1519,8 @@ class SearchEngine:
 
     def group_composition_total_steps(self, items):
         item_count = len(items) if items else 0
-        return (item_count * 3) + 1
+        comparisons = item_count * (item_count - 1) if item_count > 1 else 0
+        return (item_count * 3) + comparisons + 1
 
     def get_full_text_by_id(self, uid):
         try:
