@@ -417,6 +417,9 @@ class ExcludeDialog(QDialog):
                 shelves.append("")
                 continue
             shelf, _ = self.meta_mgr.get_meta_for_id(cleaned)
+            if shelf == "Unknown" and cleaned not in self.meta_mgr.nli_cache:
+                self.meta_mgr.fetch_nli_data(cleaned)
+                shelf, _ = self.meta_mgr.get_meta_for_id(cleaned)
             shelves.append("" if shelf == "Unknown" else shelf)
         return shelves
 
