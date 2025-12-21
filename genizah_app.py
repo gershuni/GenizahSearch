@@ -1388,7 +1388,7 @@ class GenizahGUI(QMainWindow):
         
         gb_about = QGroupBox(tr("About"))
         abl = QVBoxLayout()
-        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else """
+        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else f"""
         <style>
             h3 { margin-bottom: 0px; margin-top: 10px; }
             p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
