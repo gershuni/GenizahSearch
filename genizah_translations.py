@@ -107,6 +107,8 @@ TRANSLATIONS = {
     "Move titles appearing > X times to Appendix": "העבר כותרות המופיעות מעל X פעמים לנספח",
     "Analyze Composition": "נתח חיבור",
     "Analyze": "נתח",
+    "Full Recursive Search": "חיפוש רקורסיבי מלא",
+    "Recursive Search in Results": "חיפוש רקורסיבי בתוצאות",
     "Context": "הקשר",
     "Save Report": "שמור דוח",
     "Composition Help": "עזרה בחיפוש מקבילות",
@@ -132,6 +134,8 @@ TRANSLATIONS = {
     "Fetching metadata before export...": "טוען נתונים לפני ייצוא...",
     "Loading missing metadata...": "טוען נתונים חסרים...",
     "No items.": "אין פריטים.",
+    "No Data": "אין נתונים",
+    "Could not load full text for selected results.": "לא ניתן לטעון טקסט מלא עבור התוצאות שנבחרו.",
 
     # --- Browse Tab ---
     "Enter System ID...": "הכנס מספר מערכת...",
