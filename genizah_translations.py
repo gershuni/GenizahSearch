@@ -93,6 +93,7 @@ TRANSLATIONS = {
     "Search in Shelfmark metadata": "חיפוש במספרי מדף (Metadata)",
 
     # --- Composition Tab ---
+    "Title:": "כותרת:",
     "Composition Title": "כותרת החיבור",
     "Paste source text...": "הדבק טקסט מקור...",
     "Load Text File": "טען קובץ טקסט",
