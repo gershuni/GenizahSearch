@@ -1143,9 +1143,9 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
-        self.btn_comp_recursive = QPushButton(tr("Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
+        self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        self.btn_comp_recursive.setEnabled(False)
+        self.btn_comp_recursive.setEnabled(True)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
@@ -1160,6 +1160,12 @@ class GenizahGUI(QMainWindow):
         self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree_updating = False
+        self.comp_tree.setStyleSheet(
+            "QTreeWidget::indicator { width: 16px; height: 16px; }"
+            "QTreeWidget::indicator:unchecked { border: 1px solid #bdc3c7; background: #ecf0f1; }"
+            "QTreeWidget::indicator:checked { border: 1px solid #1e8449; background: #27ae60; }"
+            "QTreeWidget::indicator:indeterminate { border: 1px solid #f39c12; background: #f1c40f; }"
+        )
 
         # Configure columns width
         header = self.comp_tree.header()
@@ -2198,12 +2204,16 @@ class GenizahGUI(QMainWindow):
             return
 
         selected_uids = self._collect_checked_comp_page_uids()
-        if not selected_uids:
-            QMessageBox.information(self, tr("No Selections"), tr("Select compositions to run recursive search."))
-            return
+        if selected_uids:
+            source_uids = selected_uids
+        else:
+            source_uids = self._collect_all_comp_page_uids()
+            if not source_uids:
+                QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
+                return
 
         extra_texts = []
-        for uid in selected_uids:
+        for uid in source_uids:
             full_text = self.searcher.get_full_text_by_id(uid)
             if full_text:
                 extra_texts.append(full_text)
@@ -2422,14 +2432,17 @@ class GenizahGUI(QMainWindow):
 
         # 1. Main Results
         root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
+        make_checkable(root)
         for item in clean_main:
             add_manuscript_node(root, item)
 
         # 2. Appendix Results
         if clean_appx:
             root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
+            make_checkable(root_a)
             for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
                 gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
+                make_checkable(gn)
                 for item in items:
                     add_manuscript_node(gn, item)
 
@@ -2437,25 +2450,30 @@ class GenizahGUI(QMainWindow):
         total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
         if total_filtered > 0:
             root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
+            make_checkable(root_f)
 
             # 3a. Filtered Main
             if clean_filt:
                 f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
                 f_main_node.setExpanded(True)
+                make_checkable(f_main_node)
                 for item in clean_filt:
                     add_manuscript_node(f_main_node, item)
 
             # 3b. Filtered Appendix
             if clean_filt_appx:
                 f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
+                make_checkable(f_appx_node)
                 for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
+                    make_checkable(gn)
                     for item in items:
                         add_manuscript_node(gn, item)
 
         # 4. Known / Excluded Results
         if known:
             root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
+            make_checkable(root_k)
             for item in known:
                 add_manuscript_node(root_k, item)
         self.comp_tree_updating = False
@@ -2463,8 +2481,6 @@ class GenizahGUI(QMainWindow):
 
     def on_comp_tree_item_changed(self, item, column):
         if self.comp_tree_updating or column != 0:
-            return
-        if not item.data(0, Qt.ItemDataRole.UserRole):
             return
 
         self.comp_tree_updating = True
@@ -2479,7 +2495,7 @@ class GenizahGUI(QMainWindow):
 
     def _sync_parent_check_state(self, item):
         parent = item.parent()
-        if not parent or not parent.data(0, Qt.ItemDataRole.UserRole):
+        if not parent:
             return
 
         states = []
@@ -2525,11 +2541,45 @@ class GenizahGUI(QMainWindow):
 
         return sorted(uids)
 
+    def _collect_all_comp_page_uids(self):
+        uids = set()
+
+        def add_from_item(item):
+            if item.get('type') == 'manuscript':
+                for page in item.get('pages', []):
+                    uid = page.get('uid')
+                    if uid:
+                        uids.add(uid)
+            else:
+                uid = item.get('uid')
+                if uid:
+                    uids.add(uid)
+
+        for item in self.comp_main:
+            add_from_item(item)
+        for group_items in self.comp_appendix.values():
+            for item in group_items:
+                add_from_item(item)
+        for item in self.comp_filtered_main:
+            add_from_item(item)
+        for group_items in self.comp_filtered_appendix.values():
+            for item in group_items:
+                add_from_item(item)
+        for item in self.comp_known:
+            add_from_item(item)
+
+        return sorted(uids)
+
     def _update_recursive_button_state(self):
         if self.is_comp_running:
             self.btn_comp_recursive.setEnabled(False)
             return
-        self.btn_comp_recursive.setEnabled(bool(self._collect_checked_comp_page_uids()))
+        checked = self._collect_checked_comp_page_uids()
+        if checked:
+            self.btn_comp_recursive.setText(tr("Recursive Search in Results"))
+        else:
+            self.btn_comp_recursive.setText(tr("Full Recursive Search"))
+        self.btn_comp_recursive.setEnabled(True)
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
