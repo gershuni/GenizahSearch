@@ -1498,7 +1498,7 @@ class SearchEngine:
                 if sig in cand['clean']: matches.append(cand)
                 compare_batch += 1
                 if compare_batch >= compare_batch_size:
-                    bump_progress(compare_batch)
+                    bump_progress()
                     compare_batch = 0
             if len(matches) > threshold:
                 for m in matches:
@@ -1508,7 +1508,7 @@ class SearchEngine:
             bump_progress()
 
         if compare_batch:
-            bump_progress(compare_batch)
+            bump_progress()
         
         if progress_callback and progress_total:
             progress_callback(progress_offset + total_steps, progress_total)
@@ -1520,7 +1520,9 @@ class SearchEngine:
     def group_composition_total_steps(self, items):
         item_count = len(items) if items else 0
         comparisons = item_count * (item_count - 1) if item_count > 1 else 0
-        return (item_count * 3) + comparisons + 1
+        compare_batch_size = 200
+        comparison_batches = (comparisons + compare_batch_size - 1) // compare_batch_size
+        return (item_count * 3) + comparison_batches + 1
 
     def get_full_text_by_id(self, uid):
         try:
