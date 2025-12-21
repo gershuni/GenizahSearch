@@ -2296,7 +2296,12 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
+
+        # Ensure thread is finished before releasing the object to prevent QThread Destroyed error
+        if self.group_thread:
+            self.group_thread.wait()
         self.group_thread = None
+
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
 
@@ -2343,6 +2348,7 @@ class GenizahGUI(QMainWindow):
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
         self.comp_tree_updating = True
+        self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
         
         def make_snippet_label(text_content):
@@ -2483,6 +2489,8 @@ class GenizahGUI(QMainWindow):
             make_checkable(root_k)
             for item in known:
                 add_manuscript_node(root_k, item)
+
+        self.comp_tree.setUpdatesEnabled(True)
         self.comp_tree_updating = False
         self._update_recursive_button_state()
         if self.pending_recursive_search:
