@@ -320,11 +320,11 @@ class ExcludeDialog(QDialog):
         grid.addWidget(QLabel(tr("Title")), 0, 2)
 
         self.sys_text_area = QPlainTextEdit()
-        self.sys_text_area.setPlaceholderText("123456\n9900123456")
+        self.sys_text_area.setPlaceholderText("990051564290205171\n990053963680205171")
         self.sys_text_area.textChanged.connect(self._on_sys_text_changed)
 
         self.shelf_text_area = QPlainTextEdit()
-        self.shelf_text_area.setPlaceholderText("T-S NS 123.45\nJer 123")
+        self.shelf_text_area.setPlaceholderText("MS heb. e.34/30\nMs. EVR II B 1011\nMs. Kaufmann GEN 227/A")
         self.shelf_text_area.textChanged.connect(self._on_shelf_text_changed)
 
         self.title_text_area = QPlainTextEdit()
