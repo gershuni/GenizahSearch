@@ -20,10 +20,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
-                             QGridLayout,
+                             QGridLayout, QToolTip,
                              QProgressDialog, QStackedLayout) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QToolTip
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics
 
 from version import APP_VERSION
 
