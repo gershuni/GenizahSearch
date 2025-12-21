@@ -1,17 +1,33 @@
-## 📜 Genizah Search Pro 3.2.2
+## 📜 Genizah Search Pro 3.5
 
 **The Ultimate Search & Analysis Tool for the Cairo Genizah Corpus**
 
 Genizah Search Pro is a powerful desktop application designed for researchers working with Cairo Genizah manuscripts, especially with the transcriptions made available by the MiDRASH Project.
-**Version 3** introduces a major redesign focused on speed, instant metadata access, and continuous manuscript reading.
+**Version 3.5** introduces powerful workflow integrations, deep analysis tools, and optimized data management.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-> **⚠️ IMPORTANT – FIRST RUN / AFTER UPGRADES**
-> After installing or upgrading to version 3, go to **Settings & About** and click **Build / Rebuild Index**.
-> Rebuilding the index is required to enable line-by-line display and metadata-based search.
+## 🚀 What's New in Version 3.5?
+
+* **🔄 Seamless Workflow Integration:**
+  New buttons in the **Manuscript Viewer** allow instant transitions between tools:
+  * **View full transcription:** Jumps directly to the **Browse** tab to read the entire manuscript continuously.
+  * **Search for parallels:** Sends the text immediately to **Composition Search** (automatically adding the current manuscript to the exclusion list).
+
+* **🧩 Recursive Composition Search:**
+  A major upgrade to the parallels engine. You can now run a **Recursive Search** on found results. Select specific results (via checkboxes) or search on all findings to uncover deeper connections within the corpus.
+
+* **📂 Optimized Index & Data Location:**
+  * **Index:** Now stored in **AppData** by default (keeping your folder clean), with support for Portable Mode.
+  * **Transcriptions File:** The app looks for `Transcriptions.txt` locally, but if not found, it now allows you to **browse and select it** from any location on your drive.
+
+* **🛡️ Enhanced Exclusion Management:**
+  The **Exclude Manuscripts** dialog is now bidirectional and smarter: input a System ID to see its Shelfmark/Title instantly, or input a Shelfmark to resolve its System ID.
+
+* **🖼️ Browse by Image ID (FL):**
+  Added a dedicated field in the **Browse** tab to locate pages directly by their **FL ID** (File/Image ID), alongside the existing System ID search.
 
 ---
 
@@ -101,38 +117,22 @@ Genizah Search Pro is a powerful desktop application designed for researchers wo
 * **Smart image engine:** Retrieves the best available image from NLI IIIF/Rosetta services and caches it locally.
 * **Deep links:** One-click access to the Ktiv catalog and high-resolution viewer.
 
-> ⚠️ **Note:** Direct navigation by FL ID is **not currently supported**.
-
 ---
 
 ## 🛠 Installation (Windows)
 
 1. **Download**
-   Download the latest `GenizahSearchPro-3.2.1.zip` from the Releases page.
+   Download the latest ZIP from the Releases page.
 
 2. **Extract**
    Unzip to a **new folder**.
-   **Keep all files together. Do not run the EXE from inside the ZIP.**
 
-3. **Required data file**
-   Place the following file **in the same folder as `GenizahSearchPro.exe`**:
+3. **Required Data File**
+   * Download `Transcriptions.txt` (MiDRASH dataset: [https://doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473)).
+   * Place it next to `GenizahSearchPro.exe` **OR** keep it anywhere—the app will ask you to locate it on the first run if it's missing.
 
-   * `Transcriptions.txt`
-     MiDRASH dataset: [https://doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473)
-
-4. **Bundled files (included in the ZIP)**
-
-   * `libraries.csv`
-   * `README.txt`
-   * `LICENSE`
-   * `PLACE THE PROGRAM NEXT TO TRANSCRIPTIONS FILE.txt`
-
-5. **Run**
-   Double-click `GenizahSearchPro.exe`.
-
-6. **First run**
-   Go to **Settings & About → Build / Rebuild Index**
-   (Indexing takes a few minutes.)
+4. **Run**
+   Double-click `GenizahSearchPro.exe` and follow the prompt to **Build Index**.
 
 ---
 
@@ -205,14 +205,6 @@ Genizah Search Pro היא אפליקציית שולחן עבודה למחקר ב
 
 ---
 
-## ⚠️ חשוב: הפעלה ראשונה / לאחר עדכון
-
-לאחר התקנה ראשונה **או עדכון גרסה**, יש לגשת ללשונית
-**הגדרות ואודות** → **בנה / בנייה מחדש של אינדקס**.
-
-פעולה זו נדרשת כדי לאפשר חיפוש, תצוגה שורה־אחר־שורה ושימוש במטא־דאטה.
-
----
 
 ## ✨ תכונות עיקריות
 
