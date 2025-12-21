@@ -772,6 +772,7 @@ class GenizahGUI(QMainWindow):
         self.comp_raw_items = []
         self.comp_raw_filtered = []
         self.comp_known = []
+        self.pending_recursive_search = False
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
@@ -1162,9 +1163,9 @@ class GenizahGUI(QMainWindow):
         self.comp_tree_updating = False
         self.comp_tree.setStyleSheet(
             "QTreeWidget::indicator { width: 16px; height: 16px; }"
-            "QTreeWidget::indicator:unchecked { border: 1px solid #bdc3c7; background: #ecf0f1; }"
-            "QTreeWidget::indicator:checked { border: 1px solid #1e8449; background: #27ae60; }"
-            "QTreeWidget::indicator:indeterminate { border: 1px solid #f39c12; background: #f1c40f; }"
+            "QTreeWidget::indicator:unchecked { border: 1px solid #9b9b9b; background: transparent; }"
+            "QTreeWidget::indicator:checked { border: 1px solid #9b9b9b; background: rgba(255, 255, 255, 0.35); }"
+            "QTreeWidget::indicator:indeterminate { border: 1px solid #9b9b9b; background: rgba(255, 255, 255, 0.18); }"
         )
 
         # Configure columns width
@@ -2203,6 +2204,11 @@ class GenizahGUI(QMainWindow):
         if not base_text:
             return
 
+        if not self._has_comp_results():
+            self.pending_recursive_search = True
+            self.run_composition()
+            return
+
         selected_uids = self._collect_checked_comp_page_uids()
         if selected_uids:
             source_uids = selected_uids
@@ -2252,6 +2258,7 @@ class GenizahGUI(QMainWindow):
 
         if not manuscripts and not filtered_manuscripts:
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
+            self.pending_recursive_search = False
             return
 
         self.start_grouping(manuscripts, filtered_manuscripts)
@@ -2478,6 +2485,9 @@ class GenizahGUI(QMainWindow):
                 add_manuscript_node(root_k, item)
         self.comp_tree_updating = False
         self._update_recursive_button_state()
+        if self.pending_recursive_search:
+            self.pending_recursive_search = False
+            self.run_recursive_composition()
 
     def on_comp_tree_item_changed(self, item, column):
         if self.comp_tree_updating or column != 0:
@@ -2580,6 +2590,13 @@ class GenizahGUI(QMainWindow):
         else:
             self.btn_comp_recursive.setText(tr("Full Recursive Search"))
         self.btn_comp_recursive.setEnabled(True)
+
+    def _has_comp_results(self):
+        if self.comp_main or self.comp_appendix or self.comp_known:
+            return True
+        if self.comp_filtered_main or self.comp_filtered_appendix:
+            return True
+        return False
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
