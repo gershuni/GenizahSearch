@@ -1419,7 +1419,7 @@ class SearchEngine:
         manuscripts.sort(key=lambda x: x['score'], reverse=True)
         return manuscripts
 
-    def group_composition_results(self, items, threshold=5, progress_callback=None, check_cancel=None):
+    def group_composition_results(self, items, threshold=5, progress_callback=None, status_callback=None, check_cancel=None):
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
@@ -1429,7 +1429,20 @@ class SearchEngine:
             else:
                 ids.append(self.meta_mgr.parse_header_smart(i['raw_header'])[0])
 
-        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x])
+        if status_callback:
+            status_callback(tr("Fetching metadata..."))
+
+        def fetch_cb(c, t, s):
+            if progress_callback:
+                progress_callback(c, t)
+
+        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=fetch_cb)
+
+        if status_callback:
+            status_callback(tr("Grouping results..."))
+            # Reset progress for the grouping phase
+            if progress_callback:
+                progress_callback(0, len(items))
 
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
 
