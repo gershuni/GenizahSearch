@@ -356,6 +356,7 @@ class ResultDialog(QDialog):
         self.current_sys_id = None
         self.current_p_num = None
         self.current_fl_id = None
+        self.current_page_text = ""
         
         self.current_meta_request = 0
 
@@ -409,7 +410,16 @@ class ResultDialog(QDialog):
         self.lbl_total = QLabel("/ ?")
         nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row)
+        action_row = QHBoxLayout()
+        self.btn_view_transcription = QPushButton(tr("View full transcription"))
+        self.btn_view_transcription.clicked.connect(self.open_full_transcription)
+        self.btn_search_parallels = QPushButton(tr("Search for parallels"))
+        self.btn_search_parallels.clicked.connect(self.search_for_parallels)
+        action_row.addWidget(self.btn_view_transcription)
+        action_row.addWidget(self.btn_search_parallels)
+        action_row.addStretch()
+
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row)
         
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
@@ -450,6 +460,23 @@ class ResultDialog(QDialog):
         if 0 <= new_idx < len(self.all_results):
             self.current_result_idx = new_idx
             self.load_result_by_index(new_idx)
+
+    def open_full_transcription(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "open_result_in_browse"):
+            parent.open_result_in_browse(
+                self.data,
+                shelfmark=self.lbl_shelf.text(),
+                title=self.lbl_title.text(),
+                fl_id=self.current_fl_id,
+            )
+            self.close()
+
+    def search_for_parallels(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "send_result_to_composition"):
+            parent.send_result_to_composition(self.data, source_text=self.current_page_text)
+            self.close()
 
     def _htmlify(self, text):
         if not text: return ""
@@ -516,6 +543,7 @@ class ResultDialog(QDialog):
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
+        self.current_page_text = page_data.get('text', '')
 
         # Update Info Label
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
@@ -907,10 +935,14 @@ class GenizahGUI(QMainWindow):
             QApplication.instance().setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.create_search_tab(), tr("Search"))
-        self.tabs.addTab(self.create_composition_tab(), tr("Composition Search"))
-        self.tabs.addTab(self.create_browse_tab(), tr("Browse Manuscript"))
-        self.tabs.addTab(self.create_settings_tab(), tr("Settings & About"))
+        self.search_tab = self.create_search_tab()
+        self.composition_tab = self.create_composition_tab()
+        self.browse_tab = self.create_browse_tab()
+        self.settings_tab = self.create_settings_tab()
+        self.tabs.addTab(self.search_tab, tr("Search"))
+        self.tabs.addTab(self.composition_tab, tr("Composition Search"))
+        self.tabs.addTab(self.browse_tab, tr("Browse Manuscript"))
+        self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
         # Language Toggle
         lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
@@ -1173,10 +1205,14 @@ class GenizahGUI(QMainWindow):
         # Row 1: Search
         search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
+        self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL...")); self.browse_fl_input.setFixedWidth(120)
         self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50); self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
-        search_row.addWidget(QLabel(tr("System ID:"))); search_row.addWidget(self.browse_sys_input); search_row.addWidget(self.btn_browse_go)
+        self.browse_fl_input.returnPressed.connect(self.browse_load)
+        search_row.addWidget(QLabel(tr("System ID:"))); search_row.addWidget(self.browse_sys_input)
+        search_row.addWidget(QLabel(tr("FL:"))); search_row.addWidget(self.browse_fl_input)
+        search_row.addWidget(self.btn_browse_go)
         
         # Row 2: Metadata
         self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
@@ -1810,6 +1846,33 @@ class GenizahGUI(QMainWindow):
             sorted_results = self.last_results
 
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+
+    def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
+        sid = res['display'].get('id')
+        if not sid:
+            QMessageBox.warning(self, tr("Error"), tr("No System ID found for this result."))
+            return
+        if shelfmark:
+            info_text = f"<b>{shelfmark}</b>"
+            if title:
+                info_text += f"<br>{title}"
+            self.browse_info_lbl.setText(info_text)
+        self.browse_sys_input.setText(sid)
+        if fl_id:
+            self.browse_fl_input.setText(f"FL{fl_id}")
+        else:
+            self.browse_fl_input.setText("")
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self.browse_load()
+
+    def send_result_to_composition(self, res, source_text=None):
+        if not source_text:
+            if not res.get('full_text'):
+                res['full_text'] = self.searcher.get_full_text_by_id(res['uid']) or res.get('text', '')
+            source_text = res.get('full_text') or res.get('text', '')
+        self.comp_text_area.setPlainText(source_text)
+        self.tabs.setCurrentWidget(self.composition_tab)
+        self.comp_text_area.setFocus()
 
     def export_results(self, fmt='xlsx'):
         """
@@ -2846,11 +2909,23 @@ class GenizahGUI(QMainWindow):
     def browse_load(self):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
-        if not sid: return
+        if not sid:
+            QMessageBox.warning(self, tr("Error"), tr("Please enter a System ID."))
+            return
+        fl_raw = self.browse_fl_input.text().strip()
         self.current_browse_sid = sid; self.current_browse_p = None
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_all.setEnabled(True)   # Enable
         self.btn_b_save.setEnabled(True)  # Enable
+        if fl_raw:
+            fl_digits = re.sub(r'\D', '', fl_raw)
+            if fl_digits:
+                pd = self.searcher.get_browse_page_by_fl(sid, fl_digits)
+                if not pd:
+                    QMessageBox.warning(self, tr("Nav"), tr("FL not found for this manuscript."))
+                    return
+                self.browse_render_page(pd)
+                return
         self.browse_update_view(0)
 
     def browse_navigate(self, d): self.browse_update_view(d)
@@ -2859,11 +2934,14 @@ class GenizahGUI(QMainWindow):
         pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
         if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
 
+        self.browse_render_page(pd)
+
+    def browse_render_page(self, pd):
         self.current_browse_p = pd['p_num']
         # Preprocess the text outside the f-string to avoid backslash parsing issues
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
-        
+
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
 
@@ -2875,10 +2953,16 @@ class GenizahGUI(QMainWindow):
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
 
+        parsed = self.meta_mgr.parse_full_id_components(full_header)
+        if parsed.get('fl_id'):
+            self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
+        else:
+            self.browse_fl_input.setText("")
+
         if self.current_browse_sid in self.meta_mgr.nli_cache:
             self.fetch_browse_thumbnail(self.current_browse_sid)
         else:
-            self.browse_thumb.setText("Loading Meta...")
+            self.browse_thumb.setText(tr("Loading Meta..."))
             def worker():
                 self.meta_mgr.fetch_nli_data(self.current_browse_sid)
                 self.browse_thumb_resolved.emit(self.current_browse_sid, "") 

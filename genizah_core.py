@@ -1538,3 +1538,21 @@ class SearchEngine:
             'full_header': target_page['full_header'], 'text': text,
             'total_pages': len(pages), 'current_idx': new_idx + 1
         }
+
+    def get_browse_page_by_fl(self, sys_id, fl_id):
+        if not os.path.exists(Config.BROWSE_MAP): return None
+        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        if sys_id not in browse_map: return None
+        pages = browse_map[sys_id]
+        if not pages: return None
+
+        for i, p in enumerate(pages):
+            parsed = self.parse_full_id_components(p.get('full_header', ''))
+            if parsed.get('fl_id') and str(parsed['fl_id']) == str(fl_id):
+                text = self.get_full_text_by_id(p['uid'])
+                return {
+                    'uid': p['uid'], 'p_num': p['p_num'],
+                    'full_header': p['full_header'], 'text': text,
+                    'total_pages': len(pages), 'current_idx': i + 1
+                }
+        return None
