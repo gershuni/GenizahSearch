@@ -315,6 +315,7 @@ class ExcludeDialog(QDialog):
         grid = QGridLayout()
         grid.addWidget(QLabel(tr("System IDs")), 0, 0)
         grid.addWidget(QLabel(tr("Shelfmarks")), 0, 1)
+        grid.addWidget(QLabel(tr("Title")), 0, 2)
 
         self.sys_text_area = QPlainTextEdit()
         self.sys_text_area.setPlaceholderText("123456\n9900123456")
@@ -324,11 +325,16 @@ class ExcludeDialog(QDialog):
         self.shelf_text_area.setPlaceholderText("T-S NS 123.45\nJer 123")
         self.shelf_text_area.textChanged.connect(self._on_shelf_text_changed)
 
+        self.title_text_area = QPlainTextEdit()
+        self.title_text_area.setPlaceholderText(tr("Title"))
+        self.title_text_area.setReadOnly(True)
+
         self.sys_text_area.installEventFilter(self)
         self.shelf_text_area.installEventFilter(self)
 
         grid.addWidget(self.sys_text_area, 1, 0)
         grid.addWidget(self.shelf_text_area, 1, 1)
+        grid.addWidget(self.title_text_area, 1, 2)
         layout.addLayout(grid)
 
         if existing_entries:
@@ -343,6 +349,8 @@ class ExcludeDialog(QDialog):
             elif shelf_entries and not sys_entries:
                 self._last_edited = "shelf"
                 self._sync_from_shelf()
+            elif sys_entries:
+                self.title_text_area.setPlainText("\n".join(self._resolve_titles_from_sys(sys_entries)))
 
         btn_row = QHBoxLayout()
         self.btn_load = QPushButton(tr("Load from File"))
@@ -396,7 +404,9 @@ class ExcludeDialog(QDialog):
         self._syncing = True
         sys_lines = self._get_lines(self.sys_text_area.toPlainText())
         shelves = self._resolve_shelves_from_sys(sys_lines)
+        titles = self._resolve_titles_from_sys(sys_lines)
         self.shelf_text_area.setPlainText("\n".join(shelves))
+        self.title_text_area.setPlainText("\n".join(titles))
         self._syncing = False
 
     def _sync_from_shelf(self):
@@ -404,6 +414,8 @@ class ExcludeDialog(QDialog):
         shelf_lines = self._get_lines(self.shelf_text_area.toPlainText())
         sys_ids = self._resolve_sys_from_shelves(shelf_lines)
         self.sys_text_area.setPlainText("\n".join(sys_ids))
+        titles = self._resolve_titles_from_sys(sys_ids)
+        self.title_text_area.setPlainText("\n".join(titles))
         self._syncing = False
 
     def _get_lines(self, text):
@@ -422,6 +434,20 @@ class ExcludeDialog(QDialog):
                 shelf, _ = self.meta_mgr.get_meta_for_id(cleaned)
             shelves.append("" if shelf == "Unknown" else shelf)
         return shelves
+
+    def _resolve_titles_from_sys(self, sys_lines):
+        titles = []
+        for line in sys_lines:
+            cleaned = re.sub(r"\D", "", line or "")
+            if not cleaned or not self.meta_mgr:
+                titles.append("")
+                continue
+            _, title = self.meta_mgr.get_meta_for_id(cleaned)
+            if not title and cleaned not in self.meta_mgr.nli_cache:
+                self.meta_mgr.fetch_nli_data(cleaned)
+                _, title = self.meta_mgr.get_meta_for_id(cleaned)
+            titles.append(title or "")
+        return titles
 
     def _ensure_shelf_map(self):
         if self._shelf_to_sys is not None:
@@ -473,6 +499,8 @@ class ExcludeDialog(QDialog):
             elif shelf_entries and not sys_entries:
                 self._last_edited = "shelf"
                 self._sync_from_shelf()
+            elif sys_entries:
+                self.title_text_area.setPlainText("\n".join(self._resolve_titles_from_sys(sys_entries)))
 
     def get_entries_text(self):
         entries = []
