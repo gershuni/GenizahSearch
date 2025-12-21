@@ -1388,7 +1388,7 @@ class GenizahGUI(QMainWindow):
         
         gb_about = QGroupBox(tr("About"))
         abl = QVBoxLayout()
-        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else f"""
+        about_html_en = """
         <style>
             h3 { margin-bottom: 0px; margin-top: 10px; }
             p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
@@ -1418,6 +1418,7 @@ class GenizahGUI(QMainWindow):
         </div>
         """
         
+        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else about_html_en.replace("{APP_VERSION}", APP_VERSION)
         txt_about = QTextBrowser()
         txt_about.setHtml(about_txt)
         txt_about.setOpenExternalLinks(True)
@@ -2949,11 +2950,45 @@ class GenizahGUI(QMainWindow):
                 self.browse_thumb.setText(tr("Waiting..."))
     
     def run_indexing(self):
+        # 1. Pre-check: Does the input file exist?
+        if not os.path.exists(Config.FILE_V8):
+            msg = tr("The transcriptions file ('Transcriptions.txt') was not found in the application folder.") + "\n\n" + \
+                  tr("Would you like to locate it manually?")
+            
+            reply = QMessageBox.question(
+                self, 
+                tr("File Not Found"), 
+                msg, 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Open File Dialog to let user pick the file
+                path, _ = QFileDialog.getOpenFileName(
+                    self, 
+                    tr("Select Transcriptions File"), 
+                    "", 
+                    "Text Files (*.txt);;All Files (*)"
+                )
+                
+                if path:
+                    # Update Config dynamically for this session
+                    Config.FILE_V8 = path
+                else:
+                    # User cancelled the file dialog
+                    return
+            else:
+                # User clicked No
+                return
+
+        # 2. Standard Indexing Confirmation
         if not self.indexer: return
+        
         if QMessageBox.question(self, tr("Index"), tr("Start indexing?"), QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
             self.index_progress.setFormat(tr("Indexing... %p%"))
+            
             self.ithread = IndexerThread(self.meta_mgr)
             self.ithread.progress_signal.connect(self.on_index_progress)
             self.ithread.finished_signal.connect(self.on_index_finished)

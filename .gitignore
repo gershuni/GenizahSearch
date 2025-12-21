@@ -19,3 +19,5 @@ dist/
 build/
 *.spec
 /Reports
+Genizah_Index/genizah.log
+genizah.log

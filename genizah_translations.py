@@ -283,6 +283,12 @@ TRANSLATIONS = {
     </ul></div>""",
     "Browse Help": "עיון בכתב יד - עזרה",
     "Settings Help": "הגדרות - עזרה",
+    
+    # --- Indexing / File Selection ---
+    "The transcriptions file ('Transcriptions.txt') was not found in the application folder.": "קובץ התעתיקים ('Transcriptions.txt') לא נמצא בתיקיית התוכנה.",
+    "Would you like to locate it manually?": "האם ברצונך לאתר אותו ידנית?",
+    "File Not Found": "קובץ לא נמצא",
+    "Select Transcriptions File": "בחר קובץ תעתיקים",
 
     # --- HTML About ---
     "ABOUT_HTML": f"""

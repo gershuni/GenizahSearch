@@ -32,39 +32,69 @@ except ImportError:
 # ==============================================================================
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
-    # 1. Base Directory (Where the EXE/Script is)
+    
+    # 1. Determine Base Paths
     if getattr(sys, 'frozen', False):
+        # --- Running as Compiled EXE (PyInstaller Onedir/Onefile) ---
+        # BASE_DIR: Where the .exe file is located. (For external user files like Transcriptions.txt)
         BASE_DIR = os.path.dirname(sys.executable)
+        
+        # INTERNAL_DIR: Where bundled resources are located (inside _internal or temp)
+        # We find it using the location of this script file inside the bundle.
+        INTERNAL_DIR = os.path.dirname(os.path.abspath(__file__))
     else:
+        # --- Running as Python Script ---
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        INTERNAL_DIR = BASE_DIR
 
-    # 2. Input Files (Must be next to EXE)
+    # 2. External Files (Must be placed NEXT to the EXE by the user)
     FILE_V8 = os.path.join(BASE_DIR, "Transcriptions.txt")
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
     INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
     RESULTS_DIR = os.path.join(BASE_DIR, "Results")
     REPORTS_DIR = os.path.join(BASE_DIR, "Reports")
-    LIBRARIES_CSV = os.path.join(BASE_DIR, "libraries.csv")
 
-    # 3. User Data Directory (Index, Caches)
-    INDEX_DIR = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
+    # 3. User Data Directory (Index, Caches) - Smart Logic
+    # We prefer the new portable location, but respect the old one if it exists to keep user data.
+    _OLD_INDEX_PATH = os.path.join(os.path.expanduser("~"), "Genizah_Tantivy_Index")
+    _NEW_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
+    
+    _OLD_DB_CHECK = os.path.join(_OLD_INDEX_PATH, "tantivy_db")
+    _NEW_DB_CHECK = os.path.join(_NEW_INDEX_PATH, "tantivy_db")
+    
+    has_new_db = os.path.exists(_NEW_DB_CHECK) and os.listdir(_NEW_DB_CHECK)
+    has_old_db = os.path.exists(_OLD_DB_CHECK) and os.listdir(_OLD_DB_CHECK)
+
+    if has_new_db:
+        INDEX_DIR = _NEW_INDEX_PATH
+    elif has_old_db:
+        INDEX_DIR = _OLD_INDEX_PATH
+    else:
+        INDEX_DIR = _NEW_INDEX_PATH
+
     IMAGE_CACHE_DIR = os.path.join(INDEX_DIR, "images_cache")
     
-    # Generated Files locations
+    # 4. Generated Files locations (Logs, Configs, Caches - inside Index Dir)
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
     CACHE_NLI = os.path.join(INDEX_DIR, "nli_cache.pkl")
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
-    LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
+    LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl") # <--- RESTORED
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
-    LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
+    FL_MAP = os.path.join(INDEX_DIR, "fl_lookup.pkl")
+    LOG_FILE = os.path.join(INDEX_DIR, "genizah.log") # <--- Kept in INDEX_DIR
     
+    # 5. Bundled Internal Resources (Packaged inside the EXE/_internal)
+    # These must be added via --add-data in PyInstaller
+    LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")
+    HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
+
     # Settings
     TANTIVY_CLAUSE_LIMIT = 5000
     SEARCH_LIMIT = 5000
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r'[\w\u0590-\u05FF\']+'
-
+    
     @staticmethod
     def resource_path(relative_path: str) -> str:
         """Return absolute path to bundled resources, supporting PyInstaller onedir/onefile modes."""
@@ -895,7 +925,7 @@ class Indexer:
         schema = builder.build()
         
         index = tantivy.Index(schema, path=db_path)
-        writer = index.writer(heap_size=100_000_000)
+        writer = index.writer(heap_size=30_000_000)
         
         total_docs = 0
         browse_map = defaultdict(list)
