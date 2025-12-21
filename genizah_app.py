@@ -1143,11 +1143,14 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
+        self.btn_comp_recursive = QPushButton(tr("Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
+        self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.btn_comp_recursive.setEnabled(False)
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.btn_comp_run)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
@@ -1155,6 +1158,8 @@ class GenizahGUI(QMainWindow):
         
         res_w = QWidget(); rl = QVBoxLayout()
         self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
+        self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
+        self.comp_tree_updating = False
 
         # Configure columns width
         header = self.comp_tree.header()
@@ -2162,10 +2167,11 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
 
-    def run_composition(self):
-        txt = self.comp_text_area.toPlainText().strip();
+    def run_composition(self, custom_text=None):
+        txt = (custom_text if custom_text is not None else self.comp_text_area.toPlainText()).strip()
         if not txt: return
         self.is_comp_running = True; self.btn_comp_run.setText(tr("Stop")); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
+        self.btn_comp_recursive.setEnabled(False)
         self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
         self.comp_progress.setFormat(tr("Scanning chunks..."))
         self.comp_raw_items = []
@@ -2183,6 +2189,31 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
         self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Error"), e))
         self.comp_thread.start()
+
+    def run_recursive_composition(self):
+        if self.is_comp_running:
+            return
+        base_text = self.comp_text_area.toPlainText().strip()
+        if not base_text:
+            return
+
+        selected_uids = self._collect_checked_comp_page_uids()
+        if not selected_uids:
+            QMessageBox.information(self, tr("No Selections"), tr("Select compositions to run recursive search."))
+            return
+
+        extra_texts = []
+        for uid in selected_uids:
+            full_text = self.searcher.get_full_text_by_id(uid)
+            if full_text:
+                extra_texts.append(full_text)
+
+        if not extra_texts:
+            QMessageBox.information(self, tr("No Data"), tr("Could not load full text for selected results."))
+            return
+
+        combined_text = base_text + "\n\n" + "\n\n".join(extra_texts)
+        self.run_composition(custom_text=combined_text)
 
     def on_comp_progress(self, curr, total):
         if total:
@@ -2294,6 +2325,7 @@ class GenizahGUI(QMainWindow):
         if all_ids:
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
+        self.comp_tree_updating = True
         self.comp_tree.clear()
         
         def make_snippet_label(text_content):
@@ -2304,6 +2336,10 @@ class GenizahGUI(QMainWindow):
             lbl = QLabel(f"<div dir='rtl' style='margin:2px;'>{html}</div>")
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             return lbl
+
+        def make_checkable(node):
+            node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            node.setCheckState(0, Qt.CheckState.Unchecked)
 
         def add_manuscript_node(parent, ms_item):
             # Parse meta using the representative header OR just use sys_id
@@ -2324,6 +2360,7 @@ class GenizahGUI(QMainWindow):
                 ms_node.setText(1, shelf or tr("Unknown Shelfmark"))
                 ms_node.setText(2, t or "")
                 ms_node.setText(3, sid)
+                make_checkable(ms_node)
 
                 # Store full MS item in UserRole
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -2360,6 +2397,7 @@ class GenizahGUI(QMainWindow):
                         page_node.setText(1, f"{tr('Image')} {p_num}")
                         page_node.setText(2, "") # No Title needed for page
                         page_node.setText(3, "") # No SysID needed for page
+                        make_checkable(page_node)
 
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
 
@@ -2375,6 +2413,7 @@ class GenizahGUI(QMainWindow):
                 node.setText(1, shelf)
                 node.setText(2, title)
                 node.setText(3, sid)
+                make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 lbl = make_snippet_label(ms_item.get('text', ''))
                 self.comp_tree.setItemWidget(node, 4, lbl)
@@ -2419,6 +2458,78 @@ class GenizahGUI(QMainWindow):
             root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
             for item in known:
                 add_manuscript_node(root_k, item)
+        self.comp_tree_updating = False
+        self._update_recursive_button_state()
+
+    def on_comp_tree_item_changed(self, item, column):
+        if self.comp_tree_updating or column != 0:
+            return
+        if not item.data(0, Qt.ItemDataRole.UserRole):
+            return
+
+        self.comp_tree_updating = True
+        state = item.checkState(0)
+        if item.childCount() > 0 and state in (Qt.CheckState.Checked, Qt.CheckState.Unchecked):
+            for i in range(item.childCount()):
+                item.child(i).setCheckState(0, state)
+
+        self._sync_parent_check_state(item)
+        self.comp_tree_updating = False
+        self._update_recursive_button_state()
+
+    def _sync_parent_check_state(self, item):
+        parent = item.parent()
+        if not parent or not parent.data(0, Qt.ItemDataRole.UserRole):
+            return
+
+        states = []
+        for i in range(parent.childCount()):
+            states.append(parent.child(i).checkState(0))
+
+        if all(s == Qt.CheckState.Checked for s in states):
+            parent.setCheckState(0, Qt.CheckState.Checked)
+        elif all(s == Qt.CheckState.Unchecked for s in states):
+            parent.setCheckState(0, Qt.CheckState.Unchecked)
+        else:
+            parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+
+        self._sync_parent_check_state(parent)
+
+    def _collect_checked_comp_page_uids(self):
+        uids = set()
+
+        def visit(node):
+            data = node.data(0, Qt.ItemDataRole.UserRole)
+            if data:
+                if data.get('type') == 'manuscript':
+                    if node.childCount() > 0:
+                        for i in range(node.childCount()):
+                            visit(node.child(i))
+                    else:
+                        if node.checkState(0) == Qt.CheckState.Checked:
+                            pages = data.get('pages', [])
+                            if pages and pages[0].get('uid'):
+                                uids.add(pages[0]['uid'])
+                else:
+                    if node.checkState(0) == Qt.CheckState.Checked:
+                        uid = data.get('uid')
+                        if uid:
+                            uids.add(uid)
+            else:
+                for i in range(node.childCount()):
+                    visit(node.child(i))
+
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            visit(root.child(i))
+
+        return sorted(uids)
+
+    def _update_recursive_button_state(self):
+        if self.is_comp_running:
+            self.btn_comp_recursive.setEnabled(False)
+            return
+        self.btn_comp_recursive.setEnabled(bool(self._collect_checked_comp_page_uids()))
 
     def show_comp_detail(self, item, col):
         # 1. Validate Click
