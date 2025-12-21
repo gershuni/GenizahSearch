@@ -476,7 +476,11 @@ class ResultDialog(QDialog):
     def search_for_parallels(self):
         parent = self.parent()
         if parent and hasattr(parent, "send_result_to_composition"):
-            parent.send_result_to_composition(self.data, source_text=self.current_page_text)
+            parent.send_result_to_composition(
+                self.data,
+                source_text=self.current_page_text,
+                title=self.lbl_title.text(),
+            )
             self.close()
 
     def _htmlify(self, text):
@@ -1868,12 +1872,20 @@ class GenizahGUI(QMainWindow):
         self.tabs.setCurrentWidget(self.browse_tab)
         self.browse_load()
 
-    def send_result_to_composition(self, res, source_text=None):
+    def send_result_to_composition(self, res, source_text=None, title=None):
         if not source_text:
             if not res.get('full_text'):
                 res['full_text'] = self.searcher.get_full_text_by_id(res['uid']) or res.get('text', '')
             source_text = res.get('full_text') or res.get('text', '')
         self.comp_text_area.setPlainText(source_text)
+        if title:
+            self.comp_title_input.setText(title)
+        sys_id = res['display'].get('id')
+        if sys_id:
+            entries = list(self.excluded_raw_entries)
+            if sys_id not in entries:
+                entries.append(sys_id)
+                self.set_excluded_entries("\n".join(entries))
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
 
