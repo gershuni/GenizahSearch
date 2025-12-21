@@ -1509,10 +1509,13 @@ class SearchEngine:
         for p in pages_meta:
             text = self.get_full_text_by_id(p['uid'])
             if text:
+                parsed = self.meta_mgr.parse_full_id_components(p.get('full_header', ''))
                 full_content.append({
                     'p_num': p['p_num'],
                     'text': text,
-                    'uid': p['uid']
+                    'uid': p['uid'],
+                    'full_header': p.get('full_header', ''),
+                    'fl_id': parsed.get('fl_id')
                 })
         return full_content
         
@@ -1538,3 +1541,37 @@ class SearchEngine:
             'full_header': target_page['full_header'], 'text': text,
             'total_pages': len(pages), 'current_idx': new_idx + 1
         }
+
+    def get_browse_page_by_fl(self, fl_id, sys_id=None):
+        if not os.path.exists(Config.BROWSE_MAP): return None
+        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+
+        if not fl_id:
+            return None
+
+        fl_digits = re.sub(r"\D", "", str(fl_id))
+        if not fl_digits:
+            return None
+
+        sys_candidates = [sys_id] if sys_id else list(browse_map.keys())
+
+        for sid in sys_candidates:
+            if sid not in browse_map:
+                continue
+            pages = browse_map[sid]
+            for idx, page in enumerate(pages):
+                parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
+                page_fl = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
+                if page_fl and page_fl == fl_digits:
+                    text = self.get_full_text_by_id(page['uid'])
+                    return {
+                        'uid': page['uid'],
+                        'p_num': page['p_num'],
+                        'full_header': page['full_header'],
+                        'text': text,
+                        'total_pages': len(pages),
+                        'current_idx': idx + 1,
+                        'sys_id': sid,
+                        'fl_id': fl_digits
+                    }
+        return None

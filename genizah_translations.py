@@ -53,6 +53,9 @@ TRANSLATIONS = {
     "Search Help": "עזרה בחיפוש",
     "System ID": "מספר מערכת",
     "System ID:": "מספר מערכת:",
+    "FL": "מס' קובץ",
+    "FL:": "מס' קובץ:",
+    "Enter FL ID...": "הכנס מספר קובץ...",
     "Shelfmark": "מספר מדף",
     "Title": "כותרת",
     "Snippet": "קטע",
@@ -69,6 +72,9 @@ TRANSLATIONS = {
     "Metadata Error": "שגיאת נתונים",
     "Metadata load cancelled. Loaded {}/{}.": "טעינת נתונים בוטלה. נטענו {}/{}.",
     "Loaded {} items.": "נטענו {} פריטים.",
+    "View full transcription": "צפה בתעתיק מלא",
+    "Search for parallels": "חפש מקבילות",
+    "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
@@ -142,6 +148,7 @@ TRANSLATIONS = {
     "No Image": "אין תמונה",
     "Waiting...": "ממתין...",
     "Not found or end.": "לא נמצא או סוף הקובץ.",
+    "FL not found.": "מספר קובץ לא נמצא.",
     "Nav": "ניווט",
     "Loading full manuscript...": "טוען כתב יד מלא...",
     "Could not load full text.": "לא ניתן לטעון טקסט מלא.",
