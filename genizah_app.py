@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout,
                              QProgressDialog, QStackedLayout) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QToolTip
 
 from version import APP_VERSION
 
@@ -310,6 +310,8 @@ class ExcludeDialog(QDialog):
         self._syncing = False
         self._shelf_to_sys = None
         self._last_edited = None
+        self._full_titles = []
+        self._display_titles = []
         self.meta_mgr = getattr(parent, "meta_mgr", None)
 
         grid = QGridLayout()
@@ -328,9 +330,11 @@ class ExcludeDialog(QDialog):
         self.title_text_area = QPlainTextEdit()
         self.title_text_area.setPlaceholderText(tr("Title"))
         self.title_text_area.setReadOnly(True)
+        self.title_text_area.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
         self.sys_text_area.installEventFilter(self)
         self.shelf_text_area.installEventFilter(self)
+        self.title_text_area.installEventFilter(self)
 
         grid.addWidget(self.sys_text_area, 1, 0)
         grid.addWidget(self.shelf_text_area, 1, 1)
@@ -350,7 +354,7 @@ class ExcludeDialog(QDialog):
                 self._last_edited = "shelf"
                 self._sync_from_shelf()
             elif sys_entries:
-                self.title_text_area.setPlainText("\n".join(self._resolve_titles_from_sys(sys_entries)))
+                self._set_titles(self._resolve_titles_from_sys(sys_entries))
 
         btn_row = QHBoxLayout()
         self.btn_load = QPushButton(tr("Load from File"))
@@ -374,6 +378,17 @@ class ExcludeDialog(QDialog):
                 self._last_edited = "sys"
             elif obj is self.shelf_text_area:
                 self._last_edited = "shelf"
+        if obj is self.title_text_area and event.type() == QEvent.Type.ToolTip:
+            cursor = self.title_text_area.cursorForPosition(event.pos())
+            line_idx = cursor.blockNumber()
+            if 0 <= line_idx < len(self._full_titles):
+                full_title = self._full_titles[line_idx]
+                display_title = self._display_titles[line_idx]
+                if full_title and full_title != display_title:
+                    QToolTip.showText(event.globalPos(), full_title, self.title_text_area)
+                    return True
+            QToolTip.hideText()
+            return True
         return super().eventFilter(obj, event)
 
     def _split_existing_entries(self, entries):
@@ -406,7 +421,7 @@ class ExcludeDialog(QDialog):
         shelves = self._resolve_shelves_from_sys(sys_lines)
         titles = self._resolve_titles_from_sys(sys_lines)
         self.shelf_text_area.setPlainText("\n".join(shelves))
-        self.title_text_area.setPlainText("\n".join(titles))
+        self._set_titles(titles)
         self._syncing = False
 
     def _sync_from_shelf(self):
@@ -415,11 +430,29 @@ class ExcludeDialog(QDialog):
         sys_ids = self._resolve_sys_from_shelves(shelf_lines)
         self.sys_text_area.setPlainText("\n".join(sys_ids))
         titles = self._resolve_titles_from_sys(sys_ids)
-        self.title_text_area.setPlainText("\n".join(titles))
+        self._set_titles(titles)
         self._syncing = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._full_titles:
+            self._refresh_title_display()
 
     def _get_lines(self, text):
         return text.splitlines()
+
+    def _set_titles(self, titles):
+        self._full_titles = titles
+        self._refresh_title_display()
+
+    def _refresh_title_display(self):
+        metrics = QFontMetrics(self.title_text_area.font())
+        width = max(self.title_text_area.viewport().width() - 6, 20)
+        self._display_titles = [
+            metrics.elidedText(title, Qt.TextElideMode.ElideRight, width) if title else ""
+            for title in self._full_titles
+        ]
+        self.title_text_area.setPlainText("\n".join(self._display_titles))
 
     def _resolve_shelves_from_sys(self, sys_lines):
         shelves = []
@@ -500,7 +533,7 @@ class ExcludeDialog(QDialog):
                 self._last_edited = "shelf"
                 self._sync_from_shelf()
             elif sys_entries:
-                self.title_text_area.setPlainText("\n".join(self._resolve_titles_from_sys(sys_entries)))
+                self._set_titles(self._resolve_titles_from_sys(sys_entries))
 
     def get_entries_text(self):
         entries = []
