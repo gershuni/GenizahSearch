@@ -989,6 +989,13 @@ class GenizahGUI(QMainWindow):
         self.comp_filtered_summary = {}
         self.comp_raw_items = []
         self.comp_raw_filtered = []
+        self.comp_grouped_main = []
+        self.comp_grouped_appendix = {}
+        self.comp_grouped_summary = {}
+        self.comp_grouped_filtered_main = []
+        self.comp_grouped_filtered_appendix = {}
+        self.comp_grouped_filtered_summary = {}
+        self.comp_has_grouped_results = False
         self.comp_known = []
         self.pending_recursive_search = False
         self.excluded_raw_entries = []
@@ -1359,6 +1366,10 @@ class GenizahGUI(QMainWindow):
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
+        self.chk_comp_flat = QCheckBox(tr("Sort by System ID/Shelfmark only"))
+        self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
+        self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
+
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
@@ -1369,7 +1380,8 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+        cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
@@ -2425,6 +2437,25 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Error"), e))
         self.comp_thread.start()
 
+    def on_comp_display_mode_changed(self, _checked):
+        if self.is_comp_running:
+            return
+        if not self._has_comp_results():
+            return
+        if not self.chk_comp_flat.isChecked() and not self.comp_has_grouped_results:
+            if self.comp_raw_items or self.comp_raw_filtered:
+                self.start_grouping(self.comp_raw_items or [], self.comp_raw_filtered or [])
+                return
+        if self.comp_grouped_main or self.comp_grouped_filtered_main:
+            self.display_comp_results(
+                self.comp_grouped_main,
+                self.comp_grouped_appendix,
+                self.comp_grouped_summary,
+                self.comp_grouped_filtered_main,
+                self.comp_grouped_filtered_appendix,
+                self.comp_grouped_filtered_summary,
+            )
+
     def run_recursive_composition(self):
         if self.is_comp_running:
             return
@@ -2489,10 +2520,22 @@ class GenizahGUI(QMainWindow):
             self.pending_recursive_search = False
             return
 
+        if self.chk_comp_flat.isChecked():
+            self.comp_has_grouped_results = False
+            self.comp_grouped_main = manuscripts
+            self.comp_grouped_appendix = {}
+            self.comp_grouped_summary = {}
+            self.comp_grouped_filtered_main = filtered_manuscripts
+            self.comp_grouped_filtered_appendix = {}
+            self.comp_grouped_filtered_summary = {}
+            self.display_comp_results(manuscripts, {}, {}, filtered_manuscripts, {}, {})
+            return
+
         self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
         self.is_comp_running = True
+        self.comp_has_grouped_results = False
         self.btn_comp_run.setText(tr("Stop"))
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
         self.comp_progress.setVisible(True)
@@ -2513,10 +2556,51 @@ class GenizahGUI(QMainWindow):
     def on_grouping_error(self, err):
         QMessageBox.critical(self, tr("Grouping Error"), err)
         # Fallback to ungrouped display
+        self.comp_has_grouped_results = False
+        self.comp_grouped_main = self.comp_raw_items or []
+        self.comp_grouped_appendix = {}
+        self.comp_grouped_summary = {}
+        self.comp_grouped_filtered_main = self.comp_raw_filtered or []
+        self.comp_grouped_filtered_appendix = {}
+        self.comp_grouped_filtered_summary = {}
         self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
 
     def on_comp_finished(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        self.comp_has_grouped_results = True
+        self.comp_grouped_main = main_res or []
+        self.comp_grouped_appendix = main_appx or {}
+        self.comp_grouped_summary = main_summ or {}
+        self.comp_grouped_filtered_main = filt_res or []
+        self.comp_grouped_filtered_appendix = filt_appx or {}
+        self.comp_grouped_filtered_summary = filt_summ or {}
         self.display_comp_results(main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ)
+
+    def _collect_comp_items(self, main_res, main_appx, filt_res, filt_appx, known):
+        all_items = []
+        all_items.extend(main_res or [])
+        for group_items in (main_appx or {}).values():
+            all_items.extend(group_items)
+        all_items.extend(filt_res or [])
+        for group_items in (filt_appx or {}).values():
+            all_items.extend(group_items)
+        all_items.extend(known or [])
+        return all_items
+
+    def _comp_sort_key(self, item):
+        sid = None
+        shelf = None
+        if item.get('type') == 'manuscript' and item.get('sys_id'):
+            sid = item['sys_id']
+            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
+        else:
+            sid, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
+
+        shelf = shelf or ""
+        sid = sid or ""
+        shelf_key = shelf if shelf else sid
+        return (shelf_key.casefold(), sid)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.is_comp_running = False
@@ -2671,52 +2755,61 @@ class GenizahGUI(QMainWindow):
 
         # ----------------------------------------
 
-        # 1. Main Results
-        root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
-        make_checkable(root)
-        for item in clean_main:
-            add_manuscript_node(root, item)
+        if self.chk_comp_flat.isChecked():
+            all_items = self._collect_comp_items(clean_main, clean_appx, clean_filt, clean_filt_appx, known)
+            sorted_items = sorted(all_items, key=self._comp_sort_key)
+            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_items))])
+            root.setExpanded(True)
+            make_checkable(root)
+            for item in sorted_items:
+                add_manuscript_node(root, item)
+        else:
+            # 1. Main Results
+            root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
+            make_checkable(root)
+            for item in clean_main:
+                add_manuscript_node(root, item)
 
-        # 2. Appendix Results
-        if clean_appx:
-            root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
-            make_checkable(root_a)
-            for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
-                make_checkable(gn)
-                for item in items:
-                    add_manuscript_node(gn, item)
-
-        # 3. Filtered by Text (New Category with Sub-Grouping)
-        total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
-        if total_filtered > 0:
-            root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
-            make_checkable(root_f)
-
-            # 3a. Filtered Main
-            if clean_filt:
-                f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
-                f_main_node.setExpanded(True)
-                make_checkable(f_main_node)
-                for item in clean_filt:
-                    add_manuscript_node(f_main_node, item)
-
-            # 3b. Filtered Appendix
-            if clean_filt_appx:
-                f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
-                make_checkable(f_appx_node)
-                for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
+            # 2. Appendix Results
+            if clean_appx:
+                root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
+                make_checkable(root_a)
+                for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                     make_checkable(gn)
                     for item in items:
                         add_manuscript_node(gn, item)
 
-        # 4. Known / Excluded Results
-        if known:
-            root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
-            make_checkable(root_k)
-            for item in known:
-                add_manuscript_node(root_k, item)
+            # 3. Filtered by Text (New Category with Sub-Grouping)
+            total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
+            if total_filtered > 0:
+                root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
+                make_checkable(root_f)
+
+                # 3a. Filtered Main
+                if clean_filt:
+                    f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
+                    f_main_node.setExpanded(True)
+                    make_checkable(f_main_node)
+                    for item in clean_filt:
+                        add_manuscript_node(f_main_node, item)
+
+                # 3b. Filtered Appendix
+                if clean_filt_appx:
+                    f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
+                    make_checkable(f_appx_node)
+                    for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                        gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
+                        make_checkable(gn)
+                        for item in items:
+                            add_manuscript_node(gn, item)
+
+            # 4. Known / Excluded Results
+            if known:
+                root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
+                make_checkable(root_k)
+                for item in known:
+                    add_manuscript_node(root_k, item)
 
         self.comp_tree.setUpdatesEnabled(True)
         self.comp_tree_updating = False
@@ -3048,13 +3141,26 @@ class GenizahGUI(QMainWindow):
                             (ms_item.get('text', '') or '').strip()
                         ])
 
-            add_rows(self.comp_main, "Main Manuscripts")
-            for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                add_rows(items, "Appendix", sig)
-            add_rows(self.comp_filtered_main, "Filtered Main")
-            for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                add_rows(items, "Filtered Appendix", sig)
-            add_rows(self.comp_known, "Known Manuscripts")
+            if self.chk_comp_flat.isChecked():
+                flat_items = sorted(
+                    self._collect_comp_items(
+                        self.comp_main,
+                        self.comp_appendix,
+                        self.comp_filtered_main,
+                        self.comp_filtered_appendix,
+                        self.comp_known,
+                    ),
+                    key=self._comp_sort_key,
+                )
+                add_rows(flat_items, tr("All Results"))
+            else:
+                add_rows(self.comp_main, "Main Manuscripts")
+                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                    add_rows(items, "Appendix", sig)
+                add_rows(self.comp_filtered_main, "Filtered Main")
+                for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                    add_rows(items, "Filtered Appendix", sig)
+                add_rows(self.comp_known, "Known Manuscripts")
 
             # --- XLSX (Rich Text) ---
             if fmt == 'xlsx':
@@ -3192,50 +3298,71 @@ class GenizahGUI(QMainWindow):
                     else:
                         target.append(tr("No items."))
 
-                summary_lines = [
-                    sep, tr("COMPOSITION REPORT SUMMARY"), sep,
-                    f"Title: {comp_title}",
-                    f"{tr('Total Manuscripts Found')}: {total_count}",
-                    f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
-                    f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
-                    f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                    f"{tr('Known/Excluded Manuscripts')}: {known_count}"
-                ]
-                _append_group_summ(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
-                
-                summary_lines.extend([sep, tr("KNOWN MANUSCRIPTS SUMMARY"), sep])
-                if self.comp_known:
-                    for item in self.comp_known:
-                        if item.get('type') == 'manuscript':
-                            s, _ = self.meta_mgr.get_meta_for_id(item['sys_id'])
-                            summary_lines.append(f"- {s or 'Unknown'}")
-                        else:
-                            summary_lines.append("- Unknown")
+                if self.chk_comp_flat.isChecked():
+                    summary_lines = [
+                        sep, tr("COMPOSITION REPORT SUMMARY"), sep,
+                        f"Title: {comp_title}",
+                        f"{tr('Total Manuscripts Found')}: {total_count}"
+                    ]
+
+                    detail_lines = [sep, tr("ALL RESULTS"), sep]
+                    flat_items = sorted(
+                        self._collect_comp_items(
+                            self.comp_main,
+                            self.comp_appendix,
+                            self.comp_filtered_main,
+                            self.comp_filtered_appendix,
+                            self.comp_known,
+                        ),
+                        key=self._comp_sort_key,
+                    )
+                    for item in flat_items:
+                        detail_lines.extend(_fmt_ms_entry(item))
                 else:
-                    summary_lines.append(tr("No known manuscripts were excluded."))
+                    summary_lines = [
+                        sep, tr("COMPOSITION REPORT SUMMARY"), sep,
+                        f"Title: {comp_title}",
+                        f"{tr('Total Manuscripts Found')}: {total_count}",
+                        f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
+                        f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
+                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                        f"{tr('Known/Excluded Manuscripts')}: {known_count}"
+                    ]
+                    _append_group_summ(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
+                    
+                    summary_lines.extend([sep, tr("KNOWN MANUSCRIPTS SUMMARY"), sep])
+                    if self.comp_known:
+                        for item in self.comp_known:
+                            if item.get('type') == 'manuscript':
+                                s, _ = self.meta_mgr.get_meta_for_id(item['sys_id'])
+                                summary_lines.append(f"- {s or 'Unknown'}")
+                            else:
+                                summary_lines.append("- Unknown")
+                    else:
+                        summary_lines.append(tr("No known manuscripts were excluded."))
 
-                detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
+                    detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
+                    for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
 
-                if self.comp_filtered_main:
-                    detail_lines.extend([sep, tr("FILTERED BY TEXT") + " (Main)", sep])
-                    for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_filtered_main:
+                        detail_lines.extend([sep, tr("FILTERED BY TEXT") + " (Main)", sep])
+                        for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
 
-                if self.comp_known:
-                    detail_lines.extend([sep, tr("KNOWN MANUSCRIPTS"), sep])
-                    for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_known:
+                        detail_lines.extend([sep, tr("KNOWN MANUSCRIPTS"), sep])
+                        for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
 
-                if self.comp_appendix:
-                    detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
-                    for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                        detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                        for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_appendix:
+                        detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
+                        for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
 
-                if self.comp_filtered_appendix:
-                    detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
-                    for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                        detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                        for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_filtered_appendix:
+                        detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
+                        for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
