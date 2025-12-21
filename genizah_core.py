@@ -1509,10 +1509,13 @@ class SearchEngine:
         for p in pages_meta:
             text = self.get_full_text_by_id(p['uid'])
             if text:
+                parsed = self.meta_mgr.parse_full_id_components(p.get('full_header', ''))
                 full_content.append({
                     'p_num': p['p_num'],
                     'text': text,
-                    'uid': p['uid']
+                    'uid': p['uid'],
+                    'full_header': p.get('full_header', ''),
+                    'fl_id': parsed.get('fl_id')
                 })
         return full_content
         

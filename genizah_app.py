@@ -1308,9 +1308,11 @@ class GenizahGUI(QMainWindow):
             
             # Visual Separator
             img_lbl = tr("Image")
+            fl_id = p.get('fl_id')
+            fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
             separator = f"""
             <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}</b>
+                <b>{img_lbl}: {p['p_num']}{fl_suffix}</b>
             </div>
             """
             
