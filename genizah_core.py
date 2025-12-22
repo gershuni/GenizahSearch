@@ -1409,14 +1409,16 @@ class SearchEngine:
 
             # Use the first page's header as the representative one for metadata parsing
             # (Ideally find the best page or just use the first)
-            pages.sort(key=lambda x: x['score'], reverse=True)
-            rep_page = pages[0]
+            # Create a copy to ensure no shared list reference issues
+            ms_pages = list(pages)
+            ms_pages.sort(key=lambda x: x['score'], reverse=True)
+            rep_page = ms_pages[0]
 
             manuscript_item = {
                 'type': 'manuscript',
                 'sys_id': sid,
                 'score': total_score,
-                'pages': pages, # Keep all pages as children
+                'pages': ms_pages, # Keep all pages as children
                 'raw_header': rep_page['raw_header'], # For metadata compatibility
                 'text': rep_page['text'], # Representative text
                 'source_ctx': rep_page.get('source_ctx', ''),

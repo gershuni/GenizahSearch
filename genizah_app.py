@@ -2718,10 +2718,15 @@ class GenizahGUI(QMainWindow):
                 else:
                     # Update parent with first page image info and snippet
                     if pages:
-                        p0 = pages[0]
-                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        ms_first_page = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(ms_first_page['raw_header'])
                         ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        lbl_main = make_snippet_label(p0.get('text', ''))
+                        lbl_main = make_snippet_label(ms_first_page.get('text', ''))
+
+                        # Debug logic for potential snippet mismatch
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug("MS Node %s: First page snippet len %d start %s", sid, len(ms_first_page.get('text', '')), ms_first_page.get('text', '')[:20])
+
                         self.comp_tree.setItemWidget(ms_node, 4, lbl_main)
 
                     for p_item in pages:
