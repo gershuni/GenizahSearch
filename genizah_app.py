@@ -65,12 +65,14 @@ class LabSettingsDialog(QDialog):
         pg_layout = QGridLayout()
 
         self.spin_budget = QSpinBox()
-        self.spin_budget.setRange(100, 5000); self.spin_budget.setSingleStep(100)
+        self.spin_budget.setRange(100, 20000); self.spin_budget.setSingleStep(100)
         self.spin_budget.setValue(self.settings.expansion_budget)
+        self.spin_budget.setToolTip(tr("Max number of variants to search per term."))
 
         self.spin_slop = QSpinBox()
         self.spin_slop.setRange(1, 100)
         self.spin_slop.setValue(self.settings.slop_window)
+        self.spin_slop.setToolTip(tr("Size of the window to check for matches."))
 
         self.spin_rare_bonus = QDoubleSpinBox()
         self.spin_rare_bonus.setRange(0.0, 5.0); self.spin_rare_bonus.setSingleStep(0.1)
@@ -79,6 +81,35 @@ class LabSettingsDialog(QDialog):
         self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
         self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
 
+        # New Options
+        self.chk_use_slop = QCheckBox(tr("Use Slop Window"))
+        self.chk_use_slop.setChecked(self.settings.use_slop_window)
+        self.chk_use_slop.setToolTip(tr("Enable sliding window density check."))
+
+        self.chk_use_rare = QCheckBox(tr("Use Rare Word Filtering"))
+        self.chk_use_rare.setChecked(self.settings.use_rare_words)
+        self.chk_use_rare.setToolTip(tr("Boost score for rare words found in document."))
+
+        self.chk_prefix = QCheckBox(tr("Prefix Mode (Begins with...)"))
+        self.chk_prefix.setChecked(self.settings.prefix_mode)
+        self.chk_prefix.setToolTip(tr("Search for words starting with the query terms (e.g. 'lam' matches 'lama')."))
+
+        # Order Tolerance Group
+        self.grp_order = QGroupBox(tr("Order Tolerance"))
+        self.grp_order.setCheckable(True)
+        self.grp_order.setChecked(self.settings.use_order_tolerance)
+        self.grp_order.setToolTip(tr("Require N words to appear in the same order within a window of N+M words."))
+
+        o_layout = QHBoxLayout()
+        o_layout.addWidget(QLabel(tr("Find")))
+        self.spin_order_n = QSpinBox(); self.spin_order_n.setRange(1, 20); self.spin_order_n.setValue(self.settings.order_n)
+        o_layout.addWidget(self.spin_order_n)
+        o_layout.addWidget(QLabel(tr("words in order out of")))
+        self.spin_order_m = QSpinBox(); self.spin_order_m.setRange(1, 20); self.spin_order_m.setValue(self.settings.order_m)
+        o_layout.addWidget(self.spin_order_m)
+        o_layout.addWidget(QLabel(tr("extra words (Window N+M)")))
+        self.grp_order.setLayout(o_layout)
+
         pg_layout.addWidget(QLabel(tr("Expansion Budget:")), 0, 0)
         pg_layout.addWidget(self.spin_budget, 0, 1)
         pg_layout.addWidget(QLabel(tr("Slop Window:")), 1, 0)
@@ -86,6 +117,11 @@ class LabSettingsDialog(QDialog):
         pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 2, 0)
         pg_layout.addWidget(self.spin_rare_bonus, 2, 1)
         pg_layout.addWidget(self.chk_normalize, 3, 0, 1, 2)
+
+        pg_layout.addWidget(self.chk_use_slop, 4, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_rare, 5, 0, 1, 2)
+        pg_layout.addWidget(self.chk_prefix, 6, 0, 1, 2)
+        pg_layout.addWidget(self.grp_order, 7, 0, 1, 2)
 
         param_group.setLayout(pg_layout)
         layout.addWidget(param_group)
@@ -135,6 +171,12 @@ class LabSettingsDialog(QDialog):
         self.settings.slop_window = self.spin_slop.value()
         self.settings.rare_word_bonus = self.spin_rare_bonus.value()
         self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
+        self.settings.use_slop_window = self.chk_use_slop.isChecked()
+        self.settings.use_rare_words = self.chk_use_rare.isChecked()
+        self.settings.prefix_mode = self.chk_prefix.isChecked()
+        self.settings.use_order_tolerance = self.grp_order.isChecked()
+        self.settings.order_n = self.spin_order_n.value()
+        self.settings.order_m = self.spin_order_m.value()
         self.settings.parse_variants_text(self.txt_variants.toPlainText())
         self.settings.save()
         self.accept()

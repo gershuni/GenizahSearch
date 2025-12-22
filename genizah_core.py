@@ -39,11 +39,19 @@ class LabSettings:
     """Manages configuration for the Lab Mode."""
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
-        self.expansion_budget = 1000
+        self.expansion_budget = 5000
         self.slop_window = 15
         self.rare_word_bonus = 0.5
         self.normalize_abbreviations = True
         self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
+
+        # New Settings
+        self.use_slop_window = True
+        self.use_rare_words = True
+        self.prefix_mode = False
+        self.use_order_tolerance = False
+        self.order_n = 4
+        self.order_m = 4 # "m" as in "n+m" -> window size = n + m
 
         self.load()
 
@@ -53,11 +61,18 @@ class LabSettings:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
-                    self.expansion_budget = data.get('expansion_budget', 1000)
+                    self.expansion_budget = data.get('expansion_budget', 5000)
                     self.slop_window = data.get('slop_window', 15)
                     self.rare_word_bonus = data.get('rare_word_bonus', 0.5)
                     self.normalize_abbreviations = data.get('normalize_abbreviations', True)
                     self.rare_threshold = data.get('rare_threshold', 0.001)
+
+                    self.use_slop_window = data.get('use_slop_window', True)
+                    self.use_rare_words = data.get('use_rare_words', True)
+                    self.prefix_mode = data.get('prefix_mode', False)
+                    self.use_order_tolerance = data.get('use_order_tolerance', False)
+                    self.order_n = data.get('order_n', 4)
+                    self.order_m = data.get('order_m', 4)
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -71,7 +86,13 @@ class LabSettings:
                     'slop_window': self.slop_window,
                     'rare_word_bonus': self.rare_word_bonus,
                     'normalize_abbreviations': self.normalize_abbreviations,
-                    'rare_threshold': self.rare_threshold
+                    'rare_threshold': self.rare_threshold,
+                    'use_slop_window': self.use_slop_window,
+                    'use_rare_words': self.use_rare_words,
+                    'prefix_mode': self.prefix_mode,
+                    'use_order_tolerance': self.use_order_tolerance,
+                    'order_n': self.order_n,
+                    'order_m': self.order_m
                 }, f, indent=4)
         except Exception as e:
             LOGGER.error("Failed to save Lab config: %s", e)
@@ -1267,13 +1288,21 @@ class LabEngine:
             variants = self.budgeted_expansion(term)
             # Normalize variants
             variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+
+            if self.settings.prefix_mode:
+                # Append * for prefix matching (Tantivy syntax)
+                variants = [v + "*" for v in variants]
+
             expanded_terms.append(variants)
 
         # Build Boolean Query
         query_parts = []
         for group in expanded_terms:
             if not group: continue
-            clean_group = [f'"{t}"' for t in group]
+            clean_group = []
+            for t in group:
+                if '*' in t: clean_group.append(t) # No quotes for wildcards
+                else: clean_group.append(f'"{t}"')
             query_parts.append(f"({' OR '.join(clean_group)})")
 
         final_query = " OR ".join(query_parts)
@@ -1330,7 +1359,7 @@ class LabEngine:
                         matches.append((doc_idx, q_idx))
 
             # Sliding Window for Density
-            if matches:
+            if matches and self.settings.use_slop_window:
                 # matches is sorted by doc_idx
                 # We want max matches in a window of size 'slop_window' tokens
                 # Using 2 pointers
@@ -1346,64 +1375,33 @@ class LabEngine:
 
                     # Current window is matches[left : right+1]
                     window = matches[left : right+1]
-                    density = len(set(m[1] for m in window)) # Unique query terms in window? Or total matches?
-                    # "Check how many words from the original chunk appear" -> Unique terms usually implies coverage.
-                    # But "Density" implies count. Let's use count of matches for now, capped by len(raw_terms)?
-                    # Usually "Coordinate Match" is unique terms.
+                    density = len(set(m[1] for m in window))
 
                     if density > max_density:
                         max_density = density
 
                         # Calculate Order Score for this best window
-                        # Check pairs in correct relative order
-                        # Simple heuristic: Longest Increasing Subsequence of query_indices?
-                        # Or just count pairs i < j where q_idx_i < q_idx_j
                         q_indices = [m[1] for m in window]
                         order_score = 0
                         for idx1 in range(len(q_indices)):
                             for idx2 in range(idx1 + 1, len(q_indices)):
                                 if q_indices[idx1] < q_indices[idx2]:
                                     order_score += 1
-
-                        # Normalize order score?
-                        # Max pairs is n*(n-1)/2
                         best_order_score = order_score
 
             # Rare Word Boost
-            # Check presence of rare query terms in doc
-            rare_bonus = 0
-            # Reuse matches?
-            found_q_indices = set(m[1] for m in matches)
-            for q_idx in found_q_indices:
-                # Map back to normalized term to check rarity
-                # We need to map q_idx -> terms[q_idx]?
-                # raw_terms and terms might not align if normalization changed split count?
-                # "terms" was split from "norm_query_str". "raw_terms" from "query_str".
-                # They should align roughly.
-                # Let's check rarity of the *matched token* (normalized)
-                # Or just use the 'rare_query_terms' set we built in Stage 1
-                # If any match corresponds to a rare term...
-                # Heuristic: Check if 'terms' contains any rare ones.
-                # Just re-check soft match against rare_query_terms
-                pass
-
-            # Simpler Rare Boost:
-            # For every unique rare term found in doc, add bonus
-            found_rare_count = 0
-            for rare_term in rare_query_terms:
-                # Check if this rare term matches any token in doc
-                for token in tokens:
-                    if self.soft_match(rare_term, token):
-                        found_rare_count += 1
-                        break # Count once per term
-
-            rare_score = found_rare_count * self.settings.rare_word_bonus
+            rare_score = 0
+            if self.settings.use_rare_words:
+                found_rare_count = 0
+                for rare_term in rare_query_terms:
+                    # Check if this rare term matches any token in doc
+                    for token in tokens:
+                        if self.soft_match(rare_term, token):
+                            found_rare_count += 1
+                            break # Count once per term
+                rare_score = found_rare_count * self.settings.rare_word_bonus
 
             # Final Score
-            # Normalize BM25? It can be anything.
-            # Assuming BM25 is dominant.
-            # Formula: (BM25 * 0.1) + (Density * 0.6) + (Order * 0.2) + (Rare * 0.1)
-            # Density is int. Order is int. Rare is float.
             final_score = (cand['bm25'] * 0.1) + (max_density * 0.6) + (best_order_score * 0.2) + (rare_score * 0.1)
 
             cand['final_score'] = final_score
@@ -1500,7 +1498,10 @@ class LabEngine:
         # Using a huge OR might be slow if too many terms. Cap it?
         # Let's cap at 150 terms
         query_terms = rare_terms[:150]
-        query_str = " OR ".join([f'"{t}"' for t in query_terms])
+        if self.settings.prefix_mode:
+            query_str = " OR ".join([f"{t}*" for t in query_terms])
+        else:
+            query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
         try:
             q = self.lab_index.parse_query(query_str, ["text_normalized"])
@@ -1527,9 +1528,14 @@ class LabEngine:
         # Prepare Input Chunks
         norm_input = self.lab_index_normalize(full_text)
         input_tokens = norm_input.split()
-        chunk_size = self.settings.slop_window # Use slop window as chunk size?
-        # "Slide Input Chunks (size = slop_window) over Candidate Doc"
-        # Let's step by half window for overlap
+
+        # Determine chunk size based on settings
+        if self.settings.use_order_tolerance:
+            chunk_size = self.settings.order_n + self.settings.order_m
+        else:
+            chunk_size = self.settings.slop_window
+
+        # "Slide Input Chunks over Candidate Doc"
         step = max(1, chunk_size // 2)
 
         input_chunks = []
@@ -1612,24 +1618,65 @@ class LabEngine:
                 for right in range(len(match_positions)):
                     curr = match_positions[right]
 
-                    # Shrink
-                    while curr[0] - match_positions[left][0] > len(chunk['tokens']) * 1.5: # 1.5x expansion allowed
+                    # Shrink: Window size is chunk length (N+M)
+                    # Use a slightly relaxed window for Slop (1.5x) but strict for Order Tol?
+                    # Let's keep 1.5x as "Slop" factor generally, unless strict mode requested.
+                    max_window_len = len(chunk['tokens']) if self.settings.use_order_tolerance else (len(chunk['tokens']) * 1.5)
+
+                    while curr[0] - match_positions[left][0] > max_window_len:
                         left += 1
 
                     window = match_positions[left : right+1]
 
                     # Score this window
-                    # Count unique chunk indices covered
                     covered_chunk_indices = set(m[1] for m in window)
-                    coverage = len(covered_chunk_indices) / len(chunk['tokens'])
+                    count_match = len(covered_chunk_indices)
 
-                    if coverage > 0.5: # Threshold 50% match
-                        # Valid Match
-                        score = len(covered_chunk_indices)
+                    valid_hit = False
+                    score = 0
 
-                        # Store match if better than previous for this chunk or if distinct area?
-                        # We want cumulative score for the document.
-                        # But prevent double counting same area for same chunk.
+                    if self.settings.use_order_tolerance:
+                        # Logic: N out of N+M matches (where N+M is chunk size)
+                        # We need count_match >= order_n
+                        if count_match >= self.settings.order_n:
+                            # And check Order (Longest Increasing Subsequence?)
+                            # User said "finding n words in the same order"
+                            # We check LIS of chunk indices
+                            q_indices = [m[1] for m in window]
+                            # Simple greedy LIS for speed
+                            if not q_indices: continue
+                            lis = []
+                            for x in q_indices:
+                                if not lis or x > lis[-1]:
+                                    lis.append(x)
+                                else:
+                                    # Binary search replace? Or just simple check?
+                                    # For small N (4-8), simple is fine.
+                                    # Actually we need SUBSEQUENCE length.
+                                    # Standard LIS:
+                                    import bisect
+                                    from bisect import bisect_left
+                                    # ... implementation ...
+                                    # Wait, let's keep it simple.
+                                    # We need "at least N in order".
+                                    # Let's calculate LIS length properly.
+                                    tails = []
+                                    for x in q_indices:
+                                        idx = bisect_left(tails, x)
+                                        if idx < len(tails): tails[idx] = x
+                                        else: tails.append(x)
+                                    if len(tails) >= self.settings.order_n:
+                                        valid_hit = True
+                                        score = len(tails) * 2 # Boost ordered matches
+
+                    else:
+                        # Standard Density Logic (Default or Slop Window mode)
+                        coverage = count_match / len(chunk['tokens'])
+                        if coverage > 0.5: # Threshold 50%
+                            valid_hit = True
+                            score = count_match
+
+                    if valid_hit:
                         if score > best_chunk_score:
                             best_chunk_score = score
                             best_window_idx = (match_positions[left][0], curr[0])
@@ -1672,7 +1719,7 @@ class LabEngine:
                     'uid': cand['uid'],
                     'raw_header': cand['header'],
                     'src_lbl': 'Lab',
-                    'source_ctx': "Matches found via Lab Mode", # Can be improved to show source chunk
+                    'source_ctx': " ".join(chunk['tokens']),
                     'text': hl_snippet,
                     'highlight_pattern': "" # No regex pattern for lab
                 })
