@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip,
                              QProgressDialog, QStackedLayout) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
 
 from version import APP_VERSION
 
@@ -78,6 +78,41 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
             return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
 
         return natural_keys(norm1) < natural_keys(norm2)
+
+
+class PreviewLabel(QLabel):
+    def __init__(self, html_text="", plain_text="", parent=None):
+        super().__init__(parent)
+        self._html = ""
+        self._plain = ""
+        self.setWordWrap(False)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setFixedHeight(self.fontMetrics().lineSpacing() + 8)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        if html_text or plain_text:
+            self.set_preview(html_text, plain_text)
+
+    def set_preview(self, html_text, plain_text):
+        self._html = html_text or ""
+        self._plain = plain_text or ""
+        self.setText(self._html)
+        self._update_tooltip()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_tooltip()
+
+    def _update_tooltip(self):
+        if not self._html and not self._plain:
+            self.setToolTip("")
+            return
+
+        doc = QTextDocument()
+        doc.setDefaultFont(self.font())
+        doc.setHtml(self._html)
+        needs_tooltip = doc.idealWidth() > self.contentsRect().width()
+        self.setToolTip(self._plain if needs_tooltip else "")
 
 class ImageLoaderThread(QThread):
     """
@@ -968,6 +1003,8 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self.comp_col_context = 4
+        self.comp_col_ms_context = 5
         self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
         self.resize(1300, 850)
         log_tls_relaxation_notice()
@@ -992,6 +1029,8 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_main = []
         self.comp_grouped_appendix = {}
         self.comp_grouped_summary = {}
+        self.comp_sort_mode = "score"
+        self.comp_sort_reverse = True
         self.comp_grouped_filtered_main = []
         self.comp_grouped_filtered_appendix = {}
         self.comp_grouped_filtered_summary = {}
@@ -1370,6 +1409,7 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
+
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
@@ -1388,8 +1428,10 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
+        self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
+        self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
         self.comp_tree_updating = False
         self.comp_tree.setStyleSheet(
             "QTreeWidget::indicator { width: 16px; height: 16px; }"
@@ -1400,8 +1442,15 @@ class GenizahGUI(QMainWindow):
 
         # Configure columns width
         header = self.comp_tree.header()
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_comp_header_clicked)
+        header.sectionResized.connect(lambda *_: self._update_comp_text_tooltips())
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
@@ -1409,6 +1458,9 @@ class GenizahGUI(QMainWindow):
         # Title column (~25 chars)
         title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
         self.comp_tree.setColumnWidth(2, int(title_width))
+        context_width = self.comp_tree.fontMetrics().averageCharWidth() * 28
+        self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
+        self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
 
         self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
         rl.addWidget(self.comp_tree)
@@ -2586,21 +2638,136 @@ class GenizahGUI(QMainWindow):
         all_items.extend(known or [])
         return all_items
 
-    def _comp_sort_key(self, item):
+    def on_comp_header_clicked(self, section):
+        if section not in (0, 1, 2, 3):
+            return
+        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id"}
+        new_mode = mode_map.get(section, "score")
+        if new_mode == self.comp_sort_mode:
+            self.comp_sort_reverse = not self.comp_sort_reverse
+        else:
+            self.comp_sort_mode = new_mode
+            self.comp_sort_reverse = new_mode == "score"
+        order = Qt.SortOrder.DescendingOrder if self.comp_sort_reverse else Qt.SortOrder.AscendingOrder
+        header = self.comp_tree.header()
+        header.setSortIndicator(section, order)
+        if self.is_comp_running or not self._has_comp_results():
+            return
+        if not self.chk_comp_flat.isChecked() and not self.comp_has_grouped_results:
+            if self.comp_raw_items or self.comp_raw_filtered:
+                self.start_grouping(self.comp_raw_items or [], self.comp_raw_filtered or [])
+                return
+        if self.comp_grouped_main or self.comp_grouped_filtered_main:
+            self.display_comp_results(
+                self.comp_grouped_main,
+                self.comp_grouped_appendix,
+                self.comp_grouped_summary,
+                self.comp_grouped_filtered_main,
+                self.comp_grouped_filtered_appendix,
+                self.comp_grouped_filtered_summary,
+            )
+
+    def _current_comp_sort_mode(self):
+        return self.comp_sort_mode or "score"
+
+    def _get_comp_item_meta(self, item):
         sid = None
         shelf = None
+        title = None
         if item.get('type') == 'manuscript' and item.get('sys_id'):
             sid = item['sys_id']
-            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
             if not shelf or shelf == "Unknown":
                 shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
         else:
-            sid, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
+            sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+        return sid or "", shelf or "", title or ""
 
-        shelf = shelf or ""
-        sid = sid or ""
-        shelf_key = shelf if shelf else sid
-        return (shelf_key.casefold(), sid)
+    def _natural_sort_key(self, text):
+        normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
+
+    def _comp_sort_key(self, item, mode=None):
+        sort_mode = mode or self._current_comp_sort_mode()
+        if sort_mode == "score":
+            return item.get('score', 0)
+
+        sid, shelf, title = self._get_comp_item_meta(item)
+
+        if sort_mode == "title":
+            return title.casefold()
+        if sort_mode == "system_id":
+            return sid.casefold()
+
+        shelf_key = self._natural_sort_key(shelf or sid)
+        sid_key = self._natural_sort_key(sid)
+        return (shelf_key, sid_key)
+
+    def _sort_comp_items(self, items, mode=None):
+        sort_mode = mode or self._current_comp_sort_mode()
+        reverse = self.comp_sort_reverse if sort_mode == self.comp_sort_mode else sort_mode == "score"
+        return sorted(items, key=lambda item: self._comp_sort_key(item, sort_mode), reverse=reverse)
+
+    def _build_comp_preview_label(self, text_content):
+        if not text_content:
+            return QLabel("")
+        flat = text_content.replace("\n", " ... ")
+        match = re.search(r'\*(.*?)\*', flat)
+        if match:
+            match_text = match.group(1)
+            after = flat[match.end():].strip()
+            if len(after) > 80:
+                after = after[:80].rstrip() + "…"
+            snippet = f"*{match_text}* {after}".strip()
+        else:
+            snippet = flat
+        html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", snippet)
+        display_html = (
+            "<div dir='rtl' style='margin:2px; text-align:right; white-space:nowrap; width:100%;'>"
+            f"{html}</div>"
+        )
+        plain = flat.replace("*", "")
+        return PreviewLabel(display_html, plain)
+
+    def _update_comp_text_tooltips(self):
+        def update_node(node):
+            for col in (0, 1, 2, 3):
+                text = node.text(col)
+                if not text:
+                    node.setToolTip(col, "")
+                    continue
+                max_width = max(1, self.comp_tree.columnWidth(col) - 8)
+                if self.comp_tree.fontMetrics().horizontalAdvance(text) > max_width:
+                    node.setToolTip(col, text)
+                else:
+                    node.setToolTip(col, "")
+            for i in range(node.childCount()):
+                update_node(node.child(i))
+
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            update_node(root.child(i))
+
+    def _apply_comp_node_previews(self, node):
+        data = node.data(0, Qt.ItemDataRole.UserRole + 1)
+        if not data:
+            return
+        self.comp_tree.setItemWidget(node, self.comp_col_context, self._build_comp_preview_label(data.get("source_ctx")))
+        self.comp_tree.setItemWidget(node, self.comp_col_ms_context, self._build_comp_preview_label(data.get("ms_ctx")))
+
+    def _clear_comp_node_previews(self, node):
+        if not node.data(0, Qt.ItemDataRole.UserRole + 1):
+            return
+        self.comp_tree.setItemWidget(node, self.comp_col_context, QLabel(""))
+        self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
+
+    def _set_comp_node_previews(self, node, source_text, ms_text):
+        node.setData(
+            0,
+            Qt.ItemDataRole.UserRole + 1,
+            {"source_ctx": source_text or "", "ms_ctx": ms_text or ""},
+        )
+        self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.is_comp_running = False
@@ -2663,15 +2830,6 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
         
-        def make_snippet_label(text_content):
-            if not text_content: return QLabel("")
-            flat = text_content.replace("\n", " ... ")
-            html = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", flat)
-            
-            lbl = QLabel(f"<div dir='rtl' style='margin:2px;'>{html}</div>")
-            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            return lbl
-
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
@@ -2710,9 +2868,7 @@ class GenizahGUI(QMainWindow):
                     # Update Shelfmark to include Image info
                     ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
 
-                    # Show snippet in Context column
-                    lbl = make_snippet_label(p_item.get('text', ''))
-                    self.comp_tree.setItemWidget(ms_node, 4, lbl)
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
                 # Case B: Multiple Pages -> Add children
                 else:
@@ -2721,8 +2877,7 @@ class GenizahGUI(QMainWindow):
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        lbl_main = make_snippet_label(p0.get('text', ''))
-                        self.comp_tree.setItemWidget(ms_node, 4, lbl_main)
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -2736,9 +2891,7 @@ class GenizahGUI(QMainWindow):
 
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
 
-                        # Snippet for Page
-                        lbl = make_snippet_label(p_item.get('text', ''))
-                        self.comp_tree.setItemWidget(page_node, 4, lbl)
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
             else:
                 # Fallback for raw items (should not happen with new logic, but safe to keep)
@@ -2750,14 +2903,13 @@ class GenizahGUI(QMainWindow):
                 node.setText(3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                lbl = make_snippet_label(ms_item.get('text', ''))
-                self.comp_tree.setItemWidget(node, 4, lbl)
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
 
         # ----------------------------------------
 
         if self.chk_comp_flat.isChecked():
             all_items = self._collect_comp_items(clean_main, clean_appx, clean_filt, clean_filt_appx, known)
-            sorted_items = sorted(all_items, key=self._comp_sort_key)
+            sorted_items = self._sort_comp_items(all_items)
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_items))])
             root.setExpanded(True)
             make_checkable(root)
@@ -2767,7 +2919,7 @@ class GenizahGUI(QMainWindow):
             # 1. Main Results
             root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
             make_checkable(root)
-            for item in clean_main:
+            for item in self._sort_comp_items(clean_main):
                 add_manuscript_node(root, item)
 
             # 2. Appendix Results
@@ -2777,7 +2929,7 @@ class GenizahGUI(QMainWindow):
                 for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
                     make_checkable(gn)
-                    for item in items:
+                    for item in self._sort_comp_items(items):
                         add_manuscript_node(gn, item)
 
             # 3. Filtered by Text (New Category with Sub-Grouping)
@@ -2791,7 +2943,7 @@ class GenizahGUI(QMainWindow):
                     f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
                     f_main_node.setExpanded(True)
                     make_checkable(f_main_node)
-                    for item in clean_filt:
+                    for item in self._sort_comp_items(clean_filt):
                         add_manuscript_node(f_main_node, item)
 
                 # 3b. Filtered Appendix
@@ -2801,18 +2953,19 @@ class GenizahGUI(QMainWindow):
                     for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                         gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
                         make_checkable(gn)
-                        for item in items:
+                        for item in self._sort_comp_items(items):
                             add_manuscript_node(gn, item)
 
             # 4. Known / Excluded Results
             if known:
                 root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
                 make_checkable(root_k)
-                for item in known:
+                for item in self._sort_comp_items(known):
                     add_manuscript_node(root_k, item)
 
         self.comp_tree.setUpdatesEnabled(True)
         self.comp_tree_updating = False
+        self._update_comp_text_tooltips()
         self._update_recursive_button_state()
         if self.pending_recursive_search:
             self.pending_recursive_search = False
@@ -2831,6 +2984,14 @@ class GenizahGUI(QMainWindow):
         self._sync_parent_check_state(item)
         self.comp_tree_updating = False
         self._update_recursive_button_state()
+
+    def on_comp_tree_item_expanded(self, item):
+        if item.childCount() > 0:
+            self._clear_comp_node_previews(item)
+
+    def on_comp_tree_item_collapsed(self, item):
+        if item.childCount() > 0:
+            self._apply_comp_node_previews(item)
 
     def _sync_parent_check_state(self, item):
         parent = item.parent()
@@ -3142,15 +3303,14 @@ class GenizahGUI(QMainWindow):
                         ])
 
             if self.chk_comp_flat.isChecked():
-                flat_items = sorted(
+                flat_items = self._sort_comp_items(
                     self._collect_comp_items(
                         self.comp_main,
                         self.comp_appendix,
                         self.comp_filtered_main,
                         self.comp_filtered_appendix,
                         self.comp_known,
-                    ),
-                    key=self._comp_sort_key,
+                    )
                 )
                 add_rows(flat_items, tr("All Results"))
             else:
@@ -3306,15 +3466,14 @@ class GenizahGUI(QMainWindow):
                     ]
 
                     detail_lines = [sep, tr("ALL RESULTS"), sep]
-                    flat_items = sorted(
+                    flat_items = self._sort_comp_items(
                         self._collect_comp_items(
                             self.comp_main,
                             self.comp_appendix,
                             self.comp_filtered_main,
                             self.comp_filtered_appendix,
                             self.comp_known,
-                        ),
-                        key=self._comp_sort_key,
+                        )
                     )
                     for item in flat_items:
                         detail_lines.extend(_fmt_ms_entry(item))
