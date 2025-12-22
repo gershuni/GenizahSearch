@@ -1388,7 +1388,7 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("הקשר כתב יד")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree_updating = False
         self.comp_tree.setStyleSheet(
@@ -1401,6 +1401,7 @@ class GenizahGUI(QMainWindow):
         # Configure columns width
         header = self.comp_tree.header()
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
@@ -2672,6 +2673,10 @@ class GenizahGUI(QMainWindow):
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             return lbl
 
+        def set_context_widgets(node, source_ctx, manuscript_ctx):
+            self.comp_tree.setItemWidget(node, 4, make_snippet_label(source_ctx))
+            self.comp_tree.setItemWidget(node, 5, make_snippet_label(manuscript_ctx))
+
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
@@ -2710,19 +2715,16 @@ class GenizahGUI(QMainWindow):
                     # Update Shelfmark to include Image info
                     ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
 
-                    # Show snippet in Context column
-                    lbl = make_snippet_label(p_item.get('text', ''))
-                    self.comp_tree.setItemWidget(ms_node, 4, lbl)
+                    # Show source context + manuscript snippet for single page
+                    set_context_widgets(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
                 # Case B: Multiple Pages -> Add children
                 else:
-                    # Update parent with first page image info and snippet
+                    # Update parent with first page image info only (no preview when children exist)
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        lbl_main = make_snippet_label(p0.get('text', ''))
-                        self.comp_tree.setItemWidget(ms_node, 4, lbl_main)
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -2736,9 +2738,8 @@ class GenizahGUI(QMainWindow):
 
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
 
-                        # Snippet for Page
-                        lbl = make_snippet_label(p_item.get('text', ''))
-                        self.comp_tree.setItemWidget(page_node, 4, lbl)
+                        # Contexts for Page
+                        set_context_widgets(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
             else:
                 # Fallback for raw items (should not happen with new logic, but safe to keep)
@@ -2750,8 +2751,7 @@ class GenizahGUI(QMainWindow):
                 node.setText(3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                lbl = make_snippet_label(ms_item.get('text', ''))
-                self.comp_tree.setItemWidget(node, 4, lbl)
+                set_context_widgets(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
 
         # ----------------------------------------
 
