@@ -60,6 +60,25 @@ class SearchThread(QThread):
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
 
+class LabSearchThread(QThread):
+    """Execute a Lab Mode search query."""
+
+    results_signal = pyqtSignal(list)
+    progress_signal = pyqtSignal(int, int) # Not fully utilized yet but good for future
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, lab_engine, query):
+        super().__init__()
+        self.lab_engine = lab_engine
+        self.query = query
+
+    def run(self):
+        try:
+            def cb(curr, total): self.progress_signal.emit(curr, total)
+            results = self.lab_engine.lab_search(self.query, progress_callback=cb)
+            self.results_signal.emit(results)
+        except Exception as e: self.error_signal.emit(str(e))
+
 class CompositionThread(QThread):
     """Scan compositions in background to keep UI responsive."""
 
@@ -91,6 +110,26 @@ class CompositionThread(QThread):
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
 
+class LabCompositionThread(QThread):
+    """Execute Lab Composition Search (Broad-to-Narrow)."""
+
+    progress_signal = pyqtSignal(int, int)
+    status_signal = pyqtSignal(str)
+    scan_finished_signal = pyqtSignal(object) # Returns dict like standard comp
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, lab_engine, text):
+        super().__init__()
+        self.lab_engine = lab_engine
+        self.text = text
+
+    def run(self):
+        try:
+            self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
+            def cb(curr, total): self.progress_signal.emit(curr, total)
+            result = self.lab_engine.lab_composition_search(self.text, progress_callback=cb)
+            self.scan_finished_signal.emit(result)
+        except Exception as e: self.error_signal.emit(str(e))
 
 class GroupingThread(QThread):
     """Group composition results while reporting progress to the UI."""

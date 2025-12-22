@@ -6,6 +6,7 @@ import os
 import re
 import time
 import threading
+import json
 import requests
 import urllib3
 import csv
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QDoubleSpinBox, QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
@@ -29,7 +30,7 @@ from version import APP_VERSION
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -43,10 +44,137 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
+
+class LabSettingsDialog(QDialog):
+    """Configuration for Lab Mode (Two-Stage Retrieval & Advanced Indexing)."""
+    def __init__(self, parent, lab_engine):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Lab Mode Settings"))
+        self.resize(600, 600)
+        self.lab_engine = lab_engine
+        self.settings = lab_engine.settings
+
+        layout = QVBoxLayout()
+
+        # --- Parameters ---
+        param_group = QGroupBox(tr("Search Parameters"))
+        pg_layout = QGridLayout()
+
+        self.spin_budget = QSpinBox()
+        self.spin_budget.setRange(100, 5000); self.spin_budget.setSingleStep(100)
+        self.spin_budget.setValue(self.settings.expansion_budget)
+
+        self.spin_slop = QSpinBox()
+        self.spin_slop.setRange(1, 100)
+        self.spin_slop.setValue(self.settings.slop_window)
+
+        self.spin_rare_bonus = QDoubleSpinBox()
+        self.spin_rare_bonus.setRange(0.0, 5.0); self.spin_rare_bonus.setSingleStep(0.1)
+        self.spin_rare_bonus.setValue(self.settings.rare_word_bonus)
+
+        self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
+        self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
+
+        pg_layout.addWidget(QLabel(tr("Expansion Budget:")), 0, 0)
+        pg_layout.addWidget(self.spin_budget, 0, 1)
+        pg_layout.addWidget(QLabel(tr("Slop Window:")), 1, 0)
+        pg_layout.addWidget(self.spin_slop, 1, 1)
+        pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 2, 0)
+        pg_layout.addWidget(self.spin_rare_bonus, 2, 1)
+        pg_layout.addWidget(self.chk_normalize, 3, 0, 1, 2)
+
+        param_group.setLayout(pg_layout)
+        layout.addWidget(param_group)
+
+        # --- Custom Variants ---
+        var_group = QGroupBox(tr("Custom Variants (char=char, word=word)"))
+        vg_layout = QVBoxLayout()
+        self.txt_variants = QPlainTextEdit()
+        self.txt_variants.setPlaceholderText("א=ע\nנו=מ\n...")
+        self.txt_variants.setPlainText(self.settings.get_variants_text())
+        vg_layout.addWidget(self.txt_variants)
+        var_group.setLayout(vg_layout)
+        layout.addWidget(var_group)
+
+        # --- Indexing ---
+        idx_group = QGroupBox(tr("Lab Index"))
+        ig_layout = QHBoxLayout()
+        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
+        self.btn_rebuild.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
+        self.btn_rebuild.clicked.connect(self.run_rebuild)
+        self.lbl_idx_status = QLabel("")
+        ig_layout.addWidget(self.btn_rebuild)
+        ig_layout.addWidget(self.lbl_idx_status)
+        idx_group.setLayout(ig_layout)
+        layout.addWidget(idx_group)
+
+        # --- Footer ---
+        btn_box = QHBoxLayout()
+        self.btn_save = QPushButton(tr("Save & Close"))
+        self.btn_save.clicked.connect(self.save_and_close)
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.reject)
+
+        btn_copy = QPushButton(tr("Copy Config JSON"))
+        btn_copy.clicked.connect(self.copy_json)
+
+        btn_box.addWidget(btn_copy)
+        btn_box.addStretch()
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_save)
+        layout.addLayout(btn_box)
+
+        self.setLayout(layout)
+
+    def save_and_close(self):
+        self.settings.expansion_budget = self.spin_budget.value()
+        self.settings.slop_window = self.spin_slop.value()
+        self.settings.rare_word_bonus = self.spin_rare_bonus.value()
+        self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
+        self.settings.parse_variants_text(self.txt_variants.toPlainText())
+        self.settings.save()
+        self.accept()
+
+    def copy_json(self):
+        cfg = {
+            'expansion_budget': self.spin_budget.value(),
+            'slop_window': self.spin_slop.value(),
+            'custom_variants': self.txt_variants.toPlainText(),
+            'rare_word_bonus': self.spin_rare_bonus.value()
+        }
+        QApplication.clipboard().setText(json.dumps(cfg, indent=2))
+        QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
+
+    def run_rebuild(self):
+        self.btn_rebuild.setEnabled(False)
+        self.lbl_idx_status.setText(tr("Rebuilding..."))
+        QApplication.processEvents()
+
+        # Use a thread or simple execution? Rebuilding might take time.
+        # Let's run it in a thread to keep UI responsive.
+        # But we need a progress callback.
+
+        class RebuildThread(QThread):
+            finished_sig = pyqtSignal(int)
+            def __init__(self, engine):
+                super().__init__()
+                self.engine = engine
+            def run(self):
+                count = self.engine.rebuild_lab_index() # Blocking call in core
+                self.finished_sig.emit(count)
+
+        self.worker = RebuildThread(self.lab_engine)
+        self.worker.finished_sig.connect(self.on_rebuild_finished)
+        self.worker.start()
+
+    def on_rebuild_finished(self, count):
+        self.lbl_idx_status.setText(tr("Done. {} docs.").format(count))
+        self.btn_rebuild.setEnabled(True)
+        QMessageBox.information(self, tr("Success"), tr("Lab Index rebuilt successfully."))
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _TLS_NOTICE_LOGGED = False
@@ -1055,6 +1183,7 @@ class GenizahGUI(QMainWindow):
         self.searcher = None
         self.indexer = None
         self.ai_mgr = None
+        self.lab_engine = None
 
         self.last_results = []
         self.last_search_query = ""
@@ -1207,6 +1336,9 @@ class GenizahGUI(QMainWindow):
             self.indexer = indexer
             self.ai_mgr = ai_mgr
 
+            # Init Lab Engine (lightweight init)
+            self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
+
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
 
@@ -1300,6 +1432,16 @@ class GenizahGUI(QMainWindow):
         self.btn_ai.clicked.connect(self.open_ai)
         self.btn_ai.setEnabled(False)
 
+        # Lab Mode Controls
+        self.chk_lab_mode = QCheckBox(tr("Lab Mode"))
+        self.chk_lab_mode.toggled.connect(self.toggle_lab_mode_sync)
+
+        self.btn_lab_settings = QPushButton()
+        self.btn_lab_settings.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.btn_lab_settings.setToolTip(tr("Lab Settings"))
+        self.btn_lab_settings.clicked.connect(self.open_lab_settings)
+        self.btn_lab_settings.setFixedWidth(30)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -1309,7 +1451,9 @@ class GenizahGUI(QMainWindow):
         top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
         top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
         top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
-        top.addWidget(self.btn_search); top.addWidget(self.btn_ai); top.addWidget(btn_help)
+        top.addWidget(self.btn_search); top.addWidget(self.btn_ai)
+        top.addWidget(self.chk_lab_mode); top.addWidget(self.btn_lab_settings)
+        top.addWidget(btn_help)
         layout.addLayout(top)
         
         self.search_progress = QProgressBar(); self.search_progress.setVisible(False)
@@ -1450,6 +1594,16 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
+        # Lab Mode Controls (Comp Tab)
+        self.chk_lab_mode_comp = QCheckBox(tr("Lab Mode"))
+        self.chk_lab_mode_comp.toggled.connect(self.toggle_lab_mode_sync)
+
+        self.btn_lab_settings_comp = QPushButton()
+        self.btn_lab_settings_comp.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.btn_lab_settings_comp.setToolTip(tr("Lab Settings"))
+        self.btn_lab_settings_comp.clicked.connect(self.open_lab_settings)
+        self.btn_lab_settings_comp.setFixedWidth(30)
+
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
@@ -1462,6 +1616,7 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+        cr.addWidget(self.chk_lab_mode_comp); cr.addWidget(self.btn_lab_settings_comp)
         cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
@@ -1909,22 +2064,38 @@ class GenizahGUI(QMainWindow):
 
     def _default_report_path(self, hint, fallback):
         filename = self._sanitize_filename(hint, fallback)
-        os.makedirs(Config.REPORTS_DIR, exist_ok=True)
-        return os.path.join(Config.REPORTS_DIR, f"{filename}.txt")
+
+        # Lab Mode: save to Lab Dir
+        base_dir = Config.REPORTS_DIR
+        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked():
+            base_dir = os.path.join(Config.LAB_DIR, "Reports")
+
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, f"{filename}.txt")
 
     def _get_credit_header(self):
-        
+        lab_config = ""
+        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked() and self.lab_engine:
+            settings_dump = json.dumps({
+                'custom_variants': self.lab_engine.settings.custom_variants,
+                'expansion_budget': self.lab_engine.settings.expansion_budget,
+                'slop_window': self.lab_engine.settings.slop_window,
+                'rare_word_bonus': self.lab_engine.settings.rare_word_bonus
+            }, indent=2, ensure_ascii=False)
+            lab_config = f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
+
         english_text = (
             "Generated by Genizah Search Pro\n"
             "Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)\n"
             "Dataset available at: https://doi.org/10.5281/zenodo.17734473\n"
-            "================================================================================\n\n"
+            "================================================================================\n"
         )
 
+        final_text = english_text
         if CURRENT_LANG == 'he':
-            return tr("REPORT_CREDIT_TXT")
+            final_text = tr("REPORT_CREDIT_TXT")
             
-        return english_text
+        return final_text + lab_config + "\n"
     
     # --- LOGIC ---
     def open_ai(self):
@@ -1933,6 +2104,22 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
+
+    def toggle_lab_mode_sync(self, checked):
+        # Sync the two checkboxes
+        self.chk_lab_mode.blockSignals(True)
+        self.chk_lab_mode_comp.blockSignals(True)
+        self.chk_lab_mode.setChecked(checked)
+        self.chk_lab_mode_comp.setChecked(checked)
+        self.chk_lab_mode.blockSignals(False)
+        self.chk_lab_mode_comp.blockSignals(False)
+
+    def open_lab_settings(self):
+        if not self.lab_engine:
+            QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
+            return
+        d = LabSettingsDialog(self, self.lab_engine)
+        d.exec()
 
     def toggle_search(self):
         if not self.searcher: return
@@ -1965,7 +2152,15 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
 
-        self.search_thread = SearchThread(self.searcher, query, mode, gap)
+        if self.chk_lab_mode.isChecked():
+            if not self.lab_engine:
+                QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
+                self.reset_ui()
+                return
+            self.search_thread = LabSearchThread(self.lab_engine, query)
+        else:
+            self.search_thread = SearchThread(self.searcher, query, mode, gap)
+
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
         self.search_thread.error_signal.connect(self.on_error)
@@ -2519,10 +2714,18 @@ class GenizahGUI(QMainWindow):
         for b in self.comp_export_buttons: b.setEnabled(False)
         mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
 
-        self.comp_thread = CompositionThread(
-            self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
-            filter_text=self.filter_text_content, threshold=self.spin_filter.value()
-        )
+        if self.chk_lab_mode_comp.isChecked():
+            if not self.lab_engine:
+                QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
+                self.reset_comp_ui()
+                return
+            self.comp_thread = LabCompositionThread(self.lab_engine, txt)
+        else:
+            self.comp_thread = CompositionThread(
+                self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
+                filter_text=self.filter_text_content, threshold=self.spin_filter.value()
+            )
+
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
         self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
