@@ -1442,6 +1442,7 @@ class GenizahGUI(QMainWindow):
 
         # Configure columns width
         header = self.comp_tree.header()
+        header.setSectionsClickable(True)
         header.sectionClicked.connect(self.on_comp_header_clicked)
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
@@ -2708,7 +2709,7 @@ class GenizahGUI(QMainWindow):
         flat = text_content.replace("\n", " ... ")
         html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", flat)
         display_html = (
-            "<div dir='rtl' style='margin:2px; text-align:center; white-space:nowrap;'>"
+            "<div dir='rtl' style='margin:2px; text-align:center; white-space:nowrap; width:100%;'>"
             f"{html}</div>"
         )
         plain = flat.replace("*", "")
