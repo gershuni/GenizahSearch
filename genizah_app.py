@@ -20,8 +20,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
-                             QGridLayout, QToolTip,
-                             QProgressDialog, QStackedLayout) 
+                             QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
+                             QScrollArea, QFrame) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
 
@@ -79,41 +79,82 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
 
         return natural_keys(norm1) < natural_keys(norm2)
 
-
-class PreviewLabel(QLabel):
-    def __init__(self, html_text="", plain_text="", parent=None):
+class HiddenScrollArea(QScrollArea):
+    def __init__(self, text_with_markers="", anchor_text=None, parent=None):
         super().__init__(parent)
-        self._html = ""
-        self._plain = ""
-        self.setWordWrap(False)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setTextFormat(Qt.TextFormat.RichText)
-        self.setFixedHeight(self.fontMetrics().lineSpacing() + 8)
-        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        if html_text or plain_text:
-            self.set_preview(html_text, plain_text)
+        self._raw_text = text_with_markers
+        self._anchor_text = anchor_text
+        
+        # Hide scrollbars
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        
+        # Add horizontal margins to create a gap between columns (5px on each side = 10px total gap)
+        # We also ensure the background is transparent to show the row selection color
+        self.setStyleSheet("QScrollArea { background: transparent; margin-left: 5px; margin-right: 5px; }")
+        
+        # Keep height strictly slim
+        self.setFixedHeight(self.fontMetrics().lineSpacing() + 4)
+        
+        self.label = QLabel()
+        self.label.setTextFormat(Qt.TextFormat.RichText)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Ensure label background is transparent
+        self.label.setStyleSheet("background: transparent;")
+        self.setWidget(self.label)
+        
+        self._update_content()
 
-    def set_preview(self, html_text, plain_text):
-        self._html = html_text or ""
-        self._plain = plain_text or ""
-        self.setText(self._html)
-        self._update_tooltip()
+    def _update_content(self):
+        if not self._raw_text:
+            self.label.setText(""); return
+
+        # Apply coloring to markers
+        processed = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", self._raw_text)
+        processed = re.sub(r'\*([^*]+)$', r"<b style='color:#c0392b;'>\1</b>", processed)
+        processed = re.sub(r'^([^*]+)\*', r"<b style='color:#c0392b;'>\1</b>", processed)
+        final_html = processed.replace("*", "")
+        
+        # Enforce non-breaking text
+        self.label.setText(f"<div dir='rtl' style='white-space:nowrap; padding: 0 5px;'>{final_html}</div>")
+        self.setToolTip(self._raw_text.replace("*", ""))
+        
+        # Position highlight in view initially
+        QTimer.singleShot(10, self._center_on_match)
+
+    def _center_on_match(self):
+        target_pos = -1
+        if self._anchor_text:
+            target_pos = self._raw_text.find(f"*{self._anchor_text}*")
+        if target_pos == -1:
+            target_pos = self._raw_text.find('*')
+            
+        if target_pos != -1:
+            bar = self.horizontalScrollBar()
+            max_val = bar.maximum()
+            if max_val > 0:
+                # Calculate center ratio for RTL scrollbar
+                ratio = (len(self._raw_text) - target_pos) / len(self._raw_text)
+                bar.setValue(int(max_val * ratio))
+
+    def wheelEvent(self, event):
+        # Convert vertical wheel movement to horizontal scroll
+        if event.angleDelta().y() != 0:
+            bar = self.horizontalScrollBar()
+            # Sensitivity adjustment
+            bar.setValue(bar.value() - event.angleDelta().y())
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update_tooltip()
-
-    def _update_tooltip(self):
-        if not self._html and not self._plain:
-            self.setToolTip("")
-            return
-
-        doc = QTextDocument()
-        doc.setDefaultFont(self.font())
-        doc.setHtml(self._html)
-        needs_tooltip = doc.idealWidth() > self.contentsRect().width()
-        self.setToolTip(self._plain if needs_tooltip else "")
-
+        # Maintain highlight focus when column width changes
+        QTimer.singleShot(10, self._center_on_match)
+        
 class ImageLoaderThread(QThread):
     """
     Smart Image Loader:
@@ -2710,14 +2751,8 @@ class GenizahGUI(QMainWindow):
     def _build_comp_preview_label(self, text_content):
         if not text_content:
             return QLabel("")
-        flat = text_content.replace("\n", " ... ")
-        html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", flat)
-        display_html = (
-            "<div dir='rtl' style='margin:2px; text-align:right; white-space:nowrap; width:100%;'>"
-            f"{html}</div>"
-        )
-        plain = flat.replace("*", "")
-        return PreviewLabel(display_html, plain)
+        flat = text_content.replace("\n", " ").replace("\r", " ").strip()
+        return HiddenScrollArea(flat)
 
     def _set_comp_tree_text(self, node, column, text):
         node.setText(column, text)
@@ -2728,16 +2763,33 @@ class GenizahGUI(QMainWindow):
         if not text:
             node.setToolTip(column, "")
             return
-        width = self.comp_tree.columnWidth(column)
+
+        # Use the tree's font metrics for accuracy
         fm = self.comp_tree.fontMetrics()
+        width = self.comp_tree.columnWidth(column)
+
+        # For Column 0, we must subtract space for checkboxes and indentation
+        if column == 0:
+            # Approx 20px for checkbox + tree indentation level
+            level = 0
+            temp = node
+            while temp.parent():
+                level += 1
+                temp = temp.parent()
+            
+            # Subtract indentation (default is 20 per level) and checkbox width
+            width -= (self.comp_tree.indentation() * level) + 30
+
         elided = fm.elidedText(text, Qt.TextElideMode.ElideRight, width - 8)
+        
+        # If the text is elided (contains '...'), show the full text in tooltip
         node.setToolTip(column, text if elided != text else "")
 
     def _refresh_comp_tree_tooltips(self):
         root = self.comp_tree.invisibleRootItem()
 
         def visit(node):
-            for col in (0, 1, 2):
+            for col in (0, 1, 2, 3):
                 self._update_comp_tree_tooltip(node, col)
             for i in range(node.childCount()):
                 visit(node.child(i))
@@ -2749,8 +2801,16 @@ class GenizahGUI(QMainWindow):
         data = node.data(0, Qt.ItemDataRole.UserRole + 1)
         if not data:
             return
-        self.comp_tree.setItemWidget(node, self.comp_col_context, self._build_comp_preview_label(data.get("source_ctx")))
-        self.comp_tree.setItemWidget(node, self.comp_col_ms_context, self._build_comp_preview_label(data.get("ms_ctx")))
+            
+        src_txt = data.get("source_ctx", "")
+        ms_txt = data.get("ms_ctx", "")
+        anchor = data.get("anchor")
+
+        src_widget = HiddenScrollArea(src_txt.replace("\n", " "))
+        self.comp_tree.setItemWidget(node, self.comp_col_context, src_widget)
+        
+        ms_widget = HiddenScrollArea(ms_txt.replace("\n", " "), anchor_text=anchor)
+        self.comp_tree.setItemWidget(node, self.comp_col_ms_context, ms_widget)
 
     def _clear_comp_node_previews(self, node):
         if not node.data(0, Qt.ItemDataRole.UserRole + 1):
@@ -2759,10 +2819,17 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
     def _set_comp_node_previews(self, node, source_text, ms_text):
+        match = re.search(r'\*(.*?)\*', source_text or "")
+        anchor = match.group(1) if match else None
+        
         node.setData(
             0,
             Qt.ItemDataRole.UserRole + 1,
-            {"source_ctx": source_text or "", "ms_ctx": ms_text or ""},
+            {
+                "source_ctx": source_text or "",
+                "ms_ctx": ms_text or "",
+                "anchor": anchor
+            },
         )
         self._apply_comp_node_previews(node)
 
