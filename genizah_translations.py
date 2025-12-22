@@ -116,6 +116,7 @@ TRANSLATIONS = {
     "Full Recursive Search": "חיפוש רקורסיבי מלא",
     "Recursive Search in Results": "חיפוש רקורסיבי בתוצאות",
     "Context": "הקשר",
+    "Manuscript Context": "הקשר כתב יד",
     "Save Report": "שמור דוח",
     "Composition Help": "עזרה בחיפוש מקבילות",
     "Scanning chunks...": "סורק...", 
