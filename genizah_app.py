@@ -1388,7 +1388,7 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("ציון"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("הקשר כתב יד")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("הקשר כתב יד")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
