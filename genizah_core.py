@@ -1354,10 +1354,19 @@ class SearchEngine:
                     merged.append((curr_s, curr_e))
 
                 score = sum(e-s for s,e in merged)
-                ms_snips = []
+
+                # Collect snippets with their match length for sorting
+                raw_snips = []
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
+                    snip_text = data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end]
+                    match_len = e - s
+                    raw_snips.append({'text': snip_text, 'len': match_len, 'start': s})
+
+                # Sort snippets: Largest match first, then by occurrence order
+                raw_snips.sort(key=lambda x: (-x['len'], x['start']))
+
+                ms_snips = [x['text'] for x in raw_snips]
 
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
