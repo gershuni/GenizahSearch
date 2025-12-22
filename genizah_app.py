@@ -1409,6 +1409,7 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
         header.setSortIndicatorShown(True)
         header.sortIndicatorChanged.connect(self.on_comp_tree_sort_changed)
+        header.sectionClicked.connect(self.on_comp_tree_section_clicked)
         header.sectionResized.connect(self._update_comp_tree_tooltips)
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
@@ -2669,6 +2670,7 @@ class GenizahGUI(QMainWindow):
             self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
 
         self.comp_tree_updating = True
+        self.comp_context_default_widths_set = False
         self.comp_tree.setSortingEnabled(False)
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
@@ -2697,8 +2699,10 @@ class GenizahGUI(QMainWindow):
             node.setText(0, str(score))
             try:
                 node.setData(0, Qt.ItemDataRole.EditRole, float(score))
+                node.setData(0, Qt.ItemDataRole.UserRole + 2, float(score))
             except (TypeError, ValueError):
                 node.setData(0, Qt.ItemDataRole.EditRole, 0)
+                node.setData(0, Qt.ItemDataRole.UserRole + 2, 0)
 
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -2842,6 +2846,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setUpdatesEnabled(True)
         self.comp_tree.setSortingEnabled(False)
         self.comp_tree_updating = False
+        self._set_comp_context_column_widths()
         self._update_comp_tree_tooltips()
         self._update_recursive_button_state()
         if self.pending_recursive_search:
@@ -2852,9 +2857,10 @@ class GenizahGUI(QMainWindow):
         if not text_content:
             return "", ""
         flat = text_content.replace("\n", " ... ")
-        start_idx = flat.find("*")
-        end_idx = flat.find("*", start_idx + 1) if start_idx != -1 else -1
-        if start_idx != -1 and end_idx != -1:
+        match = re.search(r'\*(.*?)\*', flat)
+        if match:
+            start_idx = match.start()
+            end_idx = match.end() - 1
             ctx_start = max(0, start_idx - pad)
             ctx_end = min(len(flat), end_idx + pad)
         else:
@@ -2899,6 +2905,19 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setColumnWidth(5, width)
         self.comp_context_default_widths_set = True
 
+    def on_comp_tree_section_clicked(self, column):
+        if column > 3:
+            return
+        header = self.comp_tree.header()
+        current_section = header.sortIndicatorSection()
+        current_order = header.sortIndicatorOrder()
+        if current_section == column:
+            order = Qt.SortOrder.DescendingOrder if current_order == Qt.SortOrder.AscendingOrder else Qt.SortOrder.AscendingOrder
+        else:
+            order = Qt.SortOrder.AscendingOrder
+        header.setSortIndicator(column, order)
+        self.on_comp_tree_sort_changed(column, order)
+
     def on_comp_tree_item_expanded(self, item):
         self._toggle_comp_parent_preview(item, hide=True)
 
@@ -2928,16 +2947,21 @@ class GenizahGUI(QMainWindow):
     def _sort_comp_tree_node(self, node, column, order):
         if not node or node.childCount() == 0:
             return
-        children_have_data = False
-        for i in range(node.childCount()):
-            if node.child(i).data(0, Qt.ItemDataRole.UserRole):
-                children_have_data = True
-                break
+        children = [node.child(i) for i in range(node.childCount())]
+        children_have_data = any(child.data(0, Qt.ItemDataRole.UserRole) for child in children)
         if children_have_data:
-            node.sortChildren(column, order)
+            def sort_key(child):
+                if column == 0:
+                    return child.data(0, Qt.ItemDataRole.UserRole + 2) or 0
+                text = child.text(column)
+                return text.casefold() if isinstance(text, str) else text
+            children.sort(key=sort_key, reverse=order == Qt.SortOrder.DescendingOrder)
+            node.takeChildren()
+            for child in children:
+                node.addChild(child)
         else:
-            for i in range(node.childCount()):
-                self._sort_comp_tree_node(node.child(i), column, order)
+            for child in children:
+                self._sort_comp_tree_node(child, column, order)
 
     def _update_comp_tree_tooltips(self, *_):
         if not hasattr(self, "comp_tree"):
