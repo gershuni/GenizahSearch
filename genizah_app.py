@@ -86,7 +86,7 @@ class PreviewLabel(QLabel):
         self._html = ""
         self._plain = ""
         self.setWordWrap(False)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.setTextFormat(Qt.TextFormat.RichText)
         self.setFixedHeight(self.fontMetrics().lineSpacing() + 8)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1444,10 +1444,11 @@ class GenizahGUI(QMainWindow):
         header = self.comp_tree.header()
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self.on_comp_header_clicked)
+        header.sectionResized.connect(self._refresh_comp_tree_tooltips)
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
-        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
@@ -1456,6 +1457,9 @@ class GenizahGUI(QMainWindow):
         # Title column (~25 chars)
         title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
         self.comp_tree.setColumnWidth(2, int(title_width))
+        context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
+        self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
+        self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
 
         self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
         rl.addWidget(self.comp_tree)
@@ -2709,12 +2713,37 @@ class GenizahGUI(QMainWindow):
         flat = text_content.replace("\n", " ... ")
         html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", flat)
         display_html = (
-            "<div dir='rtl' style='margin:2px; text-align:center; white-space:nowrap; width:100%;'>"
-            "<span style='display:inline-block; text-align:center;'>"
-            f"{html}</span></div>"
+            "<div dir='rtl' style='margin:2px; text-align:right; white-space:nowrap; width:100%;'>"
+            f"{html}</div>"
         )
         plain = flat.replace("*", "")
         return PreviewLabel(display_html, plain)
+
+    def _set_comp_tree_text(self, node, column, text):
+        node.setText(column, text)
+        self._update_comp_tree_tooltip(node, column)
+
+    def _update_comp_tree_tooltip(self, node, column):
+        text = node.text(column)
+        if not text:
+            node.setToolTip(column, "")
+            return
+        width = self.comp_tree.columnWidth(column)
+        fm = self.comp_tree.fontMetrics()
+        elided = fm.elidedText(text, Qt.TextElideMode.ElideRight, width - 8)
+        node.setToolTip(column, text if elided != text else "")
+
+    def _refresh_comp_tree_tooltips(self):
+        root = self.comp_tree.invisibleRootItem()
+
+        def visit(node):
+            for col in (0, 1, 2):
+                self._update_comp_tree_tooltip(node, col)
+            for i in range(node.childCount()):
+                visit(node.child(i))
+
+        for i in range(root.childCount()):
+            visit(root.child(i))
 
     def _apply_comp_node_previews(self, node):
         data = node.data(0, Qt.ItemDataRole.UserRole + 1)
@@ -2817,10 +2846,10 @@ class GenizahGUI(QMainWindow):
 
                 # Manuscript Node
                 ms_node = QTreeWidgetItem(parent)
-                ms_node.setText(0, str(ms_item.get('score', 0)))
-                ms_node.setText(1, shelf or tr("Unknown Shelfmark"))
-                ms_node.setText(2, t or "")
-                ms_node.setText(3, sid)
+                self._set_comp_tree_text(ms_node, 0, str(ms_item.get('score', 0)))
+                self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
+                self._set_comp_tree_text(ms_node, 2, t or "")
+                self._set_comp_tree_text(ms_node, 3, sid)
                 make_checkable(ms_node)
 
                 # Store full MS item in UserRole
@@ -2834,7 +2863,7 @@ class GenizahGUI(QMainWindow):
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
 
                     # Update Shelfmark to include Image info
-                    ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
 
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
@@ -2844,17 +2873,17 @@ class GenizahGUI(QMainWindow):
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        ms_node.setText(1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
 
                         page_node = QTreeWidgetItem(ms_node)
-                        page_node.setText(0, str(p_item.get('score', '')))
-                        page_node.setText(1, f"{tr('Image')} {p_num}")
-                        page_node.setText(2, "") # No Title needed for page
-                        page_node.setText(3, "") # No SysID needed for page
+                        self._set_comp_tree_text(page_node, 0, str(p_item.get('score', '')))
+                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
+                        self._set_comp_tree_text(page_node, 2, "") # No Title needed for page
+                        self._set_comp_tree_text(page_node, 3, "") # No SysID needed for page
                         make_checkable(page_node)
 
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
@@ -2865,10 +2894,10 @@ class GenizahGUI(QMainWindow):
                 # Fallback for raw items (should not happen with new logic, but safe to keep)
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                 node = QTreeWidgetItem(parent)
-                node.setText(0, str(ms_item.get('score', '')))
-                node.setText(1, shelf)
-                node.setText(2, title)
-                node.setText(3, sid)
+                self._set_comp_tree_text(node, 0, str(ms_item.get('score', '')))
+                self._set_comp_tree_text(node, 1, shelf)
+                self._set_comp_tree_text(node, 2, title)
+                self._set_comp_tree_text(node, 3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
