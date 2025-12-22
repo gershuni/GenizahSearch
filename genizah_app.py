@@ -81,14 +81,14 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
 
 
 class PreviewLabel(QLabel):
-    def __init__(self, html_text="", plain_text="", max_height=60, parent=None):
+    def __init__(self, html_text="", plain_text="", parent=None):
         super().__init__(parent)
         self._html = ""
         self._plain = ""
-        self.setWordWrap(True)
+        self.setWordWrap(False)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setTextFormat(Qt.TextFormat.RichText)
-        self.setFixedHeight(max_height)
+        self.setFixedHeight(self.fontMetrics().lineSpacing() + 8)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         if html_text or plain_text:
             self.set_preview(html_text, plain_text)
@@ -111,8 +111,7 @@ class PreviewLabel(QLabel):
         doc = QTextDocument()
         doc.setDefaultFont(self.font())
         doc.setHtml(self._html)
-        doc.setTextWidth(max(1, self.contentsRect().width()))
-        needs_tooltip = doc.size().height() > (self.contentsRect().height() + 1)
+        needs_tooltip = doc.idealWidth() > self.contentsRect().width()
         self.setToolTip(self._plain if needs_tooltip else "")
 
 class ImageLoaderThread(QThread):
@@ -1030,6 +1029,8 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_main = []
         self.comp_grouped_appendix = {}
         self.comp_grouped_summary = {}
+        self.comp_sort_mode = "score"
+        self.comp_sort_reverse = True
         self.comp_grouped_filtered_main = []
         self.comp_grouped_filtered_appendix = {}
         self.comp_grouped_filtered_summary = {}
@@ -1408,17 +1409,6 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
-        sort_row = QHBoxLayout()
-        sort_row.addWidget(QLabel(tr("Sort by")))
-        self.comp_sort_combo = QComboBox()
-        self.comp_sort_combo.addItem(tr("Score"), "score")
-        self.comp_sort_combo.addItem(tr("Shelfmark"), "shelfmark")
-        self.comp_sort_combo.addItem(tr("Title"), "title")
-        self.comp_sort_combo.addItem(tr("System ID"), "system_id")
-        self.comp_sort_combo.setCurrentIndex(0)
-        self.comp_sort_combo.currentIndexChanged.connect(self.on_comp_sort_changed)
-        sort_row.addWidget(self.comp_sort_combo)
-        sort_row.addStretch()
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
@@ -1431,7 +1421,6 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
-        cr.addLayout(sort_row)
         cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
@@ -1453,6 +1442,9 @@ class GenizahGUI(QMainWindow):
 
         # Configure columns width
         header = self.comp_tree.header()
+        header.sectionClicked.connect(self.on_comp_header_clicked)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
         header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
@@ -2510,25 +2502,6 @@ class GenizahGUI(QMainWindow):
                 self.comp_grouped_filtered_summary,
             )
 
-    def on_comp_sort_changed(self, _index):
-        if self.is_comp_running:
-            return
-        if not self._has_comp_results():
-            return
-        if not self.chk_comp_flat.isChecked() and not self.comp_has_grouped_results:
-            if self.comp_raw_items or self.comp_raw_filtered:
-                self.start_grouping(self.comp_raw_items or [], self.comp_raw_filtered or [])
-                return
-        if self.comp_grouped_main or self.comp_grouped_filtered_main:
-            self.display_comp_results(
-                self.comp_grouped_main,
-                self.comp_grouped_appendix,
-                self.comp_grouped_summary,
-                self.comp_grouped_filtered_main,
-                self.comp_grouped_filtered_appendix,
-                self.comp_grouped_filtered_summary,
-            )
-
     def run_recursive_composition(self):
         if self.is_comp_running:
             return
@@ -2659,10 +2632,37 @@ class GenizahGUI(QMainWindow):
         all_items.extend(known or [])
         return all_items
 
+    def on_comp_header_clicked(self, section):
+        if section not in (0, 1, 2, 3):
+            return
+        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id"}
+        new_mode = mode_map.get(section, "score")
+        if new_mode == self.comp_sort_mode:
+            self.comp_sort_reverse = not self.comp_sort_reverse
+        else:
+            self.comp_sort_mode = new_mode
+            self.comp_sort_reverse = new_mode == "score"
+        order = Qt.SortOrder.DescendingOrder if self.comp_sort_reverse else Qt.SortOrder.AscendingOrder
+        header = self.comp_tree.header()
+        header.setSortIndicator(section, order)
+        if self.is_comp_running or not self._has_comp_results():
+            return
+        if not self.chk_comp_flat.isChecked() and not self.comp_has_grouped_results:
+            if self.comp_raw_items or self.comp_raw_filtered:
+                self.start_grouping(self.comp_raw_items or [], self.comp_raw_filtered or [])
+                return
+        if self.comp_grouped_main or self.comp_grouped_filtered_main:
+            self.display_comp_results(
+                self.comp_grouped_main,
+                self.comp_grouped_appendix,
+                self.comp_grouped_summary,
+                self.comp_grouped_filtered_main,
+                self.comp_grouped_filtered_appendix,
+                self.comp_grouped_filtered_summary,
+            )
+
     def _current_comp_sort_mode(self):
-        if hasattr(self, "comp_sort_combo"):
-            return self.comp_sort_combo.currentData() or "score"
-        return "score"
+        return self.comp_sort_mode or "score"
 
     def _get_comp_item_meta(self, item):
         sid = None
@@ -2699,7 +2699,7 @@ class GenizahGUI(QMainWindow):
 
     def _sort_comp_items(self, items, mode=None):
         sort_mode = mode or self._current_comp_sort_mode()
-        reverse = sort_mode == "score"
+        reverse = self.comp_sort_reverse if sort_mode == self.comp_sort_mode else sort_mode == "score"
         return sorted(items, key=lambda item: self._comp_sort_key(item, sort_mode), reverse=reverse)
 
     def _build_comp_preview_label(self, text_content):
@@ -2707,7 +2707,10 @@ class GenizahGUI(QMainWindow):
             return QLabel("")
         flat = text_content.replace("\n", " ... ")
         html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", flat)
-        display_html = f"<div dir='rtl' style='margin:2px; text-align:center;'>{html}</div>"
+        display_html = (
+            "<div dir='rtl' style='margin:2px; text-align:center; white-space:nowrap;'>"
+            f"{html}</div>"
+        )
         plain = flat.replace("*", "")
         return PreviewLabel(display_html, plain)
 
@@ -3265,15 +3268,14 @@ class GenizahGUI(QMainWindow):
                         ])
 
             if self.chk_comp_flat.isChecked():
-                flat_items = sorted(
+                flat_items = self._sort_comp_items(
                     self._collect_comp_items(
                         self.comp_main,
                         self.comp_appendix,
                         self.comp_filtered_main,
                         self.comp_filtered_appendix,
                         self.comp_known,
-                    ),
-                    key=self._comp_sort_key,
+                    )
                 )
                 add_rows(flat_items, tr("All Results"))
             else:
@@ -3429,15 +3431,14 @@ class GenizahGUI(QMainWindow):
                     ]
 
                     detail_lines = [sep, tr("ALL RESULTS"), sep]
-                    flat_items = sorted(
+                    flat_items = self._sort_comp_items(
                         self._collect_comp_items(
                             self.comp_main,
                             self.comp_appendix,
                             self.comp_filtered_main,
                             self.comp_filtered_appendix,
                             self.comp_known,
-                        ),
-                        key=self._comp_sort_key,
+                        )
                     )
                     for item in flat_items:
                         detail_lines.extend(_fmt_ms_entry(item))

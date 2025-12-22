@@ -115,7 +115,6 @@ TRANSLATIONS = {
     "Analyze": "נתח",
     "Full Recursive Search": "חיפוש רקורסיבי מלא",
     "Recursive Search in Results": "חיפוש רקורסיבי בתוצאות",
-    "Sort by": "מיין לפי",
     "Score": "ציון",
     "Context": "הקשר",
     "MS Context": "הקשר כתב יד",
