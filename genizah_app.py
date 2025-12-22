@@ -1408,6 +1408,7 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
         header.setSortIndicatorShown(True)
+        header.setSectionsClickable(True)
         header.sortIndicatorChanged.connect(self.on_comp_tree_sort_changed)
         header.sectionClicked.connect(self.on_comp_tree_section_clicked)
         header.sectionResized.connect(self._update_comp_tree_tooltips)
