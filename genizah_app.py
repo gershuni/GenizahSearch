@@ -151,25 +151,49 @@ class LabSettingsDialog(QDialog):
 
     def run_rebuild(self):
         self.btn_rebuild.setEnabled(False)
-        self.lbl_idx_status.setText(tr("Rebuilding..."))
+        self.lbl_idx_status.setText(tr("Starting..."))
         QApplication.processEvents()
-
-        # Use a thread or simple execution? Rebuilding might take time.
-        # Let's run it in a thread to keep UI responsive.
-        # But we need a progress callback.
 
         class RebuildThread(QThread):
             finished_sig = pyqtSignal(int)
+            progress_sig = pyqtSignal(int, int)
+            error_sig = pyqtSignal(str)
+
             def __init__(self, engine):
                 super().__init__()
                 self.engine = engine
             def run(self):
-                count = self.engine.rebuild_lab_index() # Blocking call in core
-                self.finished_sig.emit(count)
+                try:
+                    # Explicitly ensure directories exist
+                    if not os.path.exists(Config.LAB_DIR):
+                        os.makedirs(Config.LAB_DIR)
+                    if not os.path.exists(Config.LAB_INDEX_DIR):
+                        os.makedirs(Config.LAB_INDEX_DIR)
+
+                    def cb(curr, total):
+                        self.progress_sig.emit(curr, total)
+
+                    count = self.engine.rebuild_lab_index(progress_callback=cb)
+                    self.finished_sig.emit(count)
+                except Exception as e:
+                    self.error_sig.emit(str(e))
 
         self.worker = RebuildThread(self.lab_engine)
+        self.worker.progress_sig.connect(self.on_rebuild_progress)
         self.worker.finished_sig.connect(self.on_rebuild_finished)
+        self.worker.error_sig.connect(self.on_rebuild_error)
         self.worker.start()
+
+    def on_rebuild_progress(self, current, total):
+        pct = 0
+        if total > 0:
+            pct = int((current / total) * 100)
+        self.lbl_idx_status.setText(tr("Indexing: {}%").format(pct))
+
+    def on_rebuild_error(self, err):
+        self.btn_rebuild.setEnabled(True)
+        self.lbl_idx_status.setText(tr("Error"))
+        QMessageBox.critical(self, tr("Error"), str(err))
 
     def on_rebuild_finished(self, count):
         self.lbl_idx_status.setText(tr("Done. {} docs.").format(count))

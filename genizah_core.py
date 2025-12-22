@@ -1276,12 +1276,12 @@ class LabEngine:
             clean_group = [f'"{t}"' for t in group]
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        final_query = " AND ".join(query_parts)
+        final_query = " OR ".join(query_parts)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
             t_query = self.lab_index.parse_query(final_query, ["text_normalized"])
-            res_obj = self.lab_searcher.search(t_query, 500)
+            res_obj = self.lab_searcher.search(t_query, 2000)
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
             return []
@@ -1402,9 +1402,9 @@ class LabEngine:
             # Final Score
             # Normalize BM25? It can be anything.
             # Assuming BM25 is dominant.
-            # Formula: (BM25 * 0.4) + (Density * 0.3) + (Order * 0.2) + (Rare * 0.1)
+            # Formula: (BM25 * 0.1) + (Density * 0.6) + (Order * 0.2) + (Rare * 0.1)
             # Density is int. Order is int. Rare is float.
-            final_score = (cand['bm25'] * 0.4) + (max_density * 0.3) + (best_order_score * 0.2) + (rare_score * 0.1)
+            final_score = (cand['bm25'] * 0.1) + (max_density * 0.6) + (best_order_score * 0.2) + (rare_score * 0.1)
 
             cand['final_score'] = final_score
             cand['snippet_data'] = self._generate_snippet(cand['content'], matches, raw_terms)
@@ -1498,8 +1498,8 @@ class LabEngine:
 
         # Build Query
         # Using a huge OR might be slow if too many terms. Cap it?
-        # Let's cap at 50 terms
-        query_terms = rare_terms[:50]
+        # Let's cap at 150 terms
+        query_terms = rare_terms[:150]
         query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
         try:
