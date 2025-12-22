@@ -1448,7 +1448,7 @@ class GenizahGUI(QMainWindow):
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
         header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Shelfmark
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
@@ -2710,7 +2710,8 @@ class GenizahGUI(QMainWindow):
         html = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", flat)
         display_html = (
             "<div dir='rtl' style='margin:2px; text-align:center; white-space:nowrap; width:100%;'>"
-            f"{html}</div>"
+            "<span style='display:inline-block; text-align:center;'>"
+            f"{html}</span></div>"
         )
         plain = flat.replace("*", "")
         return PreviewLabel(display_html, plain)
