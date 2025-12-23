@@ -1486,61 +1486,61 @@ class LabEngine:
             candidate_count = len(res_obj.hits)
             LAB_LOGGER.info(f"Stage 1 found {candidate_count} candidates in {stage1_time:.2f}s")
         else:
-        for term in terms:
-            if self._is_rare(term, total_docs):
-                rare_query_terms.add(term)
+            for term in terms:
+                if self._is_rare(term, total_docs):
+                    rare_query_terms.add(term)
 
-            boost = self._get_term_boost(term, total_docs)
-            raw_group = False
-            if self.settings.prefix_mode:
-                variants = [self._prefix_term(term)]
-            else:
-                if mode == 'fuzzy':
-                    raw_group = True
-                    if len(term) < 3:
-                        variants = [f'"{term}"']
-                    elif len(term) < 5:
-                        variants = [f'"{term}"~1']
+                boost = self._get_term_boost(term, total_docs)
+                raw_group = False
+                if self.settings.prefix_mode:
+                    variants = [self._prefix_term(term)]
+                else:
+                    if mode == 'fuzzy':
+                        raw_group = True
+                        if len(term) < 3:
+                            variants = [f'"{term}"']
+                        elif len(term) < 5:
+                            variants = [f'"{term}"~1']
+                        else:
+                            variants = [f'"{term}"~2']
                     else:
-                        variants = [f'"{term}"~2']
+                        variants = self.budgeted_expansion(term, mode)
+                        # Normalize variants
+                        variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+
+                if self.settings.prefix_mode:
+                    # Append * for prefix matching (Tantivy syntax)
+                    variants = [v + "*" for v in variants]
+
+                expanded_terms.append((variants, boost, raw_group))
+                if self.settings.prefix_mode:
+                    match_terms.append(self._prefix_term(term))
+                elif mode == 'fuzzy':
+                    match_terms.append(self.lab_index_normalize(term))
                 else:
-                    variants = self.budgeted_expansion(term, mode)
-                    # Normalize variants
-                    variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+                    match_terms.append(set(variants))
 
-            if self.settings.prefix_mode:
-                # Append * for prefix matching (Tantivy syntax)
-                variants = [v + "*" for v in variants]
+            if len(rare_query_terms) >= 2:
+                rare_clause = " AND ".join([f"\"{t}\"^12" for t in rare_query_terms])
+                expanded_terms.append(([rare_clause], 1, True))
 
-            expanded_terms.append((variants, boost, raw_group))
-            if self.settings.prefix_mode:
-                match_terms.append(self._prefix_term(term))
-            elif mode == 'fuzzy':
-                match_terms.append(self.lab_index_normalize(term))
-            else:
-                match_terms.append(set(variants))
-
-        if len(rare_query_terms) >= 2:
-            rare_clause = " AND ".join([f"\"{t}\"^12" for t in rare_query_terms])
-            expanded_terms.append(([rare_clause], 1, True))
-
-        # Build Boolean Query
-        query_parts = []
-        for group, boost, raw in expanded_terms:
-            if not group:
-                continue
-            clean_group = []
-            for t in group:
-                if raw:
-                    term = t
-                elif '*' in t:
-                    term = t
-                else:
-                    term = f'"{t}"'
-                if boost > 1:
-                    term = f"{term}^{boost}"
-                clean_group.append(term)
-            query_parts.append(f"({' OR '.join(clean_group)})")
+            # Build Boolean Query
+            query_parts = []
+            for group, boost, raw in expanded_terms:
+                if not group:
+                    continue
+                clean_group = []
+                for t in group:
+                    if raw:
+                        term = t
+                    elif '*' in t:
+                        term = t
+                    else:
+                        term = f'"{t}"'
+                    if boost > 1:
+                        term = f"{term}^{boost}"
+                    clean_group.append(term)
+                query_parts.append(f"({' OR '.join(clean_group)})")
 
             joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
             final_query = joiner.join(query_parts)
