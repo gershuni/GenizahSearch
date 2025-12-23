@@ -1377,11 +1377,11 @@ class LabEngine:
             return 1
         ratio = df / total_docs
         if ratio <= self.settings.rare_threshold:
-            return 10
+            return 15
         if ratio <= self.settings.rare_threshold * 5:
-            return 6
+            return 8
         if ratio <= self.settings.rare_threshold * 20:
-            return 3
+            return 4
         return 1
 
     def _min_should_match(self, term_count):
@@ -1497,6 +1497,10 @@ class LabEngine:
             query_parts.append(f"({' OR '.join(clean_group)})")
 
         final_query = " OR ".join(query_parts)
+        msm_terms = max(1, math.ceil(len(terms) * 0.3))
+        if len(terms) > 2:
+            msm_query = " ".join([f"text_normalized:{t}" for t in terms])
+            final_query = f"{final_query} ({msm_query})@{msm_terms}"
         LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
@@ -1760,10 +1764,26 @@ class LabEngine:
         # Using a huge OR might be slow if too many terms. Cap it?
         # Let's cap at 150 terms
         query_terms = rare_terms[:150]
+        boosted_terms = []
+        for t in query_terms:
+            boost = self._get_term_boost(t, total_docs)
+            if self.settings.prefix_mode:
+                term = f"{self._prefix_term(t)}*"
+            else:
+                term = f'"{t}"'
+            if boost > 1:
+                term = f"{term}^{boost}"
+            boosted_terms.append(term)
+
         if self.settings.prefix_mode:
-            query_str = " OR ".join([f"{self._prefix_term(t)}*" for t in query_terms])
+            query_str = " OR ".join(boosted_terms)
         else:
-            query_str = " OR ".join([f'"{t}"' for t in query_terms])
+            query_str = " OR ".join(boosted_terms)
+
+        if len(query_terms) > 2:
+            msm_terms = max(1, math.ceil(len(query_terms) * 0.3))
+            msm_query = " ".join([f"text_normalized:{t}" for t in query_terms])
+            query_str = f"{query_str} ({msm_query})@{msm_terms}"
 
         try:
             LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
