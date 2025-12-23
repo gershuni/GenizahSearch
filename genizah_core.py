@@ -1320,7 +1320,7 @@ class LabEngine:
         return max(500, min(self.settings.candidate_limit, 50000))
 
     def _stage1_limit(self):
-        return min(self._candidate_limit() * 2, 50000)
+        return min(self._candidate_limit(), 5000)
 
     def _prefix_term(self, term):
         prefix_len = max(1, min(self.settings.prefix_chars, 10))
@@ -1367,12 +1367,18 @@ class LabEngine:
                 return seq
         return None
 
-    def _parse_lab_query(self, query_str):
+    def _parse_lab_query(self, query_str, conjunction_by_default=False):
         parser_cls = getattr(tantivy, "QueryParser", None)
         if parser_cls:
             parser = parser_cls.for_index(self.lab_index, ["text_normalized"])
+            if conjunction_by_default and hasattr(parser, "set_conjunction_by_default"):
+                parser.set_conjunction_by_default()
             return parser.parse_query(query_str)
-        return self.lab_index.parse_query(query_str, ["text_normalized"])
+        return self.lab_index.parse_query(
+            query_str,
+            ["text_normalized"],
+            conjunction_by_default=conjunction_by_default,
+        )
 
     def _get_term_boost(self, term, total_docs):
         df = self._get_doc_freq(term)
@@ -1380,11 +1386,11 @@ class LabEngine:
             return 1
         ratio = df / total_docs
         if ratio <= self.settings.rare_threshold:
-            return 15
+            return 20
         if ratio <= self.settings.rare_threshold * 5:
-            return 8
+            return 10
         if ratio <= self.settings.rare_threshold * 20:
-            return 4
+            return 6
         return 1
 
     def _min_should_match(self, term_count):
@@ -1499,16 +1505,16 @@ class LabEngine:
                 clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        final_query = " OR ".join(query_parts)
-        msm_terms = max(1, math.ceil(len(terms) * 0.3))
+        final_query = " ".join(query_parts)
+        msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
+        msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
         if len(terms) > 2:
-            msm_query = " ".join([f"text_normalized:{t}" for t in terms])
-            final_query = f"{final_query} ({msm_query})@{msm_terms}"
+            final_query = f"{final_query}@{msm_terms}"
         LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            t_query = self._parse_lab_query(final_query)
+            t_query = self._parse_lab_query(final_query, conjunction_by_default=True)
             res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
