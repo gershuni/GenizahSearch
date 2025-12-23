@@ -105,6 +105,11 @@ class LabSettingsDialog(QDialog):
         self.chk_prefix.setChecked(self.settings.prefix_mode)
         self.chk_prefix.setToolTip(tr("Search for words starting with the query terms (e.g. 'lam' matches 'lama')."))
 
+        self.spin_prefix_chars = QSpinBox()
+        self.spin_prefix_chars.setRange(1, 10)
+        self.spin_prefix_chars.setValue(self.settings.prefix_chars)
+        self.spin_prefix_chars.setToolTip(tr("How many letters from the start of each word to match in Prefix Mode."))
+
         # Order Tolerance Group
         self.grp_order = QGroupBox(tr("Order Tolerance"))
         self.grp_order.setCheckable(True)
@@ -136,7 +141,9 @@ class LabSettingsDialog(QDialog):
         pg_layout.addWidget(self.chk_use_slop, 6, 0, 1, 2)
         pg_layout.addWidget(self.chk_use_rare, 7, 0, 1, 2)
         pg_layout.addWidget(self.chk_prefix, 8, 0, 1, 2)
-        pg_layout.addWidget(self.grp_order, 9, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Prefix Length:")), 9, 0)
+        pg_layout.addWidget(self.spin_prefix_chars, 9, 1)
+        pg_layout.addWidget(self.grp_order, 10, 0, 1, 2)
 
         param_group.setLayout(pg_layout)
         layout.addWidget(param_group)
@@ -191,6 +198,7 @@ class LabSettingsDialog(QDialog):
         self.settings.use_slop_window = self.chk_use_slop.isChecked()
         self.settings.use_rare_words = self.chk_use_rare.isChecked()
         self.settings.prefix_mode = self.chk_prefix.isChecked()
+        self.settings.prefix_chars = self.spin_prefix_chars.value()
         self.settings.use_order_tolerance = self.grp_order.isChecked()
         self.settings.order_n = self.spin_order_n.value()
         self.settings.order_m = self.spin_order_m.value()
@@ -205,7 +213,8 @@ class LabSettingsDialog(QDialog):
             'custom_variants': self.txt_variants.toPlainText(),
             'rare_word_bonus': self.spin_rare_bonus.value(),
             'candidate_limit': self.spin_candidate_limit.value(),
-            'max_char_changes': self.spin_max_changes.value()
+            'max_char_changes': self.spin_max_changes.value(),
+            'prefix_chars': self.spin_prefix_chars.value()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
@@ -2242,7 +2251,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
                 return
-            self.search_thread = LabSearchThread(self.lab_engine, query)
+            self.search_thread = LabSearchThread(self.lab_engine, query, gap)
         else:
             self.search_thread = SearchThread(self.searcher, query, mode, gap)
 

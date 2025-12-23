@@ -67,15 +67,16 @@ class LabSearchThread(QThread):
     progress_signal = pyqtSignal(int, int) # Not fully utilized yet but good for future
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, query):
+    def __init__(self, lab_engine, query, gap=0):
         super().__init__()
         self.lab_engine = lab_engine
         self.query = query
+        self.gap = gap
 
     def run(self):
         try:
             def cb(curr, total): self.progress_signal.emit(curr, total)
-            results = self.lab_engine.lab_search(self.query, progress_callback=cb)
+            results = self.lab_engine.lab_search(self.query, progress_callback=cb, gap=self.gap)
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
 

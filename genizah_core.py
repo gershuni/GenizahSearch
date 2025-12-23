@@ -48,6 +48,7 @@ class LabSettings:
         self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
         self.candidate_limit = 2000
         self.max_char_changes = 1
+        self.prefix_chars = 1
 
         # New Settings
         self.use_slop_window = True
@@ -72,6 +73,7 @@ class LabSettings:
                     self.rare_threshold = data.get('rare_threshold', 0.001)
                     self.candidate_limit = data.get('candidate_limit', 2000)
                     self.max_char_changes = data.get('max_char_changes', 1)
+                    self.prefix_chars = data.get('prefix_chars', 1)
 
                     self.use_slop_window = data.get('use_slop_window', True)
                     self.use_rare_words = data.get('use_rare_words', True)
@@ -81,6 +83,7 @@ class LabSettings:
                     self.order_m = data.get('order_m', 4)
                     self.candidate_limit = max(1, min(self.candidate_limit, 10000))
                     self.max_char_changes = max(1, min(self.max_char_changes, 3))
+                    self.prefix_chars = max(1, min(self.prefix_chars, 10))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -97,6 +100,7 @@ class LabSettings:
                     'rare_threshold': self.rare_threshold,
                     'candidate_limit': max(1, min(self.candidate_limit, 10000)),
                     'max_char_changes': max(1, min(self.max_char_changes, 3)),
+                    'prefix_chars': max(1, min(self.prefix_chars, 10)),
                     'use_slop_window': self.use_slop_window,
                     'use_rare_words': self.use_rare_words,
                     'prefix_mode': self.prefix_mode,
@@ -1312,6 +1316,51 @@ class LabEngine:
     def _candidate_limit(self):
         return max(1, min(self.settings.candidate_limit, 10000))
 
+    def _prefix_term(self, term):
+        prefix_len = max(1, min(self.settings.prefix_chars, 10))
+        return term[:prefix_len] if len(term) > prefix_len else term
+
+    def _term_matches(self, query_term, token):
+        token_norm = self.lab_index_normalize(token)
+        if isinstance(query_term, set):
+            return token_norm in query_term
+        if self.settings.prefix_mode:
+            q_prefix = self._prefix_term(query_term)
+            return token_norm.startswith(q_prefix)
+        return self.soft_match(query_term, token)
+
+    def _find_term_sequence(self, doc_tokens, query_terms, gap):
+        if not query_terms:
+            return None
+        if len(query_terms) == 1:
+            for idx, token in enumerate(doc_tokens):
+                if self._term_matches(query_terms[0], token):
+                    return [idx]
+            return None
+
+        max_distance = max(0, gap) + 1
+        positions = []
+        for term in query_terms:
+            hits = [i for i, token in enumerate(doc_tokens) if self._term_matches(term, token)]
+            if not hits:
+                return None
+            positions.append(hits)
+
+        for start in positions[0]:
+            seq = [start]
+            prev = start
+            valid = True
+            for hits in positions[1:]:
+                next_hits = [p for p in hits if prev < p <= prev + max_distance]
+                if not next_hits:
+                    valid = False
+                    break
+                prev = next_hits[0]
+                seq.append(prev)
+            if valid:
+                return seq
+        return None
+
     def _parse_lab_query(self, query_str):
         parser_cls = getattr(tantivy, "QueryParser", None)
         if parser_cls:
@@ -1346,15 +1395,16 @@ class LabEngine:
     def _matches_min_terms(self, doc_text, terms):
         if not terms:
             return 0
-        if self.settings.prefix_mode:
-            doc_tokens = doc_text.split()
-            matched = 0
-            for term in terms:
-                if any(token.startswith(term) for token in doc_tokens):
-                    matched += 1
-            return matched
         doc_tokens = set(doc_text.split())
-        return sum(1 for term in terms if term in doc_tokens)
+        matched = 0
+        for term in terms:
+            if isinstance(doc_tokens, set):
+                if any(self._term_matches(term, token) for token in doc_tokens):
+                    matched += 1
+            else:
+                if any(self._term_matches(term, token) for token in doc_tokens):
+                    matched += 1
+        return matched
 
     def soft_match(self, t1, t2):
         if t1.lower() == t2.lower(): return True
@@ -1371,7 +1421,7 @@ class LabEngine:
 
         return False
 
-    def lab_search(self, query_str, progress_callback=None):
+    def lab_search(self, query_str, progress_callback=None, gap=0):
         """Execute Lab Mode Search (Two-Stage)."""
         if not self.lab_searcher:
             LAB_LOGGER.warning("Lab Index not loaded.")
@@ -1390,6 +1440,7 @@ class LabEngine:
 
         # Budgeted Expansion
         expanded_terms = []
+        match_terms = []
         total_docs = self.lab_searcher.num_docs
         rare_query_terms = set()
 
@@ -1398,15 +1449,22 @@ class LabEngine:
                 rare_query_terms.add(term)
 
             boost = self._get_term_boost(term, total_docs)
-            variants = self.budgeted_expansion(term)
-            # Normalize variants
-            variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+            if self.settings.prefix_mode:
+                variants = [self._prefix_term(term)]
+            else:
+                variants = self.budgeted_expansion(term)
+                # Normalize variants
+                variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
 
             if self.settings.prefix_mode:
                 # Append * for prefix matching (Tantivy syntax)
                 variants = [v + "*" for v in variants]
 
             expanded_terms.append((variants, boost))
+            if self.settings.prefix_mode:
+                match_terms.append(self._prefix_term(term))
+            else:
+                match_terms.append(set(variants))
 
         # Build Boolean Query
         query_parts = []
@@ -1445,7 +1503,7 @@ class LabEngine:
             doc = self.lab_searcher.doc(doc_addr)
             doc_text_norm = doc['text_normalized'][0]
             if len(unique_terms) > 1:
-                matched_terms = self._matches_min_terms(doc_text_norm, unique_terms)
+                matched_terms = self._matches_min_terms(doc_text_norm, match_terms)
                 if matched_terms < min_should_match:
                     continue
             candidates.append({
@@ -1457,7 +1515,8 @@ class LabEngine:
             })
 
         results = []
-        raw_terms = query_str.split() # For Stage 2, use original splitting logic
+        raw_terms = [t for t in query_str.split() if t.strip()]
+        norm_terms = [self.lab_index_normalize(t) for t in raw_terms if t.strip()]
 
         # Pre-calculate rare terms for Stage 2 boosting
         # We use the normalized 'terms' set for rarity check, but raw_terms for matching logic order?
@@ -1471,6 +1530,13 @@ class LabEngine:
             text = cand['content']
             tokens = text.split() # Simple whitespace tokenization
 
+            if len(match_terms) >= 2:
+                sequence = self._find_term_sequence(tokens, match_terms, gap)
+                if not sequence:
+                    continue
+            else:
+                sequence = None
+
             # Density & Order Analysis
             max_density = 0
             best_order_score = 0
@@ -1480,8 +1546,8 @@ class LabEngine:
             matches = [] # list of (doc_idx, query_idx)
 
             for doc_idx, token in enumerate(tokens):
-                for q_idx, q_term in enumerate(raw_terms):
-                    if self.soft_match(q_term, token):
+                for q_idx, q_term in enumerate(match_terms):
+                    if self._term_matches(q_term, token):
                         matches.append((doc_idx, q_idx))
 
             # Sliding Window for Density
@@ -1522,7 +1588,7 @@ class LabEngine:
                 for rare_term in rare_query_terms:
                     # Check if this rare term matches any token in doc
                     for token in tokens:
-                        if self.soft_match(rare_term, token):
+                        if self._term_matches(rare_term, token):
                             found_rare_count += 1
                             break # Count once per term
                 rare_score = found_rare_count * self.settings.rare_word_bonus
@@ -1531,7 +1597,18 @@ class LabEngine:
             final_score = (cand['bm25'] * 0.1) + (max_density * 0.6) + (best_order_score * 0.2) + (rare_score * 0.1)
 
             cand['final_score'] = final_score
-            cand['snippet_data'] = self._generate_snippet(cand['content'], matches, raw_terms)
+            if sequence:
+                match_indices = set(sequence)
+                cand['snippet_data'] = self._snippet_html(
+                    self._generate_snippet(cand['content'], matches, norm_terms, match_indices=match_indices)
+                )
+                cand['raw_file_hl'] = self._highlight_tokens(cand['content'], match_indices)
+            else:
+                match_indices = set(m[0] for m in matches)
+                cand['snippet_data'] = self._snippet_html(
+                    self._generate_snippet(cand['content'], matches, norm_terms, match_indices=match_indices)
+                )
+                cand['raw_file_hl'] = self._highlight_tokens(cand['content'], match_indices)
             results.append(cand)
 
         # Sort
@@ -1561,13 +1638,30 @@ class LabEngine:
                 'full_text': r['content'],
                 'uid': r['uid'],
                 'raw_header': r['header'],
-                'raw_file_hl': r['content'],
+                'raw_file_hl': r.get('raw_file_hl') or r['content'],
                 'highlight_pattern': None
             })
 
         return gui_results
 
-    def _generate_snippet(self, text, matches, query_terms):
+    def _highlight_tokens(self, text, match_indices):
+        if not match_indices:
+            return text
+        tokens = text.split()
+        out = []
+        for idx, token in enumerate(tokens):
+            if idx in match_indices:
+                out.append(f"*{token}*")
+            else:
+                out.append(token)
+        return " ".join(out)
+
+    def _snippet_html(self, snippet):
+        if not snippet:
+            return snippet
+        return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
+
+    def _generate_snippet(self, text, matches, query_terms, match_indices=None):
         """Simple snippet generator for Lab Search."""
         if not matches: return text[:300]
         # Find window with most matches
@@ -1580,7 +1674,8 @@ class LabEngine:
 
         # Highlight
         out = []
-        match_indices = set(m[0] for m in matches)
+        if match_indices is None:
+            match_indices = set(m[0] for m in matches)
         for i in range(start, end):
             t = tokens[i]
             if i in match_indices:
@@ -1637,7 +1732,7 @@ class LabEngine:
         # Let's cap at 150 terms
         query_terms = rare_terms[:150]
         if self.settings.prefix_mode:
-            query_str = " OR ".join([f"{t}*" for t in query_terms])
+            query_str = " OR ".join([f"{self._prefix_term(t)}*" for t in query_terms])
         else:
             query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
@@ -1734,7 +1829,13 @@ class LabEngine:
 
             for chunk in input_chunks:
                 # Quick check: do at least 50% of chunk tokens exist in doc_set? (normalized)
-                present = sum(1 for t in chunk['tokens'] if t in doc_token_set)
+                if self.settings.prefix_mode:
+                    present = sum(
+                        1 for t in chunk['tokens']
+                        if any(token.startswith(self._prefix_term(t)) for token in doc_token_set)
+                    )
+                else:
+                    present = sum(1 for t in chunk['tokens'] if t in doc_token_set)
                 if present < len(chunk['tokens']) * 0.4: continue
 
                 # Detailed Window Scan on Doc
@@ -1758,7 +1859,7 @@ class LabEngine:
                 match_positions = []
                 for dt_i, dt in enumerate(doc_tokens):
                     for ct_i, ct in enumerate(chunk['tokens']):
-                        if self.soft_match(dt, ct):
+                        if self._term_matches(ct, dt):
                             match_positions.append((dt_i, ct_i))
 
                 if not match_positions: continue
