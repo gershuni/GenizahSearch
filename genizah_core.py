@@ -1070,7 +1070,7 @@ class LabEngine:
                 
                 # Robust check: Try to parse a query on the field
                 try:
-                    self.lab_index.parse_query('text_ngram:"test"', ["text_ngram"])
+                    self.lab_index.parse_query('"test"', ["text_ngram"])
                 except Exception:
                     LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
                     self.lab_index_needs_rebuild = True
@@ -1259,7 +1259,7 @@ class LabEngine:
                     expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
 
         # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
+        query_terms = [f'"{gram}"' for gram in sorted(expanded_grams) if gram]
         
         if not query_terms: return []
         
@@ -1369,7 +1369,7 @@ class LabEngine:
             if not grams_set: continue
 
             query_grams = sorted(list(grams_set))
-            clauses = [f'text_ngram:"{g}"' for g in query_grams]
+            clauses = [f'"{g}"' for g in query_grams]
             
             # CRITICAL FIX: Removed @min_match syntax
             raw_query = f"({' '.join(clauses)})"
