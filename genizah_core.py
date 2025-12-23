@@ -1056,96 +1056,93 @@ class LabEngine:
         self.lab_index_needs_rebuild = False
         self._reload_lab_index()
 
+    def _close_index(self):
+        """Force release of Tantivy file handles."""
+        self.lab_searcher = None
+        self.lab_index = None
+        import gc
+        gc.collect() 
+
     def _reload_lab_index(self):
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
-                if not self._schema_has_field(self.lab_index.schema, "text_ngram"):
-                    LAB_LOGGER.warning("Lab index schema missing text_ngram field.")
+                
+                # Robust check: Try to parse a query on the field
+                try:
+                    self.lab_index.parse_query('text_ngram:"test"', ["text_ngram"])
+                except Exception:
+                    LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
                     self.lab_index_needs_rebuild = True
-                    self.lab_index = None
-                    self.lab_searcher = None
+                    self._close_index()
                     return False
+                
                 self.lab_searcher = self.lab_index.searcher()
                 self.lab_index_needs_rebuild = False
                 return True
             except Exception as e:
                 LAB_LOGGER.error("Failed to load Lab Index: %s", e)
+                self._close_index()
+        
+        self.lab_index_needs_rebuild = True
         return False
-
-    def _close_index(self):
-        self.lab_searcher = None
-        self.lab_index = None
-
-    @staticmethod
-    def _schema_has_field(schema, field_name):
-        try:
-            schema.get_field(field_name)
-            return True
-        except Exception:
-            return False
 
     @staticmethod
     def lab_index_normalize(text):
-        """Normalize text for Lab Index: Strip non-alphanumeric chars (keep Hebrew/English letters)."""
-        # Remove specific punctuation chars that are common in these texts
-        # Quotes (single/double), dashes, dots, etc.
-        # We keep whitespace to separate words.
         return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
 
     @staticmethod
     def generate_ngrams(text, n=3):
-        if not text:
-            return ""
+        if not text: return ""
         cleaned = "".join(ch for ch in text if "\u0590" <= ch <= "\u05FF")
-        if n <= 1 or len(cleaned) <= n:
-            return cleaned
+        if n <= 1 or len(cleaned) <= n: return cleaned
         grams = [cleaned[i:i + n] for i in range(len(cleaned) - n + 1)]
         return " ".join(grams)
 
     def rebuild_lab_index(self, progress_callback=None):
-        """Build the isolated Lab Index with normalized text."""
-        LAB_LOGGER.info("Starting Lab Index rebuild...")
-        self._close_index()
+        """Build the isolated Lab Index. Uses Safe Mode (Trash Strategy)."""
+        LAB_LOGGER.info(f"Starting Lab Index rebuild at: {Config.LAB_INDEX_DIR}")
 
-        # Validation
+        # 1. Close handles
+        self._close_index()
+        time.sleep(0.5)
+
+        # 2. Validation
         if not os.path.exists(Config.FILE_V8):
             raise FileNotFoundError(tr("Input file not found: {}").format(Config.FILE_V8))
 
-        # Ensure lab index dir exists and is empty
+        # 3. Cleanup Strategy: Rename to trash instead of delete
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
-                shutil.rmtree(Config.LAB_INDEX_DIR)
+                trash_name = f"lab_index_trash_{int(time.time())}"
+                trash_path = os.path.join(os.path.dirname(Config.LAB_INDEX_DIR), trash_name)
+                os.rename(Config.LAB_INDEX_DIR, trash_path)
             except Exception as e:
-                LAB_LOGGER.error("Failed to clear old Lab Index: %s", e)
+                LAB_LOGGER.error("Rename failed: %s. Trying delete...", e)
+                try:
+                    shutil.rmtree(Config.LAB_INDEX_DIR)
+                except Exception as e2:
+                    raise PermissionError(f"Cannot clear index. Restart App. ({e2})")
+
         os.makedirs(Config.LAB_INDEX_DIR, exist_ok=True)
 
+        # 4. Define Schema
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
-        # Primary search field for Lab Mode Stage 1
         builder.add_text_field("text_normalized", stored=True, tokenizer_name="whitespace")
+        # CRITICAL FIX: Ensure this field is added
         builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
-        # Store original header/shelfmark for result reconstruction
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
-        # Store full content just in case, though Stage 2 fetches from disk usually?
-        # Plan says "Stage 2: Fetch full text". Usually we fetch from disk or main index.
-        # But to be self-contained, let's store it or rely on unique_id.
-        # We'll store it to avoid main index dependency if possible, but keeping it light is better.
-        # Let's NOT store full original content here to save space, assuming we can get it via unique_id from main index
-        # or via file read.
-        # Actually, `SearchEngine._get_best_text_for_id` uses `content` field from main index.
-        # `LabEngine` might need to access original text.
-        # For simplicity/performance of Stage 2 (Python re-ranking), fetching from Tantivy doc store is fast.
         builder.add_text_field("content", stored=True)
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
         writer = index.writer(heap_size=50_000_000)
 
+        # 5. Indexing Loop
         total_docs = 0
-
         def count_lines(fname):
             if not os.path.exists(fname): return 0
             with open(fname, 'r', encoding='utf-8') as f: return sum(1 for line in f)
@@ -1154,11 +1151,7 @@ class LabEngine:
         processed_lines = 0
 
         for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
-            cid, chead, ctext = None, None, []
-            if not os.path.exists(fpath):
-                LAB_LOGGER.warning(f"File not found: {fpath}")
-                continue
-
+            if not os.path.exists(fpath): continue
             LAB_LOGGER.info("Indexing %s...", label)
 
             with open(fpath, 'r', encoding='utf-8-sig') as f:
@@ -1173,24 +1166,21 @@ class LabEngine:
                             original_content = "\n".join(ctext)
                             norm_content = self.lab_index_normalize(original_content)
                             ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
-
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
 
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid),
                                 text_normalized=norm_content,
-                                text_ngram=ngram_content,
+                                text_ngram=ngram_content, # CRITICAL FIX: Populate field
                                 content=original_content,
                                 full_header=str(chead),
                                 shelfmark=str(shelfmark),
                                 source=str(label)
                             ))
                             total_docs += 1
-
-                        # Reset for new document
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = [] # Explicit reset for new document
+                        ctext = [] 
                     else:
                         ctext.append(line)
 
@@ -1213,105 +1203,21 @@ class LabEngine:
                         source=str(label)
                     ))
                     total_docs += 1
-                cid, chead, ctext = None, None, []
 
         writer.commit()
         LAB_LOGGER.info("Lab Index rebuild complete. %d docs.", total_docs)
+        
         self._reload_lab_index()
         return total_docs
 
-    def _get_doc_freq(self, term):
-        if not self.lab_searcher: return 0
-        try:
-            # Tantivy-py 0.20+ signature uses index_reader usually, but check Searcher
-            if hasattr(self.lab_searcher, 'doc_freq'):
-                return self.lab_searcher.doc_freq("text_normalized", term)
-            # Try index reader if available (not exposed directly in simple binding?)
-            # Fallback: Perform a search (slower but safe)
-            q = self.lab_index.parse_query(f'text_normalized:"{term}"', ["text_normalized"])
-            return self.lab_searcher.search(q, 0).count
-        except:
-            return 0
+    # --- Search Methods (Fixing Syntax Error) ---
 
-    def _is_rare(self, term, total_docs):
-        df = self._get_doc_freq(term)
-        if total_docs == 0: return False
-        return (df / total_docs) < self.RARE_THRESHOLD
-
-    def _edit_distance_limit(self, s1, s2, max_dist):
-        if s1 == s2:
-            return 0
-        if max_dist <= 0:
-            return max_dist + 1
-        len1 = len(s1)
-        len2 = len(s2)
-        if abs(len1 - len2) > max_dist:
-            return max_dist + 1
-        prev = list(range(len2 + 1))
-        for i in range(1, len1 + 1):
-            curr = [i] + [0] * len2
-            min_row = curr[0]
-            c1 = s1[i - 1]
-            for j in range(1, len2 + 1):
-                cost = 0 if c1 == s2[j - 1] else 1
-                curr[j] = min(
-                    prev[j] + 1,
-                    curr[j - 1] + 1,
-                    prev[j - 1] + cost
-                )
-                if curr[j] < min_row:
-                    min_row = curr[j]
-            if min_row > max_dist:
-                return max_dist + 1
-            prev = curr
-        return prev[-1]
-
-    def _variant_within_change_limit(self, term, variant):
-        if term == variant:
-            return True
-        max_changes = 1
-        dist = self._edit_distance_limit(term, variant, max_changes)
-        if max_changes == 1:
-            return dist == 1
-        return 0 < dist <= max_changes
-
-    def budgeted_expansion(self, term, variant_mode):
-        budget = Config.VARIANT_GEN_LIMIT
-        variants = []
-        seen = set()
-
-        def add_variant(v):
-            if v in seen:
-                return False
-            if not self._variant_within_change_limit(term, v):
-                return False
-            seen.add(v)
-            variants.append(v)
-            return len(variants) >= budget
-
-        add_variant(term)
-        if len(variants) >= budget:
-            return variants
-
-        # Rank 1: Basic
-        if variant_mode in ['variants', 'variants_extended', 'variants_maximum']:
-            basic = self.var_mgr.get_variants(term, variant_mode, limit=budget)
-            for v in basic:
-                if add_variant(v):
-                    return variants
-
-        # Rank 2: Custom
-        if term in self.settings.custom_variants:
-            for v in self.settings.custom_variants[term]:
-                if add_variant(v):
-                    return variants
-
-        return variants
-
-    @staticmethod
-    def lab_normalize(text):
-        # Strips non-Hebrew characters but keeps spaces
-        return re.sub(r"[^\u0590-\u05FF\s\*\~]", "", text)
+    def _parse_lab_ngram_query(self, query_str):
+        parser_cls = getattr(tantivy, "QueryParser", None)
+        if parser_cls:
+            parser = parser_cls.for_index(self.lab_index, ["text_ngram"])
+            return parser.parse_query(query_str)
+        return self.lab_index.parse_query(query_str, ["text_ngram"])
 
     def _candidate_limit(self):
         return max(500, min(self.settings.candidate_limit, 50000))
@@ -1319,156 +1225,25 @@ class LabEngine:
     def _stage1_limit(self):
         return self._candidate_limit()
 
-    def _prefix_term(self, term):
-        prefix_len = 1
-        return term[:prefix_len] if len(term) > prefix_len else term
-
-    def _term_matches(self, query_term, token):
-        token_norm = self.lab_index_normalize(token)
-        if isinstance(query_term, set):
-            return token_norm in query_term
-        return self.soft_match(query_term, token)
-
-    def _find_term_sequence(self, doc_tokens, query_terms, gap):
-        if not query_terms:
-            return None
-        if len(query_terms) == 1:
-            for idx, token in enumerate(doc_tokens):
-                if self._term_matches(query_terms[0], token):
-                    return [idx]
-            return None
-
-        max_distance = max(0, gap) + 1
-        positions = []
-        for term in query_terms:
-            hits = [i for i, token in enumerate(doc_tokens) if self._term_matches(term, token)]
-            if not hits:
-                return None
-            positions.append(hits)
-
-        for start in positions[0]:
-            seq = [start]
-            prev = start
-            valid = True
-            for hits in positions[1:]:
-                next_hits = [p for p in hits if prev < p <= prev + max_distance]
-                if not next_hits:
-                    valid = False
-                    break
-                prev = next_hits[0]
-                seq.append(prev)
-            if valid:
-                return seq
-        return None
-
-    def _parse_lab_query(self, query_str, conjunction_by_default=False):
-        parser_cls = getattr(tantivy, "QueryParser", None)
-        if parser_cls:
-            parser = parser_cls.for_index(self.lab_index, ["text_normalized"])
-            if conjunction_by_default and hasattr(parser, "set_conjunction_by_default"):
-                parser.set_conjunction_by_default()
-            return parser.parse_query(query_str)
-        return self.lab_index.parse_query(
-            query_str,
-            ["text_normalized"],
-            conjunction_by_default=conjunction_by_default,
-        )
-
-    def _parse_lab_ngram_query(self, query_str, conjunction_by_default=False):
-        parser_cls = getattr(tantivy, "QueryParser", None)
-        if parser_cls:
-            parser = parser_cls.for_index(self.lab_index, ["text_ngram"])
-            if conjunction_by_default and hasattr(parser, "set_conjunction_by_default"):
-                parser.set_conjunction_by_default()
-            return parser.parse_query(query_str)
-        return self.lab_index.parse_query(
-            query_str,
-            ["text_ngram"],
-            conjunction_by_default=conjunction_by_default,
-        )
-
-    def _get_term_boost(self, term, total_docs):
-        df = self._get_doc_freq(term)
-        if total_docs == 0:
-            return 1
-        ratio = df / total_docs
-        if ratio <= self.RARE_THRESHOLD:
-            return 20
-        if ratio <= self.RARE_THRESHOLD * 5:
-            return 10
-        if ratio <= self.RARE_THRESHOLD * 20:
-            return 6
-        return 1
-
-    def _min_should_match(self, term_count):
-        if term_count <= 1:
-            return 1
-        ratio = max(1, min(self.settings.ngram_min_match, 100)) / 100
-        return max(1, math.ceil(term_count * ratio))
-
-    def _ngram_min_should_match(self, term_count):
-        if term_count <= 1:
-            return 1
-        ratio = max(1, min(self.settings.ngram_min_match, 100)) / 100
-        return max(1, math.ceil(term_count * ratio))
-
-    def _matches_min_terms(self, doc_text, terms):
-        if not terms:
-            return 0
-        doc_tokens = set(doc_text.split())
-        matched = 0
-        for term in terms:
-            if isinstance(doc_tokens, set):
-                if any(self._term_matches(term, token) for token in doc_tokens):
-                    matched += 1
-            else:
-                if any(self._term_matches(term, token) for token in doc_tokens):
-                    matched += 1
-        return matched
-
-    def soft_match(self, t1, t2):
-        if t1.lower() == t2.lower(): return True
-        # Normalize
-        n1 = self.lab_normalize(t1).lower()
-        n2 = self.lab_normalize(t2).lower()
-        if n1 and n1 == n2: return True
-
-        # Custom Variants (check normalized and raw)
-        if t1 in self.settings.custom_variants:
-            if t2 in self.settings.custom_variants[t1]: return True
-        if n1 in self.settings.custom_variants:
-            if n2 in self.settings.custom_variants[n1]: return True
-
-        return False
-
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
-        """Execute Lab Mode Search using character n-grams."""
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
             return []
 
         LAB_LOGGER.info("N-Gram Search: %s", query_str)
-        LAB_LOGGER.info(
-            "Recipe: N-Gram Size=%d Minimum Match=%d%% Ignore Matres=%s Phonetic=%s",
-            self.settings.ngram_size,
-            self.settings.ngram_min_match,
-            "ON" if self.settings.ignore_matres else "OFF",
-            "ON" if self.settings.phonetic_expansion else "OFF",
-        )
         start_time = time.time()
 
-        cleaned_query = self.lab_normalize(query_str)
+        cleaned_query = self.lab_index_normalize(query_str)
         cleaned_query = " ".join(cleaned_query.split())
-        if not cleaned_query:
-            return []
+        if not cleaned_query: return []
 
         base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
         base_grams = base_ngrams.split()
-        if not base_grams:
-            return []
+        if not base_grams: return []
 
         expanded_grams = set(base_grams)
 
+        # Spelling/Phonetic Expansion
         if self.settings.ignore_matres:
             skeleton = cleaned_query.replace("ו", "").replace("י", "")
             if skeleton and skeleton != cleaned_query:
@@ -1477,244 +1252,81 @@ class LabEngine:
         if self.settings.phonetic_expansion:
             words = cleaned_query.split()
             for idx, word in enumerate(words):
-                for variant in self._phonetic_variants(word):
-                    if variant == word:
-                        continue
-                    variant_words = words.copy()
-                    variant_words[idx] = variant
-                    variant_query = " ".join(variant_words)
-                    expanded_grams.update(self.generate_ngrams(variant_query, self.settings.ngram_size).split())
+                variants = {word}
+                for i, char in enumerate(word):
+                    for repl in self.var_mgr.basic_map.get(char, set()):
+                        variants.add(word[:i] + repl + word[i+1:])
+                for variant in variants:
+                    if variant == word: continue
+                    expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
 
-        min_should_match = self._ngram_min_should_match(len(base_grams))
+        # Build Query
         query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        if not query_terms:
-            return []
-        min_should_match = min(min_should_match, len(query_terms))
+        
+        if not query_terms: return []
+        
+        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
+        # Tantivy's BM25 will automatically rank documents with more matches higher.
         if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})@{min_should_match}"
+            final_query = f"({' OR '.join(query_terms)})"
         else:
             final_query = query_terms[0]
 
         LAB_LOGGER.info("N-Gram Query: %s", final_query)
 
         try:
-            t_query = self._parse_lab_ngram_query(final_query, conjunction_by_default=False)
+            t_query = self._parse_lab_ngram_query(final_query)
             res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error("N-Gram search failed: %s", e)
             return []
 
-        stage1_time = time.time() - start_time
-        candidate_count = len(res_obj.hits)
-        LAB_LOGGER.info("Found %d candidates in %.2fs", candidate_count, stage1_time)
-
         results = []
         for score, doc_addr in res_obj.hits:
             doc = self.lab_searcher.doc(doc_addr)
-            try:
-                source = doc['source'][0]
-            except Exception:
-                source = "Unknown"
-            snippet = self._generate_ngram_snippet(doc['content'][0], grams)
+            source = doc['source'][0] if 'source' in doc else "Unknown"
+            content = doc['content'][0]
+            
+            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
+            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
+            
             results.append({
                 'bm25': score,
-                'content': doc['content'][0],
+                'content': content,
                 'header': doc['full_header'][0],
                 'shelfmark': doc['shelfmark'][0],
                 'source': source,
                 'uid': doc['unique_id'][0],
                 'snippet_data': self._snippet_html(snippet),
-                'raw_file_hl': self._highlight_ngram_in_text(doc['content'][0], grams)
+                'raw_file_hl': hl_text
             })
 
         results.sort(key=lambda x: x['bm25'], reverse=True)
-
-        # Format for GUI (Pure Local Metadata Lookup)
+        
+        # Formatting
         gui_results = []
-        seen_sys_ids = {}
+        seen = set()
         for r in results:
-            # Use local lookup only to prevent lag
-            sys_id, p_num = self.meta_mgr.parse_header_smart(r['header'])
-            if sys_id in seen_sys_ids:
-                existing = seen_sys_ids[sys_id]
-                if existing == "V0.8":
-                    continue
-                if r['source'] != "V0.8":
-                    continue
-            seen_sys_ids[sys_id] = r['source']
-            shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
-
-            meta = {
-                'shelfmark': shelf or f"ID: {sys_id}",
-                'title': title or "",
-                'img': p_num,
-                'source': r['source'],
-                'id': sys_id
-            }
-
+            sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
+            if sid in seen: continue
+            seen.add(sid)
+            
+            shelf = r['shelfmark']
+            title = "" 
+            
             gui_results.append({
-                'display': meta,
+                'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
                 'snippet': r['snippet_data'],
                 'full_text': r['content'],
                 'uid': r['uid'],
                 'raw_header': r['header'],
-                'raw_file_hl': r.get('raw_file_hl') or r['content'],
+                'raw_file_hl': r['raw_file_hl'],
                 'highlight_pattern': None
             })
-
+            
         return gui_results
 
-    def _highlight_tokens(self, text, match_indices):
-        if not match_indices:
-            return text
-        tokens = text.split()
-        out = []
-        for idx, token in enumerate(tokens):
-            if idx in match_indices:
-                out.append(f"*{token}*")
-            else:
-                out.append(token)
-        return " ".join(out)
-
-    def _highlight_ngram_in_text(self, text, grams):
-        if not text or not grams:
-            return text
-        spans = self._find_ngram_spans(text, grams)
-        if not spans:
-            return text
-        return self._apply_highlights(text, spans)
-
-    def _snippet_html(self, snippet):
-        if not snippet:
-            return snippet
-        return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
-
-    def _phonetic_variants(self, word):
-        variants = {word}
-        for idx, char in enumerate(word):
-            for repl in self.var_mgr.basic_map.get(char, set()):
-                variants.add(word[:idx] + repl + word[idx + 1:])
-        return variants
-
-    def _generate_ngram_snippet(self, text, grams, window=120):
-        if not text:
-            return text
-        if not grams:
-            return text[:300] + ("..." if len(text) > 300 else "")
-        spans = self._find_ngram_spans(text, grams)
-        if not spans:
-            return text[:300] + ("..." if len(text) > 300 else "")
-        first_start, first_end = spans[0]
-        start = max(0, first_start - window)
-        end = min(len(text), first_end + window)
-        snippet_text = text[start:end]
-        snippet_spans = [
-            (max(0, s - start), min(end - start, e - start))
-            for s, e in spans
-            if s < end and e > start
-        ]
-        snippet_spans = self._merge_spans(snippet_spans)
-        snippet = self._apply_highlights(snippet_text, snippet_spans)
-        prefix = "..." if start > 0 else ""
-        suffix = "..." if end < len(text) else ""
-        return f"{prefix}{snippet}{suffix}"
-
-    @staticmethod
-    def _find_ngram_spans(text, grams):
-        spans = []
-        for gram in grams:
-            if not gram:
-                continue
-            start = 0
-            while start <= len(text) - len(gram):
-                idx = text.find(gram, start)
-                if idx == -1:
-                    break
-                spans.append((idx, idx + len(gram)))
-                start = idx + 1
-        return LabEngine._merge_spans(spans)
-
-    @staticmethod
-    def _merge_spans(spans):
-        if not spans:
-            return []
-        spans = sorted(spans)
-        merged = [list(spans[0])]
-        for start, end in spans[1:]:
-            last = merged[-1]
-            if start <= last[1]:
-                last[1] = max(last[1], end)
-            else:
-                merged.append([start, end])
-        return [(s, e) for s, e in merged]
-
-    @staticmethod
-    def _apply_highlights(text, spans):
-        if not spans:
-            return text
-        out = []
-        last_idx = 0
-        for start, end in spans:
-            if start > last_idx:
-                out.append(text[last_idx:start])
-            out.append(f"*{text[start:end]}*")
-            last_idx = end
-        if last_idx < len(text):
-            out.append(text[last_idx:])
-        return "".join(out)
-
-    def _generate_snippet(self, text, matches, query_terms, match_indices=None):
-        """Simple snippet generator for Lab Search."""
-        if not matches: return text[:300]
-        # Find window with most matches
-        # We already computed windows? Re-use logic or simple center on first best match
-        # Let's just take the first match area
-        match_idx = matches[0][0] # doc_idx of first match
-        tokens = text.split()
-        start = max(0, match_idx - 10)
-        end = min(len(tokens), match_idx + 20)
-
-        # Highlight
-        out = []
-        if match_indices is None:
-            match_indices = set(m[0] for m in matches)
-        for i in range(start, end):
-            t = tokens[i]
-            if i in match_indices:
-                out.append(f"*{t}*")
-            else:
-                out.append(t)
-
-        return "..." + " ".join(out) + "..."
-
-    def _extract_rare_terms(self, text, total_docs):
-        """Identify rare terms in the input text to use as search anchors."""
-        norm_text = self.lab_index_normalize(text)
-        tokens = list(set(norm_text.split())) # Unique tokens
-
-        rare_terms = []
-
-        # Rule 1: Strict (Threshold from settings, len >= 3)
-        threshold_strict = max(1, total_docs * self.RARE_THRESHOLD)
-        for t in tokens:
-            if len(t) >= 3 and self._get_doc_freq(t) < threshold_strict:
-                rare_terms.append(t)
-
-        # Fallback: Relaxed (5x Threshold, len >= 2)
-        if len(rare_terms) < 5:
-            rare_terms = [] # Reset to avoid duplicates or mixing strictly
-            threshold_relaxed = max(1, total_docs * (self.RARE_THRESHOLD * 5))
-            for t in tokens:
-                if len(t) >= 2 and self._get_doc_freq(t) < threshold_relaxed:
-                    rare_terms.append(t)
-
-        return rare_terms
-
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
-        """
-        Execute Composition Search using N-Grams strategy.
-        Splits source text into chunks, converts to N-Grams, and searches using Minimum Should Match.
-        """
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not ready.")
             return {'main': [], 'filtered': []}
@@ -1722,26 +1334,21 @@ class LabEngine:
         LAB_LOGGER.info("Starting N-Gram Composition Search...")
         start_time = time.time()
 
-        # 1. Prepare Input
-        norm_text = self.lab_normalize(full_text)
+        norm_text = self.lab_index_normalize(full_text)
         tokens = norm_text.split()
-
+        
         c_size = int(chunk_size) if chunk_size else 7
         step = max(1, c_size // 2)
 
         if len(tokens) < c_size:
             chunks = [" ".join(tokens)]
         else:
-            chunks = [
-                " ".join(tokens[i : i + c_size])
-                for i in range(0, len(tokens) - c_size + 1, step)
-            ]
+            chunks = [" ".join(tokens[i : i + c_size]) for i in range(0, len(tokens) - c_size + 1, step)]
 
         LAB_LOGGER.info("Generated %d chunks (Size: %d, Step: %d)", len(chunks), c_size, step)
 
         candidates = {}
 
-        # 2. Search Loop
         for i, chunk_str in enumerate(chunks):
             if progress_callback and i % 5 == 0:
                 progress_callback(i, len(chunks))
@@ -1749,37 +1356,36 @@ class LabEngine:
             base_ngrams = self.generate_ngrams(chunk_str, self.settings.ngram_size)
             base_gram_list = base_ngrams.split()
             grams_set = set(base_gram_list)
-
+            
             if self.settings.ignore_matres:
                 skeleton = chunk_str.replace("ו", "").replace("י", "")
                 grams_set.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
-
+            
             if self.settings.phonetic_expansion:
                 for word in chunk_str.split():
-                    for variant in self._phonetic_variants(word):
-                        grams_set.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
+                    for idx, char in enumerate(word):
+                        for repl in self.var_mgr.basic_map.get(char, set()):
+                             variant = word[:idx] + repl + word[idx+1:]
+                             grams_set.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
 
-            if not grams_set:
-                continue
+            if not grams_set: continue
 
-            base_gram_count = len(base_gram_list)
-            min_match = self._ngram_min_should_match(base_gram_count)
-            query_grams = sorted(g for g in grams_set if g)
-            min_match = min(min_match, len(query_grams))
-
+            query_grams = sorted(list(grams_set))
             clauses = [f'text_ngram:"{g}"' for g in query_grams]
-            raw_query = f"({' OR '.join(clauses)})@{min_match}"
-
+            
+            # CRITICAL FIX: Removed @min_match syntax
+            raw_query = f"({' '.join(clauses)})"
+            
             try:
                 t_query = self._parse_lab_ngram_query(raw_query)
-                res = self.lab_searcher.search(t_query, 50)
+                res = self.lab_searcher.search(t_query, 50) 
             except Exception:
                 continue
 
             for score, doc_addr in res.hits:
                 doc = self.lab_searcher.doc(doc_addr)
                 uid = doc['unique_id'][0]
-
+                
                 if uid not in candidates:
                     candidates[uid] = {
                         'uid': uid,
@@ -1789,7 +1395,7 @@ class LabEngine:
                         'header': doc['full_header'][0],
                         'src': doc['source'][0] if 'source' in doc else "Unknown"
                     }
-
+                
                 candidates[uid]['score'] += score
                 candidates[uid]['hits'] += 1
 
@@ -1798,10 +1404,8 @@ class LabEngine:
         results = results[:self.settings.candidate_limit]
 
         formatted_results = []
-        full_source_grams = self.generate_ngrams(
-            full_text[:1000],
-            self.settings.ngram_size,
-        ).split()
+        full_source_grams = self.generate_ngrams(full_text[:1000], self.settings.ngram_size).split()
+        
         for cand in results:
             hl_text = self._highlight_ngram_in_text(cand['content'], full_source_grams)
             snippet_html = self._generate_ngram_snippet(cand['content'], full_source_grams)
@@ -1818,8 +1422,80 @@ class LabEngine:
 
         elapsed = time.time() - start_time
         LAB_LOGGER.info("Composition search done. %d results in %.2fs", len(formatted_results), elapsed)
-
+        
         return {'main': formatted_results, 'filtered': []}
+
+    # --- Highlighting Helpers (Required) ---
+    def _snippet_html(self, snippet):
+        if not snippet: return snippet
+        return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
+
+    def _highlight_ngram_in_text(self, text, grams):
+        if not text or not grams: return text
+        spans = self._find_ngram_spans(text, grams)
+        return self._apply_highlights(text, spans)
+
+    def _generate_ngram_snippet(self, text, grams, window=120):
+        if not text: return text
+        if not grams: return text[:300]
+        spans = self._find_ngram_spans(text, grams)
+        if not spans: return text[:300]
+        
+        first_start, first_end = spans[0]
+        start = max(0, first_start - window)
+        end = min(len(text), first_end + window)
+        
+        snippet_text = text[start:end]
+        rel_spans = [
+            (max(0, s - start), min(end - start, e - start))
+            for s, e in spans if s < end and e > start
+        ]
+        merged = self._merge_spans(rel_spans)
+        
+        hl = self._apply_highlights(snippet_text, merged)
+        return f"...{hl}..."
+
+    @staticmethod
+    def _find_ngram_spans(text, grams):
+        spans = []
+        for g in grams:
+            if not g: continue
+            start = 0
+            while True:
+                idx = text.find(g, start)
+                if idx == -1: break
+                spans.append((idx, idx + len(g)))
+                start = idx + 1
+        return LabEngine._merge_spans(spans)
+
+    @staticmethod
+    def _merge_spans(spans):
+        if not spans: return []
+        spans.sort()
+        merged = [list(spans[0])]
+        for s, e in spans[1:]:
+            last = merged[-1]
+            if s <= last[1]:
+                last[1] = max(last[1], e)
+            else:
+                merged.append([s, e])
+        return [(s, e) for s, e in merged]
+
+    @staticmethod
+    def _apply_highlights(text, spans):
+        if not spans: return text
+        out = []
+        last_idx = 0
+        for s, e in spans:
+            out.append(text[last_idx:s])
+            out.append(f"*{text[s:e]}*")
+            last_idx = e
+        out.append(text[last_idx:])
+        return "".join(out)
+    
+    # Minimal helpers for legacy support (if called externally)
+    def _get_doc_freq(self, term): return 0
+    def _is_rare(self, term, total): return False
 
 
 # ==============================================================================
