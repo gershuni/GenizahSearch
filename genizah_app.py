@@ -57,6 +57,8 @@ class LabSettingsDialog(QDialog):
         self.resize(600, 600)
         self.lab_engine = lab_engine
         self.settings = lab_engine.settings
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout()
 
@@ -78,6 +80,31 @@ class LabSettingsDialog(QDialog):
         self.spin_rare_bonus.setRange(0.0, 5.0); self.spin_rare_bonus.setSingleStep(0.1)
         self.spin_rare_bonus.setValue(self.settings.rare_word_bonus)
 
+        self.spin_candidate_limit = QSpinBox()
+        self.spin_candidate_limit.setRange(500, 50000)
+        self.spin_candidate_limit.setSingleStep(500)
+        self.spin_candidate_limit.setValue(self.settings.candidate_limit)
+        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
+
+        self.spin_max_changes = QSpinBox()
+        self.spin_max_changes.setRange(1, 3)
+        self.spin_max_changes.setValue(self.settings.max_char_changes)
+        self.spin_max_changes.setToolTip(tr("How many letters in a single word can be swapped at once. 1 = High precision/speed, 2-3 = Maximum Recall but very slow."))
+
+        self.spin_min_match = QSpinBox()
+        self.spin_min_match.setRange(1, 100)
+        self.spin_min_match.setValue(self.settings.minimum_match_pct)
+        self.spin_min_match.setSuffix("%")
+        self.spin_min_match.setToolTip(tr("Minimum percent of query terms required for Stage 1 candidates."))
+
+        self.chk_use_custom_variants = QCheckBox(tr("Use Custom Variants"))
+        self.chk_use_custom_variants.setChecked(self.settings.use_custom_variants)
+        self.chk_use_custom_variants.setToolTip(tr("Use your custom char=char replacements."))
+
+        self.chk_use_double_scan = QCheckBox(tr("Use Double Scan (Stage 2)"))
+        self.chk_use_double_scan.setChecked(self.settings.use_double_scan)
+        self.chk_use_double_scan.setToolTip(tr("Run Stage 2 re-ranking (slower but more precise)."))
+
         self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
         self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
 
@@ -93,6 +120,11 @@ class LabSettingsDialog(QDialog):
         self.chk_prefix = QCheckBox(tr("Prefix Mode (Begins with...)"))
         self.chk_prefix.setChecked(self.settings.prefix_mode)
         self.chk_prefix.setToolTip(tr("Search for words starting with the query terms (e.g. 'lam' matches 'lama')."))
+
+        self.spin_prefix_chars = QSpinBox()
+        self.spin_prefix_chars.setRange(1, 10)
+        self.spin_prefix_chars.setValue(self.settings.prefix_chars)
+        self.spin_prefix_chars.setToolTip(tr("How many letters from the start of each word to match in Prefix Mode."))
 
         # Order Tolerance Group
         self.grp_order = QGroupBox(tr("Order Tolerance"))
@@ -112,16 +144,27 @@ class LabSettingsDialog(QDialog):
 
         pg_layout.addWidget(QLabel(tr("Expansion Budget:")), 0, 0)
         pg_layout.addWidget(self.spin_budget, 0, 1)
-        pg_layout.addWidget(QLabel(tr("Slop Window:")), 1, 0)
-        pg_layout.addWidget(self.spin_slop, 1, 1)
-        pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 2, 0)
-        pg_layout.addWidget(self.spin_rare_bonus, 2, 1)
-        pg_layout.addWidget(self.chk_normalize, 3, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Max Changes per Word:")), 1, 0)
+        pg_layout.addWidget(self.spin_max_changes, 1, 1)
+        pg_layout.addWidget(self.chk_use_custom_variants, 2, 0, 1, 2)
 
-        pg_layout.addWidget(self.chk_use_slop, 4, 0, 1, 2)
-        pg_layout.addWidget(self.chk_use_rare, 5, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 3, 0)
+        pg_layout.addWidget(self.spin_candidate_limit, 3, 1)
+        pg_layout.addWidget(QLabel(tr("Minimum Match %:")), 4, 0)
+        pg_layout.addWidget(self.spin_min_match, 4, 1)
+        pg_layout.addWidget(self.chk_use_double_scan, 5, 0, 1, 2)
         pg_layout.addWidget(self.chk_prefix, 6, 0, 1, 2)
-        pg_layout.addWidget(self.grp_order, 7, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Prefix Length:")), 7, 0)
+        pg_layout.addWidget(self.spin_prefix_chars, 7, 1)
+
+        pg_layout.addWidget(QLabel(tr("Slop Window:")), 8, 0)
+        pg_layout.addWidget(self.spin_slop, 8, 1)
+        pg_layout.addWidget(self.chk_use_slop, 9, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_rare, 10, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 11, 0)
+        pg_layout.addWidget(self.spin_rare_bonus, 11, 1)
+        pg_layout.addWidget(self.chk_normalize, 12, 0, 1, 2)
+        pg_layout.addWidget(self.grp_order, 13, 0, 1, 2)
 
         param_group.setLayout(pg_layout)
         layout.addWidget(param_group)
@@ -170,10 +213,17 @@ class LabSettingsDialog(QDialog):
         self.settings.expansion_budget = self.spin_budget.value()
         self.settings.slop_window = self.spin_slop.value()
         self.settings.rare_word_bonus = self.spin_rare_bonus.value()
+        self.settings.candidate_limit = self.spin_candidate_limit.value()
+        self.settings.minimum_match_pct = self.spin_min_match.value()
+        self.settings.max_char_changes = self.spin_max_changes.value()
+        self.settings.use_custom_variants = self.chk_use_custom_variants.isChecked()
+        self.settings.use_standard_variants = True
+        self.settings.use_double_scan = self.chk_use_double_scan.isChecked()
         self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
         self.settings.use_slop_window = self.chk_use_slop.isChecked()
         self.settings.use_rare_words = self.chk_use_rare.isChecked()
         self.settings.prefix_mode = self.chk_prefix.isChecked()
+        self.settings.prefix_chars = self.spin_prefix_chars.value()
         self.settings.use_order_tolerance = self.grp_order.isChecked()
         self.settings.order_n = self.spin_order_n.value()
         self.settings.order_m = self.spin_order_m.value()
@@ -186,7 +236,13 @@ class LabSettingsDialog(QDialog):
             'expansion_budget': self.spin_budget.value(),
             'slop_window': self.spin_slop.value(),
             'custom_variants': self.txt_variants.toPlainText(),
-            'rare_word_bonus': self.spin_rare_bonus.value()
+            'rare_word_bonus': self.spin_rare_bonus.value(),
+            'candidate_limit': self.spin_candidate_limit.value(),
+            'minimum_match_pct': self.spin_min_match.value(),
+            'max_char_changes': self.spin_max_changes.value(),
+            'prefix_chars': self.spin_prefix_chars.value(),
+            'use_custom_variants': self.chk_use_custom_variants.isChecked(),
+            'use_double_scan': self.chk_use_double_scan.isChecked()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
@@ -1932,6 +1988,9 @@ class GenizahGUI(QMainWindow):
                 f.write(f"--- Page {p['p_num']} ---\n")
                 f.write(p['text'])
                 f.write("\n\n")
+            lab_config = self._get_lab_config_block()
+            if lab_config:
+                f.write(lab_config)
         
         QMessageBox.information(self, tr("Saved"), tr("Manuscript saved to:\n{}").format(path))
     
@@ -2134,22 +2193,12 @@ class GenizahGUI(QMainWindow):
         # Lab Mode: save to Lab Dir
         base_dir = Config.REPORTS_DIR
         if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked():
-            base_dir = os.path.join(Config.LAB_DIR, "Reports")
+            base_dir = os.path.join(Config.BASE_DIR, "Reports")
 
         os.makedirs(base_dir, exist_ok=True)
         return os.path.join(base_dir, f"{filename}.txt")
 
     def _get_credit_header(self):
-        lab_config = ""
-        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked() and self.lab_engine:
-            settings_dump = json.dumps({
-                'custom_variants': self.lab_engine.settings.custom_variants,
-                'expansion_budget': self.lab_engine.settings.expansion_budget,
-                'slop_window': self.lab_engine.settings.slop_window,
-                'rare_word_bonus': self.lab_engine.settings.rare_word_bonus
-            }, indent=2, ensure_ascii=False)
-            lab_config = f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
-
         english_text = (
             "Generated by Genizah Search Pro\n"
             "Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)\n"
@@ -2161,7 +2210,25 @@ class GenizahGUI(QMainWindow):
         if CURRENT_LANG == 'he':
             final_text = tr("REPORT_CREDIT_TXT")
             
-        return final_text + lab_config + "\n"
+        return final_text + "\n"
+
+    def _get_lab_config_block(self):
+        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked() and self.lab_engine:
+            settings_dump = json.dumps({
+                'custom_variants': self.lab_engine.settings.custom_variants,
+                'expansion_budget': self.lab_engine.settings.expansion_budget,
+                'slop_window': self.lab_engine.settings.slop_window,
+                'rare_word_bonus': self.lab_engine.settings.rare_word_bonus,
+                'candidate_limit': self.lab_engine.settings.candidate_limit,
+                'minimum_match_pct': self.lab_engine.settings.minimum_match_pct,
+                'prefix_mode': self.lab_engine.settings.prefix_mode,
+                'prefix_chars': self.lab_engine.settings.prefix_chars,
+                'use_standard_variants': self.lab_engine.settings.use_standard_variants,
+                'use_custom_variants': self.lab_engine.settings.use_custom_variants,
+                'use_double_scan': self.lab_engine.settings.use_double_scan,
+            }, indent=2, ensure_ascii=False)
+            return f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
+        return ""
     
     # --- LOGIC ---
     def open_ai(self):
@@ -2223,7 +2290,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
                 return
-            self.search_thread = LabSearchThread(self.lab_engine, query)
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap)
         else:
             self.search_thread = SearchThread(self.searcher, query, mode, gap)
 
@@ -2507,6 +2574,12 @@ class GenizahGUI(QMainWindow):
                 return "'" + t
             return t
 
+        def clean_for_export_text(text):
+            t = str(text)
+            t = t.replace("<br>", " ").replace("\n", " ")
+            t = re.sub(r'<[^>]+>', '', t)
+            return t
+
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
         
@@ -2532,6 +2605,8 @@ class GenizahGUI(QMainWindow):
             ])
 
         credit_text = self._get_credit_header()
+        lab_config = self._get_lab_config_block()
+        lab_config = self._get_lab_config_block()
 
         # --- XLSX with inline highlighting ---
         if fmt == 'xlsx':
@@ -2547,13 +2622,15 @@ class GenizahGUI(QMainWindow):
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
-                    # No markers: write as-is with formula guard
-                    if '*' not in text:
-                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                    clean_text = clean_for_export_text(text)
+                    if '*' not in clean_text:
+                        ws.cell(row=row, column=col, value=clean_for_excel(clean_text))
                         return
 
                     # Split by asterisk markers
-                    parts = text.split('*')
+                    if clean_text.startswith(('=', '+', '-', '@')):
+                        clean_text = "'" + clean_text
+                    parts = clean_text.split('*')
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
@@ -2565,7 +2642,10 @@ class GenizahGUI(QMainWindow):
                             # Even indices are plain text
                             rich_string.append(TextBlock(font_normal, part))
 
-                    ws.cell(row=row, column=col, value=rich_string)
+                    if rich_string:
+                        ws.cell(row=row, column=col, value=rich_string)
+                    else:
+                        ws.cell(row=row, column=col, value="")
 
                 # Credit header
                 current_row = 1
@@ -2593,7 +2673,7 @@ class GenizahGUI(QMainWindow):
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
                             # Strip HTML tags in other columns
-                            clean_val = re.sub(r'<[^>]+>', '', val_str)
+                            clean_val = clean_for_export_text(val_str)
                             ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
 
                     current_row += 1
@@ -2603,6 +2683,14 @@ class GenizahGUI(QMainWindow):
                 ws.column_dimensions['B'].width = 20
                 ws.column_dimensions['C'].width = 40
                 ws.column_dimensions['F'].width = 80  # Wider snippet column
+
+                if lab_config:
+                    current_row += 1
+                    for line in lab_config.split('\n'):
+                        if not line.strip():
+                            continue
+                        ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                        current_row += 1
 
                 wb.save(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -2620,8 +2708,11 @@ class GenizahGUI(QMainWindow):
                     writer.writerow(headers)
                     for row in data_rows:
                         # Strip HTML but keep highlight markers
-                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        clean_row = [clean_for_export_text(val) for val in row]
                         writer.writerow(clean_row)
+                    if lab_config:
+                        f.write("\n")
+                        f.write(lab_config)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
@@ -2633,6 +2724,8 @@ class GenizahGUI(QMainWindow):
                     f.write(credit_text)
                     for r in self.last_results:
                         f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{r.get('raw_file_hl','')}\n\n")
+                    if lab_config:
+                        f.write(lab_config)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
@@ -2785,7 +2878,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_comp_ui()
                 return
-            self.comp_thread = LabCompositionThread(self.lab_engine, txt)
+            self.comp_thread = LabCompositionThread(self.lab_engine, txt, mode, self.spin_chunk.value())
         else:
             self.comp_thread = CompositionThread(
                 self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
@@ -3586,6 +3679,12 @@ class GenizahGUI(QMainWindow):
             if t.startswith(('=', '+', '-', '@')): return "'" + t
             return t
 
+        def clean_for_export_text(text):
+            t = str(text)
+            t = t.replace("<br>", " ").replace("\n", " ")
+            t = re.sub(r'<[^>]+>', '', t)
+            return t
+
         # ==========================================
         #  XLSX & CSV Logic
         # ==========================================
@@ -3616,8 +3715,8 @@ class GenizahGUI(QMainWindow):
                                 title or "",
                                 str(p_num or ""),
                                 f"{ms_score} (P:{page.get('score',0)})", # Show MS Score (Page Score)
-                                (page.get('source_ctx', '') or '').strip(),
-                                (page.get('text', '') or '').strip()
+                                clean_for_export_text(page.get('source_ctx', '') or '').strip(),
+                                clean_for_export_text(page.get('text', '') or '').strip()
                              ])
                     else:
                         # Fallback for pages
@@ -3630,8 +3729,8 @@ class GenizahGUI(QMainWindow):
                             title or "",
                             str(p_num or ""),
                             str(ms_item.get('score', 0)),
-                            (ms_item.get('source_ctx', '') or '').strip(),
-                            (ms_item.get('text', '') or '').strip()
+                            clean_for_export_text(ms_item.get('source_ctx', '') or '').strip(),
+                            clean_for_export_text(ms_item.get('text', '') or '').strip()
                         ])
 
             if self.chk_comp_flat.isChecked():
@@ -3667,10 +3766,13 @@ class GenizahGUI(QMainWindow):
                     font_normal = InlineFont(color='000000')
 
                     def write_rich_cell(row, col, text):
-                        if '*' not in text:
-                            ws.cell(row=row, column=col, value=clean_for_excel(text))
+                        clean_text = clean_for_export_text(text)
+                        if '*' not in clean_text:
+                            ws.cell(row=row, column=col, value=clean_for_excel(clean_text))
                             return
-                        parts = text.split('*')
+                        if clean_text.startswith(('=', '+', '-', '@')):
+                            clean_text = "'" + clean_text
+                        parts = clean_text.split('*')
                         rich_string = CellRichText()
                         for i, part in enumerate(parts):
                             if not part: continue
@@ -3678,7 +3780,10 @@ class GenizahGUI(QMainWindow):
                                 rich_string.append(TextBlock(font_red, part))
                             else:
                                 rich_string.append(TextBlock(font_normal, part))
-                        ws.cell(row=row, column=col, value=rich_string)
+                        if rich_string:
+                            ws.cell(row=row, column=col, value=rich_string)
+                        else:
+                            ws.cell(row=row, column=col, value="")
 
                     # Credit block
                     curr_row = 1
@@ -3718,6 +3823,14 @@ class GenizahGUI(QMainWindow):
                     ws.column_dimensions['H'].width = 50
                     ws.column_dimensions['I'].width = 60
 
+                    if lab_config:
+                        curr_row += 1
+                        for line in lab_config.split('\n'):
+                            if not line.strip():
+                                continue
+                            ws.cell(row=curr_row, column=1, value=clean_for_excel(line))
+                            curr_row += 1
+
                     wb.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
@@ -3733,8 +3846,11 @@ class GenizahGUI(QMainWindow):
                         writer.writerow([])
                         writer.writerow(headers)
                         for row in table_rows:
-                            clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                            clean_row = [clean_for_export_text(val) for val in row]
                             writer.writerow(clean_row)
+                        if lab_config:
+                            f.write("\n")
+                            f.write(lab_config)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
@@ -3859,6 +3975,8 @@ class GenizahGUI(QMainWindow):
                     f.write(credit_text)
                     all_lines = summary_lines + detail_lines
                     f.write("\n".join(all_lines).strip() + "\n")
+                    if lab_config:
+                        f.write(lab_config)
                 
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 

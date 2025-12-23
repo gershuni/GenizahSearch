@@ -19,6 +19,7 @@ from typing import Mapping
 import itertools
 import json
 import bisect
+import math
 
 from genizah_translations import TRANSLATIONS
 
@@ -45,6 +46,13 @@ class LabSettings:
         self.rare_word_bonus = 0.5
         self.normalize_abbreviations = True
         self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
+        self.candidate_limit = 2000
+        self.max_char_changes = 1
+        self.prefix_chars = 1
+        self.minimum_match_pct = 30
+        self.use_standard_variants = True
+        self.use_custom_variants = True
+        self.use_double_scan = True
 
         # New Settings
         self.use_slop_window = True
@@ -67,6 +75,13 @@ class LabSettings:
                     self.rare_word_bonus = data.get('rare_word_bonus', 0.5)
                     self.normalize_abbreviations = data.get('normalize_abbreviations', True)
                     self.rare_threshold = data.get('rare_threshold', 0.001)
+                    self.candidate_limit = data.get('candidate_limit', 2000)
+                    self.max_char_changes = data.get('max_char_changes', 1)
+                    self.prefix_chars = data.get('prefix_chars', 1)
+                    self.minimum_match_pct = data.get('minimum_match_pct', 30)
+                    self.use_standard_variants = data.get('use_standard_variants', True)
+                    self.use_custom_variants = data.get('use_custom_variants', True)
+                    self.use_double_scan = data.get('use_double_scan', True)
 
                     self.use_slop_window = data.get('use_slop_window', True)
                     self.use_rare_words = data.get('use_rare_words', True)
@@ -74,6 +89,10 @@ class LabSettings:
                     self.use_order_tolerance = data.get('use_order_tolerance', False)
                     self.order_n = data.get('order_n', 4)
                     self.order_m = data.get('order_m', 4)
+                    self.candidate_limit = max(500, min(self.candidate_limit, 50000))
+                    self.max_char_changes = max(1, min(self.max_char_changes, 3))
+                    self.prefix_chars = max(1, min(self.prefix_chars, 10))
+                    self.minimum_match_pct = max(1, min(self.minimum_match_pct, 100))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -88,6 +107,13 @@ class LabSettings:
                     'rare_word_bonus': self.rare_word_bonus,
                     'normalize_abbreviations': self.normalize_abbreviations,
                     'rare_threshold': self.rare_threshold,
+                    'candidate_limit': max(500, min(self.candidate_limit, 50000)),
+                    'max_char_changes': max(1, min(self.max_char_changes, 3)),
+                    'prefix_chars': max(1, min(self.prefix_chars, 10)),
+                    'minimum_match_pct': max(1, min(self.minimum_match_pct, 100)),
+                    'use_standard_variants': self.use_standard_variants,
+                    'use_custom_variants': self.use_custom_variants,
+                    'use_double_scan': self.use_double_scan,
                     'use_slop_window': self.use_slop_window,
                     'use_rare_words': self.use_rare_words,
                     'prefix_mode': self.prefix_mode,
@@ -1087,7 +1113,7 @@ class LabEngine:
         # Remove specific punctuation chars that are common in these texts
         # Quotes (single/double), dashes, dots, etc.
         # We keep whitespace to separate words.
-        return re.sub(r"[^\w\u0590-\u05FF\s]", "", text).replace('_', ' ').lower()
+        return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
 
     def rebuild_lab_index(self, progress_callback=None):
         """Build the isolated Lab Index with normalized text."""
@@ -1112,6 +1138,7 @@ class LabEngine:
         # Store original header/shelfmark for result reconstruction
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
+        builder.add_text_field("source", stored=True)
         # Store full content just in case, though Stage 2 fetches from disk usually?
         # Plan says "Stage 2: Fetch full text". Usually we fetch from disk or main index.
         # But to be self-contained, let's store it or rely on unique_id.
@@ -1137,6 +1164,7 @@ class LabEngine:
         processed_lines = 0
 
         for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
+            cid, chead, ctext = None, None, []
             if not os.path.exists(fpath):
                 LAB_LOGGER.warning(f"File not found: {fpath}")
                 continue
@@ -1162,7 +1190,8 @@ class LabEngine:
                                 text_normalized=norm_content,
                                 content=original_content,
                                 full_header=str(chead),
-                                shelfmark=str(shelfmark)
+                                shelfmark=str(shelfmark),
+                                source=str(label)
                             ))
                             total_docs += 1
 
@@ -1186,9 +1215,11 @@ class LabEngine:
                         text_normalized=norm_content,
                         content=original_content,
                         full_header=str(chead),
-                        shelfmark=str(shelfmark)
+                        shelfmark=str(shelfmark),
+                        source=str(label)
                     ))
                     total_docs += 1
+                cid, chead, ctext = None, None, []
 
         writer.commit()
         LAB_LOGGER.info("Lab Index rebuild complete. %d docs.", total_docs)
@@ -1213,43 +1244,177 @@ class LabEngine:
         if total_docs == 0: return False
         return (df / total_docs) < self.settings.rare_threshold
 
-    def budgeted_expansion(self, term):
+    def _edit_distance_limit(self, s1, s2, max_dist):
+        if s1 == s2:
+            return 0
+        if max_dist <= 0:
+            return max_dist + 1
+        len1 = len(s1)
+        len2 = len(s2)
+        if abs(len1 - len2) > max_dist:
+            return max_dist + 1
+        prev = list(range(len2 + 1))
+        for i in range(1, len1 + 1):
+            curr = [i] + [0] * len2
+            min_row = curr[0]
+            c1 = s1[i - 1]
+            for j in range(1, len2 + 1):
+                cost = 0 if c1 == s2[j - 1] else 1
+                curr[j] = min(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + cost
+                )
+                if curr[j] < min_row:
+                    min_row = curr[j]
+            if min_row > max_dist:
+                return max_dist + 1
+            prev = curr
+        return prev[-1]
+
+    def _variant_within_change_limit(self, term, variant):
+        if term == variant:
+            return True
+        max_changes = max(1, min(self.settings.max_char_changes, 3))
+        dist = self._edit_distance_limit(term, variant, max_changes)
+        if max_changes == 1:
+            return dist == 1
+        return 0 < dist <= max_changes
+
+    def budgeted_expansion(self, term, variant_mode):
         budget = self.settings.expansion_budget
-        # Rank 0: Exact
-        variants = {term}
-        if len(variants) >= budget: return list(variants)
+        variants = []
+        seen = set()
+
+        def add_variant(v):
+            if v in seen:
+                return False
+            if not self._variant_within_change_limit(term, v):
+                return False
+            seen.add(v)
+            variants.append(v)
+            return len(variants) >= budget
+
+        add_variant(term)
+        if len(variants) >= budget:
+            return variants
 
         # Rank 1: Basic
-        basic = self.var_mgr.get_variants(term, 'variants', limit=budget)
-        for v in basic:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
+        if variant_mode in ['variants', 'variants_extended', 'variants_maximum']:
+            basic = self.var_mgr.get_variants(term, variant_mode, limit=budget)
+            for v in basic:
+                if add_variant(v):
+                    return variants
 
         # Rank 2: Custom
-        # Check both key=term and val=term (assuming symmetric usage for expansion if intended)
-        if term in self.settings.custom_variants:
+        if self.settings.use_custom_variants and term in self.settings.custom_variants:
             for v in self.settings.custom_variants[term]:
-                variants.add(v)
-                if len(variants) >= budget: return list(variants)
+                if add_variant(v):
+                    return variants
 
-        # Rank 3: Extended
-        extended = self.var_mgr.get_variants(term, 'variants_extended', limit=budget)
-        for v in extended:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
-
-        # Rank 4: Maximum
-        maximum = self.var_mgr.get_variants(term, 'variants_maximum', limit=budget)
-        for v in maximum:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
-
-        return list(variants)
+        return variants
 
     @staticmethod
     def lab_normalize(text):
         # Strips non-Hebrew characters but keeps spaces
-        return re.sub(r"[^\u0590-\u05FF\s]", "", text)
+        return re.sub(r"[^\u0590-\u05FF\s\*\~]", "", text)
+
+    def _candidate_limit(self):
+        return max(500, min(self.settings.candidate_limit, 50000))
+
+    def _stage1_limit(self):
+        return self._candidate_limit()
+
+    def _prefix_term(self, term):
+        prefix_len = max(1, min(self.settings.prefix_chars, 10))
+        return term[:prefix_len] if len(term) > prefix_len else term
+
+    def _term_matches(self, query_term, token):
+        token_norm = self.lab_index_normalize(token)
+        if isinstance(query_term, set):
+            return token_norm in query_term
+        if self.settings.prefix_mode:
+            q_prefix = self._prefix_term(query_term)
+            return token_norm.startswith(q_prefix)
+        return self.soft_match(query_term, token)
+
+    def _find_term_sequence(self, doc_tokens, query_terms, gap):
+        if not query_terms:
+            return None
+        if len(query_terms) == 1:
+            for idx, token in enumerate(doc_tokens):
+                if self._term_matches(query_terms[0], token):
+                    return [idx]
+            return None
+
+        max_distance = max(0, gap) + 1
+        positions = []
+        for term in query_terms:
+            hits = [i for i, token in enumerate(doc_tokens) if self._term_matches(term, token)]
+            if not hits:
+                return None
+            positions.append(hits)
+
+        for start in positions[0]:
+            seq = [start]
+            prev = start
+            valid = True
+            for hits in positions[1:]:
+                next_hits = [p for p in hits if prev < p <= prev + max_distance]
+                if not next_hits:
+                    valid = False
+                    break
+                prev = next_hits[0]
+                seq.append(prev)
+            if valid:
+                return seq
+        return None
+
+    def _parse_lab_query(self, query_str, conjunction_by_default=False):
+        parser_cls = getattr(tantivy, "QueryParser", None)
+        if parser_cls:
+            parser = parser_cls.for_index(self.lab_index, ["text_normalized"])
+            if conjunction_by_default and hasattr(parser, "set_conjunction_by_default"):
+                parser.set_conjunction_by_default()
+            return parser.parse_query(query_str)
+        return self.lab_index.parse_query(
+            query_str,
+            ["text_normalized"],
+            conjunction_by_default=conjunction_by_default,
+        )
+
+    def _get_term_boost(self, term, total_docs):
+        df = self._get_doc_freq(term)
+        if total_docs == 0:
+            return 1
+        ratio = df / total_docs
+        if ratio <= self.settings.rare_threshold:
+            return 20
+        if ratio <= self.settings.rare_threshold * 5:
+            return 10
+        if ratio <= self.settings.rare_threshold * 20:
+            return 6
+        return 1
+
+    def _min_should_match(self, term_count):
+        if term_count <= 1:
+            return 1
+        ratio = max(1, min(self.settings.minimum_match_pct, 100)) / 100
+        return max(1, math.ceil(term_count * ratio))
+
+    def _matches_min_terms(self, doc_text, terms):
+        if not terms:
+            return 0
+        doc_tokens = set(doc_text.split())
+        matched = 0
+        for term in terms:
+            if isinstance(doc_tokens, set):
+                if any(self._term_matches(term, token) for token in doc_tokens):
+                    matched += 1
+            else:
+                if any(self._term_matches(term, token) for token in doc_tokens):
+                    matched += 1
+        return matched
 
     def soft_match(self, t1, t2):
         if t1.lower() == t2.lower(): return True
@@ -1266,13 +1431,24 @@ class LabEngine:
 
         return False
 
-    def lab_search(self, query_str, progress_callback=None):
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
         """Execute Lab Mode Search (Two-Stage)."""
         if not self.lab_searcher:
             LAB_LOGGER.warning("Lab Index not loaded.")
             return []
 
         LAB_LOGGER.info(f"Stage 1 Search: {query_str}")
+        LAB_LOGGER.info(
+            "Recipe: Mode=%s Custom=%s MSM=%d%% Prefix=%s(%d) OrderTol=%s Slop=%d DoubleScan=%s",
+            mode,
+            "ON" if self.settings.use_custom_variants else "OFF",
+            self.settings.minimum_match_pct,
+            "ON" if self.settings.prefix_mode else "OFF",
+            self.settings.prefix_chars,
+            "ON" if self.settings.use_order_tolerance else "OFF",
+            self.settings.slop_window,
+            "ON" if self.settings.use_double_scan else "OFF",
+        )
         start_time = time.time()
 
         # 1. Prepare Query
@@ -1280,9 +1456,12 @@ class LabEngine:
         norm_query_str = self.lab_index_normalize(query_str)
         terms = norm_query_str.split()
         if not terms: return []
+        unique_terms = list(dict.fromkeys(terms))
+        min_should_match = self._min_should_match(len(unique_terms))
 
         # Budgeted Expansion
         expanded_terms = []
+        match_terms = []
         total_docs = self.lab_searcher.num_docs
         rare_query_terms = set()
 
@@ -1290,33 +1469,82 @@ class LabEngine:
             if self._is_rare(term, total_docs):
                 rare_query_terms.add(term)
 
-            variants = self.budgeted_expansion(term)
-            # Normalize variants
-            variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+            boost = self._get_term_boost(term, total_docs)
+            raw_group = False
+            if self.settings.prefix_mode:
+                variants = [self._prefix_term(term)]
+            else:
+                if mode == 'fuzzy':
+                    raw_group = True
+                    if len(term) < 3:
+                        variants = [f'"{term}"']
+                    elif len(term) < 5:
+                        variants = [f'"{term}"~1']
+                    else:
+                        variants = [f'"{term}"~2']
+                else:
+                    variants = self.budgeted_expansion(term, mode)
+                    # Normalize variants
+                    variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
 
             if self.settings.prefix_mode:
                 # Append * for prefix matching (Tantivy syntax)
                 variants = [v + "*" for v in variants]
 
-            expanded_terms.append(variants)
+            expanded_terms.append((variants, boost, raw_group))
+            if self.settings.prefix_mode:
+                match_terms.append(self._prefix_term(term))
+            elif mode == 'fuzzy':
+                match_terms.append(self.lab_index_normalize(term))
+            else:
+                match_terms.append(set(variants))
+
+        if len(rare_query_terms) >= 2:
+            rare_clause = " AND ".join([f"\"{t}\"^12" for t in rare_query_terms])
+            expanded_terms.append(([rare_clause], 1, True))
 
         # Build Boolean Query
         query_parts = []
-        for group in expanded_terms:
-            if not group: continue
+        for group, boost, raw in expanded_terms:
+            if not group:
+                continue
             clean_group = []
             for t in group:
-                if '*' in t: clean_group.append(t) # No quotes for wildcards
-                else: clean_group.append(f'"{t}"')
+                if raw:
+                    term = t
+                elif '*' in t:
+                    term = t
+                else:
+                    term = f'"{t}"'
+                if boost > 1:
+                    term = f"{term}^{boost}"
+                clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        final_query = " OR ".join(query_parts)
+        if self.settings.use_double_scan:
+            joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+        else:
+            joiner = " "
+        final_query = joiner.join(query_parts)
+        msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
+        msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
+        if len(unique_terms) >= 2 and self.settings.use_double_scan:
+            final_query = f"({final_query})@{msm_terms}"
+        LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            # Use index.parse_query directly
-            t_query = self.lab_index.parse_query(final_query, ["text_normalized"])
-            res_obj = self.lab_searcher.search(t_query, 2000)
+            try:
+                t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
+            except Exception as parse_err:
+                if self.settings.use_double_scan and "@"+str(msm_terms) in final_query:
+                    fallback_query = final_query.replace(f"@{msm_terms}", "")
+                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
+                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
+                    t_query = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
+                else:
+                    raise
+            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
             return []
@@ -1329,110 +1557,183 @@ class LabEngine:
         candidates = []
         for score, doc_addr in res_obj.hits:
             doc = self.lab_searcher.doc(doc_addr)
+            doc_text_norm = doc['text_normalized'][0]
+            if len(unique_terms) > 1:
+                matched_terms = self._matches_min_terms(doc_text_norm, match_terms)
+                if matched_terms < min_should_match:
+                    continue
+            try:
+                source = doc['source'][0]
+            except Exception:
+                source = "Unknown"
             candidates.append({
                 'bm25': score,
                 'content': doc['content'][0],
                 'header': doc['full_header'][0],
                 'shelfmark': doc['shelfmark'][0],
+                'source': source,
                 'uid': doc['unique_id'][0]
             })
 
         results = []
-        raw_terms = query_str.split() # For Stage 2, use original splitting logic
+        raw_terms = [t for t in query_str.split() if t.strip()]
+        norm_terms = [self.lab_index_normalize(t) for t in raw_terms if t.strip()]
 
-        # Pre-calculate rare terms for Stage 2 boosting
-        # We use the normalized 'terms' set for rarity check, but raw_terms for matching logic order?
-        # Actually, let's use the normalized terms for rarity.
+        if not self.settings.use_double_scan:
+            for cand in candidates:
+                tokens = cand['content'].split()
+                matches = []
+                for doc_idx, token in enumerate(tokens):
+                    for q_idx, q_term in enumerate(match_terms):
+                        if self._term_matches(q_term, token):
+                            matches.append((doc_idx, q_idx))
+                if len(match_terms) >= 2:
+                    sequence = self._find_term_sequence(tokens, match_terms, gap)
+                    if not sequence:
+                        continue
+                    match_indices = set(sequence)
+                else:
+                    match_indices = set(m[0] for m in matches)
+                cand['final_score'] = cand['bm25']
+                cand['snippet_data'] = self._snippet_html(
+                    self._generate_snippet(cand['content'], matches, norm_terms, match_indices=match_indices)
+                )
+                cand['raw_file_hl'] = self._highlight_tokens(cand['content'], match_indices)
+                results.append(cand)
 
-        for i, cand in enumerate(candidates):
-            if time.time() - start_time > 30:
-                LAB_LOGGER.warning("Stage 2 Timeout Reached")
-                break
+            results.sort(key=lambda x: x['final_score'], reverse=True)
+            stage2_time = time.time() - start_time - stage1_time
+            LAB_LOGGER.info(
+                "Stage 2 skipped in %.2fs. Candidates: %d, Results: %d",
+                stage2_time,
+                candidate_count,
+                len(results),
+            )
+        else:
+            # Pre-calculate rare terms for Stage 2 boosting
+            # We use the normalized 'terms' set for rarity check, but raw_terms for matching logic order?
+            # Actually, let's use the normalized terms for rarity.
 
-            text = cand['content']
-            tokens = text.split() # Simple whitespace tokenization
+            for i, cand in enumerate(candidates):
+                if time.time() - start_time > 30:
+                    LAB_LOGGER.warning("Stage 2 Timeout Reached")
+                    break
 
-            # Density & Order Analysis
-            max_density = 0
-            best_order_score = 0
+                text = cand['content']
+                tokens = text.split() # Simple whitespace tokenization
 
-            # Find all matches
-            # Map token_index -> matching_query_term_index
-            matches = [] # list of (doc_idx, query_idx)
+                if len(match_terms) >= 2:
+                    sequence = self._find_term_sequence(tokens, match_terms, gap)
+                    if not sequence:
+                        continue
+                else:
+                    sequence = None
 
-            for doc_idx, token in enumerate(tokens):
-                for q_idx, q_term in enumerate(raw_terms):
-                    if self.soft_match(q_term, token):
-                        matches.append((doc_idx, q_idx))
+                # Density & Order Analysis
+                max_density = 0
+                best_order_score = 0
 
-            # Sliding Window for Density
-            if matches and self.settings.use_slop_window:
-                # matches is sorted by doc_idx
-                # We want max matches in a window of size 'slop_window' tokens
-                # Using 2 pointers
-                left = 0
-                window_matches = []
-                for right in range(len(matches)):
-                    curr_match = matches[right]
-                    doc_idx_right = curr_match[0]
+                # Find all matches
+                # Map token_index -> matching_query_term_index
+                matches = [] # list of (doc_idx, query_idx)
 
-                    # Shrink left
-                    while doc_idx_right - matches[left][0] > self.settings.slop_window:
-                        left += 1
+                for doc_idx, token in enumerate(tokens):
+                    for q_idx, q_term in enumerate(match_terms):
+                        if self._term_matches(q_term, token):
+                            matches.append((doc_idx, q_idx))
 
-                    # Current window is matches[left : right+1]
-                    window = matches[left : right+1]
-                    density = len(set(m[1] for m in window))
+                # Sliding Window for Density
+                if matches and self.settings.use_slop_window:
+                    # matches is sorted by doc_idx
+                    # We want max matches in a window of size 'slop_window' tokens
+                    # Using 2 pointers
+                    left = 0
+                    window_matches = []
+                    for right in range(len(matches)):
+                        curr_match = matches[right]
+                        doc_idx_right = curr_match[0]
 
-                    if density > max_density:
-                        max_density = density
+                        # Shrink left
+                        while doc_idx_right - matches[left][0] > self.settings.slop_window:
+                            left += 1
 
-                        # Calculate Order Score for this best window
-                        q_indices = [m[1] for m in window]
-                        order_score = 0
-                        for idx1 in range(len(q_indices)):
-                            for idx2 in range(idx1 + 1, len(q_indices)):
-                                if q_indices[idx1] < q_indices[idx2]:
-                                    order_score += 1
-                        best_order_score = order_score
+                        # Current window is matches[left : right+1]
+                        window = matches[left : right+1]
+                        density = len(set(m[1] for m in window))
 
-            # Rare Word Boost
-            rare_score = 0
-            if self.settings.use_rare_words:
-                found_rare_count = 0
-                for rare_term in rare_query_terms:
-                    # Check if this rare term matches any token in doc
-                    for token in tokens:
-                        if self.soft_match(rare_term, token):
-                            found_rare_count += 1
-                            break # Count once per term
-                rare_score = found_rare_count * self.settings.rare_word_bonus
+                        if density > max_density:
+                            max_density = density
 
-            # Final Score
-            final_score = (cand['bm25'] * 0.1) + (max_density * 0.6) + (best_order_score * 0.2) + (rare_score * 0.1)
+                            # Calculate Order Score for this best window
+                            q_indices = [m[1] for m in window]
+                            order_score = 0
+                            for idx1 in range(len(q_indices)):
+                                for idx2 in range(idx1 + 1, len(q_indices)):
+                                    if q_indices[idx1] < q_indices[idx2]:
+                                        order_score += 1
+                            best_order_score = order_score
 
-            cand['final_score'] = final_score
-            cand['snippet_data'] = self._generate_snippet(cand['content'], matches, raw_terms)
-            results.append(cand)
+                # Rare Word Boost
+                rare_score = 0
+                if self.settings.use_rare_words:
+                    found_rare_count = 0
+                    for rare_term in rare_query_terms:
+                        # Check if this rare term matches any token in doc
+                        for token in tokens:
+                            if self._term_matches(rare_term, token):
+                                found_rare_count += 1
+                                break # Count once per term
+                    rare_score = found_rare_count * self.settings.rare_word_bonus
 
-        # Sort
-        results.sort(key=lambda x: x['final_score'], reverse=True)
+                # Final Score
+                final_score = (cand['bm25'] * 0.1) + (max_density * 0.6) + (best_order_score * 0.2) + (rare_score * 0.1)
 
-        stage2_time = time.time() - start_time
-        LAB_LOGGER.info(f"Stage 2 completed in {stage2_time:.2f}s. Candidates: {candidate_count}, Results: {len(results)}")
+                cand['final_score'] = final_score
+                if sequence:
+                    match_indices = set(sequence)
+                    cand['snippet_data'] = self._snippet_html(
+                        self._generate_snippet(cand['content'], matches, norm_terms, match_indices=match_indices)
+                    )
+                    cand['raw_file_hl'] = self._highlight_tokens(cand['content'], match_indices)
+                else:
+                    match_indices = set(m[0] for m in matches)
+                    cand['snippet_data'] = self._snippet_html(
+                        self._generate_snippet(cand['content'], matches, norm_terms, match_indices=match_indices)
+                    )
+                    cand['raw_file_hl'] = self._highlight_tokens(cand['content'], match_indices)
+                results.append(cand)
+
+            # Sort
+            results.sort(key=lambda x: x['final_score'], reverse=True)
+
+            stage2_time = time.time() - start_time - stage1_time
+            LAB_LOGGER.info(
+                "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
+                stage2_time,
+                candidate_count,
+                len(results),
+            )
 
         # Format for GUI (Pure Local Metadata Lookup)
         gui_results = []
+        seen_sys_ids = {}
         for r in results:
             # Use local lookup only to prevent lag
             sys_id, p_num = self.meta_mgr.parse_header_smart(r['header'])
+            if sys_id in seen_sys_ids:
+                existing = seen_sys_ids[sys_id]
+                if existing == "V0.8":
+                    continue
+                if r['source'] != "V0.8":
+                    continue
+            seen_sys_ids[sys_id] = r['source']
             shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
 
             meta = {
                 'shelfmark': shelf or f"ID: {sys_id}",
                 'title': title or "",
                 'img': p_num,
-                'source': "Lab",
+                'source': r['source'],
                 'id': sys_id
             }
 
@@ -1442,13 +1743,30 @@ class LabEngine:
                 'full_text': r['content'],
                 'uid': r['uid'],
                 'raw_header': r['header'],
-                'raw_file_hl': r['content'],
+                'raw_file_hl': r.get('raw_file_hl') or r['content'],
                 'highlight_pattern': None
             })
 
         return gui_results
 
-    def _generate_snippet(self, text, matches, query_terms):
+    def _highlight_tokens(self, text, match_indices):
+        if not match_indices:
+            return text
+        tokens = text.split()
+        out = []
+        for idx, token in enumerate(tokens):
+            if idx in match_indices:
+                out.append(f"*{token}*")
+            else:
+                out.append(token)
+        return " ".join(out)
+
+    def _snippet_html(self, snippet):
+        if not snippet:
+            return snippet
+        return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
+
+    def _generate_snippet(self, text, matches, query_terms, match_indices=None):
         """Simple snippet generator for Lab Search."""
         if not matches: return text[:300]
         # Find window with most matches
@@ -1461,11 +1779,12 @@ class LabEngine:
 
         # Highlight
         out = []
-        match_indices = set(m[0] for m in matches)
+        if match_indices is None:
+            match_indices = set(m[0] for m in matches)
         for i in range(start, end):
             t = tokens[i]
             if i in match_indices:
-                out.append(f"<b style='color:red;'>{t}</b>")
+                out.append(f"*{t}*")
             else:
                 out.append(t)
 
@@ -1494,11 +1813,21 @@ class LabEngine:
 
         return rare_terms
 
-    def lab_composition_search(self, full_text, progress_callback=None):
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
         """Execute Broad-to-Narrow Composition Search."""
         if not self.lab_searcher: return {'main': [], 'filtered': []}
 
         LAB_LOGGER.info("Starting Lab Composition Search...")
+        LAB_LOGGER.info(
+            "Recipe: Mode=%s Custom=%s MSM=%d%% Prefix=%s(%d) OrderTol=%s Slop=%d",
+            mode,
+            "ON" if self.settings.use_custom_variants else "OFF",
+            self.settings.minimum_match_pct,
+            "ON" if self.settings.prefix_mode else "OFF",
+            self.settings.prefix_chars,
+            "ON" if self.settings.use_order_tolerance else "OFF",
+            self.settings.slop_window,
+        )
         start_time = time.time()
 
         # 1. Broad Filter (Candidate Generation)
@@ -1517,14 +1846,68 @@ class LabEngine:
         # Using a huge OR might be slow if too many terms. Cap it?
         # Let's cap at 150 terms
         query_terms = rare_terms[:150]
-        if self.settings.prefix_mode:
-            query_str = " OR ".join([f"{t}*" for t in query_terms])
-        else:
-            query_str = " OR ".join([f'"{t}"' for t in query_terms])
+        expanded_terms = []
+        for term in query_terms:
+            boost = self._get_term_boost(term, total_docs)
+            raw_group = False
+            if self.settings.prefix_mode:
+                variants = [self._prefix_term(term)]
+            else:
+                if mode == 'fuzzy':
+                    raw_group = True
+                    if len(term) < 3:
+                        variants = [f'"{term}"']
+                    elif len(term) < 5:
+                        variants = [f'"{term}"~1']
+                    else:
+                        variants = [f'"{term}"~2']
+                else:
+                    variants = self.budgeted_expansion(term, mode)
+                    variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+
+            if self.settings.prefix_mode:
+                variants = [v + "*" for v in variants]
+
+            expanded_terms.append((variants, boost, raw_group))
+
+        query_parts = []
+        for group, boost, raw in expanded_terms:
+            if not group:
+                continue
+            clean_group = []
+            for t in group:
+                if raw:
+                    term = t
+                elif '*' in t:
+                    term = t
+                else:
+                    term = f'"{t}"'
+                if boost > 1:
+                    term = f"{term}^{boost}"
+                clean_group.append(term)
+            query_parts.append(f"({' OR '.join(clean_group)})")
+
+        joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+        query_str = joiner.join(query_parts)
+        msm_terms = None
+        if len(query_terms) >= 2:
+            msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
+            msm_terms = max(1, math.ceil(len(query_terms) * msm_pct))
+            query_str = f"({query_str})@{msm_terms}"
 
         try:
-            q = self.lab_index.parse_query(query_str, ["text_normalized"])
-            res = self.lab_searcher.search(q, 2000)
+            LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
+            try:
+                q = self._parse_lab_query(query_str, conjunction_by_default=(joiner == " "))
+            except Exception as parse_err:
+                if msm_terms and f"@{msm_terms}" in query_str:
+                    fallback_query = query_str.replace(f"@{msm_terms}", "")
+                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
+                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
+                    q = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
+                else:
+                    raise
+            res = self.lab_searcher.search(q, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
             return {'main': [], 'filtered': []}
@@ -1541,8 +1924,9 @@ class LabEngine:
                     else: fuzzy_terms.append(f'"{t}"~1')
 
                 fuzzy_query = " OR ".join(fuzzy_terms)
-                q = self.lab_index.parse_query(fuzzy_query, ["text_normalized"])
-                res = self.lab_searcher.search(q, 2000)
+                LAB_LOGGER.info("Stage 1 Raw Query (Fuzzy): %s", fuzzy_query)
+                q = self._parse_lab_query(fuzzy_query, conjunction_by_default=(joiner == " "))
+                res = self.lab_searcher.search(q, self._stage1_limit())
                 LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
             except Exception as e:
                 LAB_LOGGER.error(f"Fuzzy retry failed: {e}")
@@ -1550,15 +1934,20 @@ class LabEngine:
         candidates = []
         for score, doc_addr in res.hits:
             doc = self.lab_searcher.doc(doc_addr)
+            try:
+                source = doc['source'][0]
+            except Exception:
+                source = "Unknown"
             candidates.append({
                 'content': doc['content'][0],
                 'header': doc['full_header'][0],
                 'shelfmark': doc['shelfmark'][0],
                 'uid': doc['unique_id'][0],
-                'src': 'Lab' # Source label
+                'src': source
             })
 
-        LAB_LOGGER.info(f"Found {len(candidates)} candidates.")
+        stage1_time = time.time() - start_time
+        LAB_LOGGER.info(f"Found {len(candidates)} candidates in {stage1_time:.2f}s.")
 
         # 2. Narrow Scan (Python)
         # Prepare Input Chunks
@@ -1566,7 +1955,9 @@ class LabEngine:
         input_tokens = norm_input.split()
 
         # Determine chunk size based on settings
-        if self.settings.use_order_tolerance:
+        if chunk_size is not None and chunk_size > 0:
+            chunk_size = int(chunk_size)
+        elif self.settings.use_order_tolerance:
             chunk_size = self.settings.order_n + self.settings.order_m
         else:
             chunk_size = self.settings.slop_window
@@ -1593,6 +1984,7 @@ class LabEngine:
             doc_text = cand['content']
             doc_norm = self.lab_index_normalize(doc_text)
             doc_tokens = doc_norm.split()
+            orig_tokens = doc_text.split()
 
             # Map doc tokens for fast lookup?
             # Or scan doc for each chunk?
@@ -1613,7 +2005,13 @@ class LabEngine:
 
             for chunk in input_chunks:
                 # Quick check: do at least 50% of chunk tokens exist in doc_set? (normalized)
-                present = sum(1 for t in chunk['tokens'] if t in doc_token_set)
+                if self.settings.prefix_mode:
+                    present = sum(
+                        1 for t in chunk['tokens']
+                        if any(token.startswith(self._prefix_term(t)) for token in doc_token_set)
+                    )
+                else:
+                    present = sum(1 for t in chunk['tokens'] if t in doc_token_set)
                 if present < len(chunk['tokens']) * 0.4: continue
 
                 # Detailed Window Scan on Doc
@@ -1637,7 +2035,7 @@ class LabEngine:
                 match_positions = []
                 for dt_i, dt in enumerate(doc_tokens):
                     for ct_i, ct in enumerate(chunk['tokens']):
-                        if self.soft_match(dt, ct):
+                        if self._term_matches(ct, dt):
                             match_positions.append((dt_i, ct_i))
 
                 if not match_positions: continue
@@ -1707,8 +2105,24 @@ class LabEngine:
                 if best_chunk_score > 0 and best_window_idx != -1:
                     total_score += best_chunk_score
                     s, e = best_window_idx
-                    # Store match data including the source text chunk
-                    doc_matches.append((s, e, best_chunk_score, " ".join(chunk['tokens'])))
+                    context_start = max(0, s - 10)
+                    context_end = min(len(orig_tokens), e + 10)
+                    context_raw = []
+                    context_highlight = []
+                    for i in range(context_start, context_end):
+                        token = orig_tokens[i]
+                        if s <= i <= e:
+                            context_highlight.append(f"*{token}*")
+                        else:
+                            context_highlight.append(token)
+                        context_raw.append(token)
+                    doc_matches.append((
+                        s,
+                        e,
+                        best_chunk_score,
+                        " ".join(context_raw),
+                        " ".join(context_highlight),
+                    ))
 
             if total_score > 0:
                 # Format snippet
@@ -1720,13 +2134,11 @@ class LabEngine:
 
                     # Collect source contexts (up to 3 best)
                     for m in doc_matches[:3]:
-                        if m[3] not in source_contexts:
-                            source_contexts.append(m[3])
+                        if m[4] not in source_contexts:
+                            source_contexts.append(m[4])
 
                     # Generate highlighted snippet for the BEST match
-                    s, e, _, _ = doc_matches[0]
-
-                    orig_tokens = doc_text.split()
+                    s, e, _, _, _ = doc_matches[0]
 
                     # Expand context
                     start = max(0, s - 10)
@@ -1749,14 +2161,34 @@ class LabEngine:
                     'score': total_score,
                     'uid': cand['uid'],
                     'raw_header': cand['header'],
-                    'src_lbl': 'Lab',
+                    'src_lbl': cand.get('src', 'Unknown'),
                     'source_ctx': " ... ".join(source_contexts),
                     'text': hl_snippet,
                     'highlight_pattern': ""
                 })
 
         final_items.sort(key=lambda x: x['score'], reverse=True)
-        return {'main': final_items, 'filtered': []}
+        deduped = []
+        seen_sys_ids = {}
+        for item in final_items:
+            sys_id, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sys_id in seen_sys_ids:
+                existing = seen_sys_ids[sys_id]
+                if existing == "V0.8":
+                    continue
+                if item['src_lbl'] != "V0.8":
+                    continue
+            seen_sys_ids[sys_id] = item['src_lbl']
+            deduped.append(item)
+
+        stage2_time = time.time() - start_time - stage1_time
+        LAB_LOGGER.info(
+            "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
+            stage2_time,
+            len(candidates),
+            len(deduped),
+        )
+        return {'main': deduped, 'filtered': []}
 
 
 # ==============================================================================
