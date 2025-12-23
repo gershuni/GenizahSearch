@@ -47,6 +47,7 @@ class LabSettings:
         self.normalize_abbreviations = True
         self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
         self.candidate_limit = 2000
+        self.max_char_changes = 1
 
         # New Settings
         self.use_slop_window = True
@@ -70,6 +71,7 @@ class LabSettings:
                     self.normalize_abbreviations = data.get('normalize_abbreviations', True)
                     self.rare_threshold = data.get('rare_threshold', 0.001)
                     self.candidate_limit = data.get('candidate_limit', 2000)
+                    self.max_char_changes = data.get('max_char_changes', 1)
 
                     self.use_slop_window = data.get('use_slop_window', True)
                     self.use_rare_words = data.get('use_rare_words', True)
@@ -78,6 +80,7 @@ class LabSettings:
                     self.order_n = data.get('order_n', 4)
                     self.order_m = data.get('order_m', 4)
                     self.candidate_limit = max(1, min(self.candidate_limit, 10000))
+                    self.max_char_changes = max(1, min(self.max_char_changes, 3))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -93,6 +96,7 @@ class LabSettings:
                     'normalize_abbreviations': self.normalize_abbreviations,
                     'rare_threshold': self.rare_threshold,
                     'candidate_limit': max(1, min(self.candidate_limit, 10000)),
+                    'max_char_changes': max(1, min(self.max_char_changes, 3)),
                     'use_slop_window': self.use_slop_window,
                     'use_rare_words': self.use_rare_words,
                     'prefix_mode': self.prefix_mode,
@@ -1219,38 +1223,86 @@ class LabEngine:
         if total_docs == 0: return False
         return (df / total_docs) < self.settings.rare_threshold
 
+    def _edit_distance_limit(self, s1, s2, max_dist):
+        if s1 == s2:
+            return 0
+        if max_dist <= 0:
+            return max_dist + 1
+        len1 = len(s1)
+        len2 = len(s2)
+        if abs(len1 - len2) > max_dist:
+            return max_dist + 1
+        prev = list(range(len2 + 1))
+        for i in range(1, len1 + 1):
+            curr = [i] + [0] * len2
+            min_row = curr[0]
+            c1 = s1[i - 1]
+            for j in range(1, len2 + 1):
+                cost = 0 if c1 == s2[j - 1] else 1
+                curr[j] = min(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + cost
+                )
+                if curr[j] < min_row:
+                    min_row = curr[j]
+            if min_row > max_dist:
+                return max_dist + 1
+            prev = curr
+        return prev[-1]
+
+    def _variant_within_change_limit(self, term, variant):
+        if term == variant:
+            return True
+        max_changes = max(1, min(self.settings.max_char_changes, 3))
+        dist = self._edit_distance_limit(term, variant, max_changes)
+        if max_changes == 1:
+            return dist == 1
+        return 0 < dist <= max_changes
+
     def budgeted_expansion(self, term):
         budget = self.settings.expansion_budget
-        # Rank 0: Exact
-        variants = {term}
-        if len(variants) >= budget: return list(variants)
+        variants = []
+        seen = set()
+
+        def add_variant(v):
+            if v in seen:
+                return False
+            if not self._variant_within_change_limit(term, v):
+                return False
+            seen.add(v)
+            variants.append(v)
+            return len(variants) >= budget
+
+        add_variant(term)
+        if len(variants) >= budget:
+            return variants
 
         # Rank 1: Basic
         basic = self.var_mgr.get_variants(term, 'variants', limit=budget)
         for v in basic:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
+            if add_variant(v):
+                return variants
 
         # Rank 2: Custom
-        # Check both key=term and val=term (assuming symmetric usage for expansion if intended)
         if term in self.settings.custom_variants:
             for v in self.settings.custom_variants[term]:
-                variants.add(v)
-                if len(variants) >= budget: return list(variants)
+                if add_variant(v):
+                    return variants
 
         # Rank 3: Extended
         extended = self.var_mgr.get_variants(term, 'variants_extended', limit=budget)
         for v in extended:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
+            if add_variant(v):
+                return variants
 
         # Rank 4: Maximum
         maximum = self.var_mgr.get_variants(term, 'variants_maximum', limit=budget)
         for v in maximum:
-            variants.add(v)
-            if len(variants) >= budget: return list(variants)
+            if add_variant(v):
+                return variants
 
-        return list(variants)
+        return variants
 
     @staticmethod
     def lab_normalize(text):
