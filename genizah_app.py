@@ -2192,7 +2192,7 @@ class GenizahGUI(QMainWindow):
         # Lab Mode: save to Lab Dir
         base_dir = Config.REPORTS_DIR
         if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked():
-            base_dir = os.path.join(Config.LAB_DIR, "Reports")
+            base_dir = os.path.join(Config.BASE_DIR, "Reports")
 
         os.makedirs(base_dir, exist_ok=True)
         return os.path.join(base_dir, f"{filename}.txt")
