@@ -1515,7 +1515,16 @@ class LabEngine:
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
+            try:
+                t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
+            except Exception as parse_err:
+                if "@"+str(msm_terms) in final_query:
+                    fallback_query = final_query.replace(f"@{msm_terms}", "")
+                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
+                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
+                    t_query = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
+                else:
+                    raise
             res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
@@ -1808,7 +1817,16 @@ class LabEngine:
 
         try:
             LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
-            q = self._parse_lab_query(query_str, conjunction_by_default=(joiner == " "))
+            try:
+                q = self._parse_lab_query(query_str, conjunction_by_default=(joiner == " "))
+            except Exception as parse_err:
+                if f"@{msm_terms}" in query_str:
+                    fallback_query = query_str.replace(f"@{msm_terms}", "")
+                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
+                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
+                    q = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
+                else:
+                    raise
             res = self.lab_searcher.search(q, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
