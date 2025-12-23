@@ -30,7 +30,6 @@ except ImportError:
     
 try:
     import tantivy
-    from tantivy import QueryParser
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
 
@@ -1088,7 +1087,7 @@ class LabEngine:
         # Remove specific punctuation chars that are common in these texts
         # Quotes (single/double), dashes, dots, etc.
         # We keep whitespace to separate words.
-        return re.sub(r"[^\w\u0590-\u05FF\s]", "", text).replace('_', ' ')
+        return re.sub(r"[^\w\u0590-\u05FF\s]", "", text).replace('_', ' ').lower()
 
     def rebuild_lab_index(self, progress_callback=None):
         """Build the isolated Lab Index with normalized text."""
@@ -1144,7 +1143,7 @@ class LabEngine:
 
             LAB_LOGGER.info("Indexing %s...", label)
 
-            with open(fpath, 'r', encoding='utf-8') as f:
+            with open(fpath, 'r', encoding='utf-8-sig') as f:
                 cid, chead, ctext = None, None, []
                 for line in f:
                     processed_lines += 1
@@ -1253,10 +1252,10 @@ class LabEngine:
         return re.sub(r"[^\u0590-\u05FF\s]", "", text)
 
     def soft_match(self, t1, t2):
-        if t1 == t2: return True
+        if t1.lower() == t2.lower(): return True
         # Normalize
-        n1 = self.lab_normalize(t1)
-        n2 = self.lab_normalize(t2)
+        n1 = self.lab_normalize(t1).lower()
+        n2 = self.lab_normalize(t2).lower()
         if n1 and n1 == n2: return True
 
         # Custom Variants (check normalized and raw)
@@ -1315,9 +1314,8 @@ class LabEngine:
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            # Use QueryParser for better syntax support (including wildcards)
-            parser = QueryParser.for_index(self.lab_index, ["text_normalized"])
-            t_query = parser.parse_query(final_query)
+            # Use index.parse_query directly
+            t_query = self.lab_index.parse_query(final_query, ["text_normalized"])
             res_obj = self.lab_searcher.search(t_query, 2000)
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
@@ -1525,8 +1523,7 @@ class LabEngine:
             query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
         try:
-            parser = QueryParser.for_index(self.lab_index, ["text_normalized"])
-            q = parser.parse_query(query_str)
+            q = self.lab_index.parse_query(query_str, ["text_normalized"])
             res = self.lab_searcher.search(q, 2000)
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
@@ -1544,7 +1541,7 @@ class LabEngine:
                     else: fuzzy_terms.append(f'"{t}"~1')
 
                 fuzzy_query = " OR ".join(fuzzy_terms)
-                q = parser.parse_query(fuzzy_query)
+                q = self.lab_index.parse_query(fuzzy_query, ["text_normalized"])
                 res = self.lab_searcher.search(q, 2000)
                 LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
             except Exception as e:
