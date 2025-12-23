@@ -1465,6 +1465,27 @@ class LabEngine:
         total_docs = self.lab_searcher.num_docs
         rare_query_terms = set()
 
+        if not self.settings.use_double_scan:
+            match_terms = [self.lab_index_normalize(term) for term in terms]
+            phrase_terms = []
+            for term in terms:
+                phrase_terms.append(self._prefix_term(term) if self.settings.prefix_mode else term)
+            phrase_body = " ".join(phrase_terms)
+            if gap and gap > 0:
+                final_query = f"\"{phrase_body}\"~{gap}"
+            else:
+                final_query = f"\"{phrase_body}\""
+            LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
+            try:
+                t_query = self._parse_lab_query(final_query, conjunction_by_default=True)
+                res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
+            except Exception as e:
+                LAB_LOGGER.error(f"Stage 1 failed: {e}")
+                return []
+            stage1_time = time.time() - start_time
+            candidate_count = len(res_obj.hits)
+            LAB_LOGGER.info(f"Stage 1 found {candidate_count} candidates in {stage1_time:.2f}s")
+        else:
         for term in terms:
             if self._is_rare(term, total_docs):
                 rare_query_terms.add(term)
@@ -1521,34 +1542,34 @@ class LabEngine:
                 clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
-        final_query = joiner.join(query_parts)
-        msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
-        msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
-        if len(unique_terms) >= 2:
-            final_query = f"({final_query})@{msm_terms}"
-        LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
-        LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
+            joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+            final_query = joiner.join(query_parts)
+            msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
+            msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
+            if len(unique_terms) >= 2:
+                final_query = f"({final_query})@{msm_terms}"
+            LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
+            LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
-        try:
             try:
-                t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
-            except Exception as parse_err:
-                if "@"+str(msm_terms) in final_query:
-                    fallback_query = final_query.replace(f"@{msm_terms}", "")
-                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
-                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
-                    t_query = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
-                else:
-                    raise
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error(f"Stage 1 failed: {e}")
-            return []
+                try:
+                    t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
+                except Exception as parse_err:
+                    if "@"+str(msm_terms) in final_query:
+                        fallback_query = final_query.replace(f"@{msm_terms}", "")
+                        LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
+                        LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
+                        t_query = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
+                    else:
+                        raise
+                res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
+            except Exception as e:
+                LAB_LOGGER.error(f"Stage 1 failed: {e}")
+                return []
 
-        stage1_time = time.time() - start_time
-        candidate_count = len(res_obj.hits)
-        LAB_LOGGER.info(f"Stage 1 found {candidate_count} candidates in {stage1_time:.2f}s")
+            stage1_time = time.time() - start_time
+            candidate_count = len(res_obj.hits)
+            LAB_LOGGER.info(f"Stage 1 found {candidate_count} candidates in {stage1_time:.2f}s")
 
         # Stage 2: Re-ranking
         candidates = []
