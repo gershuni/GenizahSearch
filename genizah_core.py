@@ -30,6 +30,7 @@ except ImportError:
     
 try:
     import tantivy
+    from tantivy import QueryParser
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
 
@@ -1137,7 +1138,10 @@ class LabEngine:
         processed_lines = 0
 
         for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
-            if not os.path.exists(fpath): continue
+            if not os.path.exists(fpath):
+                LAB_LOGGER.warning(f"File not found: {fpath}")
+                continue
+
             LAB_LOGGER.info("Indexing %s...", label)
 
             with open(fpath, 'r', encoding='utf-8') as f:
@@ -1163,9 +1167,10 @@ class LabEngine:
                             ))
                             total_docs += 1
 
+                        # Reset for new document
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = []
+                        ctext = [] # Explicit reset for new document
                     else:
                         ctext.append(line)
 
@@ -1310,14 +1315,17 @@ class LabEngine:
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            t_query = self.lab_index.parse_query(final_query, ["text_normalized"])
+            # Use QueryParser for better syntax support (including wildcards)
+            parser = QueryParser.for_index(self.lab_index, ["text_normalized"])
+            t_query = parser.parse_query(final_query)
             res_obj = self.lab_searcher.search(t_query, 2000)
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
             return []
 
         stage1_time = time.time() - start_time
-        LAB_LOGGER.info(f"Stage 1 found {len(res_obj.hits)} candidates in {stage1_time:.2f}s")
+        candidate_count = len(res_obj.hits)
+        LAB_LOGGER.info(f"Stage 1 found {candidate_count} candidates in {stage1_time:.2f}s")
 
         # Stage 2: Re-ranking
         candidates = []
@@ -1412,20 +1420,32 @@ class LabEngine:
         # Sort
         results.sort(key=lambda x: x['final_score'], reverse=True)
 
-        LAB_LOGGER.info(f"Stage 2 completed in {time.time() - start_time:.2f}s")
+        stage2_time = time.time() - start_time
+        LAB_LOGGER.info(f"Stage 2 completed in {stage2_time:.2f}s. Candidates: {candidate_count}, Results: {len(results)}")
 
-        # Format for GUI
+        # Format for GUI (Pure Local Metadata Lookup)
         gui_results = []
         for r in results:
-            meta = self.meta_mgr.get_display_data(r['header'], "Lab")
+            # Use local lookup only to prevent lag
+            sys_id, p_num = self.meta_mgr.parse_header_smart(r['header'])
+            shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+            meta = {
+                'shelfmark': shelf or f"ID: {sys_id}",
+                'title': title or "",
+                'img': p_num,
+                'source': "Lab",
+                'id': sys_id
+            }
+
             gui_results.append({
                 'display': meta,
                 'snippet': r['snippet_data'],
                 'full_text': r['content'],
                 'uid': r['uid'],
                 'raw_header': r['header'],
-                'raw_file_hl': r['content'], # Highlight not implemented yet for export
-                'highlight_pattern': None # Lab search highlights differently
+                'raw_file_hl': r['content'],
+                'highlight_pattern': None
             })
 
         return gui_results
@@ -1505,12 +1525,30 @@ class LabEngine:
             query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
         try:
-            q = self.lab_index.parse_query(query_str, ["text_normalized"])
-            # Limit to 2000 candidates
+            parser = QueryParser.for_index(self.lab_index, ["text_normalized"])
+            q = parser.parse_query(query_str)
             res = self.lab_searcher.search(q, 2000)
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
             return {'main': [], 'filtered': []}
+
+        # Retry with Fuzzy if 0 results
+        if res.count == 0:
+            LAB_LOGGER.info("Stage 1 yielded 0 results. Retrying with Fuzzy (~1)...")
+            try:
+                # Add fuzzy ~1 to each term
+                fuzzy_terms = []
+                for t in query_terms:
+                    # Don't add fuzzy to wildcard terms
+                    if '*' in t: fuzzy_terms.append(t)
+                    else: fuzzy_terms.append(f'"{t}"~1')
+
+                fuzzy_query = " OR ".join(fuzzy_terms)
+                q = parser.parse_query(fuzzy_query)
+                res = self.lab_searcher.search(q, 2000)
+                LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
+            except Exception as e:
+                LAB_LOGGER.error(f"Fuzzy retry failed: {e}")
 
         candidates = []
         for score, doc_addr in res.hits:
@@ -1672,44 +1710,52 @@ class LabEngine:
                 if best_chunk_score > 0 and best_window_idx != -1:
                     total_score += best_chunk_score
                     s, e = best_window_idx
-                    # Extract snippet from original doc content?
-                    # Need mapping from token index to char index in original text.
-                    # Approximate for now using token join.
-                    # Or just return indices.
-                    doc_matches.append((s, e, best_chunk_score))
+                    # Store match data including the source text chunk
+                    doc_matches.append((s, e, best_chunk_score, " ".join(chunk['tokens'])))
 
             if total_score > 0:
-                # Merge overlapping matches for display
-                # ...
-                # Construct result item
-
                 # Format snippet
-                # Just take the best match area
+                hl_snippet = "..."
+                source_contexts = []
+
                 if doc_matches:
                     doc_matches.sort(key=lambda x: x[2], reverse=True) # best score first
-                    s, e, _ = doc_matches[0]
 
-                    # Reconstruct snippet from tokens (approx)
-                    # Ideally we want original text.
-                    # Simple heuristic: find text roughly at token pos
-                    # text.split() is consistent-ish.
-                    # char_start ~ sum(len(t)+1 for t in tokens[:s])
+                    # Collect source contexts (up to 3 best)
+                    for m in doc_matches[:3]:
+                        if m[3] not in source_contexts:
+                            source_contexts.append(m[3])
+
+                    # Generate highlighted snippet for the BEST match
+                    s, e, _, _ = doc_matches[0]
 
                     orig_tokens = doc_text.split()
-                    snippet_tokens = orig_tokens[max(0, s-5) : min(len(orig_tokens), e+5)]
-                    snippet = " ".join(snippet_tokens)
-                    hl_snippet = f"... {snippet} ..."
-                else:
-                    hl_snippet = "..."
+
+                    # Expand context
+                    start = max(0, s - 10)
+                    end = min(len(orig_tokens), e + 10)
+
+                    # Build snippet with highlights
+                    out = []
+                    # We highlight tokens in the match window
+                    for i in range(start, end):
+                        t = orig_tokens[i]
+                        # If inside the match window, wrap in *...*
+                        if s <= i <= e:
+                            out.append(f"*{t}*")
+                        else:
+                            out.append(t)
+
+                    hl_snippet = "... " + " ".join(out) + " ..."
 
                 final_items.append({
                     'score': total_score,
                     'uid': cand['uid'],
                     'raw_header': cand['header'],
                     'src_lbl': 'Lab',
-                    'source_ctx': " ".join(chunk['tokens']),
+                    'source_ctx': " ... ".join(source_contexts),
                     'text': hl_snippet,
-                    'highlight_pattern': "" # No regex pattern for lab
+                    'highlight_pattern': ""
                 })
 
         final_items.sort(key=lambda x: x['score'], reverse=True)
