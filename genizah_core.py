@@ -1316,6 +1316,9 @@ class LabEngine:
     def _candidate_limit(self):
         return max(1, min(self.settings.candidate_limit, 10000))
 
+    def _stage1_limit(self):
+        return min(self._candidate_limit() * 2, 10000)
+
     def _prefix_term(self, term):
         prefix_len = max(1, min(self.settings.prefix_chars, 10))
         return term[:prefix_len] if len(term) > prefix_len else term
@@ -1460,20 +1463,26 @@ class LabEngine:
                 # Append * for prefix matching (Tantivy syntax)
                 variants = [v + "*" for v in variants]
 
-            expanded_terms.append((variants, boost))
+            expanded_terms.append((variants, boost, False))
             if self.settings.prefix_mode:
                 match_terms.append(self._prefix_term(term))
             else:
                 match_terms.append(set(variants))
 
+        if len(rare_query_terms) >= 2:
+            rare_clause = " AND ".join([f"\"{t}\"^12" for t in rare_query_terms])
+            expanded_terms.append(([rare_clause], 1, True))
+
         # Build Boolean Query
         query_parts = []
-        for group, boost in expanded_terms:
+        for group, boost, raw in expanded_terms:
             if not group:
                 continue
             clean_group = []
             for t in group:
-                if '*' in t:
+                if raw:
+                    term = t
+                elif '*' in t:
                     term = t
                 else:
                     term = f'"{t}"'
@@ -1488,7 +1497,7 @@ class LabEngine:
 
         try:
             t_query = self._parse_lab_query(final_query)
-            res_obj = self.lab_searcher.search(t_query, self._candidate_limit())
+            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
             return []
@@ -1614,8 +1623,13 @@ class LabEngine:
         # Sort
         results.sort(key=lambda x: x['final_score'], reverse=True)
 
-        stage2_time = time.time() - start_time
-        LAB_LOGGER.info(f"Stage 2 completed in {stage2_time:.2f}s. Candidates: {candidate_count}, Results: {len(results)}")
+        stage2_time = time.time() - start_time - stage1_time
+        LAB_LOGGER.info(
+            "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
+            stage2_time,
+            candidate_count,
+            len(results),
+        )
 
         # Format for GUI (Pure Local Metadata Lookup)
         gui_results = []
@@ -1708,7 +1722,7 @@ class LabEngine:
 
         return rare_terms
 
-    def lab_composition_search(self, full_text, progress_callback=None):
+    def lab_composition_search(self, full_text, progress_callback=None, chunk_size=None):
         """Execute Broad-to-Narrow Composition Search."""
         if not self.lab_searcher: return {'main': [], 'filtered': []}
 
@@ -1739,7 +1753,7 @@ class LabEngine:
         try:
             LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
             q = self._parse_lab_query(query_str)
-            res = self.lab_searcher.search(q, self._candidate_limit())
+            res = self.lab_searcher.search(q, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
             return {'main': [], 'filtered': []}
@@ -1758,7 +1772,7 @@ class LabEngine:
                 fuzzy_query = " OR ".join(fuzzy_terms)
                 LAB_LOGGER.info("Stage 1 Raw Query (Fuzzy): %s", fuzzy_query)
                 q = self._parse_lab_query(fuzzy_query)
-                res = self.lab_searcher.search(q, self._candidate_limit())
+                res = self.lab_searcher.search(q, self._stage1_limit())
                 LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
             except Exception as e:
                 LAB_LOGGER.error(f"Fuzzy retry failed: {e}")
@@ -1774,7 +1788,8 @@ class LabEngine:
                 'src': 'Lab' # Source label
             })
 
-        LAB_LOGGER.info(f"Found {len(candidates)} candidates.")
+        stage1_time = time.time() - start_time
+        LAB_LOGGER.info(f"Found {len(candidates)} candidates in {stage1_time:.2f}s.")
 
         # 2. Narrow Scan (Python)
         # Prepare Input Chunks
@@ -1782,7 +1797,9 @@ class LabEngine:
         input_tokens = norm_input.split()
 
         # Determine chunk size based on settings
-        if self.settings.use_order_tolerance:
+        if chunk_size is not None and chunk_size > 0:
+            chunk_size = int(chunk_size)
+        elif self.settings.use_order_tolerance:
             chunk_size = self.settings.order_n + self.settings.order_m
         else:
             chunk_size = self.settings.slop_window
@@ -1930,7 +1947,9 @@ class LabEngine:
                     total_score += best_chunk_score
                     s, e = best_window_idx
                     # Store match data including the source text chunk
-                    doc_matches.append((s, e, best_chunk_score, " ".join(chunk['tokens'])))
+                    chunk_text = " ".join(chunk['tokens'])
+                    chunk_highlight = " ".join([f"*{t}*" for t in chunk['tokens']])
+                    doc_matches.append((s, e, best_chunk_score, chunk_text, chunk_highlight))
 
             if total_score > 0:
                 # Format snippet
@@ -1942,8 +1961,8 @@ class LabEngine:
 
                     # Collect source contexts (up to 3 best)
                     for m in doc_matches[:3]:
-                        if m[3] not in source_contexts:
-                            source_contexts.append(m[3])
+                        if m[4] not in source_contexts:
+                            source_contexts.append(m[4])
 
                     # Generate highlighted snippet for the BEST match
                     s, e, _, _ = doc_matches[0]
@@ -1978,6 +1997,13 @@ class LabEngine:
                 })
 
         final_items.sort(key=lambda x: x['score'], reverse=True)
+        stage2_time = time.time() - start_time - stage1_time
+        LAB_LOGGER.info(
+            "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
+            stage2_time,
+            len(candidates),
+            len(final_items),
+        )
         return {'main': final_items, 'filtered': []}
 
 

@@ -119,16 +119,21 @@ class LabCompositionThread(QThread):
     scan_finished_signal = pyqtSignal(object) # Returns dict like standard comp
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, text):
+    def __init__(self, lab_engine, text, chunk_size=None):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
+        self.chunk_size = chunk_size
 
     def run(self):
         try:
             self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
             def cb(curr, total): self.progress_signal.emit(curr, total)
-            result = self.lab_engine.lab_composition_search(self.text, progress_callback=cb)
+            result = self.lab_engine.lab_composition_search(
+                self.text,
+                progress_callback=cb,
+                chunk_size=self.chunk_size,
+            )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
 

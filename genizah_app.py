@@ -2813,7 +2813,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_comp_ui()
                 return
-            self.comp_thread = LabCompositionThread(self.lab_engine, txt)
+            self.comp_thread = LabCompositionThread(self.lab_engine, txt, self.spin_chunk.value())
         else:
             self.comp_thread = CompositionThread(
                 self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
