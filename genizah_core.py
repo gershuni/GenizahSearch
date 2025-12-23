@@ -1881,6 +1881,7 @@ class LabEngine:
             doc_text = cand['content']
             doc_norm = self.lab_index_normalize(doc_text)
             doc_tokens = doc_norm.split()
+            orig_tokens = doc_text.split()
 
             # Map doc tokens for fast lookup?
             # Or scan doc for each chunk?
@@ -2001,10 +2002,24 @@ class LabEngine:
                 if best_chunk_score > 0 and best_window_idx != -1:
                     total_score += best_chunk_score
                     s, e = best_window_idx
-                    # Store match data including the source text chunk
-                    chunk_text = " ".join(chunk['tokens'])
-                    chunk_highlight = " ".join([f"*{t}*" for t in chunk['tokens']])
-                    doc_matches.append((s, e, best_chunk_score, chunk_text, chunk_highlight))
+                    context_start = max(0, s - 10)
+                    context_end = min(len(orig_tokens), e + 10)
+                    context_raw = []
+                    context_highlight = []
+                    for i in range(context_start, context_end):
+                        token = orig_tokens[i]
+                        if s <= i <= e:
+                            context_highlight.append(f"*{token}*")
+                        else:
+                            context_highlight.append(token)
+                        context_raw.append(token)
+                    doc_matches.append((
+                        s,
+                        e,
+                        best_chunk_score,
+                        " ".join(context_raw),
+                        " ".join(context_highlight),
+                    ))
 
             if total_score > 0:
                 # Format snippet
@@ -2021,8 +2036,6 @@ class LabEngine:
 
                     # Generate highlighted snippet for the BEST match
                     s, e, _, _, _ = doc_matches[0]
-
-                    orig_tokens = doc_text.split()
 
                     # Expand context
                     start = max(0, s - 10)
