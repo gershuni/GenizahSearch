@@ -1510,12 +1510,12 @@ class LabEngine:
         msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
         msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
         if len(unique_terms) >= 2:
-            final_query = f"{final_query}@{msm_terms}"
+            final_query = f"({final_query})@{msm_terms}"
         LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            t_query = self._parse_lab_query(final_query, conjunction_by_default=True)
+            t_query = self._parse_lab_query(final_query, conjunction_by_default=(joiner == " "))
             res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
@@ -1804,11 +1804,11 @@ class LabEngine:
         if len(query_terms) >= 2:
             msm_terms = max(1, math.ceil(len(query_terms) * 0.3))
             msm_query = " ".join([f"text_normalized:{t}" for t in query_terms])
-            query_str = f"{query_str} ({msm_query})@{msm_terms}"
+            query_str = f"({query_str}) ({msm_query})@{msm_terms}"
 
         try:
             LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
-            q = self._parse_lab_query(query_str)
+            q = self._parse_lab_query(query_str, conjunction_by_default=(joiner == " "))
             res = self.lab_searcher.search(q, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
@@ -1827,7 +1827,7 @@ class LabEngine:
 
                 fuzzy_query = " OR ".join(fuzzy_terms)
                 LAB_LOGGER.info("Stage 1 Raw Query (Fuzzy): %s", fuzzy_query)
-                q = self._parse_lab_query(fuzzy_query)
+                q = self._parse_lab_query(fuzzy_query, conjunction_by_default=(joiner == " "))
                 res = self.lab_searcher.search(q, self._stage1_limit())
                 LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
             except Exception as e:
