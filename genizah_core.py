@@ -49,6 +49,9 @@ class LabSettings:
         self.candidate_limit = 2000
         self.max_char_changes = 1
         self.prefix_chars = 1
+        self.minimum_match_pct = 30
+        self.use_standard_variants = True
+        self.use_custom_variants = True
 
         # New Settings
         self.use_slop_window = True
@@ -74,6 +77,9 @@ class LabSettings:
                     self.candidate_limit = data.get('candidate_limit', 2000)
                     self.max_char_changes = data.get('max_char_changes', 1)
                     self.prefix_chars = data.get('prefix_chars', 1)
+                    self.minimum_match_pct = data.get('minimum_match_pct', 30)
+                    self.use_standard_variants = data.get('use_standard_variants', True)
+                    self.use_custom_variants = data.get('use_custom_variants', True)
 
                     self.use_slop_window = data.get('use_slop_window', True)
                     self.use_rare_words = data.get('use_rare_words', True)
@@ -81,9 +87,10 @@ class LabSettings:
                     self.use_order_tolerance = data.get('use_order_tolerance', False)
                     self.order_n = data.get('order_n', 4)
                     self.order_m = data.get('order_m', 4)
-                    self.candidate_limit = max(1, min(self.candidate_limit, 10000))
+                    self.candidate_limit = max(500, min(self.candidate_limit, 50000))
                     self.max_char_changes = max(1, min(self.max_char_changes, 3))
                     self.prefix_chars = max(1, min(self.prefix_chars, 10))
+                    self.minimum_match_pct = max(1, min(self.minimum_match_pct, 100))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -98,9 +105,12 @@ class LabSettings:
                     'rare_word_bonus': self.rare_word_bonus,
                     'normalize_abbreviations': self.normalize_abbreviations,
                     'rare_threshold': self.rare_threshold,
-                    'candidate_limit': max(1, min(self.candidate_limit, 10000)),
+                    'candidate_limit': max(500, min(self.candidate_limit, 50000)),
                     'max_char_changes': max(1, min(self.max_char_changes, 3)),
                     'prefix_chars': max(1, min(self.prefix_chars, 10)),
+                    'minimum_match_pct': max(1, min(self.minimum_match_pct, 100)),
+                    'use_standard_variants': self.use_standard_variants,
+                    'use_custom_variants': self.use_custom_variants,
                     'use_slop_window': self.use_slop_window,
                     'use_rare_words': self.use_rare_words,
                     'prefix_mode': self.prefix_mode,
@@ -1150,6 +1160,7 @@ class LabEngine:
         processed_lines = 0
 
         for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
+            cid, chead, ctext = None, None, []
             if not os.path.exists(fpath):
                 LAB_LOGGER.warning(f"File not found: {fpath}")
                 continue
@@ -1283,28 +1294,17 @@ class LabEngine:
             return variants
 
         # Rank 1: Basic
-        basic = self.var_mgr.get_variants(term, 'variants', limit=budget)
-        for v in basic:
-            if add_variant(v):
-                return variants
-
-        # Rank 2: Custom
-        if term in self.settings.custom_variants:
-            for v in self.settings.custom_variants[term]:
+        if self.settings.use_standard_variants:
+            basic = self.var_mgr.get_variants(term, 'variants', limit=budget)
+            for v in basic:
                 if add_variant(v):
                     return variants
 
-        # Rank 3: Extended
-        extended = self.var_mgr.get_variants(term, 'variants_extended', limit=budget)
-        for v in extended:
-            if add_variant(v):
-                return variants
-
-        # Rank 4: Maximum
-        maximum = self.var_mgr.get_variants(term, 'variants_maximum', limit=budget)
-        for v in maximum:
-            if add_variant(v):
-                return variants
+        # Rank 2: Custom
+        if self.settings.use_custom_variants and term in self.settings.custom_variants:
+            for v in self.settings.custom_variants[term]:
+                if add_variant(v):
+                    return variants
 
         return variants
 
@@ -1314,10 +1314,10 @@ class LabEngine:
         return re.sub(r"[^\u0590-\u05FF\s\*\~]", "", text)
 
     def _candidate_limit(self):
-        return max(1, min(self.settings.candidate_limit, 10000))
+        return max(500, min(self.settings.candidate_limit, 50000))
 
     def _stage1_limit(self):
-        return min(self._candidate_limit() * 2, 10000)
+        return min(self._candidate_limit() * 2, 50000)
 
     def _prefix_term(self, term):
         prefix_len = max(1, min(self.settings.prefix_chars, 10))
@@ -1387,12 +1387,7 @@ class LabEngine:
     def _min_should_match(self, term_count):
         if term_count <= 1:
             return 1
-        if term_count <= 3:
-            ratio = 0.5
-        elif term_count <= 6:
-            ratio = 0.4
-        else:
-            ratio = 0.3
+        ratio = max(1, min(self.settings.minimum_match_pct, 100)) / 100
         return max(1, math.ceil(term_count * ratio))
 
     def _matches_min_terms(self, doc_text, terms):
@@ -1431,6 +1426,16 @@ class LabEngine:
             return []
 
         LAB_LOGGER.info(f"Stage 1 Search: {query_str}")
+        LAB_LOGGER.info(
+            "Recipe: Variants=%s Custom=%s MSM=%d%% Prefix=%s(%d) OrderTol=%s Slop=%d",
+            "ON" if self.settings.use_standard_variants else "OFF",
+            "ON" if self.settings.use_custom_variants else "OFF",
+            self.settings.minimum_match_pct,
+            "ON" if self.settings.prefix_mode else "OFF",
+            self.settings.prefix_chars,
+            "ON" if self.settings.use_order_tolerance else "OFF",
+            self.settings.slop_window,
+        )
         start_time = time.time()
 
         # 1. Prepare Query
@@ -1727,6 +1732,16 @@ class LabEngine:
         if not self.lab_searcher: return {'main': [], 'filtered': []}
 
         LAB_LOGGER.info("Starting Lab Composition Search...")
+        LAB_LOGGER.info(
+            "Recipe: Variants=%s Custom=%s MSM=%d%% Prefix=%s(%d) OrderTol=%s Slop=%d",
+            "ON" if self.settings.use_standard_variants else "OFF",
+            "ON" if self.settings.use_custom_variants else "OFF",
+            self.settings.minimum_match_pct,
+            "ON" if self.settings.prefix_mode else "OFF",
+            self.settings.prefix_chars,
+            "ON" if self.settings.use_order_tolerance else "OFF",
+            self.settings.slop_window,
+        )
         start_time = time.time()
 
         # 1. Broad Filter (Candidate Generation)
@@ -1965,7 +1980,7 @@ class LabEngine:
                             source_contexts.append(m[4])
 
                     # Generate highlighted snippet for the BEST match
-                    s, e, _, _ = doc_matches[0]
+                    s, e, _, _, _ = doc_matches[0]
 
                     orig_tokens = doc_text.split()
 

@@ -79,15 +79,29 @@ class LabSettingsDialog(QDialog):
         self.spin_rare_bonus.setValue(self.settings.rare_word_bonus)
 
         self.spin_candidate_limit = QSpinBox()
-        self.spin_candidate_limit.setRange(100, 10000)
-        self.spin_candidate_limit.setSingleStep(100)
+        self.spin_candidate_limit.setRange(500, 50000)
+        self.spin_candidate_limit.setSingleStep(500)
         self.spin_candidate_limit.setValue(self.settings.candidate_limit)
-        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 10000)."))
+        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
 
         self.spin_max_changes = QSpinBox()
         self.spin_max_changes.setRange(1, 3)
         self.spin_max_changes.setValue(self.settings.max_char_changes)
         self.spin_max_changes.setToolTip(tr("How many letters in a single word can be swapped at once. 1 = High precision/speed, 2-3 = Maximum Recall but very slow."))
+
+        self.spin_min_match = QSpinBox()
+        self.spin_min_match.setRange(1, 100)
+        self.spin_min_match.setValue(self.settings.minimum_match_pct)
+        self.spin_min_match.setSuffix("%")
+        self.spin_min_match.setToolTip(tr("Minimum percent of query terms required for Stage 1 candidates."))
+
+        self.chk_use_standard_variants = QCheckBox(tr("Use Standard Variants"))
+        self.chk_use_standard_variants.setChecked(self.settings.use_standard_variants)
+        self.chk_use_standard_variants.setToolTip(tr("Standard visual swaps like ד/ר."))
+
+        self.chk_use_custom_variants = QCheckBox(tr("Use Custom Variants"))
+        self.chk_use_custom_variants.setChecked(self.settings.use_custom_variants)
+        self.chk_use_custom_variants.setToolTip(tr("Use your custom char=char replacements."))
 
         self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
         self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
@@ -134,16 +148,20 @@ class LabSettingsDialog(QDialog):
         pg_layout.addWidget(self.spin_rare_bonus, 2, 1)
         pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 3, 0)
         pg_layout.addWidget(self.spin_candidate_limit, 3, 1)
-        pg_layout.addWidget(QLabel(tr("Max Changes per Word:")), 4, 0)
-        pg_layout.addWidget(self.spin_max_changes, 4, 1)
-        pg_layout.addWidget(self.chk_normalize, 5, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Minimum Match %:")), 4, 0)
+        pg_layout.addWidget(self.spin_min_match, 4, 1)
+        pg_layout.addWidget(QLabel(tr("Max Changes per Word:")), 5, 0)
+        pg_layout.addWidget(self.spin_max_changes, 5, 1)
+        pg_layout.addWidget(self.chk_use_standard_variants, 6, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_custom_variants, 7, 0, 1, 2)
+        pg_layout.addWidget(self.chk_normalize, 8, 0, 1, 2)
 
-        pg_layout.addWidget(self.chk_use_slop, 6, 0, 1, 2)
-        pg_layout.addWidget(self.chk_use_rare, 7, 0, 1, 2)
-        pg_layout.addWidget(self.chk_prefix, 8, 0, 1, 2)
-        pg_layout.addWidget(QLabel(tr("Prefix Length:")), 9, 0)
-        pg_layout.addWidget(self.spin_prefix_chars, 9, 1)
-        pg_layout.addWidget(self.grp_order, 10, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_slop, 9, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_rare, 10, 0, 1, 2)
+        pg_layout.addWidget(self.chk_prefix, 11, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Prefix Length:")), 12, 0)
+        pg_layout.addWidget(self.spin_prefix_chars, 12, 1)
+        pg_layout.addWidget(self.grp_order, 13, 0, 1, 2)
 
         param_group.setLayout(pg_layout)
         layout.addWidget(param_group)
@@ -193,7 +211,10 @@ class LabSettingsDialog(QDialog):
         self.settings.slop_window = self.spin_slop.value()
         self.settings.rare_word_bonus = self.spin_rare_bonus.value()
         self.settings.candidate_limit = self.spin_candidate_limit.value()
+        self.settings.minimum_match_pct = self.spin_min_match.value()
         self.settings.max_char_changes = self.spin_max_changes.value()
+        self.settings.use_standard_variants = self.chk_use_standard_variants.isChecked()
+        self.settings.use_custom_variants = self.chk_use_custom_variants.isChecked()
         self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
         self.settings.use_slop_window = self.chk_use_slop.isChecked()
         self.settings.use_rare_words = self.chk_use_rare.isChecked()
@@ -213,8 +234,11 @@ class LabSettingsDialog(QDialog):
             'custom_variants': self.txt_variants.toPlainText(),
             'rare_word_bonus': self.spin_rare_bonus.value(),
             'candidate_limit': self.spin_candidate_limit.value(),
+            'minimum_match_pct': self.spin_min_match.value(),
             'max_char_changes': self.spin_max_changes.value(),
-            'prefix_chars': self.spin_prefix_chars.value()
+            'prefix_chars': self.spin_prefix_chars.value(),
+            'use_standard_variants': self.chk_use_standard_variants.isChecked(),
+            'use_custom_variants': self.chk_use_custom_variants.isChecked()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
