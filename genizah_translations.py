@@ -223,6 +223,8 @@ TRANSLATIONS = {
     "Standard visual swaps like ד/ר.": "חילופים חזותיים סטנדרטיים כמו ד/ר.",
     "Use Custom Variants": "השתמש בווריאנטים מותאמים",
     "Use your custom char=char replacements.": "השתמש בהחלפות מותאמות אישית מסוג תו=תו.",
+    "Use Double Scan (Stage 2)": "סריקה כפולה (שלב 2)",
+    "Run Stage 2 re-ranking (slower but more precise).": "הרץ דירוג מחדש בשלב 2 (איטי יותר אך מדויק).",
     "Use Slop Window": "השתמש בחלון גמיש (Slop)",
     "Enable sliding window density check.": "הפעל בדיקת צפיפות בחלון גולש.",
     "Use Rare Word Filtering": "השתמש בסינון מילים נדירות",

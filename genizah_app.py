@@ -97,13 +97,13 @@ class LabSettingsDialog(QDialog):
         self.spin_min_match.setSuffix("%")
         self.spin_min_match.setToolTip(tr("Minimum percent of query terms required for Stage 1 candidates."))
 
-        self.chk_use_standard_variants = QCheckBox(tr("Use Standard Variants"))
-        self.chk_use_standard_variants.setChecked(self.settings.use_standard_variants)
-        self.chk_use_standard_variants.setToolTip(tr("Standard visual swaps like ד/ר."))
-
         self.chk_use_custom_variants = QCheckBox(tr("Use Custom Variants"))
         self.chk_use_custom_variants.setChecked(self.settings.use_custom_variants)
         self.chk_use_custom_variants.setToolTip(tr("Use your custom char=char replacements."))
+
+        self.chk_use_double_scan = QCheckBox(tr("Use Double Scan (Stage 2)"))
+        self.chk_use_double_scan.setChecked(self.settings.use_double_scan)
+        self.chk_use_double_scan.setToolTip(tr("Run Stage 2 re-ranking (slower but more precise)."))
 
         self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
         self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
@@ -146,13 +146,13 @@ class LabSettingsDialog(QDialog):
         pg_layout.addWidget(self.spin_budget, 0, 1)
         pg_layout.addWidget(QLabel(tr("Max Changes per Word:")), 1, 0)
         pg_layout.addWidget(self.spin_max_changes, 1, 1)
-        pg_layout.addWidget(self.chk_use_standard_variants, 2, 0, 1, 2)
-        pg_layout.addWidget(self.chk_use_custom_variants, 3, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_custom_variants, 2, 0, 1, 2)
 
-        pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 4, 0)
-        pg_layout.addWidget(self.spin_candidate_limit, 4, 1)
-        pg_layout.addWidget(QLabel(tr("Minimum Match %:")), 5, 0)
-        pg_layout.addWidget(self.spin_min_match, 5, 1)
+        pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 3, 0)
+        pg_layout.addWidget(self.spin_candidate_limit, 3, 1)
+        pg_layout.addWidget(QLabel(tr("Minimum Match %:")), 4, 0)
+        pg_layout.addWidget(self.spin_min_match, 4, 1)
+        pg_layout.addWidget(self.chk_use_double_scan, 5, 0, 1, 2)
         pg_layout.addWidget(self.chk_prefix, 6, 0, 1, 2)
         pg_layout.addWidget(QLabel(tr("Prefix Length:")), 7, 0)
         pg_layout.addWidget(self.spin_prefix_chars, 7, 1)
@@ -216,8 +216,9 @@ class LabSettingsDialog(QDialog):
         self.settings.candidate_limit = self.spin_candidate_limit.value()
         self.settings.minimum_match_pct = self.spin_min_match.value()
         self.settings.max_char_changes = self.spin_max_changes.value()
-        self.settings.use_standard_variants = self.chk_use_standard_variants.isChecked()
         self.settings.use_custom_variants = self.chk_use_custom_variants.isChecked()
+        self.settings.use_standard_variants = True
+        self.settings.use_double_scan = self.chk_use_double_scan.isChecked()
         self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
         self.settings.use_slop_window = self.chk_use_slop.isChecked()
         self.settings.use_rare_words = self.chk_use_rare.isChecked()
@@ -240,8 +241,8 @@ class LabSettingsDialog(QDialog):
             'minimum_match_pct': self.spin_min_match.value(),
             'max_char_changes': self.spin_max_changes.value(),
             'prefix_chars': self.spin_prefix_chars.value(),
-            'use_standard_variants': self.chk_use_standard_variants.isChecked(),
-            'use_custom_variants': self.chk_use_custom_variants.isChecked()
+            'use_custom_variants': self.chk_use_custom_variants.isChecked(),
+            'use_double_scan': self.chk_use_double_scan.isChecked()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
@@ -2224,6 +2225,7 @@ class GenizahGUI(QMainWindow):
                 'prefix_chars': self.lab_engine.settings.prefix_chars,
                 'use_standard_variants': self.lab_engine.settings.use_standard_variants,
                 'use_custom_variants': self.lab_engine.settings.use_custom_variants,
+                'use_double_scan': self.lab_engine.settings.use_double_scan,
             }, indent=2, ensure_ascii=False)
             return f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
         return ""
@@ -2288,7 +2290,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
                 return
-            self.search_thread = LabSearchThread(self.lab_engine, query, gap)
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap)
         else:
             self.search_thread = SearchThread(self.searcher, query, mode, gap)
 
@@ -2876,7 +2878,7 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_comp_ui()
                 return
-            self.comp_thread = LabCompositionThread(self.lab_engine, txt, self.spin_chunk.value())
+            self.comp_thread = LabCompositionThread(self.lab_engine, txt, mode, self.spin_chunk.value())
         else:
             self.comp_thread = CompositionThread(
                 self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
