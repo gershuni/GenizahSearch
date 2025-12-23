@@ -1469,23 +1469,23 @@ class LabEngine:
             if self._is_rare(term, total_docs):
                 rare_query_terms.add(term)
 
-                boost = self._get_term_boost(term, total_docs)
-                raw_group = False
-                if self.settings.prefix_mode:
-                    variants = [self._prefix_term(term)]
-                else:
-                    if mode == 'fuzzy':
-                        raw_group = True
-                        if len(term) < 3:
-                            variants = [f'"{term}"']
-                        elif len(term) < 5:
-                            variants = [f'"{term}"~1']
-                        else:
-                            variants = [f'"{term}"~2']
+            boost = self._get_term_boost(term, total_docs)
+            raw_group = False
+            if self.settings.prefix_mode:
+                variants = [self._prefix_term(term)]
+            else:
+                if mode == 'fuzzy':
+                    raw_group = True
+                    if len(term) < 3:
+                        variants = [f'"{term}"']
+                    elif len(term) < 5:
+                        variants = [f'"{term}"~1']
                     else:
-                        variants = self.budgeted_expansion(term, mode)
-                        # Normalize variants
-                        variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
+                        variants = [f'"{term}"~2']
+                else:
+                    variants = self.budgeted_expansion(term, mode)
+                    # Normalize variants
+                    variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
 
             if self.settings.prefix_mode:
                 # Append * for prefix matching (Tantivy syntax)
