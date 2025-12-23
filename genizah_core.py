@@ -1213,9 +1213,13 @@ class LabEngine:
     # --- Search Methods (Fixing Syntax Error) ---
 
     def _parse_lab_ngram_query(self, query_str):
-        # Safe implementation: Use the index's direct parse_query method
-        # which correctly handles string field names ("text_ngram").
-        return self.lab_index.parse_query(query_str, ["text_ngram"])
+        fields = ["text_ngram"]
+        try:
+            return self.lab_index.parse_query(query_str, fields)
+        except TypeError:
+            # Fallback: explicitly scope the query to the field
+            scoped_query = f"text_ngram:({query_str})"
+            return self.lab_index.parse_query(scoped_query, fields)
 
     def _candidate_limit(self):
         return max(500, min(self.settings.candidate_limit, 50000))
@@ -1259,7 +1263,7 @@ class LabEngine:
                     expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
 
         # Build Query
-        query_terms = [f'"{gram}"' for gram in sorted(expanded_grams) if gram]
+        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
         
         if not query_terms: return []
         
@@ -1369,7 +1373,7 @@ class LabEngine:
             if not grams_set: continue
 
             query_grams = sorted(list(grams_set))
-            clauses = [f'"{g}"' for g in query_grams]
+            clauses = [f'text_ngram:"{g}"' for g in query_grams]
             
             # CRITICAL FIX: Removed @min_match syntax
             raw_query = f"({' '.join(clauses)})"
