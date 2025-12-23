@@ -18,6 +18,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Mapping
 import itertools
 import json
+import bisect
 
 from genizah_translations import TRANSLATIONS
 
@@ -1643,31 +1644,18 @@ class LabEngine:
                             # User said "finding n words in the same order"
                             # We check LIS of chunk indices
                             q_indices = [m[1] for m in window]
-                            # Simple greedy LIS for speed
                             if not q_indices: continue
-                            lis = []
+
+                            # Calculate LIS length
+                            tails = []
                             for x in q_indices:
-                                if not lis or x > lis[-1]:
-                                    lis.append(x)
-                                else:
-                                    # Binary search replace? Or just simple check?
-                                    # For small N (4-8), simple is fine.
-                                    # Actually we need SUBSEQUENCE length.
-                                    # Standard LIS:
-                                    import bisect
-                                    from bisect import bisect_left
-                                    # ... implementation ...
-                                    # Wait, let's keep it simple.
-                                    # We need "at least N in order".
-                                    # Let's calculate LIS length properly.
-                                    tails = []
-                                    for x in q_indices:
-                                        idx = bisect_left(tails, x)
-                                        if idx < len(tails): tails[idx] = x
-                                        else: tails.append(x)
-                                    if len(tails) >= self.settings.order_n:
-                                        valid_hit = True
-                                        score = len(tails) * 2 # Boost ordered matches
+                                idx = bisect.bisect_left(tails, x)
+                                if idx < len(tails): tails[idx] = x
+                                else: tails.append(x)
+
+                            if len(tails) >= self.settings.order_n:
+                                valid_hit = True
+                                score = len(tails) * 2 # Boost ordered matches
 
                     else:
                         # Standard Density Logic (Default or Slop Window mode)
