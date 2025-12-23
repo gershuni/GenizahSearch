@@ -1135,6 +1135,7 @@ class LabEngine:
         # Store original header/shelfmark for result reconstruction
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
+        builder.add_text_field("source", stored=True)
         # Store full content just in case, though Stage 2 fetches from disk usually?
         # Plan says "Stage 2: Fetch full text". Usually we fetch from disk or main index.
         # But to be self-contained, let's store it or rely on unique_id.
@@ -1186,7 +1187,8 @@ class LabEngine:
                                 text_normalized=norm_content,
                                 content=original_content,
                                 full_header=str(chead),
-                                shelfmark=str(shelfmark)
+                                shelfmark=str(shelfmark),
+                                source=str(label)
                             ))
                             total_docs += 1
 
@@ -1210,7 +1212,8 @@ class LabEngine:
                         text_normalized=norm_content,
                         content=original_content,
                         full_header=str(chead),
-                        shelfmark=str(shelfmark)
+                        shelfmark=str(shelfmark),
+                        source=str(label)
                     ))
                     total_docs += 1
                 cid, chead, ctext = None, None, []
@@ -1524,11 +1527,16 @@ class LabEngine:
                 matched_terms = self._matches_min_terms(doc_text_norm, match_terms)
                 if matched_terms < min_should_match:
                     continue
+            try:
+                source = doc['source'][0]
+            except Exception:
+                source = "Unknown"
             candidates.append({
                 'bm25': score,
                 'content': doc['content'][0],
                 'header': doc['full_header'][0],
                 'shelfmark': doc['shelfmark'][0],
+                'source': source,
                 'uid': doc['unique_id'][0]
             })
 
@@ -1642,16 +1650,24 @@ class LabEngine:
 
         # Format for GUI (Pure Local Metadata Lookup)
         gui_results = []
+        seen_sys_ids = {}
         for r in results:
             # Use local lookup only to prevent lag
             sys_id, p_num = self.meta_mgr.parse_header_smart(r['header'])
+            if sys_id in seen_sys_ids:
+                existing = seen_sys_ids[sys_id]
+                if existing == "V0.8":
+                    continue
+                if r['source'] != "V0.8":
+                    continue
+            seen_sys_ids[sys_id] = r['source']
             shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
 
             meta = {
                 'shelfmark': shelf or f"ID: {sys_id}",
                 'title': title or "",
                 'img': p_num,
-                'source': "Lab",
+                'source': r['source'],
                 'id': sys_id
             }
 
@@ -1815,12 +1831,16 @@ class LabEngine:
         candidates = []
         for score, doc_addr in res.hits:
             doc = self.lab_searcher.doc(doc_addr)
+            try:
+                source = doc['source'][0]
+            except Exception:
+                source = "Unknown"
             candidates.append({
                 'content': doc['content'][0],
                 'header': doc['full_header'][0],
                 'shelfmark': doc['shelfmark'][0],
                 'uid': doc['unique_id'][0],
-                'src': 'Lab' # Source label
+                'src': source
             })
 
         stage1_time = time.time() - start_time
@@ -2025,21 +2045,34 @@ class LabEngine:
                     'score': total_score,
                     'uid': cand['uid'],
                     'raw_header': cand['header'],
-                    'src_lbl': 'Lab',
+                    'src_lbl': cand.get('src', 'Unknown'),
                     'source_ctx': " ... ".join(source_contexts),
                     'text': hl_snippet,
                     'highlight_pattern': ""
                 })
 
         final_items.sort(key=lambda x: x['score'], reverse=True)
+        deduped = []
+        seen_sys_ids = {}
+        for item in final_items:
+            sys_id, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
+            if sys_id in seen_sys_ids:
+                existing = seen_sys_ids[sys_id]
+                if existing == "V0.8":
+                    continue
+                if item['src_lbl'] != "V0.8":
+                    continue
+            seen_sys_ids[sys_id] = item['src_lbl']
+            deduped.append(item)
+
         stage2_time = time.time() - start_time - stage1_time
         LAB_LOGGER.info(
             "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
             stage2_time,
             len(candidates),
-            len(final_items),
+            len(deduped),
         )
-        return {'main': final_items, 'filtered': []}
+        return {'main': deduped, 'filtered': []}
 
 
 # ==============================================================================
