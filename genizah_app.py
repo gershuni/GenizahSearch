@@ -78,6 +78,12 @@ class LabSettingsDialog(QDialog):
         self.spin_rare_bonus.setRange(0.0, 5.0); self.spin_rare_bonus.setSingleStep(0.1)
         self.spin_rare_bonus.setValue(self.settings.rare_word_bonus)
 
+        self.spin_candidate_limit = QSpinBox()
+        self.spin_candidate_limit.setRange(100, 10000)
+        self.spin_candidate_limit.setSingleStep(100)
+        self.spin_candidate_limit.setValue(self.settings.candidate_limit)
+        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 10000)."))
+
         self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
         self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
 
@@ -116,12 +122,14 @@ class LabSettingsDialog(QDialog):
         pg_layout.addWidget(self.spin_slop, 1, 1)
         pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 2, 0)
         pg_layout.addWidget(self.spin_rare_bonus, 2, 1)
-        pg_layout.addWidget(self.chk_normalize, 3, 0, 1, 2)
+        pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 3, 0)
+        pg_layout.addWidget(self.spin_candidate_limit, 3, 1)
+        pg_layout.addWidget(self.chk_normalize, 4, 0, 1, 2)
 
-        pg_layout.addWidget(self.chk_use_slop, 4, 0, 1, 2)
-        pg_layout.addWidget(self.chk_use_rare, 5, 0, 1, 2)
-        pg_layout.addWidget(self.chk_prefix, 6, 0, 1, 2)
-        pg_layout.addWidget(self.grp_order, 7, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_slop, 5, 0, 1, 2)
+        pg_layout.addWidget(self.chk_use_rare, 6, 0, 1, 2)
+        pg_layout.addWidget(self.chk_prefix, 7, 0, 1, 2)
+        pg_layout.addWidget(self.grp_order, 8, 0, 1, 2)
 
         param_group.setLayout(pg_layout)
         layout.addWidget(param_group)
@@ -170,6 +178,7 @@ class LabSettingsDialog(QDialog):
         self.settings.expansion_budget = self.spin_budget.value()
         self.settings.slop_window = self.spin_slop.value()
         self.settings.rare_word_bonus = self.spin_rare_bonus.value()
+        self.settings.candidate_limit = self.spin_candidate_limit.value()
         self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
         self.settings.use_slop_window = self.chk_use_slop.isChecked()
         self.settings.use_rare_words = self.chk_use_rare.isChecked()
@@ -186,7 +195,8 @@ class LabSettingsDialog(QDialog):
             'expansion_budget': self.spin_budget.value(),
             'slop_window': self.spin_slop.value(),
             'custom_variants': self.txt_variants.toPlainText(),
-            'rare_word_bonus': self.spin_rare_bonus.value()
+            'rare_word_bonus': self.spin_rare_bonus.value(),
+            'candidate_limit': self.spin_candidate_limit.value()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))

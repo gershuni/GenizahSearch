@@ -19,6 +19,7 @@ from typing import Mapping
 import itertools
 import json
 import bisect
+import math
 
 from genizah_translations import TRANSLATIONS
 
@@ -45,6 +46,7 @@ class LabSettings:
         self.rare_word_bonus = 0.5
         self.normalize_abbreviations = True
         self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
+        self.candidate_limit = 2000
 
         # New Settings
         self.use_slop_window = True
@@ -67,6 +69,7 @@ class LabSettings:
                     self.rare_word_bonus = data.get('rare_word_bonus', 0.5)
                     self.normalize_abbreviations = data.get('normalize_abbreviations', True)
                     self.rare_threshold = data.get('rare_threshold', 0.001)
+                    self.candidate_limit = data.get('candidate_limit', 2000)
 
                     self.use_slop_window = data.get('use_slop_window', True)
                     self.use_rare_words = data.get('use_rare_words', True)
@@ -74,6 +77,7 @@ class LabSettings:
                     self.use_order_tolerance = data.get('use_order_tolerance', False)
                     self.order_n = data.get('order_n', 4)
                     self.order_m = data.get('order_m', 4)
+                    self.candidate_limit = max(1, min(self.candidate_limit, 10000))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -88,6 +92,7 @@ class LabSettings:
                     'rare_word_bonus': self.rare_word_bonus,
                     'normalize_abbreviations': self.normalize_abbreviations,
                     'rare_threshold': self.rare_threshold,
+                    'candidate_limit': max(1, min(self.candidate_limit, 10000)),
                     'use_slop_window': self.use_slop_window,
                     'use_rare_words': self.use_rare_words,
                     'prefix_mode': self.prefix_mode,
@@ -1087,7 +1092,7 @@ class LabEngine:
         # Remove specific punctuation chars that are common in these texts
         # Quotes (single/double), dashes, dots, etc.
         # We keep whitespace to separate words.
-        return re.sub(r"[^\w\u0590-\u05FF\s]", "", text).replace('_', ' ').lower()
+        return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
 
     def rebuild_lab_index(self, progress_callback=None):
         """Build the isolated Lab Index with normalized text."""
@@ -1189,6 +1194,7 @@ class LabEngine:
                         shelfmark=str(shelfmark)
                     ))
                     total_docs += 1
+                cid, chead, ctext = None, None, []
 
         writer.commit()
         LAB_LOGGER.info("Lab Index rebuild complete. %d docs.", total_docs)
@@ -1249,7 +1255,54 @@ class LabEngine:
     @staticmethod
     def lab_normalize(text):
         # Strips non-Hebrew characters but keeps spaces
-        return re.sub(r"[^\u0590-\u05FF\s]", "", text)
+        return re.sub(r"[^\u0590-\u05FF\s\*\~]", "", text)
+
+    def _candidate_limit(self):
+        return max(1, min(self.settings.candidate_limit, 10000))
+
+    def _parse_lab_query(self, query_str):
+        parser_cls = getattr(tantivy, "QueryParser", None)
+        if parser_cls:
+            parser = parser_cls.for_index(self.lab_index, ["text_normalized"])
+            return parser.parse_query(query_str)
+        return self.lab_index.parse_query(query_str, ["text_normalized"])
+
+    def _get_term_boost(self, term, total_docs):
+        df = self._get_doc_freq(term)
+        if total_docs == 0:
+            return 1
+        ratio = df / total_docs
+        if ratio <= self.settings.rare_threshold:
+            return 10
+        if ratio <= self.settings.rare_threshold * 5:
+            return 6
+        if ratio <= self.settings.rare_threshold * 20:
+            return 3
+        return 1
+
+    def _min_should_match(self, term_count):
+        if term_count <= 1:
+            return 1
+        if term_count <= 3:
+            ratio = 0.5
+        elif term_count <= 6:
+            ratio = 0.4
+        else:
+            ratio = 0.3
+        return max(1, math.ceil(term_count * ratio))
+
+    def _matches_min_terms(self, doc_text, terms):
+        if not terms:
+            return 0
+        if self.settings.prefix_mode:
+            doc_tokens = doc_text.split()
+            matched = 0
+            for term in terms:
+                if any(token.startswith(term) for token in doc_tokens):
+                    matched += 1
+            return matched
+        doc_tokens = set(doc_text.split())
+        return sum(1 for term in terms if term in doc_tokens)
 
     def soft_match(self, t1, t2):
         if t1.lower() == t2.lower(): return True
@@ -1280,6 +1333,8 @@ class LabEngine:
         norm_query_str = self.lab_index_normalize(query_str)
         terms = norm_query_str.split()
         if not terms: return []
+        unique_terms = list(dict.fromkeys(terms))
+        min_should_match = self._min_should_match(len(unique_terms))
 
         # Budgeted Expansion
         expanded_terms = []
@@ -1290,6 +1345,7 @@ class LabEngine:
             if self._is_rare(term, total_docs):
                 rare_query_terms.add(term)
 
+            boost = self._get_term_boost(term, total_docs)
             variants = self.budgeted_expansion(term)
             # Normalize variants
             variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
@@ -1298,25 +1354,31 @@ class LabEngine:
                 # Append * for prefix matching (Tantivy syntax)
                 variants = [v + "*" for v in variants]
 
-            expanded_terms.append(variants)
+            expanded_terms.append((variants, boost))
 
         # Build Boolean Query
         query_parts = []
-        for group in expanded_terms:
-            if not group: continue
+        for group, boost in expanded_terms:
+            if not group:
+                continue
             clean_group = []
             for t in group:
-                if '*' in t: clean_group.append(t) # No quotes for wildcards
-                else: clean_group.append(f'"{t}"')
+                if '*' in t:
+                    term = t
+                else:
+                    term = f'"{t}"'
+                if boost > 1:
+                    term = f"{term}^{boost}"
+                clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
         final_query = " OR ".join(query_parts)
+        LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
 
         try:
-            # Use index.parse_query directly
-            t_query = self.lab_index.parse_query(final_query, ["text_normalized"])
-            res_obj = self.lab_searcher.search(t_query, 2000)
+            t_query = self._parse_lab_query(final_query)
+            res_obj = self.lab_searcher.search(t_query, self._candidate_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Stage 1 failed: {e}")
             return []
@@ -1329,6 +1391,11 @@ class LabEngine:
         candidates = []
         for score, doc_addr in res_obj.hits:
             doc = self.lab_searcher.doc(doc_addr)
+            doc_text_norm = doc['text_normalized'][0]
+            if len(unique_terms) > 1:
+                matched_terms = self._matches_min_terms(doc_text_norm, unique_terms)
+                if matched_terms < min_should_match:
+                    continue
             candidates.append({
                 'bm25': score,
                 'content': doc['content'][0],
@@ -1465,7 +1532,7 @@ class LabEngine:
         for i in range(start, end):
             t = tokens[i]
             if i in match_indices:
-                out.append(f"<b style='color:red;'>{t}</b>")
+                out.append(f"*{t}*")
             else:
                 out.append(t)
 
@@ -1523,8 +1590,9 @@ class LabEngine:
             query_str = " OR ".join([f'"{t}"' for t in query_terms])
 
         try:
-            q = self.lab_index.parse_query(query_str, ["text_normalized"])
-            res = self.lab_searcher.search(q, 2000)
+            LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
+            q = self._parse_lab_query(query_str)
+            res = self.lab_searcher.search(q, self._candidate_limit())
         except Exception as e:
             LAB_LOGGER.error(f"Candidate generation failed: {e}")
             return {'main': [], 'filtered': []}
@@ -1541,8 +1609,9 @@ class LabEngine:
                     else: fuzzy_terms.append(f'"{t}"~1')
 
                 fuzzy_query = " OR ".join(fuzzy_terms)
-                q = self.lab_index.parse_query(fuzzy_query, ["text_normalized"])
-                res = self.lab_searcher.search(q, 2000)
+                LAB_LOGGER.info("Stage 1 Raw Query (Fuzzy): %s", fuzzy_query)
+                q = self._parse_lab_query(fuzzy_query)
+                res = self.lab_searcher.search(q, self._candidate_limit())
                 LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
             except Exception as e:
                 LAB_LOGGER.error(f"Fuzzy retry failed: {e}")
