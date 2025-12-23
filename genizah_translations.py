@@ -209,6 +209,21 @@ TRANSLATIONS = {
     "Done": "בוצע",
     "Indexing complete. Documents indexed: {}": "בניית האינדקס הושלמה. מסמכים שמופתחו: {}",
 
+    # --- Lab Settings ---
+    "Max number of variants to search per term.": "מספר וריאנטים מקסימלי לחיפוש לכל מילה.",
+    "Size of the window to check for matches.": "גודל החלון לבדיקת התאמות.",
+    "Use Slop Window": "השתמש בחלון גמיש (Slop)",
+    "Enable sliding window density check.": "הפעל בדיקת צפיפות בחלון גולש.",
+    "Use Rare Word Filtering": "השתמש בסינון מילים נדירות",
+    "Boost score for rare words found in document.": "העלה ציון עבור מילים נדירות שנמצאו במסמך.",
+    "Prefix Mode (Begins with...)": "מצב קידומת (מתחיל ב...)",
+    "Search for words starting with the query terms (e.g. 'lam' matches 'lama').": "חפש מילים המתחילות במונחי השאילתא (למשל 'למ' ימצא 'למה').",
+    "Order Tolerance": "סדר מילים",
+    "Require N words to appear in the same order within a window of N+M words.": "דרוש הופעה של N מילים באותו סדר בתוך חלון של N+M מילים.",
+    "Find": "מצא",
+    "words in order out of": "מילים לפי סדר מתוך",
+    "extra words (Window N+M)": "מילים נוספות (חלון N+M)",
+
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
     "Result {} of {}": "תוצאה {} מתוך {}", 
