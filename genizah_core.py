@@ -1073,6 +1073,10 @@ class LabEngine:
                 LAB_LOGGER.error("Failed to load Lab Index: %s", e)
         return False
 
+    def _close_index(self):
+        self.lab_searcher = None
+        self.lab_index = None
+
     @staticmethod
     def _schema_has_field(schema, field_name):
         try:
@@ -1102,6 +1106,7 @@ class LabEngine:
     def rebuild_lab_index(self, progress_callback=None):
         """Build the isolated Lab Index with normalized text."""
         LAB_LOGGER.info("Starting Lab Index rebuild...")
+        self._close_index()
 
         # Validation
         if not os.path.exists(Config.FILE_V8):
