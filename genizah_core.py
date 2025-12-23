@@ -1213,10 +1213,8 @@ class LabEngine:
     # --- Search Methods (Fixing Syntax Error) ---
 
     def _parse_lab_ngram_query(self, query_str):
-        parser_cls = getattr(tantivy, "QueryParser", None)
-        if parser_cls:
-            parser = parser_cls.for_index(self.lab_index, ["text_ngram"])
-            return parser.parse_query(query_str)
+        # Safe implementation: Use the index's direct parse_query method
+        # which correctly handles string field names ("text_ngram").
         return self.lab_index.parse_query(query_str, ["text_ngram"])
 
     def _candidate_limit(self):
