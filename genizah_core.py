@@ -1706,378 +1706,115 @@ class LabEngine:
         return rare_terms
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
-        """Execute Broad-to-Narrow Composition Search."""
-        if not self.lab_searcher: return {'main': [], 'filtered': []}
+        """
+        Execute Composition Search using N-Grams strategy.
+        Splits source text into chunks, converts to N-Grams, and searches using Minimum Should Match.
+        """
+        if not self.lab_searcher or self.lab_index_needs_rebuild:
+            LAB_LOGGER.warning("Lab Index not ready.")
+            return {'main': [], 'filtered': []}
 
-        LAB_LOGGER.info("Starting Lab Composition Search...")
-        LAB_LOGGER.info("Recipe: Mode=%s", mode)
+        LAB_LOGGER.info("Starting N-Gram Composition Search...")
         start_time = time.time()
 
-        use_order_tolerance = False
-        slop_window = 15
-        prefix_mode = False
-        order_n = 4
-        order_m = 4
+        # 1. Prepare Input
+        norm_text = self.lab_normalize(full_text)
+        tokens = norm_text.split()
 
-        # 1. Broad Filter (Candidate Generation)
-        total_docs = self.lab_searcher.num_docs
-        rare_terms = self._extract_rare_terms(full_text, total_docs)
+        c_size = int(chunk_size) if chunk_size else 7
+        step = max(1, c_size // 2)
 
-        if not rare_terms:
-            LAB_LOGGER.warning("No rare terms found for anchoring.")
-            # Fallback? Or just return nothing?
-            # User instruction was to rely on rare terms.
-            return {'main': [], 'filtered': []}
-
-        LAB_LOGGER.info(f"Using {len(rare_terms)} rare terms for candidate generation.")
-
-        # Build Query
-        # Using a huge OR might be slow if too many terms. Cap it?
-        # Let's cap at 150 terms
-        query_terms = rare_terms[:150]
-        expanded_terms = []
-        for term in query_terms:
-            boost = self._get_term_boost(term, total_docs)
-            raw_group = False
-            if prefix_mode:
-                variants = [self._prefix_term(term)]
-            else:
-                if mode == 'fuzzy':
-                    raw_group = True
-                    if len(term) < 3:
-                        variants = [f'"{term}"']
-                    elif len(term) < 5:
-                        variants = [f'"{term}"~1']
-                    else:
-                        variants = [f'"{term}"~2']
-                else:
-                    variants = self.budgeted_expansion(term, mode)
-                    variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
-
-            if prefix_mode:
-                variants = [v + "*" for v in variants]
-
-            expanded_terms.append((variants, boost, raw_group))
-
-        query_parts = []
-        for group, boost, raw in expanded_terms:
-            if not group:
-                continue
-            clean_group = []
-            for t in group:
-                if raw:
-                    term = t
-                elif '*' in t:
-                    term = t
-                else:
-                    term = f'"{t}"'
-                if boost > 1:
-                    term = f"{term}^{boost}"
-                clean_group.append(term)
-            query_parts.append(f"({' OR '.join(clean_group)})")
-
-        joiner = " OR "
-        query_str = joiner.join(query_parts)
-        msm_terms = None
-        if len(query_terms) >= 2:
-            msm_pct = 0.33
-            msm_terms = max(1, math.ceil(len(query_terms) * msm_pct))
-            query_str = f"({query_str})@{msm_terms}"
-
-        try:
-            LAB_LOGGER.info("Stage 1 Raw Query: %s", query_str)
-            try:
-                q = self._parse_lab_query(query_str, conjunction_by_default=(joiner == " "))
-            except Exception as parse_err:
-                if msm_terms and f"@{msm_terms}" in query_str:
-                    fallback_query = query_str.replace(f"@{msm_terms}", "")
-                    LAB_LOGGER.warning("Stage 1 MSM syntax failed, retrying without @: %s", parse_err)
-                    LAB_LOGGER.info("Stage 1 Raw Query (Fallback): %s", fallback_query)
-                    q = self._parse_lab_query(fallback_query, conjunction_by_default=(joiner == " "))
-                else:
-                    raise
-            res = self.lab_searcher.search(q, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error(f"Candidate generation failed: {e}")
-            return {'main': [], 'filtered': []}
-
-        # Retry with Fuzzy if 0 results
-        if res.count == 0:
-            LAB_LOGGER.info("Stage 1 yielded 0 results. Retrying with Fuzzy (~1)...")
-            try:
-                # Add fuzzy ~1 to each term
-                fuzzy_terms = []
-                for t in query_terms:
-                    # Don't add fuzzy to wildcard terms
-                    if '*' in t: fuzzy_terms.append(t)
-                    else: fuzzy_terms.append(f'"{t}"~1')
-
-                fuzzy_query = " OR ".join(fuzzy_terms)
-                LAB_LOGGER.info("Stage 1 Raw Query (Fuzzy): %s", fuzzy_query)
-                q = self._parse_lab_query(fuzzy_query, conjunction_by_default=(joiner == " "))
-                res = self.lab_searcher.search(q, self._stage1_limit())
-                LAB_LOGGER.info(f"Fuzzy retry found {res.count} candidates.")
-            except Exception as e:
-                LAB_LOGGER.error(f"Fuzzy retry failed: {e}")
-
-        candidates = []
-        for score, doc_addr in res.hits:
-            doc = self.lab_searcher.doc(doc_addr)
-            try:
-                source = doc['source'][0]
-            except Exception:
-                source = "Unknown"
-            candidates.append({
-                'content': doc['content'][0],
-                'header': doc['full_header'][0],
-                'shelfmark': doc['shelfmark'][0],
-                'uid': doc['unique_id'][0],
-                'src': source
-            })
-
-        stage1_time = time.time() - start_time
-        LAB_LOGGER.info(f"Found {len(candidates)} candidates in {stage1_time:.2f}s.")
-
-        # 2. Narrow Scan (Python)
-        # Prepare Input Chunks
-        norm_input = self.lab_index_normalize(full_text)
-        input_tokens = norm_input.split()
-
-        # Determine chunk size based on settings
-        if chunk_size is not None and chunk_size > 0:
-            chunk_size = int(chunk_size)
-        elif use_order_tolerance:
-            chunk_size = order_n + order_m
+        if len(tokens) < c_size:
+            chunks = [" ".join(tokens)]
         else:
-            chunk_size = slop_window
+            chunks = [
+                " ".join(tokens[i : i + c_size])
+                for i in range(0, len(tokens) - c_size + 1, step)
+            ]
 
-        # "Slide Input Chunks over Candidate Doc"
-        step = max(1, chunk_size // 2)
+        LAB_LOGGER.info("Generated %d chunks (Size: %d, Step: %d)", len(chunks), c_size, step)
 
-        input_chunks = []
-        for i in range(0, len(input_tokens), step):
-            chunk = input_tokens[i : i + chunk_size]
-            if len(chunk) < 2: continue # Skip tiny chunks
-            input_chunks.append({
-                'tokens': chunk,
-                'start_idx': i,
-                'end_idx': i + len(chunk)
+        candidates = {}
+
+        # 2. Search Loop
+        for i, chunk_str in enumerate(chunks):
+            if progress_callback and i % 5 == 0:
+                progress_callback(i, len(chunks))
+
+            base_ngrams = self.generate_ngrams(chunk_str, self.settings.ngram_size)
+            base_gram_list = base_ngrams.split()
+            grams_set = set(base_gram_list)
+
+            if self.settings.ignore_matres:
+                skeleton = chunk_str.replace("ו", "").replace("י", "")
+                grams_set.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
+
+            if self.settings.phonetic_expansion:
+                for word in chunk_str.split():
+                    for variant in self._phonetic_variants(word):
+                        grams_set.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
+
+            if not grams_set:
+                continue
+
+            base_gram_count = len(base_gram_list)
+            min_match = self._ngram_min_should_match(base_gram_count)
+            query_grams = sorted(g for g in grams_set if g)
+            min_match = min(min_match, len(query_grams))
+
+            clauses = [f'text_ngram:"{g}"' for g in query_grams]
+            raw_query = f"({' OR '.join(clauses)})@{min_match}"
+
+            try:
+                t_query = self._parse_lab_ngram_query(raw_query)
+                res = self.lab_searcher.search(t_query, 50)
+            except Exception:
+                continue
+
+            for score, doc_addr in res.hits:
+                doc = self.lab_searcher.doc(doc_addr)
+                uid = doc['unique_id'][0]
+
+                if uid not in candidates:
+                    candidates[uid] = {
+                        'uid': uid,
+                        'score': 0,
+                        'hits': 0,
+                        'content': doc['content'][0],
+                        'header': doc['full_header'][0],
+                        'src': doc['source'][0] if 'source' in doc else "Unknown"
+                    }
+
+                candidates[uid]['score'] += score
+                candidates[uid]['hits'] += 1
+
+        results = list(candidates.values())
+        results.sort(key=lambda x: x['score'], reverse=True)
+        results = results[:self.settings.candidate_limit]
+
+        formatted_results = []
+        full_source_grams = self.generate_ngrams(
+            full_text[:1000],
+            self.settings.ngram_size,
+        ).split()
+        for cand in results:
+            hl_text = self._highlight_ngram_in_text(cand['content'], full_source_grams)
+            snippet_html = self._generate_ngram_snippet(cand['content'], full_source_grams)
+
+            formatted_results.append({
+                'uid': cand['uid'],
+                'score': cand['score'],
+                'raw_header': cand['header'],
+                'src_lbl': cand['src'],
+                'source_ctx': "Composition Match",
+                'text': self._snippet_html(snippet_html),
+                'raw_file_hl': hl_text
             })
 
-        final_items = []
+        elapsed = time.time() - start_time
+        LAB_LOGGER.info("Composition search done. %d results in %.2fs", len(formatted_results), elapsed)
 
-        for idx, cand in enumerate(candidates):
-            if progress_callback and idx % 10 == 0:
-                progress_callback(idx, len(candidates))
-
-            doc_text = cand['content']
-            doc_norm = self.lab_index_normalize(doc_text)
-            doc_tokens = doc_norm.split()
-            orig_tokens = doc_text.split()
-
-            # Map doc tokens for fast lookup?
-            # Or scan doc for each chunk?
-            # Since we have "soft_match", exact map is hard.
-            # But we can assume soft_match is mostly equality or known variants.
-            # Optimization:
-            #   Scan doc once, find positions of all input tokens (roughly).
-            #   Then check density.
-
-            # Simplified Narrow Scan:
-            # For each input chunk, verify if a "soft match" cluster exists in doc.
-
-            doc_matches = [] # (start, end, score, snippet)
-            total_score = 0
-
-            # Pre-filter: Check if chunk terms exist in doc at all to skip expensive scan
-            doc_token_set = set(doc_tokens)
-
-            for chunk in input_chunks:
-                # Quick check: do at least 50% of chunk tokens exist in doc_set? (normalized)
-                if prefix_mode:
-                    present = sum(
-                        1 for t in chunk['tokens']
-                        if any(token.startswith(self._prefix_term(t)) for token in doc_token_set)
-                    )
-                else:
-                    present = sum(1 for t in chunk['tokens'] if t in doc_token_set)
-                if present < len(chunk['tokens']) * 0.4: continue
-
-                # Detailed Window Scan on Doc
-                # Slide window over doc tokens
-                # Window size = len(chunk) + padding?
-                # User said: "Sliding Window... soft match... density"
-
-                best_chunk_score = 0
-                best_window_idx = -1
-
-                # We scan the doc for this chunk
-                # Optimized: Find all positions of the first few rare tokens of the chunk?
-                # Brute force sliding window over doc is O(N*M) where N=doc_len, M=chunk_len.
-                # doc_len ~ 500, chunk_len ~ 15. 500*15 = 7500 ops.
-                # If 100 chunks * 2000 docs * 7500 = 1.5 Billion ops. Too slow.
-
-                # Better approach:
-                # Find all token matches first.
-                # match_positions = list of (doc_token_index, input_token_index_in_chunk)
-
-                match_positions = []
-                for dt_i, dt in enumerate(doc_tokens):
-                    for ct_i, ct in enumerate(chunk['tokens']):
-                        if self._term_matches(ct, dt):
-                            match_positions.append((dt_i, ct_i))
-
-                if not match_positions: continue
-
-                # Find clusters in match_positions
-                # A cluster is a set of matches where doc_indices are close and chunk_indices are consistent
-                # Use a sliding window over match_positions?
-
-                # Sort by doc_index
-                match_positions.sort(key=lambda x: x[0])
-
-                # Sliding window of size 'chunk_size' (in doc terms)
-                left = 0
-                for right in range(len(match_positions)):
-                    curr = match_positions[right]
-
-                    # Shrink: Window size is chunk length (N+M)
-                    # Use a slightly relaxed window for Slop (1.5x) but strict for Order Tol?
-                    # Let's keep 1.5x as "Slop" factor generally, unless strict mode requested.
-                    max_window_len = len(chunk['tokens']) if use_order_tolerance else (len(chunk['tokens']) * 1.5)
-
-                    while curr[0] - match_positions[left][0] > max_window_len:
-                        left += 1
-
-                    window = match_positions[left : right+1]
-
-                    # Score this window
-                    covered_chunk_indices = set(m[1] for m in window)
-                    count_match = len(covered_chunk_indices)
-
-                    valid_hit = False
-                    score = 0
-
-                    if use_order_tolerance:
-                        # Logic: N out of N+M matches (where N+M is chunk size)
-                        # We need count_match >= order_n
-                        if count_match >= order_n:
-                            # And check Order (Longest Increasing Subsequence?)
-                            # User said "finding n words in the same order"
-                            # We check LIS of chunk indices
-                            q_indices = [m[1] for m in window]
-                            if not q_indices: continue
-
-                            # Calculate LIS length
-                            tails = []
-                            for x in q_indices:
-                                idx = bisect.bisect_left(tails, x)
-                                if idx < len(tails): tails[idx] = x
-                                else: tails.append(x)
-
-                            if len(tails) >= order_n:
-                                valid_hit = True
-                                score = len(tails) * 2 # Boost ordered matches
-
-                    else:
-                        # Standard Density Logic (Default or Slop Window mode)
-                        coverage = count_match / len(chunk['tokens'])
-                        if coverage > 0.5: # Threshold 50%
-                            valid_hit = True
-                            score = count_match
-
-                    if valid_hit:
-                        if score > best_chunk_score:
-                            best_chunk_score = score
-                            best_window_idx = (match_positions[left][0], curr[0])
-
-                if best_chunk_score > 0 and best_window_idx != -1:
-                    total_score += best_chunk_score
-                    s, e = best_window_idx
-                    context_start = max(0, s - 10)
-                    context_end = min(len(orig_tokens), e + 10)
-                    context_raw = []
-                    context_highlight = []
-                    for i in range(context_start, context_end):
-                        token = orig_tokens[i]
-                        if s <= i <= e:
-                            context_highlight.append(f"*{token}*")
-                        else:
-                            context_highlight.append(token)
-                        context_raw.append(token)
-                    doc_matches.append((
-                        s,
-                        e,
-                        best_chunk_score,
-                        " ".join(context_raw),
-                        " ".join(context_highlight),
-                    ))
-
-            if total_score > 0:
-                # Format snippet
-                hl_snippet = "..."
-                source_contexts = []
-
-                if doc_matches:
-                    doc_matches.sort(key=lambda x: x[2], reverse=True) # best score first
-
-                    # Collect source contexts (up to 3 best)
-                    for m in doc_matches[:3]:
-                        if m[4] not in source_contexts:
-                            source_contexts.append(m[4])
-
-                    # Generate highlighted snippet for the BEST match
-                    s, e, _, _, _ = doc_matches[0]
-
-                    # Expand context
-                    start = max(0, s - 10)
-                    end = min(len(orig_tokens), e + 10)
-
-                    # Build snippet with highlights
-                    out = []
-                    # We highlight tokens in the match window
-                    for i in range(start, end):
-                        t = orig_tokens[i]
-                        # If inside the match window, wrap in *...*
-                        if s <= i <= e:
-                            out.append(f"*{t}*")
-                        else:
-                            out.append(t)
-
-                    hl_snippet = "... " + " ".join(out) + " ..."
-
-                final_items.append({
-                    'score': total_score,
-                    'uid': cand['uid'],
-                    'raw_header': cand['header'],
-                    'src_lbl': cand.get('src', 'Unknown'),
-                    'source_ctx': " ... ".join(source_contexts),
-                    'text': hl_snippet,
-                    'highlight_pattern': ""
-                })
-
-        final_items.sort(key=lambda x: x['score'], reverse=True)
-        deduped = []
-        seen_sys_ids = {}
-        for item in final_items:
-            sys_id, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-            if sys_id in seen_sys_ids:
-                existing = seen_sys_ids[sys_id]
-                if existing == "V0.8":
-                    continue
-                if item['src_lbl'] != "V0.8":
-                    continue
-            seen_sys_ids[sys_id] = item['src_lbl']
-            deduped.append(item)
-
-        stage2_time = time.time() - start_time - stage1_time
-        LAB_LOGGER.info(
-            "Stage 2 completed in %.2fs. Candidates: %d, Results: %d",
-            stage2_time,
-            len(candidates),
-            len(deduped),
-        )
-        return {'main': deduped, 'filtered': []}
+        return {'main': formatted_results, 'filtered': []}
 
 
 # ==============================================================================
