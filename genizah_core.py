@@ -41,28 +41,11 @@ class LabSettings:
     """Manages configuration for the Lab Mode."""
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
-        self.expansion_budget = 5000
-        self.slop_window = 15
-        self.rare_word_bonus = 0.5
-        self.normalize_abbreviations = True
-        self.rare_threshold = 0.001 # Top 0.1% frequency considered rare
         self.candidate_limit = 2000
-        self.max_char_changes = 1
-        self.prefix_chars = 1
-        self.minimum_match_pct = 30
-        self.use_standard_variants = True
-        self.use_custom_variants = True
-        self.use_double_scan = True
-
-        # New Settings
-        self.use_slop_window = True
-        self.use_rare_words = True
-        self.prefix_mode = False
-        self.use_order_tolerance = False
-        self.order_n = 4
-        self.order_m = 4 # "m" as in "n+m" -> window size = n + m
         self.ngram_size = 3
         self.ngram_min_match = 35
+        self.ignore_matres = False
+        self.phonetic_expansion = False
 
         self.load()
 
@@ -72,31 +55,12 @@ class LabSettings:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
-                    self.expansion_budget = data.get('expansion_budget', 5000)
-                    self.slop_window = data.get('slop_window', 15)
-                    self.rare_word_bonus = data.get('rare_word_bonus', 0.5)
-                    self.normalize_abbreviations = data.get('normalize_abbreviations', True)
-                    self.rare_threshold = data.get('rare_threshold', 0.001)
                     self.candidate_limit = data.get('candidate_limit', 2000)
-                    self.max_char_changes = data.get('max_char_changes', 1)
-                    self.prefix_chars = data.get('prefix_chars', 1)
-                    self.minimum_match_pct = data.get('minimum_match_pct', 30)
-                    self.use_standard_variants = data.get('use_standard_variants', True)
-                    self.use_custom_variants = data.get('use_custom_variants', True)
-                    self.use_double_scan = data.get('use_double_scan', True)
-
-                    self.use_slop_window = data.get('use_slop_window', True)
-                    self.use_rare_words = data.get('use_rare_words', True)
-                    self.prefix_mode = data.get('prefix_mode', False)
-                    self.use_order_tolerance = data.get('use_order_tolerance', False)
-                    self.order_n = data.get('order_n', 4)
-                    self.order_m = data.get('order_m', 4)
                     self.ngram_size = data.get('ngram_size', 3)
                     self.ngram_min_match = data.get('ngram_min_match', 35)
+                    self.ignore_matres = data.get('ignore_matres', False)
+                    self.phonetic_expansion = data.get('phonetic_expansion', False)
                     self.candidate_limit = max(500, min(self.candidate_limit, 50000))
-                    self.max_char_changes = max(1, min(self.max_char_changes, 3))
-                    self.prefix_chars = max(1, min(self.prefix_chars, 10))
-                    self.minimum_match_pct = max(1, min(self.minimum_match_pct, 100))
                     self.ngram_size = max(2, min(self.ngram_size, 4))
                     self.ngram_min_match = max(1, min(self.ngram_min_match, 100))
             except Exception as e:
@@ -108,26 +72,11 @@ class LabSettings:
             with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump({
                     'custom_variants': self.custom_variants,
-                    'expansion_budget': self.expansion_budget,
-                    'slop_window': self.slop_window,
-                    'rare_word_bonus': self.rare_word_bonus,
-                    'normalize_abbreviations': self.normalize_abbreviations,
-                    'rare_threshold': self.rare_threshold,
                     'candidate_limit': max(500, min(self.candidate_limit, 50000)),
-                    'max_char_changes': max(1, min(self.max_char_changes, 3)),
-                    'prefix_chars': max(1, min(self.prefix_chars, 10)),
-                    'minimum_match_pct': max(1, min(self.minimum_match_pct, 100)),
-                    'use_standard_variants': self.use_standard_variants,
-                    'use_custom_variants': self.use_custom_variants,
-                    'use_double_scan': self.use_double_scan,
-                    'use_slop_window': self.use_slop_window,
-                    'use_rare_words': self.use_rare_words,
-                    'prefix_mode': self.prefix_mode,
-                    'use_order_tolerance': self.use_order_tolerance,
-                    'order_n': self.order_n,
-                    'order_m': self.order_m,
                     'ngram_size': self.ngram_size,
-                    'ngram_min_match': self.ngram_min_match
+                    'ngram_min_match': self.ngram_min_match,
+                    'ignore_matres': self.ignore_matres,
+                    'phonetic_expansion': self.phonetic_expansion
                 }, f, indent=4)
         except Exception as e:
             LOGGER.error("Failed to save Lab config: %s", e)
@@ -1096,6 +1045,7 @@ class MetadataManager:
 # ==============================================================================
 class LabEngine:
     """Handles advanced logic for Lab Mode: Two-Stage Retrieval, Normalization, Lab Indexing."""
+    RARE_THRESHOLD = 0.001
 
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
@@ -1281,7 +1231,7 @@ class LabEngine:
     def _is_rare(self, term, total_docs):
         df = self._get_doc_freq(term)
         if total_docs == 0: return False
-        return (df / total_docs) < self.settings.rare_threshold
+        return (df / total_docs) < self.RARE_THRESHOLD
 
     def _edit_distance_limit(self, s1, s2, max_dist):
         if s1 == s2:
@@ -1314,14 +1264,14 @@ class LabEngine:
     def _variant_within_change_limit(self, term, variant):
         if term == variant:
             return True
-        max_changes = max(1, min(self.settings.max_char_changes, 3))
+        max_changes = 1
         dist = self._edit_distance_limit(term, variant, max_changes)
         if max_changes == 1:
             return dist == 1
         return 0 < dist <= max_changes
 
     def budgeted_expansion(self, term, variant_mode):
-        budget = self.settings.expansion_budget
+        budget = Config.VARIANT_GEN_LIMIT
         variants = []
         seen = set()
 
@@ -1346,7 +1296,7 @@ class LabEngine:
                     return variants
 
         # Rank 2: Custom
-        if self.settings.use_custom_variants and term in self.settings.custom_variants:
+        if term in self.settings.custom_variants:
             for v in self.settings.custom_variants[term]:
                 if add_variant(v):
                     return variants
@@ -1365,16 +1315,13 @@ class LabEngine:
         return self._candidate_limit()
 
     def _prefix_term(self, term):
-        prefix_len = max(1, min(self.settings.prefix_chars, 10))
+        prefix_len = 1
         return term[:prefix_len] if len(term) > prefix_len else term
 
     def _term_matches(self, query_term, token):
         token_norm = self.lab_index_normalize(token)
         if isinstance(query_term, set):
             return token_norm in query_term
-        if self.settings.prefix_mode:
-            q_prefix = self._prefix_term(query_term)
-            return token_norm.startswith(q_prefix)
         return self.soft_match(query_term, token)
 
     def _find_term_sequence(self, doc_tokens, query_terms, gap):
@@ -1440,18 +1387,18 @@ class LabEngine:
         if total_docs == 0:
             return 1
         ratio = df / total_docs
-        if ratio <= self.settings.rare_threshold:
+        if ratio <= self.RARE_THRESHOLD:
             return 20
-        if ratio <= self.settings.rare_threshold * 5:
+        if ratio <= self.RARE_THRESHOLD * 5:
             return 10
-        if ratio <= self.settings.rare_threshold * 20:
+        if ratio <= self.RARE_THRESHOLD * 20:
             return 6
         return 1
 
     def _min_should_match(self, term_count):
         if term_count <= 1:
             return 1
-        ratio = max(1, min(self.settings.minimum_match_pct, 100)) / 100
+        ratio = max(1, min(self.settings.ngram_min_match, 100)) / 100
         return max(1, math.ceil(term_count * ratio))
 
     def _ngram_min_should_match(self, term_count):
@@ -1497,21 +1444,49 @@ class LabEngine:
 
         LAB_LOGGER.info("N-Gram Search: %s", query_str)
         LAB_LOGGER.info(
-            "Recipe: N-Gram Size=%d Minimum Match=%d%%",
+            "Recipe: N-Gram Size=%d Minimum Match=%d%% Ignore Matres=%s Phonetic=%s",
             self.settings.ngram_size,
             self.settings.ngram_min_match,
+            "ON" if self.settings.ignore_matres else "OFF",
+            "ON" if self.settings.phonetic_expansion else "OFF",
         )
         start_time = time.time()
 
-        ngram_query = self.generate_ngrams(query_str, self.settings.ngram_size)
-        grams = ngram_query.split()
-        if not grams:
+        cleaned_query = self.lab_normalize(query_str)
+        cleaned_query = " ".join(cleaned_query.split())
+        if not cleaned_query:
             return []
 
-        min_should_match = self._ngram_min_should_match(len(grams))
-        query_terms = [f'text_ngram:"{gram}"' for gram in grams]
-        if len(grams) > 1:
-            final_query = f"({' '.join(query_terms)})@{min_should_match}"
+        base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
+        base_grams = base_ngrams.split()
+        if not base_grams:
+            return []
+
+        expanded_grams = set(base_grams)
+
+        if self.settings.ignore_matres:
+            skeleton = cleaned_query.replace("ו", "").replace("י", "")
+            if skeleton and skeleton != cleaned_query:
+                expanded_grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
+
+        if self.settings.phonetic_expansion:
+            words = cleaned_query.split()
+            for idx, word in enumerate(words):
+                for variant in self._phonetic_variants(word):
+                    if variant == word:
+                        continue
+                    variant_words = words.copy()
+                    variant_words[idx] = variant
+                    variant_query = " ".join(variant_words)
+                    expanded_grams.update(self.generate_ngrams(variant_query, self.settings.ngram_size).split())
+
+        min_should_match = self._ngram_min_should_match(len(base_grams))
+        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
+        if not query_terms:
+            return []
+        min_should_match = min(min_should_match, len(query_terms))
+        if len(query_terms) > 1:
+            final_query = f"({' OR '.join(query_terms)})@{min_should_match}"
         else:
             final_query = query_terms[0]
 
@@ -1608,6 +1583,13 @@ class LabEngine:
         if not snippet:
             return snippet
         return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
+
+    def _phonetic_variants(self, word):
+        variants = {word}
+        for idx, char in enumerate(word):
+            for repl in self.var_mgr.basic_map.get(char, set()):
+                variants.add(word[:idx] + repl + word[idx + 1:])
+        return variants
 
     def _generate_ngram_snippet(self, text, grams, window=120):
         if not text:
@@ -1708,7 +1690,7 @@ class LabEngine:
         rare_terms = []
 
         # Rule 1: Strict (Threshold from settings, len >= 3)
-        threshold_strict = max(1, total_docs * self.settings.rare_threshold)
+        threshold_strict = max(1, total_docs * self.RARE_THRESHOLD)
         for t in tokens:
             if len(t) >= 3 and self._get_doc_freq(t) < threshold_strict:
                 rare_terms.append(t)
@@ -1716,7 +1698,7 @@ class LabEngine:
         # Fallback: Relaxed (5x Threshold, len >= 2)
         if len(rare_terms) < 5:
             rare_terms = [] # Reset to avoid duplicates or mixing strictly
-            threshold_relaxed = max(1, total_docs * (self.settings.rare_threshold * 5))
+            threshold_relaxed = max(1, total_docs * (self.RARE_THRESHOLD * 5))
             for t in tokens:
                 if len(t) >= 2 and self._get_doc_freq(t) < threshold_relaxed:
                     rare_terms.append(t)
@@ -1728,17 +1710,14 @@ class LabEngine:
         if not self.lab_searcher: return {'main': [], 'filtered': []}
 
         LAB_LOGGER.info("Starting Lab Composition Search...")
-        LAB_LOGGER.info(
-            "Recipe: Mode=%s Custom=%s MSM=%d%% Prefix=%s(%d) OrderTol=%s Slop=%d",
-            mode,
-            "ON" if self.settings.use_custom_variants else "OFF",
-            self.settings.minimum_match_pct,
-            "ON" if self.settings.prefix_mode else "OFF",
-            self.settings.prefix_chars,
-            "ON" if self.settings.use_order_tolerance else "OFF",
-            self.settings.slop_window,
-        )
+        LAB_LOGGER.info("Recipe: Mode=%s", mode)
         start_time = time.time()
+
+        use_order_tolerance = False
+        slop_window = 15
+        prefix_mode = False
+        order_n = 4
+        order_m = 4
 
         # 1. Broad Filter (Candidate Generation)
         total_docs = self.lab_searcher.num_docs
@@ -1760,7 +1739,7 @@ class LabEngine:
         for term in query_terms:
             boost = self._get_term_boost(term, total_docs)
             raw_group = False
-            if self.settings.prefix_mode:
+            if prefix_mode:
                 variants = [self._prefix_term(term)]
             else:
                 if mode == 'fuzzy':
@@ -1775,7 +1754,7 @@ class LabEngine:
                     variants = self.budgeted_expansion(term, mode)
                     variants = [self.lab_index_normalize(v) for v in variants if v.strip()]
 
-            if self.settings.prefix_mode:
+            if prefix_mode:
                 variants = [v + "*" for v in variants]
 
             expanded_terms.append((variants, boost, raw_group))
@@ -1797,11 +1776,11 @@ class LabEngine:
                 clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+        joiner = " OR "
         query_str = joiner.join(query_parts)
         msm_terms = None
         if len(query_terms) >= 2:
-            msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
+            msm_pct = 0.33
             msm_terms = max(1, math.ceil(len(query_terms) * msm_pct))
             query_str = f"({query_str})@{msm_terms}"
 
@@ -1867,10 +1846,10 @@ class LabEngine:
         # Determine chunk size based on settings
         if chunk_size is not None and chunk_size > 0:
             chunk_size = int(chunk_size)
-        elif self.settings.use_order_tolerance:
-            chunk_size = self.settings.order_n + self.settings.order_m
+        elif use_order_tolerance:
+            chunk_size = order_n + order_m
         else:
-            chunk_size = self.settings.slop_window
+            chunk_size = slop_window
 
         # "Slide Input Chunks over Candidate Doc"
         step = max(1, chunk_size // 2)
@@ -1915,7 +1894,7 @@ class LabEngine:
 
             for chunk in input_chunks:
                 # Quick check: do at least 50% of chunk tokens exist in doc_set? (normalized)
-                if self.settings.prefix_mode:
+                if prefix_mode:
                     present = sum(
                         1 for t in chunk['tokens']
                         if any(token.startswith(self._prefix_term(t)) for token in doc_token_set)
@@ -1965,7 +1944,7 @@ class LabEngine:
                     # Shrink: Window size is chunk length (N+M)
                     # Use a slightly relaxed window for Slop (1.5x) but strict for Order Tol?
                     # Let's keep 1.5x as "Slop" factor generally, unless strict mode requested.
-                    max_window_len = len(chunk['tokens']) if self.settings.use_order_tolerance else (len(chunk['tokens']) * 1.5)
+                    max_window_len = len(chunk['tokens']) if use_order_tolerance else (len(chunk['tokens']) * 1.5)
 
                     while curr[0] - match_positions[left][0] > max_window_len:
                         left += 1
@@ -1979,10 +1958,10 @@ class LabEngine:
                     valid_hit = False
                     score = 0
 
-                    if self.settings.use_order_tolerance:
+                    if use_order_tolerance:
                         # Logic: N out of N+M matches (where N+M is chunk size)
                         # We need count_match >= order_n
-                        if count_match >= self.settings.order_n:
+                        if count_match >= order_n:
                             # And check Order (Longest Increasing Subsequence?)
                             # User said "finding n words in the same order"
                             # We check LIS of chunk indices
@@ -1996,7 +1975,7 @@ class LabEngine:
                                 if idx < len(tails): tails[idx] = x
                                 else: tails.append(x)
 
-                            if len(tails) >= self.settings.order_n:
+                            if len(tails) >= order_n:
                                 valid_hit = True
                                 score = len(tails) * 2 # Boost ordered matches
 

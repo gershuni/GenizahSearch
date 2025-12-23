@@ -20,9 +20,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
-                             QDoubleSpinBox, QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame) 
+                             QScrollArea, QFrame, QSlider) 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
 
@@ -57,23 +57,52 @@ class LabSettingsDialog(QDialog):
         self.resize(600, 600)
         self.lab_engine = lab_engine
         self.settings = lab_engine.settings
+        self._rebuild_required = False
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout()
 
-        # --- Parameters ---
-        param_group = QGroupBox(tr("Search Parameters"))
-        pg_layout = QGridLayout()
+        # --- Index Settings ---
+        index_group = QGroupBox(tr("Index Settings (Requires Rebuild)"))
+        index_layout = QGridLayout()
 
-        self.spin_slop = QSpinBox()
-        self.spin_slop.setRange(1, 100)
-        self.spin_slop.setValue(self.settings.slop_window)
-        self.spin_slop.setToolTip(tr("Size of the window to check for matches."))
+        self.spin_ngram_size = QSpinBox()
+        self.spin_ngram_size.setRange(2, 4)
+        self.spin_ngram_size.setValue(self.settings.ngram_size)
+        self.spin_ngram_size.setToolTip(tr("Character n-gram size used for indexing and search."))
 
-        self.spin_rare_bonus = QDoubleSpinBox()
-        self.spin_rare_bonus.setRange(0.0, 5.0); self.spin_rare_bonus.setSingleStep(0.1)
-        self.spin_rare_bonus.setValue(self.settings.rare_word_bonus)
+        self.lbl_rebuild_notice = QLabel(tr("Changing this setting requires rebuilding the Lab Index."))
+        self.lbl_rebuild_notice.setWordWrap(True)
+
+        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
+        self.btn_rebuild.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
+        self.btn_rebuild.clicked.connect(self.run_rebuild)
+        self.lbl_idx_status = QLabel("")
+
+        index_layout.addWidget(QLabel(tr("N-Gram Size:")), 0, 0)
+        index_layout.addWidget(self.spin_ngram_size, 0, 1)
+        index_layout.addWidget(self.lbl_rebuild_notice, 1, 0, 1, 2)
+        index_layout.addWidget(self.btn_rebuild, 2, 0)
+        index_layout.addWidget(self.lbl_idx_status, 2, 1)
+
+        index_group.setLayout(index_layout)
+        layout.addWidget(index_group)
+
+        # --- Search Sensitivity ---
+        sensitivity_group = QGroupBox(tr("Search Sensitivity"))
+        sens_layout = QGridLayout()
+
+        self.slider_min_match = QSlider(Qt.Orientation.Horizontal)
+        self.slider_min_match.setRange(10, 100)
+        self.slider_min_match.setValue(self.settings.ngram_min_match)
+        self.slider_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
+
+        self.spin_ngram_min_match = QSpinBox()
+        self.spin_ngram_min_match.setRange(10, 100)
+        self.spin_ngram_min_match.setValue(self.settings.ngram_min_match)
+        self.spin_ngram_min_match.setSuffix("%")
+        self.spin_ngram_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
 
         self.spin_candidate_limit = QSpinBox()
         self.spin_candidate_limit.setRange(500, 50000)
@@ -81,102 +110,31 @@ class LabSettingsDialog(QDialog):
         self.spin_candidate_limit.setValue(self.settings.candidate_limit)
         self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
 
-        self.spin_ngram_size = QSpinBox()
-        self.spin_ngram_size.setRange(2, 4)
-        self.spin_ngram_size.setValue(self.settings.ngram_size)
-        self.spin_ngram_size.setToolTip(tr("Character n-gram size used for indexing and search."))
+        sens_layout.addWidget(QLabel(tr("Minimum Match %:")), 0, 0)
+        sens_layout.addWidget(self.slider_min_match, 0, 1)
+        sens_layout.addWidget(self.spin_ngram_min_match, 0, 2)
+        sens_layout.addWidget(QLabel(tr("Result Limit:")), 1, 0)
+        sens_layout.addWidget(self.spin_candidate_limit, 1, 1)
 
-        self.spin_ngram_min_match = QSpinBox()
-        self.spin_ngram_min_match.setRange(1, 100)
-        self.spin_ngram_min_match.setValue(self.settings.ngram_min_match)
-        self.spin_ngram_min_match.setSuffix("%")
-        self.spin_ngram_min_match.setToolTip(tr("Lower values increase recall for broken text but can add noise."))
+        sensitivity_group.setLayout(sens_layout)
+        layout.addWidget(sensitivity_group)
 
-        self.chk_use_custom_variants = QCheckBox(tr("Use Custom Variants"))
-        self.chk_use_custom_variants.setChecked(self.settings.use_custom_variants)
-        self.chk_use_custom_variants.setToolTip(tr("Use your custom char=char replacements."))
+        # --- Query Expansion ---
+        expand_group = QGroupBox(tr("Query Expansion (Smart Matching)"))
+        expand_layout = QVBoxLayout()
 
-        self.chk_normalize = QCheckBox(tr("Normalize Abbreviations (Stage 2)"))
-        self.chk_normalize.setChecked(self.settings.normalize_abbreviations)
+        self.chk_ignore_matres = QCheckBox(tr("Ignore Matres Lectionis (ו/י)"))
+        self.chk_ignore_matres.setChecked(self.settings.ignore_matres)
+        self.chk_ignore_matres.setToolTip(tr("Matches text even if Vav/Yod are missing or added (e.g. שומר = שמר)."))
 
-        # New Options
-        self.chk_use_slop = QCheckBox(tr("Use Slop Window"))
-        self.chk_use_slop.setChecked(self.settings.use_slop_window)
-        self.chk_use_slop.setToolTip(tr("Enable sliding window density check."))
+        self.chk_phonetic = QCheckBox(tr("Phonetic Matching"))
+        self.chk_phonetic.setChecked(self.settings.phonetic_expansion)
+        self.chk_phonetic.setToolTip(tr("Expands search to include letter swaps like ט/ת, כ/ק, ה/ח."))
 
-        self.chk_use_rare = QCheckBox(tr("Use Rare Word Filtering"))
-        self.chk_use_rare.setChecked(self.settings.use_rare_words)
-        self.chk_use_rare.setToolTip(tr("Boost score for rare words found in document."))
-
-        self.chk_prefix = QCheckBox(tr("Prefix Mode (Begins with...)"))
-        self.chk_prefix.setChecked(self.settings.prefix_mode)
-        self.chk_prefix.setToolTip(tr("Search for words starting with the query terms (e.g. 'lam' matches 'lama')."))
-
-        self.spin_prefix_chars = QSpinBox()
-        self.spin_prefix_chars.setRange(1, 10)
-        self.spin_prefix_chars.setValue(self.settings.prefix_chars)
-        self.spin_prefix_chars.setToolTip(tr("How many letters from the start of each word to match in Prefix Mode."))
-
-        # Order Tolerance Group
-        self.grp_order = QGroupBox(tr("Order Tolerance"))
-        self.grp_order.setCheckable(True)
-        self.grp_order.setChecked(self.settings.use_order_tolerance)
-        self.grp_order.setToolTip(tr("Require N words to appear in the same order within a window of N+M words."))
-
-        o_layout = QHBoxLayout()
-        o_layout.addWidget(QLabel(tr("Find")))
-        self.spin_order_n = QSpinBox(); self.spin_order_n.setRange(1, 20); self.spin_order_n.setValue(self.settings.order_n)
-        o_layout.addWidget(self.spin_order_n)
-        o_layout.addWidget(QLabel(tr("words in order out of")))
-        self.spin_order_m = QSpinBox(); self.spin_order_m.setRange(1, 20); self.spin_order_m.setValue(self.settings.order_m)
-        o_layout.addWidget(self.spin_order_m)
-        o_layout.addWidget(QLabel(tr("extra words (Window N+M)")))
-        self.grp_order.setLayout(o_layout)
-
-        pg_layout.addWidget(QLabel(tr("Candidate Limit:")), 0, 0)
-        pg_layout.addWidget(self.spin_candidate_limit, 0, 1)
-        pg_layout.addWidget(QLabel(tr("N-Gram Size:")), 1, 0)
-        pg_layout.addWidget(self.spin_ngram_size, 1, 1)
-        pg_layout.addWidget(QLabel(tr("Minimum Match %:")), 2, 0)
-        pg_layout.addWidget(self.spin_ngram_min_match, 2, 1)
-        pg_layout.addWidget(self.chk_use_custom_variants, 3, 0, 1, 2)
-        pg_layout.addWidget(self.chk_prefix, 4, 0, 1, 2)
-        pg_layout.addWidget(QLabel(tr("Prefix Length:")), 5, 0)
-        pg_layout.addWidget(self.spin_prefix_chars, 5, 1)
-
-        pg_layout.addWidget(QLabel(tr("Slop Window:")), 6, 0)
-        pg_layout.addWidget(self.spin_slop, 6, 1)
-        pg_layout.addWidget(self.chk_use_slop, 7, 0, 1, 2)
-        pg_layout.addWidget(self.chk_use_rare, 8, 0, 1, 2)
-        pg_layout.addWidget(QLabel(tr("Rare Word Bonus:")), 9, 0)
-        pg_layout.addWidget(self.spin_rare_bonus, 9, 1)
-        pg_layout.addWidget(self.chk_normalize, 10, 0, 1, 2)
-        pg_layout.addWidget(self.grp_order, 11, 0, 1, 2)
-
-        param_group.setLayout(pg_layout)
-        layout.addWidget(param_group)
-
-        # --- Custom Variants ---
-        var_group = QGroupBox(tr("Custom Variants (char=char, word=word)"))
-        vg_layout = QVBoxLayout()
-        self.txt_variants = QPlainTextEdit()
-        self.txt_variants.setPlaceholderText("א=ע\nנו=מ\n...")
-        self.txt_variants.setPlainText(self.settings.get_variants_text())
-        vg_layout.addWidget(self.txt_variants)
-        var_group.setLayout(vg_layout)
-        layout.addWidget(var_group)
-
-        # --- Indexing ---
-        idx_group = QGroupBox(tr("Lab Index"))
-        ig_layout = QHBoxLayout()
-        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
-        self.btn_rebuild.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
-        self.btn_rebuild.clicked.connect(self.run_rebuild)
-        self.lbl_idx_status = QLabel("")
-        ig_layout.addWidget(self.btn_rebuild)
-        ig_layout.addWidget(self.lbl_idx_status)
-        idx_group.setLayout(ig_layout)
-        layout.addWidget(idx_group)
+        expand_layout.addWidget(self.chk_ignore_matres)
+        expand_layout.addWidget(self.chk_phonetic)
+        expand_group.setLayout(expand_layout)
+        layout.addWidget(expand_group)
 
         # --- Footer ---
         btn_box = QHBoxLayout()
@@ -195,44 +153,28 @@ class LabSettingsDialog(QDialog):
         layout.addLayout(btn_box)
 
         self.setLayout(layout)
+        self.spin_ngram_size.valueChanged.connect(self._mark_rebuild_required)
+        self.slider_min_match.valueChanged.connect(self._sync_min_match_spin)
+        self.spin_ngram_min_match.valueChanged.connect(self._sync_min_match_slider)
         if self.lab_engine.lab_index_needs_rebuild:
-            self.lbl_idx_status.setText(tr("Index schema updated. Please rebuild."))
-            self.lbl_idx_status.setStyleSheet("color: #c0392b; font-weight: bold;")
-            self.btn_save.setEnabled(False)
+            self._mark_rebuild_required()
 
     def save_and_close(self):
-        self.settings.slop_window = self.spin_slop.value()
-        self.settings.rare_word_bonus = self.spin_rare_bonus.value()
         self.settings.candidate_limit = self.spin_candidate_limit.value()
-        self.settings.minimum_match_pct = self.spin_ngram_min_match.value()
         self.settings.ngram_min_match = self.spin_ngram_min_match.value()
         self.settings.ngram_size = self.spin_ngram_size.value()
-        self.settings.use_custom_variants = self.chk_use_custom_variants.isChecked()
-        self.settings.use_standard_variants = True
-        self.settings.use_double_scan = False
-        self.settings.normalize_abbreviations = self.chk_normalize.isChecked()
-        self.settings.use_slop_window = self.chk_use_slop.isChecked()
-        self.settings.use_rare_words = self.chk_use_rare.isChecked()
-        self.settings.prefix_mode = self.chk_prefix.isChecked()
-        self.settings.prefix_chars = self.spin_prefix_chars.value()
-        self.settings.use_order_tolerance = self.grp_order.isChecked()
-        self.settings.order_n = self.spin_order_n.value()
-        self.settings.order_m = self.spin_order_m.value()
-        self.settings.parse_variants_text(self.txt_variants.toPlainText())
+        self.settings.ignore_matres = self.chk_ignore_matres.isChecked()
+        self.settings.phonetic_expansion = self.chk_phonetic.isChecked()
         self.settings.save()
         self.accept()
 
     def copy_json(self):
         cfg = {
-            'slop_window': self.spin_slop.value(),
-            'custom_variants': self.txt_variants.toPlainText(),
-            'rare_word_bonus': self.spin_rare_bonus.value(),
             'candidate_limit': self.spin_candidate_limit.value(),
             'ngram_size': self.spin_ngram_size.value(),
             'ngram_min_match': self.spin_ngram_min_match.value(),
-            'prefix_chars': self.spin_prefix_chars.value(),
-            'use_custom_variants': self.chk_use_custom_variants.isChecked(),
-            'use_double_scan': False
+            'ignore_matres': self.chk_ignore_matres.isChecked(),
+            'phonetic_expansion': self.chk_phonetic.isChecked()
         }
         QApplication.clipboard().setText(json.dumps(cfg, indent=2))
         QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
@@ -241,6 +183,7 @@ class LabSettingsDialog(QDialog):
         self.btn_rebuild.setEnabled(False)
         self.lbl_idx_status.setText(tr("Starting..."))
         QApplication.processEvents()
+        self.settings.ngram_size = self.spin_ngram_size.value()
 
         class RebuildThread(QThread):
             finished_sig = pyqtSignal(int)
@@ -272,6 +215,30 @@ class LabSettingsDialog(QDialog):
         self.worker.error_sig.connect(self.on_rebuild_error)
         self.worker.start()
 
+    def _mark_rebuild_required(self):
+        needs_rebuild = self.spin_ngram_size.value() != self.settings.ngram_size or self.lab_engine.lab_index_needs_rebuild
+        self._rebuild_required = needs_rebuild
+        if needs_rebuild:
+            self.lbl_idx_status.setText(tr("Index schema updated. Please rebuild."))
+            self.lbl_idx_status.setStyleSheet("color: #c0392b; font-weight: bold;")
+            self.btn_save.setEnabled(False)
+        else:
+            self.lbl_idx_status.setText("")
+            self.lbl_idx_status.setStyleSheet("")
+            self.btn_save.setEnabled(True)
+
+    def _sync_min_match_spin(self, value):
+        if self.spin_ngram_min_match.value() != value:
+            self.spin_ngram_min_match.blockSignals(True)
+            self.spin_ngram_min_match.setValue(value)
+            self.spin_ngram_min_match.blockSignals(False)
+
+    def _sync_min_match_slider(self, value):
+        if self.slider_min_match.value() != value:
+            self.slider_min_match.blockSignals(True)
+            self.slider_min_match.setValue(value)
+            self.slider_min_match.blockSignals(False)
+
     def on_rebuild_progress(self, current, total):
         pct = 0
         if total > 0:
@@ -288,6 +255,7 @@ class LabSettingsDialog(QDialog):
         self.lbl_idx_status.setText(tr("Done. {} docs.").format(count))
         self.lbl_idx_status.setStyleSheet("")
         self.btn_rebuild.setEnabled(True)
+        self._rebuild_required = False
         self.btn_save.setEnabled(True)
         QMessageBox.information(self, tr("Success"), tr("Lab Index rebuilt successfully."))
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -2209,16 +2177,11 @@ class GenizahGUI(QMainWindow):
         if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked() and self.lab_engine:
             settings_dump = json.dumps({
                 'custom_variants': self.lab_engine.settings.custom_variants,
-                'expansion_budget': self.lab_engine.settings.expansion_budget,
-                'slop_window': self.lab_engine.settings.slop_window,
-                'rare_word_bonus': self.lab_engine.settings.rare_word_bonus,
                 'candidate_limit': self.lab_engine.settings.candidate_limit,
-                'minimum_match_pct': self.lab_engine.settings.minimum_match_pct,
-                'prefix_mode': self.lab_engine.settings.prefix_mode,
-                'prefix_chars': self.lab_engine.settings.prefix_chars,
-                'use_standard_variants': self.lab_engine.settings.use_standard_variants,
-                'use_custom_variants': self.lab_engine.settings.use_custom_variants,
-                'use_double_scan': self.lab_engine.settings.use_double_scan,
+                'ngram_size': self.lab_engine.settings.ngram_size,
+                'ngram_min_match': self.lab_engine.settings.ngram_min_match,
+                'ignore_matres': self.lab_engine.settings.ignore_matres,
+                'phonetic_expansion': self.lab_engine.settings.phonetic_expansion,
             }, indent=2, ensure_ascii=False)
             return f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
         return ""
