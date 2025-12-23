@@ -1070,7 +1070,9 @@ class LabEngine:
                 
                 # Robust check: Try to parse a query on the field
                 try:
-                    self.lab_index.parse_query('"test"', ["text_ngram"])
+                    schema = self.lab_index.schema
+                    ngram_field = schema.get_field("text_ngram")
+                    self.lab_index.parse_query('"test"', [ngram_field])
                 except Exception:
                     LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
                     self.lab_index_needs_rebuild = True
@@ -1213,13 +1215,23 @@ class LabEngine:
     # --- Search Methods (Fixing Syntax Error) ---
 
     def _parse_lab_ngram_query(self, query_str):
-        fields = ["text_ngram"]
+        schema = self.lab_index.schema
+        try:
+            ngram_field = schema.get_field("text_ngram")
+        except Exception:
+            LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
+            return None
+
+        fields = [ngram_field]  # Tantivy expects field handles, not strings
         try:
             return self.lab_index.parse_query(query_str, fields)
-        except TypeError:
-            # Fallback: explicitly scope the query to the field
-            scoped_query = f"text_ngram:({query_str})"
-            return self.lab_index.parse_query(scoped_query, fields)
+        except Exception:
+            try:
+                scoped_query = f"text_ngram:({query_str})"
+                return self.lab_index.parse_query(scoped_query, fields)
+            except Exception as e2:
+                LAB_LOGGER.error(f"Query parsing failed: {e2}")
+                return None
 
     def _candidate_limit(self):
         return max(500, min(self.settings.candidate_limit, 50000))
@@ -1278,6 +1290,8 @@ class LabEngine:
 
         try:
             t_query = self._parse_lab_ngram_query(final_query)
+            if t_query is None:
+                return []
             res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
         except Exception as e:
             LAB_LOGGER.error("N-Gram search failed: %s", e)
@@ -1380,6 +1394,8 @@ class LabEngine:
             
             try:
                 t_query = self._parse_lab_ngram_query(raw_query)
+                if t_query is None:
+                    continue
                 res = self.lab_searcher.search(t_query, 50) 
             except Exception:
                 continue
