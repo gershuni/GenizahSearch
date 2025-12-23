@@ -1320,7 +1320,7 @@ class LabEngine:
         return max(500, min(self.settings.candidate_limit, 50000))
 
     def _stage1_limit(self):
-        return min(self._candidate_limit(), 5000)
+        return self._candidate_limit()
 
     def _prefix_term(self, term):
         prefix_len = max(1, min(self.settings.prefix_chars, 10))
@@ -1505,10 +1505,11 @@ class LabEngine:
                 clean_group.append(term)
             query_parts.append(f"({' OR '.join(clean_group)})")
 
-        final_query = " ".join(query_parts)
+        joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+        final_query = joiner.join(query_parts)
         msm_pct = max(25, min(self.settings.minimum_match_pct, 33)) / 100
         msm_terms = max(1, math.ceil(len(unique_terms) * msm_pct))
-        if len(terms) > 2:
+        if len(unique_terms) >= 2:
             final_query = f"{final_query}@{msm_terms}"
         LAB_LOGGER.info("Stage 1 Raw Query: %s", final_query)
         LAB_LOGGER.debug(f"Stage 1 Query: {final_query}")
@@ -1797,12 +1798,10 @@ class LabEngine:
                 term = f"{term}^{boost}"
             boosted_terms.append(term)
 
-        if self.settings.prefix_mode:
-            query_str = " OR ".join(boosted_terms)
-        else:
-            query_str = " OR ".join(boosted_terms)
+        joiner = " OR " if self.settings.minimum_match_pct < 50 else " "
+        query_str = joiner.join(boosted_terms)
 
-        if len(query_terms) > 2:
+        if len(query_terms) >= 2:
             msm_terms = max(1, math.ceil(len(query_terms) * 0.3))
             msm_query = " ".join([f"text_normalized:{t}" for t in query_terms])
             query_str = f"{query_str} ({msm_query})@{msm_terms}"
