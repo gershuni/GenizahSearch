@@ -23,6 +23,65 @@ import math
 
 from genizah_translations import TRANSLATIONS
 
+# --- Setup Logger (הוסף את זה מיד אחרי האימפורטים) ---
+LAB_LOGGER = logging.getLogger("GenizahLab")
+LAB_LOGGER.setLevel(logging.DEBUG)
+if not LAB_LOGGER.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[LAB DEBUG] %(message)s"))
+    LAB_LOGGER.addHandler(handler)
+
+# --- Shmidman Rare-Letter Helpers ---
+HEBREW_FREQ = {
+    'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 
+    'ב': 9, 'ש': 10, 'נ': 11, 'ד': 12, 'כ': 13, 'ע': 14, 'ח': 15, 
+    'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19, 'ט': 20, 'ז': 21, 'צ': 22
+}
+
+def encode_word_shmidman(word):
+    """Encode a single Hebrew word using the Shmidman et al. rare-letter fingerprint."""
+    letters = [(idx, ch, HEBREW_FREQ.get(ch)) for idx, ch in enumerate(word) if ch in HEBREW_FREQ]
+    if not letters:
+        return ""
+    # Sort by rarity (descending freq rank), then by position
+    ranked = sorted(letters, key=lambda t: (-t[2], t[0]))
+    # Pick top two
+    top_two = ranked[:2]
+    # Restore order
+    ordered = sorted(top_two, key=lambda t: t[0])
+    return "".join(ch for _, ch, _ in ordered)
+
+def text_to_fingerprint(text):
+    """Convert full text into space-separated rare-letter fingerprints."""
+    words = re.findall(r"[\w\u0590-\u05FF\']+", text or "")
+    enc = [encode_word_shmidman(w) for w in words]
+    return " ".join([e for e in enc if e])
+
+def encode_word_shmidman(word: str) -> str:
+    """Encode a single word by selecting its two rarest Hebrew characters."""
+    letters = []
+    for idx, ch in enumerate(word):
+        if ch in HEBREW_FREQ:
+            letters.append((idx, ch, HEBREW_FREQ[ch]))
+
+    if not letters:
+        return ""
+
+    rarest = sorted(letters, key=lambda item: (-item[2], item[0]))[:2]
+    rarest_sorted = sorted(rarest, key=lambda item: item[0])
+    return "".join(ch for _, ch, _ in rarest_sorted)
+
+
+def text_to_fingerprint(text: str) -> str:
+    """Convert free text into a fingerprint representation."""
+    tokens = re.findall(Config.WORD_TOKEN_PATTERN, text or "")
+    encoded_tokens = []
+    for tok in tokens:
+        encoded = encode_word_shmidman(tok)
+        if encoded:
+            encoded_tokens.append(encoded)
+    return " ".join(encoded_tokens)
+
 try:
     import google.generativeai as genai
     HAS_GENAI = True
@@ -38,15 +97,30 @@ except ImportError:
 #  LAB SETTINGS
 # ==============================================================================
 class LabSettings:
-    """Manages configuration for the Lab Mode."""
+    """Manages configuration for the Lab Mode, including scoring weights."""
     def __init__(self):
-        self.custom_variants = {} # dict mapping char/string -> set of replacements
+        self.custom_variants = {} 
         self.candidate_limit = 2000
-        self.ngram_size = 3
-        self.ngram_min_match = 35
-        self.ignore_matres = False
-        self.phonetic_expansion = False
-
+        self.min_should_match = 60
+        self.gap_penalty = 2
+        
+        # Scoring Weights
+        self.length_bonus_factor = 1.5
+        self.common_penalty_factor = 0.1
+        self.unique_bonus_base = 100
+        self.density_penalty = 0.2
+        self.coverage_power = 2.0
+        self.order_bonus = 10.0
+        
+        # --- הגדרות חדשות: דיכוי רעשים (Stop Words) ---
+        self.stop_word_score = 1.0       # ניקוד למילים קצרות (<3 אותיות)
+        self.common_3char_score = 2.0    # ניקוד למילים נפוצות בנות 3 אותיות
+        
+        # Composition Settings
+        self.comp_chunk_limit = 200
+        self.comp_min_score = 70
+        self.comp_max_final_results = 100
+        
         self.load()
 
     def load(self):
@@ -56,63 +130,808 @@ class LabSettings:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
                     self.candidate_limit = data.get('candidate_limit', 2000)
-                    self.ngram_size = data.get('ngram_size', 3)
-                    self.ngram_min_match = data.get('ngram_min_match', 35)
-                    self.ignore_matres = data.get('ignore_matres', False)
-                    self.phonetic_expansion = data.get('phonetic_expansion', False)
-                    self.candidate_limit = max(500, min(self.candidate_limit, 50000))
-                    self.ngram_size = max(2, min(self.ngram_size, 4))
-                    self.ngram_min_match = max(1, min(self.ngram_min_match, 100))
-            except Exception as e:
-                LOGGER.warning("Failed to load Lab config: %s", e)
+                    self.min_should_match = data.get('min_should_match', 60)
+                    self.gap_penalty = data.get('gap_penalty', 2)
+                    
+                    self.length_bonus_factor = data.get('length_bonus_factor', 1.5)
+                    self.common_penalty_factor = data.get('common_penalty_factor', 0.1)
+                    self.unique_bonus_base = data.get('unique_bonus_base', 100)
+                    self.density_penalty = data.get('density_penalty', 0.2)
+                    self.coverage_power = data.get('coverage_power', 2.0)
+                    self.order_bonus = data.get('order_bonus', 10.0)
+
+                    # טעינת הגדרות רעש
+                    self.stop_word_score = data.get('stop_word_score', 1.0)
+                    self.common_3char_score = data.get('common_3char_score', 2.0)
+
+                    self.comp_chunk_limit = data.get('comp_chunk_limit', 200)
+                    self.comp_min_score = data.get('comp_min_score', 70)
+                    self.comp_max_final_results = data.get('comp_max_final_results', 100)
+            except Exception: pass
 
     def save(self):
-        os.makedirs(Config.LAB_DIR, exist_ok=True)
         try:
+            os.makedirs(Config.LAB_DIR, exist_ok=True)
             with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump({
                     'custom_variants': self.custom_variants,
-                    'candidate_limit': max(500, min(self.candidate_limit, 50000)),
-                    'ngram_size': self.ngram_size,
-                    'ngram_min_match': self.ngram_min_match,
-                    'ignore_matres': self.ignore_matres,
-                    'phonetic_expansion': self.phonetic_expansion
+                    'candidate_limit': self.candidate_limit,
+                    'min_should_match': self.min_should_match,
+                    'gap_penalty': self.gap_penalty,
+                    
+                    'length_bonus_factor': self.length_bonus_factor,
+                    'common_penalty_factor': self.common_penalty_factor,
+                    'unique_bonus_base': self.unique_bonus_base,
+                    'density_penalty': self.density_penalty,
+                    'coverage_power': self.coverage_power,
+                    'order_bonus': self.order_bonus,
+                    
+                    # שמירת הגדרות רעש
+                    'stop_word_score': self.stop_word_score,
+                    'common_3char_score': self.common_3char_score,
+
+                    'comp_chunk_limit': self.comp_chunk_limit,
+                    'comp_min_score': self.comp_min_score,
+                    'comp_max_final_results': self.comp_max_final_results
                 }, f, indent=4)
-        except Exception as e:
-            LOGGER.error("Failed to save Lab config: %s", e)
+        except Exception: pass
 
-    def parse_variants_text(self, text):
-        """Parse text input (e.g. 'a=b, c=d') into custom_variants dict."""
-        new_vars = {}
-        # Handle newlines or commas
-        lines = text.replace(',', '\n').splitlines()
-        for line in lines:
-            if '=' in line:
-                parts = line.split('=')
-                if len(parts) == 2:
-                    k, v = parts[0].strip(), parts[1].strip()
-                    if k and v:
-                        if k not in new_vars: new_vars[k] = []
-                        new_vars[k].append(v)
-                        # Also add reverse? Usually variants are symmetric but maybe not always.
-                        # For now, let's assume symmetric for char swaps, maybe not for multi-char.
-                        # User request: "also for two to one words such as נו=מ".
-                        if v not in new_vars: new_vars[v] = []
-                        new_vars[v].append(k)
-        self.custom_variants = new_vars
+# ==============================================================================
+#  LAB ENGINE (ROBUST & DEBUGGED)
+# ==============================================================================
+class LabEngine:
+    LAB_FINGERPRINT_FIELD = "fingerprint"
+    # NGRAM_SIZE kept for compatibility if other parts of code ref it
+    NGRAM_SIZE = 3 
 
-    def get_variants_text(self):
-        """Convert custom_variants dict back to text format."""
-        pairs = set()
-        for k, vals in self.custom_variants.items():
-            for v in vals:
-                # Store sorted tuple to avoid duplicates like a=b and b=a
-                if k < v:
-                    pairs.add(f"{k}={v}")
-                elif v < k:
-                    pairs.add(f"{v}={k}")
-        return "\n".join(sorted(list(pairs)))
+    def __init__(self, meta_mgr, variants_mgr):
+        self.meta_mgr = meta_mgr
+        self.var_mgr = variants_mgr
+        self.settings = LabSettings()
+        self.lab_index = None
+        self.lab_searcher = None
+        self.lab_index_needs_rebuild = False
+        self._reload_lab_index()
 
+    def _close_index(self):
+        self.lab_searcher = None
+        self.lab_index = None
+        import gc
+        gc.collect() 
+
+    def _ensure_lab_tokenizers(self, index):
+        """Register analyzers safely."""
+        try:
+            index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
+        except Exception:
+            pass
+        try:
+            index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
+        except Exception:
+            pass
+
+    def _reload_lab_index(self):
+        """Loads index with heavy debug logging."""
+        if os.path.exists(Config.LAB_INDEX_DIR):
+            try:
+                LAB_LOGGER.info("Reloading Lab Index...")
+                self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
+                self._ensure_lab_tokenizers(self.lab_index)
+                self.lab_searcher = self.lab_index.searcher()
+                
+                # Simplified robust check
+                self.lab_index_needs_rebuild = False
+                return True
+            except Exception as e:
+                LAB_LOGGER.error(f"Failed to load Lab Index: {e}")
+                self._close_index()
+        
+        self.lab_index_needs_rebuild = True
+        return False
+
+    @staticmethod
+    def lab_index_normalize(text):
+        return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
+
+    @staticmethod
+    def generate_ngrams(text, n=3):
+        # Legacy helper for compatibility
+        if not text: return ""
+        return "".join(ch for ch in text if "\u0590" <= ch <= "\u05FF")
+
+    def rebuild_lab_index(self, progress_callback=None):
+        LAB_LOGGER.info(f"Starting REBUILD at: {Config.LAB_INDEX_DIR}")
+        self._close_index()
+        time.sleep(0.5)
+
+        if not os.path.exists(Config.FILE_V8):
+            raise FileNotFoundError("Input file not found")
+
+        if os.path.exists(Config.LAB_INDEX_DIR):
+            try:
+                shutil.rmtree(Config.LAB_INDEX_DIR, ignore_errors=True)
+            except Exception as e:
+                LAB_LOGGER.error(f"Delete failed: {e}")
+
+        os.makedirs(Config.LAB_INDEX_DIR, exist_ok=True)
+
+        builder = tantivy.SchemaBuilder()
+        builder.add_text_field("unique_id", stored=True)
+        builder.add_text_field("text_normalized", stored=True, tokenizer_name="simple")
+        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace") # Legacy
+        
+        # The critical field
+        builder.add_text_field(self.LAB_FINGERPRINT_FIELD, stored=False, tokenizer_name="simple")
+        
+        builder.add_text_field("full_header", stored=True)
+        builder.add_text_field("shelfmark", stored=True)
+        builder.add_text_field("source", stored=True)
+        builder.add_text_field("content", stored=True, tokenizer_name="simple")
+
+        schema = builder.build()
+        index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        self._ensure_lab_tokenizers(index)
+        writer = index.writer(heap_size=50_000_000)
+
+        total_docs = 0
+        
+        def process_file(fpath, label):
+            nonlocal total_docs
+            if not os.path.exists(fpath): return
+            LAB_LOGGER.info(f"Indexing {label}...")
+            
+            with open(fpath, 'r', encoding='utf-8-sig') as f:
+                cid, chead, ctext = None, None, []
+                for line in f:
+                    line = line.strip()
+                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
+
+                    if is_sep:
+                        if cid and ctext:
+                            original = "\n".join(ctext)
+                            norm = self.lab_index_normalize(original)
+                            fp = text_to_fingerprint(original)
+                            sm = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
+
+                            writer.add_document(tantivy.Document(
+                                unique_id=str(cid),
+                                text_normalized=norm,
+                                fingerprint=fp,
+                                content=original,
+                                full_header=str(chead),
+                                shelfmark=str(sm),
+                                source=str(label)
+                            ))
+                            total_docs += 1
+                            if progress_callback and total_docs % 1000 == 0:
+                                progress_callback(total_docs, 0)
+                        
+                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
+                        cid = self.meta_mgr.extract_unique_id(line)
+                        ctext = [] 
+                    else:
+                        ctext.append(line)
+                
+                # Last doc
+                if cid and ctext:
+                    original = "\n".join(ctext)
+                    fp = text_to_fingerprint(original)
+                    writer.add_document(tantivy.Document(
+                        unique_id=str(cid),
+                        text_normalized=self.lab_index_normalize(original),
+                        fingerprint=fp,
+                        content=original,
+                        full_header=str(chead),
+                        shelfmark=str("Unknown"),
+                        source=str(label)
+                    ))
+                    total_docs += 1
+
+        process_file(Config.FILE_V8, "V0.8")
+        process_file(Config.FILE_V7, "V0.7")
+
+        writer.commit()
+        LAB_LOGGER.info(f"Rebuild done. {total_docs} docs committed.")
+        self._reload_lab_index()
+        return total_docs
+
+    def _execute_safe_search(self, query_str, slop=0):
+        """
+        Modified to support fuzzy matching based on sensitivity settings.
+        If min_should_match is 100%, uses a strict Phrase Query.
+        Otherwise, constructs a Boolean OR query to fetch candidates for filtering.
+        """
+        tokens = query_str.split()
+        if not tokens:
+            return None
+
+        # אם המשתמש דורש 100% התאמה, נשתמש בחיפוש המקורי (Phrase Query) שהוא המחמיר ביותר
+        if self.settings.min_should_match >= 100:
+            final_query_str = f'{self.LAB_FINGERPRINT_FIELD}:"{query_str}"~{slop}'
+        else:
+            # אחרת, נבנה שאילתת OR כדי לקבל כל מסמך שמכיל לפחות חלק מהמילים
+            # הסינון המדויק לפי אחוזים יתבצע בפונקציה lab_search
+            # מבנה: fingerprint:token1 OR fingerprint:token2 ...
+            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in tokens]
+            final_query_str = " OR ".join(clauses)
+
+        # Strategy A: Call parse_query with ONE argument
+        try:
+            q = self.lab_index.parse_query(final_query_str)
+            return self.lab_searcher.search(q, self.settings.candidate_limit)
+        except Exception as e1:
+            pass
+
+        # Strategy B: Call parse_query with explicit field list (STRINGS)
+        try:
+            # בחיפוש בוליאני מורכב, לפעמים צריך לציין את השדות ברירת המחדל
+            q = self.lab_index.parse_query(final_query_str, [self.LAB_FINGERPRINT_FIELD])
+            return self.lab_searcher.search(q, self.settings.candidate_limit)
+        except Exception as e2:
+            pass
+
+        # Strategy C: Call parse_query with explicit field list (INTS - Schema objects)
+        try:
+            field_handle = self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)
+            q = self.lab_index.parse_query(final_query_str, [field_handle])
+            return self.lab_searcher.search(q, self.settings.candidate_limit)
+        except Exception as e3:
+            LAB_LOGGER.error(f"All query strategies failed. Last: {e3}")
+            return None
+
+    def _get_term_weight(self, fp):
+        """
+        Calculates importance using User Configurable Stop-Word scores.
+        """
+        raw_weight = 0
+        for char in fp:
+            raw_weight += HEBREW_FREQ.get(char, 0)
+        
+        # 1. מילים קצרות מדי (<3 תווים)
+        if len(fp) < 3:
+            return self.settings.stop_word_score 
+        
+        # 2. מילים נפוצות בנות 3 תווים (משקל נמוך)
+        if len(fp) == 3 and raw_weight < 18:
+            return self.settings.common_3char_score
+
+        # 3. מילים רגילות/נדירות
+        final_weight = raw_weight
+        
+        # בונוס אורך רק למילים משמעותיות
+        if len(fp) > 3:
+            final_weight *= self.settings.length_bonus_factor
+            
+        return final_weight
+
+    def _calculate_match_metrics(self, text, query_fingerprints_list, original_query_str):
+        """
+        Calculates score with STRICT FREQUENCY CAP & SEQUENTIAL ORDER.
+        1. Words appearing more times in text than in query yield ZERO score.
+        2. Sequence matches get huge bonuses.
+        """
+        if not text:
+            return 0, [], (0, 0)
+
+        # 1. Exact Match Check
+        def safe_norm(s): return re.sub(r"[^\w\u0590-\u05FF]", "", s).lower()
+        norm_text = safe_norm(text)
+        norm_query = safe_norm(original_query_str)
+        exact_bonus = 0
+        if norm_query and norm_query in norm_text:
+            exact_bonus = 1000000
+
+        # 2. Weights & Mapping
+        fp_to_query_indices = defaultdict(list)
+        term_weights = {}
+        
+        for idx, fp in enumerate(query_fingerprints_list):
+            fp_to_query_indices[fp].append(idx)
+            term_weights[fp] = self._get_term_weight(fp)
+
+        max_possible_unique_weight = sum(term_weights.values()) 
+        
+        # 3. Collect Matches
+        matches = []
+        q_fp_set = set(query_fingerprints_list)
+        
+        for m in re.finditer(r"[\w\u0590-\u05FF\']+", text):
+            word = m.group()
+            fp = encode_word_shmidman(word)
+            if fp in q_fp_set:
+                matches.append({
+                    'start': m.start(),
+                    'end': m.end(),
+                    'word': word,
+                    'fp': fp,
+                    'weight': term_weights[fp],
+                    'q_indices': fp_to_query_indices[fp]
+                })
+
+        if not matches:
+            return 0, [], (0, 0)
+
+        # 4. Find Best Cluster
+        max_score = 0
+        best_window = (0, 0)
+        total_matches = len(matches)
+        
+        unique_bonus = self.settings.unique_bonus_base
+        common_factor = self.settings.common_penalty_factor
+        density_pen = self.settings.density_penalty
+        order_bonus_factor = self.settings.order_bonus
+        
+        lookahead_limit = len(query_fingerprints_list) * 5
+        
+        for i in range(total_matches):
+            current_window_score = 0
+            
+            # מעקב אחרי כמויות: כמה פעמים ראינו כל מילה בחלון הנוכחי?
+            seen_counts = defaultdict(int)
+            
+            # מעקב אחרי סדר
+            last_valid_query_idx = -1
+            sequential_chain_length = 0
+            
+            # אתחול לפי מילת ההתחלה
+            if matches[i]['q_indices']:
+                last_valid_query_idx = matches[i]['q_indices'][0]
+
+            for j in range(i, min(total_matches, i + lookahead_limit)):
+                m = matches[j]
+                
+                # בדיקת מרחק פיזי
+                dist = m['end'] - matches[i]['start']
+                if dist > 450: break 
+                
+                fp = m['fp']
+                w = m['weight']
+                
+                # כמה פעמים המילה הזו מופיעה בשאילתה המקורית?
+                allowed_count = len(fp_to_query_indices[fp])
+                
+                # כמה פעמים ראינו אותה בחלון הזה עד כה?
+                seen_counts[fp] += 1
+                
+                # חישוב הניקוד למילה הספציפית הזו
+                word_score = 0
+                
+                if seen_counts[fp] <= allowed_count:
+                    # זוהי הופעה "חוקית" (ראשונה או שניה אם יש כפילות בשאילתה)
+                    # ניתן ניקוד מלא
+                    word_score = (w * unique_bonus)
+                else:
+                    # זוהי הופעה מיותרת (זבל). המילה כבר נמצאה מספיק פעמים.
+                    # ניתן ניקוד מופחת דרסטית (או אפס אם המשתמש קבע 0)
+                    word_score = (w * common_factor) 
+                
+                current_window_score += word_score
+
+                # --- Order Bonus Logic ---
+                found_sequence = False
+                best_q_idx_for_match = -1
+                
+                for q_idx in m['q_indices']:
+                    if q_idx > last_valid_query_idx:
+                        best_q_idx_for_match = q_idx
+                        found_sequence = True
+                        break 
+                
+                if found_sequence:
+                    sequential_chain_length += 1
+                    current_window_score += (w * order_bonus_factor * sequential_chain_length)
+                    last_valid_query_idx = best_q_idx_for_match
+                
+                # --- Density Penalty ---
+                penalty = dist * density_pen
+                final_window_score = current_window_score - penalty
+                
+                if final_window_score > max_score:
+                    max_score = final_window_score
+                    best_window = (i, j)
+
+        # 5. Coverage Calculation
+        start_idx, end_idx = best_window
+        window_matches = matches[start_idx : end_idx + 1]
+        
+        found_unique_fps = set(m['fp'] for m in window_matches)
+        found_unique_weight = sum(term_weights[fp] for fp in found_unique_fps)
+        
+        coverage_ratio = 0
+        if max_possible_unique_weight > 0:
+            coverage_ratio = found_unique_weight / max_possible_unique_weight
+        
+        final_score = (max_score * (coverage_ratio ** self.settings.coverage_power)) + exact_bonus
+
+        return final_score, matches, best_window    
+
+    def _generate_highlighted_snippet(self, text, matches, best_window):
+        """
+        Generates an HTML snippet with RED highlighting and surrounding context.
+        """
+        if not text: return ""
+        if not matches: return text[:300]
+
+        start_m_idx, end_m_idx = best_window
+        
+        # הגנה על אינדקסים
+        start_m_idx = max(0, start_m_idx)
+        end_m_idx = min(len(matches) - 1, end_m_idx)
+
+        # 1. קביעת גבולות הטקסט להצגה (100 תווים להקשר רחב)
+        padding = 100
+        snippet_start_char = max(0, matches[start_m_idx]['start'] - padding)
+        snippet_end_char = min(len(text), matches[end_m_idx]['end'] + padding)
+        
+        # קוסמטיקה: לא לחתוך באמצע מילה
+        if snippet_start_char > 0:
+            next_space = text.find(' ', snippet_start_char)
+            if next_space != -1 and next_space < matches[start_m_idx]['start']:
+                snippet_start_char = next_space + 1
+
+        # 2. איסוף המילים הרלוונטיות
+        relevant_matches = matches[start_m_idx : end_m_idx + 1]
+        
+        # 3. בניית ה-HTML
+        out_parts = []
+        out_parts.append("<div dir='rtl' style='white-space: pre-wrap;'>") 
+        
+        if snippet_start_char > 0: out_parts.append("... ")
+        
+        current_idx = snippet_start_char
+        
+        for m in relevant_matches:
+            if m['start'] < snippet_start_char: continue
+            if m['end'] > snippet_end_char: break
+            
+            # טקסט רגיל
+            if m['start'] > current_idx:
+                plain = text[current_idx : m['start']]
+                out_parts.append(plain)
+            
+            # מילה מודגשת באדום
+            word = text[m['start'] : m['end']]
+            out_parts.append(f"<span style='color:#ff0000; font-weight:bold;'>{word}</span>")
+            
+            current_idx = m['end']
+        
+        # שארית
+        if current_idx < snippet_end_char:
+            out_parts.append(text[current_idx : snippet_end_char])
+            
+        if snippet_end_char < len(text): out_parts.append(" ...")
+        
+        out_parts.append("</div>")
+
+        final_html = "".join(out_parts)
+        # המרת ירידות שורה לרווחים כדי לא לשבור את הטבלה
+        return final_html.replace("\n", " ").replace("\r", "")
+
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+        if not self.lab_searcher: return []
+
+        # 1. Prepare Fingerprints
+        fp_str = text_to_fingerprint(query_str)
+        if not fp_str: return []
+        
+        query_fp_list = fp_str.split()
+        
+        # 2. Fetch Candidates
+        slop = max(50, int(self.settings.gap_penalty) * 10) 
+        res_obj = self._execute_safe_search(fp_str, slop)
+        if not res_obj: return []
+
+        results = []
+        min_match_pct = self.settings.min_should_match
+
+        # 3. Process
+        for score, doc_addr in res_obj.hits:
+            try:
+                doc = self.lab_searcher.doc(doc_addr)
+                content = doc['content'][0]
+                uid = doc['unique_id'][0]
+
+                # --- Core: Calculate Score & Find Matches ---
+                custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str)
+                
+                if custom_score < 15: 
+                    continue
+                
+                # Filter by Percentage (Approximate)
+                if min_match_pct < 100:
+                    found_unique = set(m['fp'] for m in matches)
+                    needed_unique = set(query_fp_list)
+                    common = found_unique.intersection(needed_unique)
+                    if len(needed_unique) > 0 and (len(common) / len(needed_unique) * 100 < min_match_pct):
+                        continue
+
+                # --- Highlight Snippet ---
+                smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
+                html_snippet = self._html_snippet(smart_snippet)
+
+                # --- FIX FOR VIEWER HIGHLIGHTING ---
+                # We extract the ACTUAL corrupted words found in the match window
+                # and create a Regex pattern from them. The GUI uses this pattern to highlight.
+                start_idx, end_idx = best_window
+                relevant_matches = matches[start_idx : end_idx + 1]
+                
+                # Collect unique words found (e.g., "מאמתי", "קורין", "את", "שמע")
+                found_words = list(set(m['word'] for m in relevant_matches))
+                
+                # Sort by length descending (so "wordLong" matches before "word")
+                found_words.sort(key=len, reverse=True)
+                
+                # Create a regex OR pattern: (word1|word2|...)
+                # We use re.escape to handle any special chars in the text
+                highlight_regex_str = "|".join(re.escape(w) for w in found_words) if found_words else ""
+                
+                results.append({
+                    'sort_score': custom_score,
+                    'display': {
+                        'id': self.meta_mgr.extract_unique_id(doc['full_header'][0]) or uid, 
+                        'shelfmark': doc['shelfmark'][0], 
+                        'title': '', 
+                        'source': doc['source'][0], 
+                        'img': ''
+                    },
+                    'snippet': html_snippet,
+                    'full_text': content,
+                    'uid': uid,
+                    'raw_header': doc['full_header'][0],
+                    'raw_file_hl': smart_snippet,
+                    # This is the magic key for the Viewer:
+                    'highlight_pattern': highlight_regex_str 
+                })
+            except Exception as e:
+                LAB_LOGGER.error(f"Error processing doc: {e}")
+
+        # 4. Sort & Dedup
+        results.sort(key=lambda x: x['sort_score'], reverse=True)
+        unique_map = {}
+        for r in results:
+            if r['uid'] not in unique_map:
+                unique_map[r['uid']] = r
+        
+        final_results = list(unique_map.values())
+        final_results.sort(key=lambda x: x['sort_score'], reverse=True)
+
+        return final_results
+
+    def _generate_snippet(self, text, terms, window=100):
+        # Basic highlighter finding first term
+        low = text.lower()
+        idx = -1
+        for t in terms:
+            idx = low.find(t.lower())
+            if idx != -1: break
+        
+        if idx == -1: return text[:300]
+        
+        start = max(0, idx - window)
+        end = min(len(text), idx + window)
+        chunk = text[start:end]
+        
+        # Highlight in chunk
+        for t in terms:
+            chunk = re.sub(f"({re.escape(t)})", r"*\1*", chunk, flags=re.IGNORECASE)
+        return chunk
+
+    def _html_snippet(self, text):
+        # Convert *bold* to html
+        return text.replace("*", "<b style='color:red'>", 1).replace("*", "</b>", 1).replace("*", "")
+
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
+        """
+        Scans a composition using Lab Mode.
+        Includes WIDE SOURCE CONTEXT and HTML HIGHLIGHTING.
+        """
+        if not full_text:
+            return {'main': [], 'filtered': []}
+
+        # הגדרות משתמש
+        PER_CHUNK_LIMIT = self.settings.comp_chunk_limit
+        MIN_SCORE_THRESHOLD = self.settings.comp_min_score
+        MAX_FINAL = self.settings.comp_max_final_results
+        min_pct_ratio = self.settings.min_should_match / 100.0
+
+        # 1. פירוק למקטעים (טוקנים)
+        tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
+        c_size = chunk_size if chunk_size else 15
+        step = max(1, int(c_size * 0.5)) 
+        
+        # יצירת הצ'אנקים עם מעקב אחרי אינדקס ההתחלה שלהם
+        chunks_data = []
+        for i in range(0, max(1, len(tokens) - c_size + 1), step):
+            chunk = tokens[i : i + c_size]
+            chunks_data.append((i, chunk)) # (start_token_index, chunk_tokens)
+        
+        if len(tokens) < c_size: 
+            chunks_data = [(0, tokens)]
+
+        total_chunks = len(chunks_data)
+        results_map = {} 
+
+        # 2. סריקה
+        for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
+            if progress_callback and i % 5 == 0: 
+                progress_callback(i, total_chunks)
+
+            chunk_text = " ".join(chunk_tokens)
+            fp_str = text_to_fingerprint(chunk_text)
+            
+            if not fp_str or len(chunk_tokens) < 4: continue
+            
+            fp_list = fp_str.split()
+            needed_unique_fps = set(fp_list) 
+            
+            # חיפוש (שימוש בלוגיקה הפנימית של LabEngine)
+            slop = min(100, max(50, int(self.settings.gap_penalty) * 10))
+            # בניית שאילתת OR לטביעות אצבע
+            query_tokens = fp_str.split()
+            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in query_tokens]
+            final_query_str = " OR ".join(clauses)
+            
+            res_obj = None
+            try:
+                q = self.lab_index.parse_query(final_query_str)
+                res_obj = self.lab_searcher.search(q, PER_CHUNK_LIMIT)
+            except Exception:
+                continue
+
+            if not res_obj: continue
+
+            for score, doc_addr in res_obj.hits:
+                try:
+                    doc = self.lab_searcher.doc(doc_addr)
+                    content = doc['content'][0]
+                    
+                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text)
+                    
+                    # בדיקת אחוזים (Coverage)
+                    found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
+                    common_fps = found_unique_fps.intersection(needed_unique_fps)
+                    if len(needed_unique_fps) > 0:
+                        coverage = len(common_fps) / len(needed_unique_fps)
+                        if coverage < min_pct_ratio: continue
+                    
+                    if match_score < MIN_SCORE_THRESHOLD: continue
+
+                    uid = doc['unique_id'][0]
+
+                    if uid not in results_map:
+                        results_map[uid] = {
+                            'uid': uid, 'total_score': 0, 'hits_count': 0,
+                            'raw_header': doc['full_header'][0], 'source': doc['source'][0],
+                            'content': content, 
+                            'best_chunk_score': -1,
+                            'all_found_words': set(),
+                            'src_indices': set(), # אינדקסים בטקסט המקור שנמצאו
+                            'ms_matches': [] # (start, end) בטקסט כתב היד
+                        }
+                    
+                    rec = results_map[uid]
+                    rec['total_score'] += match_score
+                    rec['hits_count'] += 1
+                    
+                    # מעקב אחרי מיקום בטקסט המקור (לטובת בניית Context רחב)
+                    token_end_idx = token_start_idx + len(chunk_tokens)
+                    rec['src_indices'].update(range(token_start_idx, token_end_idx))
+                    
+                    # מעקב אחרי מיקום בכתב היד (לטובת הדגשה בתוצאה)
+                    start_m, end_m = best_window
+                    if matches:
+                        # המרה מאינדקסים של matches למיקומים בטקסט (start/end chars)
+                        ms_start_char = matches[start_m]['start']
+                        ms_end_char = matches[end_m]['end']
+                        rec['ms_matches'].append((ms_start_char, ms_end_char))
+                        
+                        # שמירת מילים להדגשה
+                        for m in matches[start_m : end_m + 1]: 
+                            rec['all_found_words'].add(m['word'])
+
+                except Exception: pass
+
+        # 3. בניית התוצאות הסופיות
+        final_items = []
+        is_short_search = (total_chunks <= 3)
+
+        for uid, data in results_map.items():
+            
+            # --- מסננת עקביות ---
+            if not is_short_search:
+                if data['hits_count'] < 2 and data['total_score'] < 1000: continue 
+            else:
+                if data['total_score'] < 250: continue
+
+            # --- א. בניית הקשר מקור רחב (Wide Source Context) ---
+            src_snippets = []
+            src_indices = sorted(list(data['src_indices']))
+            
+            if src_indices:
+                # קיבוץ אינדקסים קרובים (מרחק < 60 מילים)
+                clusters = []
+                curr_cluster = [src_indices[0]]
+                for idx in src_indices[1:]:
+                    if idx - curr_cluster[-1] < 60:
+                        curr_cluster.append(idx)
+                    else:
+                        clusters.append(curr_cluster)
+                        curr_cluster = [idx]
+                clusters.append(curr_cluster)
+                
+                # בניית הטקסט לכל קלאסטר
+                for cl in clusters:
+                    start_ctx = max(0, cl[0] - 50)
+                    end_ctx = min(len(tokens), cl[-1] + 51)
+                    
+                    cl_set = set(cl)
+                    words_out = []
+                    for k in range(start_ctx, end_ctx):
+                        word = tokens[k]
+                        if k in cl_set:
+                            words_out.append(f"*{word}*") # סימון להדגשה
+                        else:
+                            words_out.append(word)
+                    src_snippets.append(f"... {' '.join(words_out)} ...")
+
+            # --- ב. בניית סניפטים מכתב היד (MS Snippets) ---
+            ms_snips = []
+            # איחוד חפיפות בכתב היד
+            spans = sorted(data['ms_matches'], key=lambda x: x[0])
+            merged = []
+            if spans:
+                curr_s, curr_e = spans[0]
+                for s, e in spans[1:]:
+                    if s <= curr_e + 20: curr_e = max(curr_e, e) # איחוד אם קרוב
+                    else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
+                merged.append((curr_s, curr_e))
+            
+            # יצירת HTML
+            content = data['content']
+            for s, e in merged:
+                start = max(0, s - 60)
+                end = min(len(content), e + 60)
+                
+                # הדגשה באדום
+                # זהירות: s ו-e הם יחסיים לטקסט המלא, צריך לחתוך נכון
+                snippet_text = content[start:end]
+                
+                # נסמן את החלק שנמצא בתוך הסניפט
+                # המיקום של s בתוך snippet_text הוא s - start
+                rel_s = s - start
+                rel_e = e - start
+                
+                # הרכבה מחדש עם תגיות HTML
+                fragment = snippet_text[:rel_s] + \
+                           f"<span style='color:#ff0000; font-weight:bold;'>{snippet_text[rel_s:rel_e]}</span>" + \
+                           snippet_text[rel_e:]
+                           
+                ms_snips.append(fragment)
+
+            # --- ג. סיום ---
+            found_words = sorted(list(data['all_found_words']), key=len, reverse=True)
+            if len(found_words) > 50: found_words = found_words[:50]
+            hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""
+
+            item = {
+                'score': data['total_score'],
+                'uid': uid,
+                'raw_header': data['raw_header'],
+                'src_lbl': data['source'],
+                'source_ctx': "\n\n".join(src_snippets), # ההקשר הרחב החדש
+                'text': "\n...\n".join(ms_snips),        # הסניפט המודגש ב-HTML
+                'highlight_pattern': hl_pattern,
+                'full_text': data['content']
+            }
+            final_items.append(item)
+
+        final_items.sort(key=lambda x: x['score'], reverse=True)
+        
+        if len(final_items) > MAX_FINAL:
+            final_items = final_items[:MAX_FINAL]
+
+        return {'main': final_items, 'filtered': []}
+        
 # ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
@@ -821,7 +1640,25 @@ class MetadataManager:
         return result
 
     def fetch_nli_data(self, system_id):
-        if system_id in self.nli_cache: return self.nli_cache[system_id]
+        # 1. בדיקה במטמון הקיים
+        if system_id in self.nli_cache: 
+            return self.nli_cache[system_id]
+        
+        # 2. בדיקה ב-CSV Bank (התיקון המרכזי: שליפה מקומית במקום רשת)
+        if system_id in self.csv_bank:
+            row = self.csv_bank[system_id]
+            meta = {
+                'shelfmark': row['shelfmark'], 
+                'title': row['title'],
+                'desc': '', 
+                'fl_ids': [], 
+                'thumb_url': None, 
+                'thumb_checked': True # מסמנים כבדוק כדי למנוע ניסיונות חוזרים להורדת תמונה
+            }
+            self.nli_cache[system_id] = meta
+            return meta
+
+        # 3. רק אם אין ברירה (לא במטמון ולא ב-CSV) - פנייה לרשת
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
         return meta
@@ -989,18 +1826,41 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return thumb_url
         
-    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
-        to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
-        if not to_fetch: return
+    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True):
+        """
+        Populate metadata cache. 
+        use_network=False -> Only loads from local CSV/Cache (Instant).
+        use_network=True  -> Fetches missing items from NLI.
+        """
+        # שלב א': שליפה מהירה מה-CSV (ללא רשת)
+        for sid in system_ids:
+            if sid not in self.nli_cache and sid in self.csv_bank:
+                self.fetch_nli_data(sid) # זה שולף מה-CSV אוטומטית כעת
+        
+        # אם ביקשנו רק עבודה מקומית, עוצרים כאן
+        if not use_network:
+            return
 
+        # שלב ב': זיהוי מה *באמת* חסר 
+        to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
+        
+        if not to_fetch:
+            if progress_callback:
+                for i, sid in enumerate(system_ids):
+                     progress_callback(i + 1, len(system_ids), sid)
+            return
+
+        # שלב ג': הורדה מהרשת (רק אם use_network=True)
         futures = {self.nli_executor.submit(self._fetch_single_worker, sid): sid for sid in to_fetch}
-        count = 0
+        current_progress = len(system_ids) - len(to_fetch)
+        
         for future in as_completed(futures):
             sid, meta = future.result()
             self.nli_cache[sid] = meta
-            count += 1
+            current_progress += 1
             if progress_callback:
-                progress_callback(count, len(to_fetch), sid)
+                progress_callback(current_progress, len(system_ids), sid)
+        
         self.save_caches()
 
     def search_by_meta(self, query, field):
@@ -1039,482 +1899,6 @@ class MetadataManager:
             'source': src_label,
             'id': sys_id
         }
-
-# ==============================================================================
-#  LAB ENGINE
-# ==============================================================================
-class LabEngine:
-    """Handles advanced logic for Lab Mode: Two-Stage Retrieval, Normalization, Lab Indexing."""
-    RARE_THRESHOLD = 0.001
-
-    def __init__(self, meta_mgr, variants_mgr):
-        self.meta_mgr = meta_mgr
-        self.var_mgr = variants_mgr
-        self.settings = LabSettings()
-        self.lab_index = None
-        self.lab_searcher = None
-        self.lab_index_needs_rebuild = False
-        self._reload_lab_index()
-
-    def _close_index(self):
-        """Force release of Tantivy file handles."""
-        self.lab_searcher = None
-        self.lab_index = None
-        import gc
-        gc.collect() 
-
-    def _reload_lab_index(self):
-        if os.path.exists(Config.LAB_INDEX_DIR):
-            try:
-                self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
-                
-                # Robust check: Try to parse a query on the field
-                try:
-                    schema = self.lab_index.schema
-                    ngram_field = schema.get_field("text_ngram")
-                    self.lab_index.parse_query('"test"', [ngram_field])
-                except Exception:
-                    LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
-                    self.lab_index_needs_rebuild = True
-                    self._close_index()
-                    return False
-                
-                self.lab_searcher = self.lab_index.searcher()
-                self.lab_index_needs_rebuild = False
-                return True
-            except Exception as e:
-                LAB_LOGGER.error("Failed to load Lab Index: %s", e)
-                self._close_index()
-        
-        self.lab_index_needs_rebuild = True
-        return False
-
-    @staticmethod
-    def lab_index_normalize(text):
-        return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
-
-    @staticmethod
-    def generate_ngrams(text, n=3):
-        if not text: return ""
-        cleaned = "".join(ch for ch in text if "\u0590" <= ch <= "\u05FF")
-        if n <= 1 or len(cleaned) <= n: return cleaned
-        grams = [cleaned[i:i + n] for i in range(len(cleaned) - n + 1)]
-        return " ".join(grams)
-
-    def rebuild_lab_index(self, progress_callback=None):
-        """Build the isolated Lab Index. Uses Safe Mode (Trash Strategy)."""
-        LAB_LOGGER.info(f"Starting Lab Index rebuild at: {Config.LAB_INDEX_DIR}")
-
-        # 1. Close handles
-        self._close_index()
-        time.sleep(0.5)
-
-        # 2. Validation
-        if not os.path.exists(Config.FILE_V8):
-            raise FileNotFoundError(tr("Input file not found: {}").format(Config.FILE_V8))
-
-        # 3. Cleanup Strategy: Rename to trash instead of delete
-        if os.path.exists(Config.LAB_INDEX_DIR):
-            try:
-                trash_name = f"lab_index_trash_{int(time.time())}"
-                trash_path = os.path.join(os.path.dirname(Config.LAB_INDEX_DIR), trash_name)
-                os.rename(Config.LAB_INDEX_DIR, trash_path)
-            except Exception as e:
-                LAB_LOGGER.error("Rename failed: %s. Trying delete...", e)
-                try:
-                    shutil.rmtree(Config.LAB_INDEX_DIR)
-                except Exception as e2:
-                    raise PermissionError(f"Cannot clear index. Restart App. ({e2})")
-
-        os.makedirs(Config.LAB_INDEX_DIR, exist_ok=True)
-
-        # 4. Define Schema
-        builder = tantivy.SchemaBuilder()
-        builder.add_text_field("unique_id", stored=True)
-        builder.add_text_field("text_normalized", stored=True, tokenizer_name="whitespace")
-        # CRITICAL FIX: Ensure this field is added
-        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
-        builder.add_text_field("full_header", stored=True)
-        builder.add_text_field("shelfmark", stored=True)
-        builder.add_text_field("source", stored=True)
-        builder.add_text_field("content", stored=True)
-
-        schema = builder.build()
-        index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
-        writer = index.writer(heap_size=50_000_000)
-
-        # 5. Indexing Loop
-        total_docs = 0
-        def count_lines(fname):
-            if not os.path.exists(fname): return 0
-            with open(fname, 'r', encoding='utf-8') as f: return sum(1 for line in f)
-
-        total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
-        processed_lines = 0
-
-        for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
-            if not os.path.exists(fpath): continue
-            LAB_LOGGER.info("Indexing %s...", label)
-
-            with open(fpath, 'r', encoding='utf-8-sig') as f:
-                cid, chead, ctext = None, None, []
-                for line in f:
-                    processed_lines += 1
-                    line = line.strip()
-                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
-
-                    if is_sep:
-                        if cid and ctext:
-                            original_content = "\n".join(ctext)
-                            norm_content = self.lab_index_normalize(original_content)
-                            ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
-                            shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
-
-                            writer.add_document(tantivy.Document(
-                                unique_id=str(cid),
-                                text_normalized=norm_content,
-                                text_ngram=ngram_content, # CRITICAL FIX: Populate field
-                                content=original_content,
-                                full_header=str(chead),
-                                shelfmark=str(shelfmark),
-                                source=str(label)
-                            ))
-                            total_docs += 1
-                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
-                        cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = [] 
-                    else:
-                        ctext.append(line)
-
-                    if progress_callback and processed_lines % 1000 == 0:
-                        progress_callback(processed_lines, total_lines)
-
-                # Last doc
-                if cid and ctext:
-                    original_content = "\n".join(ctext)
-                    norm_content = self.lab_index_normalize(original_content)
-                    ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
-                    shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
-                    writer.add_document(tantivy.Document(
-                        unique_id=str(cid),
-                        text_normalized=norm_content,
-                        text_ngram=ngram_content,
-                        content=original_content,
-                        full_header=str(chead),
-                        shelfmark=str(shelfmark),
-                        source=str(label)
-                    ))
-                    total_docs += 1
-
-        writer.commit()
-        LAB_LOGGER.info("Lab Index rebuild complete. %d docs.", total_docs)
-        
-        self._reload_lab_index()
-        return total_docs
-
-    # --- Search Methods (Fixing Syntax Error) ---
-
-    def _parse_lab_ngram_query(self, query_str):
-        schema = self.lab_index.schema
-        try:
-            ngram_field = schema.get_field("text_ngram")
-        except Exception:
-            LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
-            return None
-
-        fields = [ngram_field]  # Tantivy expects field handles, not strings
-        try:
-            return self.lab_index.parse_query(query_str, fields)
-        except Exception:
-            try:
-                scoped_query = f"text_ngram:({query_str})"
-                return self.lab_index.parse_query(scoped_query, fields)
-            except Exception as e2:
-                LAB_LOGGER.error(f"Query parsing failed: {e2}")
-                return None
-
-    def _candidate_limit(self):
-        return max(500, min(self.settings.candidate_limit, 50000))
-
-    def _stage1_limit(self):
-        return self._candidate_limit()
-
-    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
-        if not self.lab_searcher or self.lab_index_needs_rebuild:
-            LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
-            return []
-
-        LAB_LOGGER.info("N-Gram Search: %s", query_str)
-        start_time = time.time()
-
-        cleaned_query = self.lab_index_normalize(query_str)
-        cleaned_query = " ".join(cleaned_query.split())
-        if not cleaned_query: return []
-
-        base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
-        base_grams = base_ngrams.split()
-        if not base_grams: return []
-
-        expanded_grams = set(base_grams)
-
-        # Spelling/Phonetic Expansion
-        if self.settings.ignore_matres:
-            skeleton = cleaned_query.replace("ו", "").replace("י", "")
-            if skeleton and skeleton != cleaned_query:
-                expanded_grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
-
-        if self.settings.phonetic_expansion:
-            words = cleaned_query.split()
-            for idx, word in enumerate(words):
-                variants = {word}
-                for i, char in enumerate(word):
-                    for repl in self.var_mgr.basic_map.get(char, set()):
-                        variants.add(word[:i] + repl + word[i+1:])
-                for variant in variants:
-                    if variant == word: continue
-                    expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
-
-        # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        
-        if not query_terms: return []
-        
-        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
-        # Tantivy's BM25 will automatically rank documents with more matches higher.
-        if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})"
-        else:
-            final_query = query_terms[0]
-
-        LAB_LOGGER.info("N-Gram Query: %s", final_query)
-
-        try:
-            t_query = self._parse_lab_ngram_query(final_query)
-            if t_query is None:
-                return []
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error("N-Gram search failed: %s", e)
-            return []
-
-        results = []
-        for score, doc_addr in res_obj.hits:
-            doc = self.lab_searcher.doc(doc_addr)
-            source = doc['source'][0] if 'source' in doc else "Unknown"
-            content = doc['content'][0]
-            
-            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
-            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
-            
-            results.append({
-                'bm25': score,
-                'content': content,
-                'header': doc['full_header'][0],
-                'shelfmark': doc['shelfmark'][0],
-                'source': source,
-                'uid': doc['unique_id'][0],
-                'snippet_data': self._snippet_html(snippet),
-                'raw_file_hl': hl_text
-            })
-
-        results.sort(key=lambda x: x['bm25'], reverse=True)
-        
-        # Formatting
-        gui_results = []
-        seen = set()
-        for r in results:
-            sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
-            if sid in seen: continue
-            seen.add(sid)
-            
-            shelf = r['shelfmark']
-            title = "" 
-            
-            gui_results.append({
-                'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
-                'snippet': r['snippet_data'],
-                'full_text': r['content'],
-                'uid': r['uid'],
-                'raw_header': r['header'],
-                'raw_file_hl': r['raw_file_hl'],
-                'highlight_pattern': None
-            })
-            
-        return gui_results
-
-    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
-        if not self.lab_searcher or self.lab_index_needs_rebuild:
-            LAB_LOGGER.warning("Lab Index not ready.")
-            return {'main': [], 'filtered': []}
-
-        LAB_LOGGER.info("Starting N-Gram Composition Search...")
-        start_time = time.time()
-
-        norm_text = self.lab_index_normalize(full_text)
-        tokens = norm_text.split()
-        
-        c_size = int(chunk_size) if chunk_size else 7
-        step = max(1, c_size // 2)
-
-        if len(tokens) < c_size:
-            chunks = [" ".join(tokens)]
-        else:
-            chunks = [" ".join(tokens[i : i + c_size]) for i in range(0, len(tokens) - c_size + 1, step)]
-
-        LAB_LOGGER.info("Generated %d chunks (Size: %d, Step: %d)", len(chunks), c_size, step)
-
-        candidates = {}
-
-        for i, chunk_str in enumerate(chunks):
-            if progress_callback and i % 5 == 0:
-                progress_callback(i, len(chunks))
-
-            base_ngrams = self.generate_ngrams(chunk_str, self.settings.ngram_size)
-            base_gram_list = base_ngrams.split()
-            grams_set = set(base_gram_list)
-            
-            if self.settings.ignore_matres:
-                skeleton = chunk_str.replace("ו", "").replace("י", "")
-                grams_set.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
-            
-            if self.settings.phonetic_expansion:
-                for word in chunk_str.split():
-                    for idx, char in enumerate(word):
-                        for repl in self.var_mgr.basic_map.get(char, set()):
-                             variant = word[:idx] + repl + word[idx+1:]
-                             grams_set.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
-
-            if not grams_set: continue
-
-            query_grams = sorted(list(grams_set))
-            clauses = [f'text_ngram:"{g}"' for g in query_grams]
-            
-            # CRITICAL FIX: Removed @min_match syntax
-            raw_query = f"({' '.join(clauses)})"
-            
-            try:
-                t_query = self._parse_lab_ngram_query(raw_query)
-                if t_query is None:
-                    continue
-                res = self.lab_searcher.search(t_query, 50) 
-            except Exception:
-                continue
-
-            for score, doc_addr in res.hits:
-                doc = self.lab_searcher.doc(doc_addr)
-                uid = doc['unique_id'][0]
-                
-                if uid not in candidates:
-                    candidates[uid] = {
-                        'uid': uid,
-                        'score': 0,
-                        'hits': 0,
-                        'content': doc['content'][0],
-                        'header': doc['full_header'][0],
-                        'src': doc['source'][0] if 'source' in doc else "Unknown"
-                    }
-                
-                candidates[uid]['score'] += score
-                candidates[uid]['hits'] += 1
-
-        results = list(candidates.values())
-        results.sort(key=lambda x: x['score'], reverse=True)
-        results = results[:self.settings.candidate_limit]
-
-        formatted_results = []
-        full_source_grams = self.generate_ngrams(full_text[:1000], self.settings.ngram_size).split()
-        
-        for cand in results:
-            hl_text = self._highlight_ngram_in_text(cand['content'], full_source_grams)
-            snippet_html = self._generate_ngram_snippet(cand['content'], full_source_grams)
-
-            formatted_results.append({
-                'uid': cand['uid'],
-                'score': cand['score'],
-                'raw_header': cand['header'],
-                'src_lbl': cand['src'],
-                'source_ctx': "Composition Match",
-                'text': self._snippet_html(snippet_html),
-                'raw_file_hl': hl_text
-            })
-
-        elapsed = time.time() - start_time
-        LAB_LOGGER.info("Composition search done. %d results in %.2fs", len(formatted_results), elapsed)
-        
-        return {'main': formatted_results, 'filtered': []}
-
-    # --- Highlighting Helpers (Required) ---
-    def _snippet_html(self, snippet):
-        if not snippet: return snippet
-        return re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", snippet)
-
-    def _highlight_ngram_in_text(self, text, grams):
-        if not text or not grams: return text
-        spans = self._find_ngram_spans(text, grams)
-        return self._apply_highlights(text, spans)
-
-    def _generate_ngram_snippet(self, text, grams, window=120):
-        if not text: return text
-        if not grams: return text[:300]
-        spans = self._find_ngram_spans(text, grams)
-        if not spans: return text[:300]
-        
-        first_start, first_end = spans[0]
-        start = max(0, first_start - window)
-        end = min(len(text), first_end + window)
-        
-        snippet_text = text[start:end]
-        rel_spans = [
-            (max(0, s - start), min(end - start, e - start))
-            for s, e in spans if s < end and e > start
-        ]
-        merged = self._merge_spans(rel_spans)
-        
-        hl = self._apply_highlights(snippet_text, merged)
-        return f"...{hl}..."
-
-    @staticmethod
-    def _find_ngram_spans(text, grams):
-        spans = []
-        for g in grams:
-            if not g: continue
-            start = 0
-            while True:
-                idx = text.find(g, start)
-                if idx == -1: break
-                spans.append((idx, idx + len(g)))
-                start = idx + 1
-        return LabEngine._merge_spans(spans)
-
-    @staticmethod
-    def _merge_spans(spans):
-        if not spans: return []
-        spans.sort()
-        merged = [list(spans[0])]
-        for s, e in spans[1:]:
-            last = merged[-1]
-            if s <= last[1]:
-                last[1] = max(last[1], e)
-            else:
-                merged.append([s, e])
-        return [(s, e) for s, e in merged]
-
-    @staticmethod
-    def _apply_highlights(text, spans):
-        if not spans: return text
-        out = []
-        last_idx = 0
-        for s, e in spans:
-            out.append(text[last_idx:s])
-            out.append(f"*{text[s:e]}*")
-            last_idx = e
-        out.append(text[last_idx:])
-        return "".join(out)
-    
-    # Minimal helpers for legacy support (if called externally)
-    def _get_doc_freq(self, term): return 0
-    def _is_rare(self, term, total): return False
-
 
 # ==============================================================================
 #  INDEXER
@@ -1879,62 +2263,104 @@ class SearchEngine:
         return final
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None):
+        """
+        Scans composition chunks against the index.
+        Returns aggregated results with WIDE source context.
+        """
+        # 1. פירוק הטקסט המקורי לטוקנים
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
 
-        # We need two accumulators now
         doc_hits_main = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
         doc_hits_filtered = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
 
         total_chunks = len(chunks)
         
+        # 2. סריקת הצ'אנקים
         for i, chunk in enumerate(chunks):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
+            
+            # בניית שאילתה
             t_query = self.build_tantivy_query(chunk, mode)
             regex = self.build_regex_pattern(chunk, mode, 0)
             if not regex: continue
 
-            # Check filter text (sampling)
+            # סינון מקדים (Sampling)
             is_filtered = False
             if filter_text:
                 if regex.search(filter_text):
                     is_filtered = True
 
             try:
+                # חיפוש באינדקס
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
+                
+                # סינון ביטויים נפוצים מדי (למשל "וידבר ה' אל משה")
                 if len(hits) > max_freq: continue 
+                
                 for score, doc_addr in hits:
                     doc = self.searcher.doc(doc_addr)
                     content = doc['content'][0]
+                    
+                    # וידוא התאמה מדויקת עם Regex
                     if regex.search(content):
                         uid = doc['unique_id'][0]
-
                         rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
                         rec['matches'].append(regex.search(content).span())
+                        # שמירת האינדקסים של המילים בטקסט *המקור* שנמצאו
                         rec['src_indices'].update(range(i, i + chunk_size))
                         rec['patterns'].add(regex.pattern)
             except Exception as e:
-                LOGGER.warning("Failed composition chunk processing at token %s: %s", i, e)
+                LAB_LOGGER.warning(f"Failed composition chunk processing at token {i}: {e}")
 
+        # 3. בניית התוצאות עם הקשר רחב (Wide Context Logic)
         def build_items(hits_dict):
             final_items = []
+            
             for uid, data in hits_dict.items():
+                # --- לוגיקה חדשה: בניית הקשר מקור רחב ---
                 src_indices = sorted(list(data['src_indices']))
                 src_snippets = []
+                
                 if src_indices:
-                    for k, g in itertools.groupby(enumerate(src_indices), lambda ix: ix[0] - ix[1]):
-                        group = list(map(lambda ix: ix[1], g))
-                        s, e = group[0], group[-1]
-                        ctx_s = max(0, s - 15); ctx_e = min(len(tokens), e + 1 + 15)
-                        seq = " ".join(tokens[s:e+1])
-                        src_snippets.append(f"... {' '.join(tokens[ctx_s:s])} *{seq}* {' '.join(tokens[e+1:ctx_e])} ...")
+                    # א. קיבוץ אינדקסים קרובים (Clustering)
+                    # אם המרחק בין מילים הוא פחות מ-60 מילים, נאחד אותן לפסקה אחת
+                    clusters = []
+                    if src_indices:
+                        curr_cluster = [src_indices[0]]
+                        for idx in src_indices[1:]:
+                            if idx - curr_cluster[-1] < 60: # סף לאיחוד פסקאות
+                                curr_cluster.append(idx)
+                            else:
+                                clusters.append(curr_cluster)
+                                curr_cluster = [idx]
+                        clusters.append(curr_cluster)
+                    
+                    # ב. בניית הטקסט לכל קלאסטר עם שוליים רחבים
+                    for cl in clusters:
+                        start_ctx = max(0, cl[0] - 200)
+                        end_ctx = min(len(tokens), cl[-1] + 201)
+                        
+                        # בניית רצף המילים עם סימון המילים שנמצאו
+                        cl_set = set(cl)
+                        words_out = []
+                        for k in range(start_ctx, end_ctx):
+                            word = tokens[k]
+                            if k in cl_set:
+                                # סימון בכוכביות לצביעה באדום בממשק
+                                words_out.append(f"*{word}*") 
+                            else:
+                                words_out.append(word)
+                        
+                        src_snippets.append(f"... {' '.join(words_out)} ...")
 
+                # --- המשך הלוגיקה הרגילה (חישוב ציון וכו') ---
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
                 if spans:
@@ -1945,20 +2371,29 @@ class SearchEngine:
                     merged.append((curr_s, curr_e))
 
                 score = sum(e-s for s,e in merged)
+                
+                # סניפטים מתוך כתב היד (Genizah Snippets)
                 ms_snips = []
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
+                    # שימוש ב-HTML span לאדום בכתב היד
+                    fragment = data['content'][start:s] + \
+                               f"<span style='color:#ff0000; font-weight:bold;'>{data['content'][s:e]}</span>" + \
+                               data['content'][e:end]
+                    ms_snips.append(fragment)
 
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
                 final_items.append({
-                    'score': score, 'uid': uid,
-                    'raw_header': data['head'], 'src_lbl': data['src'],
-                    'source_ctx': "\n".join(src_snippets),
+                    'score': score, 
+                    'uid': uid,
+                    'raw_header': data['head'], 
+                    'src_lbl': data['src'],
+                    'source_ctx': "\n\n".join(src_snippets), # כאן נכנס ההקשר הרחב החדש
                     'text': "\n...\n".join(ms_snips),
                     'highlight_pattern': combined_pattern
                 })
+                
             final_items.sort(key=lambda x: x['score'], reverse=True)
             return final_items
 
@@ -1967,7 +2402,7 @@ class SearchEngine:
         filtered_list = build_items(doc_hits_filtered)
 
         return {'main': main_list, 'filtered': filtered_list}
-
+    
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items."""
         grouped = defaultdict(list)
@@ -2011,30 +2446,26 @@ class SearchEngine:
         return manuscripts
 
     def group_composition_results(self, items, threshold=5, progress_callback=None, status_callback=None, check_cancel=None):
+        # 1. איסוף IDs לטובת מטא-דאטה
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
-            # Check if it's a manuscript object with pre-parsed ID
             if i.get('type') == 'manuscript' and i.get('sys_id'):
                 ids.append(i['sys_id'])
             else:
-                ids.append(self.meta_mgr.parse_header_smart(i['raw_header'])[0])
+                parsed = self.meta_mgr.parse_header_smart(i['raw_header'])
+                if parsed and parsed[0]: ids.append(parsed[0])
 
         if status_callback:
             status_callback(tr("Fetching metadata..."))
 
-        def fetch_cb(c, t, s):
-            if progress_callback:
-                progress_callback(c, t)
-
-        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=fetch_cb)
+        # טעינת מטא-דאטה (כעת מהירה בזכות התיקון הקודם)
+        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=progress_callback)
 
         if status_callback:
             status_callback(tr("Grouping results..."))
-            # Reset progress for the grouping phase
-            if progress_callback:
-                progress_callback(0, len(items))
 
+        # 2. הכנת נתונים למיון
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
 
         def _get_clean_words(t):
@@ -2046,10 +2477,24 @@ class SearchEngine:
             words = _get_clean_words(title_str)
             while words and words[0] in IGNORE_PREFIXES: words.pop(0)
             if not words: return None
+            # חתימה: שתי המילים המשמעותיות הראשונות
             return f"{words[0]} {words[1]}" if len(words) >= 2 else words[0]
 
-        wrapped = []
-        for item in items:
+        # 3. אלגוריתם ה-Grouping החדש (Dictionary Based - O(N))
+        # במקום לולאה כפולה, אנו ממפים את כל הפריטים לפי החתימה שלהם
+        
+        groups_map = defaultdict(list)
+        wrapped_items = []
+        total_items = len(items)
+
+        for idx, item in enumerate(items):
+            # עדכון GUI בתדירות נמוכה למניעת קיפאון
+            if progress_callback and idx % 100 == 0:
+                progress_callback(idx, total_items)
+            
+            if check_cancel and check_cancel(): return None, None, None
+
+            # חילוץ כותרת
             if item.get('type') == 'manuscript' and item.get('sys_id'):
                 sid = item['sys_id']
             else:
@@ -2058,38 +2503,43 @@ class SearchEngine:
             meta = self.meta_mgr.nli_cache.get(sid, {})
             t = meta.get('title', '').strip()
             shelfmark = self.meta_mgr.get_shelfmark_from_header(item['raw_header']) or meta.get('shelfmark', 'Unknown')
-            wrapped.append({
-                'item': item, 'title': t, 'clean': " ".join(_get_clean_words(t)),
-                'grouped': False, 'shelfmark': shelfmark
-            })
+            
+            sig = _get_signature(t)
+            
+            w_item = {
+                'item': item, 
+                'title': t, 
+                'signature': sig,
+                'shelfmark': shelfmark,
+                'grouped': False
+            }
+            wrapped_items.append(w_item)
+            
+            if sig:
+                groups_map[sig].append(w_item)
 
-        wrapped.sort(key=lambda x: len(x['title']))
+        # 4. סינון קבוצות לפי הסף (Threshold)
         appendix = defaultdict(list)
         summary = defaultdict(list)
-        total = len(wrapped)
 
-        for i, root in enumerate(wrapped):
-            if check_cancel and check_cancel(): return None, None, None
-            if progress_callback and total:
-                progress_callback(i, total)
-            if root['grouped']: continue
-            sig = _get_signature(root['title'])
-            if not sig: continue
-            matches = [root]
-            for j, cand in enumerate(wrapped):
-                if i == j or cand['grouped']: continue
-                if sig in cand['clean']: matches.append(cand)
-            if len(matches) > threshold:
-                for m in matches:
-                    m['grouped'] = True
-                    appendix[sig].append(m['item'])
-                    summary[sig].append(m['shelfmark'])
+        for sig, group_items in groups_map.items():
+            if len(group_items) > threshold:
+                # הקבוצה גדולה מספיק - מעבירים לנספח
+                for w in group_items:
+                    w['grouped'] = True
+                    appendix[sig].append(w['item'])
+                    summary[sig].append(w['shelfmark'])
+
+        # 5. יצירת הרשימה הראשית (כל מה שלא קובץ)
+        main_list = [w['item'] for w in wrapped_items if not w['grouped']]
         
-        if progress_callback and total:
-            progress_callback(total, total)
-
-        main_list = [w['item'] for w in wrapped if not w['grouped']]
+        # מיון לפי ציון יורד
         main_list.sort(key=lambda x: x['score'], reverse=True)
+        
+        # עדכון סופי ל-GUI
+        if progress_callback:
+            progress_callback(total_items, total_items)
+
         return main_list, appendix, summary
 
     def get_full_text_by_id(self, uid):

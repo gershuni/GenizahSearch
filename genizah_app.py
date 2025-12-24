@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
-                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
+                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider) 
@@ -27,6 +27,8 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoo
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
 
 from version import APP_VERSION
+
+from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
@@ -50,140 +52,142 @@ from filter_text_dialog import FilterTextDialog
 logger = get_logger(__name__)
 
 class LabSettingsDialog(QDialog):
-    """Configuration for Lab Mode (Two-Stage Retrieval & Advanced Indexing)."""
+    """Configuration for Lab Mode (Rare Letter Fingerprinting)."""
     def __init__(self, parent, lab_engine):
         super().__init__(parent)
         self.setWindowTitle(tr("Lab Mode Settings"))
-        self.resize(600, 600)
+        self.resize(600, 600) # הגדלתי קצת גובה
         self.lab_engine = lab_engine
         self.settings = lab_engine.settings
-        self._rebuild_required = False
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout()
-
-        # --- Index Settings ---
-        index_group = QGroupBox(tr("Index Settings (Requires Rebuild)"))
-        index_layout = QGridLayout()
-
-        self.spin_ngram_size = QSpinBox()
-        self.spin_ngram_size.setRange(2, 4)
-        self.spin_ngram_size.setValue(self.settings.ngram_size)
-        self.spin_ngram_size.setToolTip(tr("Character n-gram size used for indexing and search."))
-
-        self.lbl_rebuild_notice = QLabel(tr("Changing this setting requires rebuilding the Lab Index."))
-        self.lbl_rebuild_notice.setWordWrap(True)
-
+        tabs = QTabWidget()
+        
+        # --- TAB 1: General ---
+        tab_general = QWidget(); layout_gen = QVBoxLayout()
+        
+        index_group = QGroupBox(tr("Index Actions"))
+        idx_l = QVBoxLayout()
+        self.lbl_rebuild_notice = QLabel(tr("Rebuild the index if you changed the source text files."))
+        self.lbl_rebuild_notice.setStyleSheet("color: gray; font-style: italic;")
         self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
-        self.btn_rebuild.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold;")
         self.btn_rebuild.clicked.connect(self.run_rebuild)
         self.lbl_idx_status = QLabel("")
+        idx_l.addWidget(self.lbl_rebuild_notice); idx_l.addWidget(self.btn_rebuild); idx_l.addWidget(self.lbl_idx_status)
+        index_group.setLayout(idx_l); layout_gen.addWidget(index_group)
+        
+        sens_group = QGroupBox(tr("Basic Filters"))
+        sens_l = QGridLayout()
+        self.spin_min_should_match = QSpinBox(); self.spin_min_should_match.setRange(10, 100); self.spin_min_should_match.setValue(self.settings.min_should_match); self.spin_min_should_match.setSuffix("%")
+        self.spin_candidate_limit = QSpinBox(); self.spin_candidate_limit.setRange(500, 1000000); self.spin_candidate_limit.setSingleStep(500); self.spin_candidate_limit.setValue(self.settings.candidate_limit)
+        sens_l.addWidget(QLabel(tr("Minimum Match %:")), 0, 0); sens_l.addWidget(self.spin_min_should_match, 0, 1)
+        sens_l.addWidget(QLabel(tr("Max Results to Process:")), 1, 0); sens_l.addWidget(self.spin_candidate_limit, 1, 1)
+        sens_group.setLayout(sens_l); layout_gen.addWidget(sens_group)
+        layout_gen.addStretch(); tab_general.setLayout(layout_gen)
+        
+        # --- TAB 2: Scoring & Algorithm ---
+        tab_scoring = QWidget(); layout_score = QVBoxLayout()
+        layout_score.addWidget(QLabel(tr("Adjust how the algorithm prioritizes results.")))
+        
+        grid = QGridLayout()
+        
+        # Order Bonus
+        self.spin_order_bonus = QDoubleSpinBox(); self.spin_order_bonus.setRange(0.0, 100.0); self.spin_order_bonus.setSingleStep(1.0); self.spin_order_bonus.setValue(getattr(self.settings, 'order_bonus', 10.0))
+        lbl_order = QLabel(tr("Sequential Order Bonus:")); lbl_order.setStyleSheet("color: #2980b9; font-weight: bold;")
+        grid.addWidget(lbl_order, 0, 0); grid.addWidget(self.spin_order_bonus, 0, 1)
 
-        index_layout.addWidget(QLabel(tr("N-Gram Size:")), 0, 0)
-        index_layout.addWidget(self.spin_ngram_size, 0, 1)
-        index_layout.addWidget(self.lbl_rebuild_notice, 1, 0, 1, 2)
-        index_layout.addWidget(self.btn_rebuild, 2, 0)
-        index_layout.addWidget(self.lbl_idx_status, 2, 1)
+        # Coverage
+        self.spin_coverage_power = QDoubleSpinBox(); self.spin_coverage_power.setRange(1.0, 10.0); self.spin_coverage_power.setValue(self.settings.coverage_power)
+        grid.addWidget(QLabel(tr("Coverage Penalty Power:")), 1, 0); grid.addWidget(self.spin_coverage_power, 1, 1)
 
-        index_group.setLayout(index_layout)
-        layout.addWidget(index_group)
+        # Noise Suppression (New Section)
+        lbl_noise = QLabel(tr("Stop-Word Suppression:")); lbl_noise.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        grid.addWidget(lbl_noise, 2, 0, 1, 2)
 
-        # --- Search Sensitivity ---
-        sensitivity_group = QGroupBox(tr("Search Sensitivity"))
-        sens_layout = QGridLayout()
+        # Short Word Score
+        self.spin_stop_score = QDoubleSpinBox(); self.spin_stop_score.setRange(0.0, 50.0); self.spin_stop_score.setSingleStep(0.5); self.spin_stop_score.setValue(getattr(self.settings, 'stop_word_score', 1.0))
+        self.spin_stop_score.setToolTip(tr("Points given for very short words (<3 letters). Keep low to reduce noise."))
+        grid.addWidget(QLabel(tr("Score for Short Words (<3):")), 3, 0); grid.addWidget(self.spin_stop_score, 3, 1)
 
-        self.slider_min_match = QSlider(Qt.Orientation.Horizontal)
-        self.slider_min_match.setRange(10, 100)
-        self.slider_min_match.setValue(self.settings.ngram_min_match)
-        self.slider_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
+        # Common 3-Char Score
+        self.spin_common3_score = QDoubleSpinBox(); self.spin_common3_score.setRange(0.0, 50.0); self.spin_common3_score.setSingleStep(0.5); self.spin_common3_score.setValue(getattr(self.settings, 'common_3char_score', 2.0))
+        self.spin_common3_score.setToolTip(tr("Points for common 3-letter words (e.g. 'ליה', 'הכי')."))
+        grid.addWidget(QLabel(tr("Score for Common 3-Letter:")), 4, 0); grid.addWidget(self.spin_common3_score, 4, 1)
 
-        self.spin_ngram_min_match = QSpinBox()
-        self.spin_ngram_min_match.setRange(10, 100)
-        self.spin_ngram_min_match.setValue(self.settings.ngram_min_match)
-        self.spin_ngram_min_match.setSuffix("%")
-        self.spin_ngram_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
+        # Other Weights
+        lbl_other = QLabel(tr("Standard Weights:")); lbl_other.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        grid.addWidget(lbl_other, 5, 0, 1, 2)
 
-        self.spin_candidate_limit = QSpinBox()
-        self.spin_candidate_limit.setRange(500, 50000)
-        self.spin_candidate_limit.setSingleStep(500)
-        self.spin_candidate_limit.setValue(self.settings.candidate_limit)
-        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
+        self.spin_len_bonus = QDoubleSpinBox(); self.spin_len_bonus.setRange(1.0, 10.0); self.spin_len_bonus.setValue(self.settings.length_bonus_factor)
+        grid.addWidget(QLabel(tr("Long Word Bonus:")), 6, 0); grid.addWidget(self.spin_len_bonus, 6, 1)
 
-        sens_layout.addWidget(QLabel(tr("Minimum Match %:")), 0, 0)
-        sens_layout.addWidget(self.slider_min_match, 0, 1)
-        sens_layout.addWidget(self.spin_ngram_min_match, 0, 2)
-        sens_layout.addWidget(QLabel(tr("Result Limit:")), 1, 0)
-        sens_layout.addWidget(self.spin_candidate_limit, 1, 1)
+        self.spin_unique_base = QSpinBox(); self.spin_unique_base.setRange(10, 1000); self.spin_unique_base.setValue(self.settings.unique_bonus_base)
+        grid.addWidget(QLabel(tr("Unique Match Base Score:")), 7, 0); grid.addWidget(self.spin_unique_base, 7, 1)
 
-        sensitivity_group.setLayout(sens_layout)
-        layout.addWidget(sensitivity_group)
+        self.spin_density = QDoubleSpinBox(); self.spin_density.setRange(0.0, 5.0); self.spin_density.setValue(self.settings.density_penalty)
+        grid.addWidget(QLabel(tr("Distance Penalty:")), 8, 0); grid.addWidget(self.spin_density, 8, 1)
 
-        # --- Query Expansion ---
-        expand_group = QGroupBox(tr("Query Expansion (Smart Matching)"))
-        expand_layout = QVBoxLayout()
+        self.spin_common_factor = QDoubleSpinBox(); self.spin_common_factor.setRange(0.0, 1.0); self.spin_common_factor.setValue(self.settings.common_penalty_factor)
+        grid.addWidget(QLabel(tr("Repeated Word Factor:")), 9, 0); grid.addWidget(self.spin_common_factor, 9, 1)
 
-        self.chk_ignore_matres = QCheckBox(tr("Ignore Matres Lectionis (ו/י)"))
-        self.chk_ignore_matres.setChecked(self.settings.ignore_matres)
-        self.chk_ignore_matres.setToolTip(tr("Matches text even if Vav/Yod are missing or added (e.g. שומר = שמר)."))
+        layout_score.addLayout(grid); layout_score.addStretch(); tab_scoring.setLayout(layout_score)
+        
+        # --- TAB 3: Composition ---
+        tab_comp = QWidget(); layout_comp = QVBoxLayout()
+        layout_comp.addWidget(QLabel(tr("Settings for 'Analyze Composition' mode.")))
+        grid_c = QGridLayout()
+        self.spin_comp_limit = QSpinBox(); self.spin_comp_limit.setRange(50, 5000); self.spin_comp_limit.setSingleStep(50); self.spin_comp_limit.setValue(self.settings.comp_chunk_limit)
+        grid_c.addWidget(QLabel(tr("Max Candidates per Chunk:")), 0, 0); grid_c.addWidget(self.spin_comp_limit, 0, 1)
+        self.spin_comp_score = QSpinBox(); self.spin_comp_score.setRange(10, 500); self.spin_comp_score.setValue(self.settings.comp_min_score)
+        grid_c.addWidget(QLabel(tr("Min Chunk Score:")), 1, 0); grid_c.addWidget(self.spin_comp_score, 1, 1)
+        self.spin_comp_final = QSpinBox(); self.spin_comp_final.setRange(10, 10000); self.spin_comp_final.setValue(self.settings.comp_max_final_results)
+        grid_c.addWidget(QLabel(tr("Max Final Results:")), 2, 0); grid_c.addWidget(self.spin_comp_final, 2, 1)
+        layout_comp.addLayout(grid_c); layout_comp.addStretch(); tab_comp.setLayout(layout_comp)
 
-        self.chk_phonetic = QCheckBox(tr("Phonetic Matching"))
-        self.chk_phonetic.setChecked(self.settings.phonetic_expansion)
-        self.chk_phonetic.setToolTip(tr("Expands search to include letter swaps like ט/ת, כ/ק, ה/ח."))
+        tabs.addTab(tab_general, tr("General"))
+        tabs.addTab(tab_scoring, tr("Scoring & Algorithm"))
+        tabs.addTab(tab_comp, tr("Composition"))
+        layout.addWidget(tabs)
 
-        expand_layout.addWidget(self.chk_ignore_matres)
-        expand_layout.addWidget(self.chk_phonetic)
-        expand_group.setLayout(expand_layout)
-        layout.addWidget(expand_group)
-
-        # --- Footer ---
         btn_box = QHBoxLayout()
-        self.btn_save = QPushButton(tr("Save & Close"))
-        self.btn_save.clicked.connect(self.save_and_close)
-        self.btn_cancel = QPushButton(tr("Cancel"))
-        self.btn_cancel.clicked.connect(self.reject)
-
-        btn_copy = QPushButton(tr("Copy Config JSON"))
-        btn_copy.clicked.connect(self.copy_json)
-
-        btn_box.addWidget(btn_copy)
-        btn_box.addStretch()
-        btn_box.addWidget(self.btn_cancel)
-        btn_box.addWidget(self.btn_save)
+        self.btn_save = QPushButton(tr("Save & Close")); self.btn_save.clicked.connect(self.save_and_close)
+        self.btn_cancel = QPushButton(tr("Cancel")); self.btn_cancel.clicked.connect(self.reject)
+        btn_box.addStretch(); btn_box.addWidget(self.btn_cancel); btn_box.addWidget(self.btn_save)
         layout.addLayout(btn_box)
-
         self.setLayout(layout)
-        self.spin_ngram_size.valueChanged.connect(self._mark_rebuild_required)
-        self.slider_min_match.valueChanged.connect(self._sync_min_match_spin)
-        self.spin_ngram_min_match.valueChanged.connect(self._sync_min_match_slider)
-        if self.lab_engine.lab_index_needs_rebuild:
-            self._mark_rebuild_required()
+        self._mark_rebuild_required()
 
     def save_and_close(self):
+        # General
         self.settings.candidate_limit = self.spin_candidate_limit.value()
-        self.settings.ngram_min_match = self.spin_ngram_min_match.value()
-        self.settings.ngram_size = self.spin_ngram_size.value()
-        self.settings.ignore_matres = self.chk_ignore_matres.isChecked()
-        self.settings.phonetic_expansion = self.chk_phonetic.isChecked()
+        self.settings.min_should_match = self.spin_min_should_match.value()
+        # Scoring
+        self.settings.coverage_power = self.spin_coverage_power.value()
+        self.settings.length_bonus_factor = self.spin_len_bonus.value()
+        self.settings.common_penalty_factor = self.spin_common_factor.value()
+        self.settings.density_penalty = self.spin_density.value()
+        self.settings.unique_bonus_base = self.spin_unique_base.value()
+        if hasattr(self.settings, 'order_bonus'): self.settings.order_bonus = self.spin_order_bonus.value()
+        
+        # New Noise Settings
+        if hasattr(self.settings, 'stop_word_score'):
+            self.settings.stop_word_score = self.spin_stop_score.value()
+            self.settings.common_3char_score = self.spin_common3_score.value()
+
+        # Comp
+        self.settings.comp_chunk_limit = self.spin_comp_limit.value()
+        self.settings.comp_min_score = self.spin_comp_score.value()
+        self.settings.comp_max_final_results = self.spin_comp_final.value()
+        
         self.settings.save()
         self.accept()
-
-    def copy_json(self):
-        cfg = {
-            'candidate_limit': self.spin_candidate_limit.value(),
-            'ngram_size': self.spin_ngram_size.value(),
-            'ngram_min_match': self.spin_ngram_min_match.value(),
-            'ignore_matres': self.chk_ignore_matres.isChecked(),
-            'phonetic_expansion': self.chk_phonetic.isChecked()
-        }
-        QApplication.clipboard().setText(json.dumps(cfg, indent=2))
-        QMessageBox.information(self, tr("Copied"), tr("Configuration JSON copied to clipboard."))
 
     def run_rebuild(self):
         self.btn_rebuild.setEnabled(False)
         self.lbl_idx_status.setText(tr("Starting..."))
         QApplication.processEvents()
-        self.settings.ngram_size = self.spin_ngram_size.value()
 
         class RebuildThread(QThread):
             finished_sig = pyqtSignal(int)
@@ -195,12 +199,9 @@ class LabSettingsDialog(QDialog):
                 self.engine = engine
             def run(self):
                 try:
-                    # Explicitly ensure directories exist
                     if not os.path.exists(Config.LAB_DIR):
                         os.makedirs(Config.LAB_DIR)
-                    if not os.path.exists(Config.LAB_INDEX_DIR):
-                        os.makedirs(Config.LAB_INDEX_DIR)
-
+                    
                     def cb(curr, total):
                         self.progress_sig.emit(curr, total)
 
@@ -216,48 +217,27 @@ class LabSettingsDialog(QDialog):
         self.worker.start()
 
     def _mark_rebuild_required(self):
-        needs_rebuild = self.spin_ngram_size.value() != self.settings.ngram_size or self.lab_engine.lab_index_needs_rebuild
-        self._rebuild_required = needs_rebuild
-        if needs_rebuild:
-            self.lbl_idx_status.setText(tr("Index schema updated. Please rebuild."))
-            self.lbl_idx_status.setStyleSheet("color: #c0392b; font-weight: bold;")
-            self.btn_save.setEnabled(False)
+        if self.lab_engine.lab_index_needs_rebuild:
+            self.lbl_idx_status.setText(tr("Index missing or outdated."))
+            self.lbl_idx_status.setStyleSheet("color: #c0392b;")
         else:
-            self.lbl_idx_status.setText("")
-            self.lbl_idx_status.setStyleSheet("")
-            self.btn_save.setEnabled(True)
-
-    def _sync_min_match_spin(self, value):
-        if self.spin_ngram_min_match.value() != value:
-            self.spin_ngram_min_match.blockSignals(True)
-            self.spin_ngram_min_match.setValue(value)
-            self.spin_ngram_min_match.blockSignals(False)
-
-    def _sync_min_match_slider(self, value):
-        if self.slider_min_match.value() != value:
-            self.slider_min_match.blockSignals(True)
-            self.slider_min_match.setValue(value)
-            self.slider_min_match.blockSignals(False)
+            self.lbl_idx_status.setText(tr("Index is ready."))
+            self.lbl_idx_status.setStyleSheet("color: #27ae60;")
 
     def on_rebuild_progress(self, current, total):
-        pct = 0
-        if total > 0:
-            pct = int((current / total) * 100)
-        self.lbl_idx_status.setText(tr("Indexing: {}%").format(pct))
+        self.lbl_idx_status.setText(tr("Processing docs: {}").format(current))
 
     def on_rebuild_error(self, err):
         self.btn_rebuild.setEnabled(True)
         self.lbl_idx_status.setText(tr("Error"))
-        self.lbl_idx_status.setStyleSheet("color: #c0392b; font-weight: bold;")
         QMessageBox.critical(self, tr("Error"), str(err))
 
     def on_rebuild_finished(self, count):
         self.lbl_idx_status.setText(tr("Done. {} docs.").format(count))
-        self.lbl_idx_status.setStyleSheet("")
+        self.lbl_idx_status.setStyleSheet("color: #27ae60; font-weight: bold;")
         self.btn_rebuild.setEnabled(True)
-        self._rebuild_required = False
-        self.btn_save.setEnabled(True)
         QMessageBox.information(self, tr("Success"), tr("Lab Index rebuilt successfully."))
+      
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _TLS_NOTICE_LOGGED = False
@@ -1740,7 +1720,9 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
 
-        self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
+        self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
+        self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
+        self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
@@ -2178,8 +2160,8 @@ class GenizahGUI(QMainWindow):
             settings_dump = json.dumps({
                 'custom_variants': self.lab_engine.settings.custom_variants,
                 'candidate_limit': self.lab_engine.settings.candidate_limit,
-                'ngram_size': self.lab_engine.settings.ngram_size,
-                'ngram_min_match': self.lab_engine.settings.ngram_min_match,
+                'min_should_match': self.lab_engine.settings.min_should_match,
+                'gap_penalty': self.lab_engine.settings.gap_penalty,
                 'ignore_matres': self.lab_engine.settings.ignore_matres,
                 'phonetic_expansion': self.lab_engine.settings.phonetic_expansion,
             }, indent=2, ensure_ascii=False)
@@ -3158,200 +3140,186 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
 
-        # Ensure thread is finished before releasing the object to prevent QThread Destroyed error
-        if self.group_thread:
+        if getattr(self, 'group_thread', None):
             self.group_thread.wait()
         self.group_thread = None
 
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
 
-        # 1. Apply Exclusions to Main
-        clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
+        # 2. איחוד כל התוצאות לרשימה אחת שטוחה
+        all_items = []
+        all_items.extend(main_res)
+        for items in main_appx.values(): all_items.extend(items)
+        all_items.extend(filt_res)
+        for items in filt_appx.values(): all_items.extend(items)
+        
+        # מיון
+        all_items.sort(key=lambda x: x.get('score', 0), reverse=True)
+        
+        seen_uids = set()
+        self.batch_items = []
+        
+        for item in all_items:
+            uid = item.get('uid')
+            if not uid:
+                header = item.get('raw_header', '')
+                uid = self.meta_mgr.extract_unique_id(header) or header
+                item['uid'] = uid 
 
-        # 2. Apply Exclusions to Filtered (treating it as its own result set)
-        clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
+            if uid not in seen_uids:
+                self.batch_items.append(item)
+                seen_uids.add(uid)
 
-        known = known_main + known_filt
-
-        self.comp_main = clean_main
-        self.comp_appendix = clean_appx
-        self.comp_summary = main_summ
-
-        self.comp_filtered_main = clean_filt
-        self.comp_filtered_appendix = clean_filt_appx
-        self.comp_filtered_summary = filt_summ
-
-        self.comp_known = known
-
-        # Ensure metadata is loaded
-        all_ids = []
-        def collect_ids(item_list):
-            for item in item_list:
-                # If item is manuscript, we have direct sys_id
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
-                    all_ids.append(item['sys_id'])
-                else:
-                    sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                    if sid: all_ids.append(sid)
-
-        collect_ids(clean_main)
-        for group_items in clean_appx.values():
-            collect_ids(group_items)
-
-        collect_ids(clean_filt)
-        for group_items in clean_filt_appx.values():
-            collect_ids(group_items)
-
-        collect_ids(known)
-
-        if all_ids:
-            self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
-
-        self.comp_tree_updating = True
+        # 3. הכנת העץ
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
         
-        def make_checkable(node):
-            node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            node.setCheckState(0, Qt.CheckState.Unchecked)
+        self.batch_root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(self.batch_items))])
+        self.batch_root.setExpanded(True)
+        self.batch_root.setFlags(self.batch_root.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        self.batch_root.setCheckState(0, Qt.CheckState.Unchecked)
 
-        def add_manuscript_node(parent, ms_item):
-            # Parse meta using the representative header OR just use sys_id
-            if ms_item.get('type') == 'manuscript':
-                sid = ms_item['sys_id']
+        # 4. מנגנון טעינה מדורגת
+        self.batch_index = 0
+        self.batch_size = 20
+        
+        if hasattr(self, 'load_timer'): self.load_timer.stop()
+        self.load_timer = QTimer()
+        self.load_timer.timeout.connect(self._load_next_batch)
+        self.load_timer.start(10)
 
-                # Use unified metadata retrieval (CSV > Cache)
-                shelf, t = self.meta_mgr.get_meta_for_id(sid)
+        # 5. השלמת מטא-דאטה (התחלה)
+        ids_to_fetch = set()
+        for item in self.batch_items[:100]:
+            sid = item.get('sys_id') or item.get('uid')
+            if sid and sid not in self.meta_mgr.nli_cache:
+                 ids_to_fetch.add(sid)
+        
+        if ids_to_fetch:
+            self.meta_mgr.batch_fetch_shelfmarks(list(ids_to_fetch), use_network=False)
 
-                # Fallback to header parsing if still unknown
-                if not shelf or shelf == "Unknown":
-                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                    if header_shelf: shelf = header_shelf
+    def _load_next_batch(self):
+        try:
+            if self.batch_index >= len(self.batch_items):
+                self.load_timer.stop()
+                self.comp_tree.setUpdatesEnabled(True)
+                self.status_label.setText(tr("Results loaded."))
+                return
 
-                # Manuscript Node
-                ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(ms_item.get('score', 0)))
-                self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
-                self._set_comp_tree_text(ms_node, 2, t or "")
-                self._set_comp_tree_text(ms_node, 3, sid)
-                make_checkable(ms_node)
+            end_index = min(self.batch_index + self.batch_size, len(self.batch_items))
+            chunk = self.batch_items[self.batch_index : end_index]
+            
+            for ms_item in chunk:
+                # שימוש בפונקציה החדשה שהוספנו!
+                self._add_single_comp_node(self.batch_root, ms_item)
+            
+            self.batch_index = end_index
+            
+            if self.batch_index % 100 == 0:
+                self.comp_tree.setUpdatesEnabled(True)
+                QApplication.processEvents()
+                self.comp_tree.setUpdatesEnabled(False)
 
-                # Store full MS item in UserRole
-                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+        except Exception as e:
+            print(f"Error in batch loading: {e}")
+            self.load_timer.stop()
+            self.comp_tree.setUpdatesEnabled(True)
+    
+    def _load_next_batch(self):
+        """Helper function called by timer to add items incrementally."""
+        try:
+            if self.batch_index >= len(self.batch_items):
+                self.load_timer.stop()
+                self.comp_tree.setUpdatesEnabled(True)
+                self.status_label.setText(tr("Results loaded."))
+                
+                # בסיום הטעינה הגרפית - נפעיל השלמת מטא-דאטה מהרשת למה שחסר
+                self._trigger_lazy_metadata_fetch()
+                return
 
-                pages = ms_item.get('pages', [])
+            end_index = min(self.batch_index + self.batch_size, len(self.batch_items))
+            chunk = self.batch_items[self.batch_index : end_index]
+            
+            for ms_item in chunk:
+                self._add_single_node_to_tree(self.batch_root, ms_item)
+            
+            self.batch_index = end_index
+            
+            # עדכון סטטוס כדי שהמשתמש יראה שמשהו קורה
+            if self.batch_index % 500 == 0:
+                self.status_label.setText(tr("Rendered {}/{} results...").format(self.batch_index, len(self.batch_items)))
+                # רענון גרפי קטן באמצע
+                self.comp_tree.setUpdatesEnabled(True)
+                QApplication.processEvents()
+                self.comp_tree.setUpdatesEnabled(False)
 
-                # Case A: Single Page -> Display inline
-                if len(pages) == 1:
-                    p_item = pages[0]
-                    _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+        except Exception as e:
+            print(f"Error in batch loading: {e}")
+            self.load_timer.stop()
+            self.comp_tree.setUpdatesEnabled(True)
 
-                    # Update Shelfmark to include Image info
-                    self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+    def _add_single_node_to_tree(self, parent, ms_item):
+        """Dedicated helper to add one row to the tree."""
+        sid = ms_item.get('sys_id')
+        if not sid:
+            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
+        
+        # ניסיון שליפה מהיר מהזיכרון
+        shelf, t = self.meta_mgr.get_meta_for_id(sid)
+        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+        
+        node = QTreeWidgetItem(parent)
+        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # עיגול הציון
+        self._set_comp_tree_text(node, 1, display_shelf)
+        self._set_comp_tree_text(node, 2, t or "")
+        self._set_comp_tree_text(node, 3, sid)
+        
+        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+        # הוספת תתי-פריטים (עמודים) אם יש
+        # ... (אותה לוגיקה כמו קודם) ...
+        pages = ms_item.get('pages', [])
+        # טיפול מקוצר: אם יש עמוד אחד, נציג אותו בשורה הראשית
+        if len(pages) == 1:
+            p_item = pages[0]
+            # חילוץ מס' תמונה מהכותרת הגולמית אם אפשר
+            p_num = "Img"
+            if 'raw_header' in p_item:
+                _, p_num_extracted, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                if p_num_extracted: p_num = p_num_extracted
+            
+            self._set_comp_tree_text(node, 1, f"{display_shelf} (Img {p_num})")
+            self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+        
+        elif len(pages) > 1:
+             self._set_comp_tree_text(node, 1, f"{display_shelf} ({len(pages)} matches)")
+             for p_item in pages:
+                child = QTreeWidgetItem(node)
+                self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
+                child.setText(1, "Page Match") # אפשר לשפר עם מספר תמונה
+                child.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''))
 
-                # Case B: Multiple Pages -> Add children
-                else:
-                    # Update parent with first page image info and snippet
-                    if pages:
-                        p0 = pages[0]
-                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
-
-                    for p_item in pages:
-                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-
-                        page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(p_item.get('score', '')))
-                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
-                        self._set_comp_tree_text(page_node, 2, "") # No Title needed for page
-                        self._set_comp_tree_text(page_node, 3, "") # No SysID needed for page
-                        make_checkable(page_node)
-
-                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
-
-            else:
-                # Fallback for raw items (should not happen with new logic, but safe to keep)
-                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-                node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(node, 0, str(ms_item.get('score', '')))
-                self._set_comp_tree_text(node, 1, shelf)
-                self._set_comp_tree_text(node, 2, title)
-                self._set_comp_tree_text(node, 3, sid)
-                make_checkable(node)
-                node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
-
-        # ----------------------------------------
-
-        if self.chk_comp_flat.isChecked():
-            all_items = self._collect_comp_items(clean_main, clean_appx, clean_filt, clean_filt_appx, known)
-            sorted_items = self._sort_comp_items(all_items)
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_items))])
-            root.setExpanded(True)
-            make_checkable(root)
-            for item in sorted_items:
-                add_manuscript_node(root, item)
-        else:
-            # 1. Main Results
-            root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
-            make_checkable(root)
-            for item in self._sort_comp_items(clean_main):
-                add_manuscript_node(root, item)
-
-            # 2. Appendix Results
-            if clean_appx:
-                root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
-                make_checkable(root_a)
-                for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
-                    make_checkable(gn)
-                    for item in self._sort_comp_items(items):
-                        add_manuscript_node(gn, item)
-
-            # 3. Filtered by Text (New Category with Sub-Grouping)
-            total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
-            if total_filtered > 0:
-                root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
-                make_checkable(root_f)
-
-                # 3a. Filtered Main
-                if clean_filt:
-                    f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
-                    f_main_node.setExpanded(True)
-                    make_checkable(f_main_node)
-                    for item in self._sort_comp_items(clean_filt):
-                        add_manuscript_node(f_main_node, item)
-
-                # 3b. Filtered Appendix
-                if clean_filt_appx:
-                    f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
-                    make_checkable(f_appx_node)
-                    for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                        gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
-                        make_checkable(gn)
-                        for item in self._sort_comp_items(items):
-                            add_manuscript_node(gn, item)
-
-            # 4. Known / Excluded Results
-            if known:
-                root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
-                make_checkable(root_k)
-                for item in self._sort_comp_items(known):
-                    add_manuscript_node(root_k, item)
-
-        self.comp_tree.setUpdatesEnabled(True)
-        self.comp_tree_updating = False
-        self._update_recursive_button_state()
-        if self.pending_recursive_search:
-            self.pending_recursive_search = False
-            self.run_recursive_composition()
-
+    def _trigger_lazy_metadata_fetch(self):
+        """Starts background fetching for items that are currently displayed but missing data."""
+        # אוסף את כל ה-IDs מהעץ שעדיין אין להם מדף
+        missing_ids = set()
+        # סורק רק את ה-Batch הנוכחי או את הכל - לביצועים, עדיף להסתמך על הרשימה המקורית
+        for item in self.batch_items:
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header'))
+            
+            if sid and sid not in self.meta_mgr.nli_cache:
+                 missing_ids.add(sid)
+        
+        if missing_ids:
+            # מפעיל את ה-Thread הקיים שלך לעדכון ברקע
+            self.trigger_comp_metadata_background(list(missing_ids))
+    
     def on_comp_tree_item_changed(self, item, column):
         if self.comp_tree_updating or column != 0:
             return
@@ -4243,7 +4211,205 @@ class GenizahGUI(QMainWindow):
                     self.group_thread.wait()
         finally:
             super().closeEvent(event)
+    
+    def _add_single_comp_node(self, parent, ms_item):
+        """Adds a node to the composition tree with parent/child logic."""
+        sid = ms_item.get('sys_id')
+        if not sid:
+            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
+        
+        shelf, t = self.meta_mgr.get_meta_for_id(sid)
+        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+        
+        pages = ms_item.get('pages', [])
+        best_snippet = ""
+        best_ctx = ""
+        if pages:
+            best_snippet = pages[0].get('text', '') 
+            best_ctx = pages[0].get('source_ctx', '')
 
+        # יצירת ה-Node של ההורה
+        node = QTreeWidgetItem(parent)
+        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
+        self._set_comp_tree_text(node, 1, display_shelf)
+        self._set_comp_tree_text(node, 2, t or "")
+        self._set_comp_tree_text(node, 3, sid)
+        
+        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+        # שמירת הסניפט המקורי כדי לשחזר בסגירה
+        node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
+
+        # הצגת הסניפט בהורה
+        self._set_comp_node_previews(node, best_ctx, best_snippet)
+
+        if len(pages) > 1:
+            node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+            for p_item in pages:
+                p_num_str = "Page Match"
+                raw_h = p_item.get('raw_header', '')
+                match = re.search(r'(?i)Img\s*(\d+)', raw_h)
+                if match:
+                    p_num_str = f"Image {match.group(1)}"
+                else:
+                    _, p_num_ex, _, _ = self._get_meta_for_header(raw_h)
+                    if p_num_ex: p_num_str = f"Image {p_num_ex}"
+                
+                child = QTreeWidgetItem(node)
+                self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
+                child.setText(1, p_num_str)
+                child.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''))
+        
+        elif len(pages) == 1:
+            p_item = pages[0]
+            p_suffix = ""
+            match = re.search(r'(?i)Img\s*(\d+)', p_item.get('raw_header', ''))
+            if match: p_suffix = f" (Img {match.group(1)})"
+            node.setText(1, f"{display_shelf}{p_suffix}")
+
+    def _on_comp_item_expanded(self, item):
+        if item.childCount() > 0:
+            self.comp_tree.setItemWidget(item, self.comp_col_context, None) 
+            self.comp_tree.setItemWidget(item, self.comp_col_ms_context, None) 
+
+    def _on_comp_item_collapsed(self, item):
+        if item.childCount() > 0:
+            stored_data = item.data(1, Qt.ItemDataRole.UserRole)
+            if stored_data:
+                ctx, snippet = stored_data
+                self._set_comp_node_previews(item, ctx, snippet)
+
+    def on_comp_item_double_clicked(self, item, column):
+        """
+        Smart navigation that restores full context (Next/Prev, Source Text).
+        It rebuilds the full list of results from the tree but jumps to the specific clicked item.
+        """
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data: return # התעלמות מכותרות ראשיות (כמו "Main")
+
+        # 1. בניית רשימה שטוחה של כל התוצאות (עבור כפתורי Next/Prev)
+        flat_list = []
+        target_index = -1
+        
+        # אנו צריכים לזהות את הפריט שעליו לחצנו בתוך הרשימה השטוחה
+        # נשווה לפי כתובת האובייקט (item) או לפי מזהה ייחודי
+        clicked_node = item
+        
+        # אם לחצנו על "הורה" (כתב יד) - המטרה היא הילד הראשון שלו (העמוד הכי טוב)
+        if data.get('type') == 'manuscript' and item.childCount() > 0:
+            clicked_node = item.child(0)
+
+        # פונקציית עזר שאוספת את הנתונים בצורה מסודרת
+        def collect_node_data(node):
+            node_data = node.data(0, Qt.ItemDataRole.UserRole)
+            if not node_data: return
+
+            # אם זה הורה שמכיל עמודים, לא מוסיפים אותו אלא את הילדים שלו
+            # (אלא אם כן הוא הורה ללא ילדים גרפיים, כלומר עמוד בודד)
+            if node_data.get('type') == 'manuscript' and node.childCount() > 0:
+                for i in range(node.childCount()):
+                    collect_node_data(node.child(i))
+                return
+
+            # חילוץ מטא-דאטה מלא
+            raw_h = node_data.get('raw_header', '')
+            sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+            
+            # וידוא שיש לנו Highlight Pattern (חשוב להדגשה האדומה!)
+            hl_pattern = node_data.get('highlight_pattern')
+            
+            # בניית האובייקט ל-Viewer
+            # חשוב: מעבירים את ה-source_ctx וה-text המקוריים מהעץ!
+            ready_item = {
+                'uid': node_data.get('uid', sid),
+                'raw_header': raw_h,
+                'text': node_data.get('text', ''), # הסניפט עם ההדגשה
+                'full_text': None, # ייטען ב-Dialog
+                'source_ctx': node_data.get('source_ctx', ''), # הטקסט המקביל (חשוב!)
+                'highlight_pattern': hl_pattern,
+                'display': {
+                    'id': sid,
+                    'shelfmark': shelf,
+                    'title': title,
+                    'img': p_num,
+                    'source': node_data.get('src_lbl', 'Genizah Lab')
+                }
+            }
+            
+            flat_list.append(ready_item)
+            
+            # בדיקה האם זה הפריט שלחצנו עליו
+            if node is clicked_node:
+                nonlocal target_index
+                target_index = len(flat_list) - 1
+
+        # סריקת העץ (Main -> Appendix -> Filtered -> Known)
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            category = root.child(i)
+            # אם הקטגוריה עצמה מכילה דפים (במצב שטוח)
+            if category.data(0, Qt.ItemDataRole.UserRole):
+                 collect_node_data(category)
+            
+            # סריקת הילדים של הקטגוריה
+            for j in range(category.childCount()):
+                sub = category.child(j)
+                # אם זה קבוצה (כמו בנספח) או סתם פריט
+                collect_node_data(sub)
+
+        if not flat_list: return
+        
+        # אם לא מצאנו (נדיר), נפתח את הראשון
+        if target_index == -1: target_index = 0
+
+        # 3. פתיחת הדיאלוג עם הרשימה המלאה והאינדקס הנכון
+        # זה משחזר את הניווט (Result X of Y) ואת ההקשר
+        try:
+            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
+
+    def open_manuscript_viewer_by_id(self, sys_id, highlight_regex=None, target_page=0):
+        """
+        פותח את חלון הצפייה עבור מזהה ספציפי, ומנווט לעמוד המבוקש.
+        """
+        # 1. שליפת המטא-דאטה
+        meta = self.meta_mgr.fetch_nli_data(sys_id)
+        
+        # 2. בניית אובייקט נתונים לדיאלוג
+        item_data = {
+            'display': {
+                'id': sys_id,
+                'shelfmark': meta.get('shelfmark', sys_id),
+                'title': meta.get('title', ''),
+                'source': 'Genizah Lab',
+                'img': meta.get('thumb_url', '')
+            },
+            'snippet': '',  
+            'full_text': '', 
+            'uid': sys_id,
+            'highlight_pattern': highlight_regex,
+            'raw_header': str(sys_id) 
+        }
+
+        # 3. יצירת הדיאלוג
+        try:
+            dlg = ResultDialog(self, [item_data], 0, self.meta_mgr, self.searcher)
+            
+            # 4. ניווט לתמונה הספציפית (אם התבקש)
+            if target_page > 0:
+                dlg.load_page(target=target_page)
+
+            dlg.exec()
+        except Exception as e:
+            # הגנה מפני קריסות עתידיות בחלון הצפייה
+            print(f"Error opening viewer: {e}")
+            QMessageBox.warning(self, "Error", f"Could not open viewer: {e}")
+    
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
