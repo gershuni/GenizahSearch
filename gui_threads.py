@@ -161,7 +161,8 @@ class GroupingThread(QThread):
             def check(): return self.isInterruptionRequested()
 
             # 1. Group Main Items
-            def cb1(curr, total): self.progress_signal.emit(curr, total)
+            # תיקון: הוספת *args כדי להתעלם מהפרמטר השלישי (sid) אם נשלח
+            def cb1(curr, total, *args): self.progress_signal.emit(curr, total)
             self.status_signal.emit("Grouping main results...")
 
             result_main = self.searcher.group_composition_results(
@@ -176,7 +177,8 @@ class GroupingThread(QThread):
             filt_res, filt_appx, filt_summ = [], {}, {}
             if self.filtered_items:
                 self.status_signal.emit("Grouping filtered results...")
-                def cb2(curr, total): self.progress_signal.emit(curr, total)
+                # תיקון: הוספת *args גם כאן
+                def cb2(curr, total, *args): self.progress_signal.emit(curr, total)
 
                 result_filt = self.searcher.group_composition_results(
                     self.filtered_items, self.threshold, progress_callback=cb2, check_cancel=check, status_callback=self.status_signal.emit
@@ -190,34 +192,39 @@ class GroupingThread(QThread):
         except Exception as e: self.error_signal.emit(str(e))
 
 class ShelfmarkLoaderThread(QThread):
-    """Preload metadata for shelfmarks without blocking the main thread."""
-
+    """
+    Background thread to load metadata.
+    OPTIMIZED: Delegates work to the efficient batch_fetch_shelfmarks manager method.
+    """
+    # Signal: current_count, total_count, current_sid
     progress_signal = pyqtSignal(int, int, str)
     finished_signal = pyqtSignal(bool)
-    error_signal = pyqtSignal(str)
-    def __init__(self, meta_mgr, id_list):
+
+    def __init__(self, meta_mgr, sids):
         super().__init__()
         self.meta_mgr = meta_mgr
-        self.id_list = id_list
-        self._cancelled = False
-
-    def request_cancel(self):
-        self._cancelled = True
+        self.sids = sids
 
     def run(self):
         try:
-            to_fetch = [sid for sid in self.id_list if sid and sid not in self.meta_mgr.nli_cache]
-            total = len(to_fetch)
-            for idx, sid in enumerate(to_fetch, start=1):
-                if self._cancelled or self.isInterruptionRequested():
-                    self.finished_signal.emit(True)
-                    return
-                self.meta_mgr.fetch_nli_data(sid)
-                self.progress_signal.emit(idx, total, sid)
-            self.meta_mgr.save_caches()
-            self.finished_signal.emit(False)
+            total = len(self.sids)
+            if total == 0:
+                self.finished_signal.emit(True)
+                return
+
+            # הגדרת Callback שמקשר בין המנהל (Core) לבין ה-GUI (Signals)
+            def update_gui(curr, tot, sid):
+                self.progress_signal.emit(curr, tot, sid)
+
+            # שימוש בפונקציה היעילה החדשה שכתבנו ב-MetadataManager
+            # היא תטפל לבד בבדיקת CSV ובשימוש ב-20 ה-Threads לרשת
+            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui)
+            
+            self.finished_signal.emit(True)
         except Exception as e:
-            self.error_signal.emit(str(e))
+            # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
+            print(f"Error in background loader: {e}")
+            self.finished_signal.emit(False)
 
 class AIWorkerThread(QThread):
     """Send a prompt to the AI manager in the background."""
