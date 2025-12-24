@@ -104,17 +104,24 @@ class LabSettingsDialog(QDialog):
         self.spin_ngram_min_match.setSuffix("%")
         self.spin_ngram_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
 
+        self.spin_gap_penalty = QSpinBox()
+        self.spin_gap_penalty.setRange(0, 50)
+        self.spin_gap_penalty.setValue(getattr(self.settings, 'gap_penalty', 2))
+        self.spin_gap_penalty.setToolTip(tr("Penalty applied per gap between aligned tokens (higher = stricter proximity)."))
+
         self.spin_candidate_limit = QSpinBox()
         self.spin_candidate_limit.setRange(500, 50000)
         self.spin_candidate_limit.setSingleStep(500)
         self.spin_candidate_limit.setValue(self.settings.candidate_limit)
-        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
+        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 50000, max 50000)."))
 
         sens_layout.addWidget(QLabel(tr("Minimum Match %:")), 0, 0)
         sens_layout.addWidget(self.slider_min_match, 0, 1)
         sens_layout.addWidget(self.spin_ngram_min_match, 0, 2)
         sens_layout.addWidget(QLabel(tr("Result Limit:")), 1, 0)
         sens_layout.addWidget(self.spin_candidate_limit, 1, 1)
+        sens_layout.addWidget(QLabel(tr("Gap Penalty:")), 2, 0)
+        sens_layout.addWidget(self.spin_gap_penalty, 2, 1)
 
         sensitivity_group.setLayout(sens_layout)
         layout.addWidget(sensitivity_group)
@@ -163,6 +170,7 @@ class LabSettingsDialog(QDialog):
         self.settings.candidate_limit = self.spin_candidate_limit.value()
         self.settings.ngram_min_match = self.spin_ngram_min_match.value()
         self.settings.ngram_size = self.spin_ngram_size.value()
+        self.settings.gap_penalty = self.spin_gap_penalty.value()
         self.settings.ignore_matres = self.chk_ignore_matres.isChecked()
         self.settings.phonetic_expansion = self.chk_phonetic.isChecked()
         self.settings.save()
@@ -173,6 +181,7 @@ class LabSettingsDialog(QDialog):
             'candidate_limit': self.spin_candidate_limit.value(),
             'ngram_size': self.spin_ngram_size.value(),
             'ngram_min_match': self.spin_ngram_min_match.value(),
+            'gap_penalty': self.spin_gap_penalty.value(),
             'ignore_matres': self.chk_ignore_matres.isChecked(),
             'phonetic_expansion': self.chk_phonetic.isChecked()
         }
