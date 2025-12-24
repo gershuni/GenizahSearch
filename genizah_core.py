@@ -2,6 +2,7 @@
 
 # -*- coding: utf-8 -*-
 # genizah_core.py
+import difflib
 import logging
 import os
 import sys
@@ -15,7 +16,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
-from typing import Mapping
+from typing import Generator, Iterable, Mapping, Optional, Sequence
 import itertools
 import json
 import bisect
@@ -41,9 +42,9 @@ class LabSettings:
     """Manages configuration for the Lab Mode."""
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
-        self.candidate_limit = 2000
+        self.candidate_limit = 50000
         self.ngram_size = 3
-        self.ngram_min_match = 35
+        self.ngram_min_match = 60
         self.ignore_matres = False
         self.phonetic_expansion = False
 
@@ -1067,18 +1068,18 @@ class LabEngine:
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
-                
+
                 # Robust check: Try to parse a query on the field
                 try:
                     schema = self.lab_index.schema
-                    ngram_field = schema.get_field("text_ngram")
+                    ngram_field = self._get_field_handle(schema, "text_ngram")
                     self.lab_index.parse_query('"test"', [ngram_field])
                 except Exception:
                     LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
                     self.lab_index_needs_rebuild = True
                     self._close_index()
                     return False
-                
+
                 self.lab_searcher = self.lab_index.searcher()
                 self.lab_index_needs_rebuild = False
                 return True
@@ -1129,11 +1130,15 @@ class LabEngine:
         os.makedirs(Config.LAB_INDEX_DIR, exist_ok=True)
 
         # 4. Define Schema
+        trigram_analyzer = (
+            tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.ngram(3, 3, False))
+            .filter(tantivy.Filter.lowercase())
+            .build()
+        )
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("text_normalized", stored=True, tokenizer_name="whitespace")
-        # CRITICAL FIX: Ensure this field is added
-        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("text_ngram", stored=False, tokenizer_name="lab_trigram")
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
@@ -1141,6 +1146,7 @@ class LabEngine:
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        index.register_tokenizer("lab_trigram", trigram_analyzer)
         writer = index.writer(heap_size=50_000_000)
 
         # 5. Indexing Loop
@@ -1167,13 +1173,12 @@ class LabEngine:
                         if cid and ctext:
                             original_content = "\n".join(ctext)
                             norm_content = self.lab_index_normalize(original_content)
-                            ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
 
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid),
                                 text_normalized=norm_content,
-                                text_ngram=ngram_content, # CRITICAL FIX: Populate field
+                                text_ngram=norm_content,
                                 content=original_content,
                                 full_header=str(chead),
                                 shelfmark=str(shelfmark),
@@ -1193,12 +1198,11 @@ class LabEngine:
                 if cid and ctext:
                     original_content = "\n".join(ctext)
                     norm_content = self.lab_index_normalize(original_content)
-                    ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid),
                         text_normalized=norm_content,
-                        text_ngram=ngram_content,
+                        text_ngram=norm_content,
                         content=original_content,
                         full_header=str(chead),
                         shelfmark=str(shelfmark),
@@ -1213,11 +1217,18 @@ class LabEngine:
         return total_docs
 
     # --- Search Methods (Fixing Syntax Error) ---
+    @staticmethod
+    def _get_field_handle(schema, field_name):
+        getter = getattr(schema, "get_field", None)
+        if getter:
+            return getter(field_name)
+        # Fallback: the query builders accept field names; keep string for compatibility
+        return field_name
 
     def _parse_lab_ngram_query(self, query_str):
         schema = self.lab_index.schema
         try:
-            ngram_field = schema.get_field("text_ngram")
+            ngram_field = self._get_field_handle(schema, "text_ngram")
         except Exception:
             LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
             return None
@@ -1240,107 +1251,199 @@ class LabEngine:
         return self._candidate_limit()
 
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+        return list(self.lab_search_stream(query_str, mode=mode, progress_callback=progress_callback, gap=gap))
+
+    def _build_query_windows(self, normalized_query: str, window_size: int = 15, overlap: int = 5) -> list[str]:
+        tokens = normalized_query.split()
+        if not tokens:
+            return []
+        if len(tokens) <= window_size:
+            return [" ".join(tokens)]
+        step = max(1, window_size - overlap)
+        return [
+            " ".join(tokens[i:i + window_size])
+            for i in range(0, len(tokens) - window_size + 1, step)
+        ]
+
+    def _expand_query_grams(self, query: str) -> set[str]:
+        base_ngrams = self.generate_ngrams(query, self.settings.ngram_size)
+        grams = set(base_ngrams.split())
+        if not grams:
+            return grams
+
+        if self.settings.ignore_matres:
+            skeleton = query.replace("ו", "").replace("י", "")
+            grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
+
+        if self.settings.phonetic_expansion:
+            for word in query.split():
+                for idx, char in enumerate(word):
+                    for repl in self.var_mgr.basic_map.get(char, set()):
+                        variant = word[:idx] + repl + word[idx + 1:]
+                        grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
+        return grams
+
+    @staticmethod
+    def _batched(items: Sequence, size: int) -> Iterable[Sequence]:
+        for i in range(0, len(items), size):
+            yield items[i:i + size]
+
+    def _broad_candidate_docaddrs(self, window_grams: list[set[str]]) -> list[tuple[int, int]]:
+        """Run broad OR queries per window and return unique DocAddress tuples (segment, doc)."""
+        schema = self.lab_index.schema
+        candidates = {}
+
+        for grams in window_grams:
+            if not grams:
+                continue
+            clauses = [
+                (tantivy.Occur.Should, tantivy.Query.term_query(schema, "text_ngram", gram))
+                for gram in grams
+            ]
+            # Avoid empty boolean query
+            if not clauses:
+                continue
+            query = tantivy.Query.boolean_query(clauses)
+            res_obj = self.lab_searcher.search(query, self._stage1_limit())
+            for score, doc_addr in res_obj.hits:
+                key = (doc_addr.segment_ord, doc_addr.doc)
+                if key not in candidates or score > candidates[key]:
+                    candidates[key] = score
+        # Preserve ordering by score descending for stability and cap to limit
+        ordered = [k for k, _ in sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)]
+        return ordered[: self._stage1_limit()]
+
+    def _ngram_overlap_ratio(self, doc_text: str, query_grams: set[str]) -> float:
+        if not doc_text or not query_grams:
+            return 0.0
+        doc_grams = set(self.generate_ngrams(self.lab_index_normalize(doc_text), self.settings.ngram_size).split())
+        if not doc_grams:
+            return 0.0
+        overlap = len(doc_grams & query_grams)
+        return overlap / max(1, len(query_grams))
+
+    def _alignment_score(self, query_tokens: list[str], doc_tokens: list[str], gap: int) -> tuple[float, list[tuple[int, int]]]:
+        matcher = difflib.SequenceMatcher(None, query_tokens, doc_tokens)
+        ratio = matcher.ratio()
+        blocks = matcher.get_matching_blocks()
+
+        # Gap penalty: penalize large jumps between matching blocks
+        penalty = 0.0
+        if gap > 0 and len(blocks) > 1:
+            for prev, curr in zip(blocks, blocks[1:]):
+                gap_size = (curr.b - (prev.b + prev.size))
+                if gap_size > gap:
+                    penalty += (gap_size - gap) / max(1, len(doc_tokens))
+        score = max(0.0, ratio - penalty)
+        return score, blocks
+
+    def _build_alignment_snippet(self, doc_tokens: list[str], blocks: list[difflib.Match], window: int = 15) -> str:
+        if not blocks:
+            return " ".join(doc_tokens[:window])
+        # Pick the longest block for anchoring the snippet
+        best = max(blocks, key=lambda b: b.size if b else 0)
+        start = max(0, best.b - window // 2)
+        end = min(len(doc_tokens), best.b + best.size + window // 2)
+        snippet_tokens = doc_tokens[start:end]
+        highlights = set(range(best.b, best.b + best.size))
+
+        rendered = []
+        for idx, tok in enumerate(snippet_tokens, start=start):
+            if idx in highlights:
+                rendered.append(f"*{tok}*")
+            else:
+                rendered.append(tok)
+        return " ".join(rendered)
+
+    def lab_search_stream(self, query_str, mode='variants', progress_callback=None, gap=0):
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
             return []
 
         LAB_LOGGER.info("N-Gram Search: %s", query_str)
-        start_time = time.time()
 
         cleaned_query = self.lab_index_normalize(query_str)
         cleaned_query = " ".join(cleaned_query.split())
         if not cleaned_query: return []
 
-        base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
-        base_grams = base_ngrams.split()
-        if not base_grams: return []
-
-        expanded_grams = set(base_grams)
-
-        # Spelling/Phonetic Expansion
-        if self.settings.ignore_matres:
-            skeleton = cleaned_query.replace("ו", "").replace("י", "")
-            if skeleton and skeleton != cleaned_query:
-                expanded_grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
-
-        if self.settings.phonetic_expansion:
-            words = cleaned_query.split()
-            for idx, word in enumerate(words):
-                variants = {word}
-                for i, char in enumerate(word):
-                    for repl in self.var_mgr.basic_map.get(char, set()):
-                        variants.add(word[:i] + repl + word[i+1:])
-                for variant in variants:
-                    if variant == word: continue
-                    expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
-
-        # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        
-        if not query_terms: return []
-        
-        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
-        # Tantivy's BM25 will automatically rank documents with more matches higher.
-        if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})"
-        else:
-            final_query = query_terms[0]
-
-        LAB_LOGGER.info("N-Gram Query: %s", final_query)
-
-        try:
-            t_query = self._parse_lab_ngram_query(final_query)
-            if t_query is None:
-                return []
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error("N-Gram search failed: %s", e)
+        query_tokens = cleaned_query.split()
+        windows = self._build_query_windows(cleaned_query)
+        if not windows:
             return []
 
-        results = []
-        for score, doc_addr in res_obj.hits:
-            doc = self.lab_searcher.doc(doc_addr)
-            source = doc['source'][0] if 'source' in doc else "Unknown"
-            content = doc['content'][0]
-            
-            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
-            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
-            
-            results.append({
-                'bm25': score,
-                'content': content,
-                'header': doc['full_header'][0],
-                'shelfmark': doc['shelfmark'][0],
-                'source': source,
-                'uid': doc['unique_id'][0],
-                'snippet_data': self._snippet_html(snippet),
-                'raw_file_hl': hl_text
-            })
+        expanded_windows = [self._expand_query_grams(w) for w in windows]
+        # Union grams for overlap ratio checks
+        global_expanded_grams = set().union(*expanded_windows)
+        if not global_expanded_grams:
+            return []
 
-        results.sort(key=lambda x: x['bm25'], reverse=True)
-        
-        # Formatting
-        gui_results = []
+        candidate_keys = self._broad_candidate_docaddrs(expanded_windows)
+        if not candidate_keys:
+            return []
+
+        min_match_ratio = max(0.0, min(1.0, self.settings.ngram_min_match / 100))
+        batch_size = 1000
+        results = []
+
+        for batch in self._batched(candidate_keys, batch_size):
+            doc_addrs = [tantivy.DocAddress(seg, doc) for seg, doc in batch]
+            for doc_addr in doc_addrs:
+                doc = self.lab_searcher.doc(doc_addr)
+                source = doc['source'][0] if 'source' in doc else "Unknown"
+                content = doc['content'][0] if 'content' in doc else ""
+                header = doc['full_header'][0] if 'full_header' in doc else ""
+                uid = doc['unique_id'][0] if 'unique_id' in doc else ""
+                shelfmark = doc['shelfmark'][0] if 'shelfmark' in doc else "Unknown"
+
+                overlap_ratio = self._ngram_overlap_ratio(content, global_expanded_grams)
+                if overlap_ratio < min_match_ratio:
+                    continue
+
+                doc_tokens = self.lab_index_normalize(content).split()
+                align_score, blocks = self._alignment_score(query_tokens, doc_tokens, gap)
+                if align_score <= 0:
+                    continue
+
+                snippet_text = self._build_alignment_snippet(doc_tokens, blocks)
+                snippet_html = self._snippet_html(snippet_text)
+                hl_text = self._highlight_ngram_in_text(content, list(global_expanded_grams))
+
+                results.append({
+                    'score': align_score,
+                    'overlap': overlap_ratio,
+                    'content': content,
+                    'header': header,
+                    'shelfmark': shelfmark,
+                    'source': source,
+                    'uid': uid,
+                    'snippet_data': snippet_html,
+                    'raw_file_hl': hl_text
+                })
+
+        results.sort(key=lambda x: (x['score'], x['overlap']), reverse=True)
+        LAB_LOGGER.info(
+            "Lab search candidates: %d -> %d reranked results (min_match=%.2f)",
+            len(candidate_keys),
+            len(results),
+            min_match_ratio,
+        )
+
         seen = set()
         for r in results:
             sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
-            if sid in seen: continue
+            if sid in seen:
+                continue
             seen.add(sid)
-            
-            shelf = r['shelfmark']
-            title = "" 
-            
-            gui_results.append({
-                'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
+
+            yield {
+                'display': {'id': sid, 'shelfmark': r['shelfmark'], 'title': "", 'source': r['source'], 'img': ''},
                 'snippet': r['snippet_data'],
                 'full_text': r['content'],
                 'uid': r['uid'],
                 'raw_header': r['header'],
                 'raw_file_hl': r['raw_file_hl'],
                 'highlight_pattern': None
-            })
-            
-        return gui_results
+            }
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
         if not self.lab_searcher or self.lab_index_needs_rebuild:
@@ -1387,17 +1490,18 @@ class LabEngine:
             if not grams_set: continue
 
             query_grams = sorted(list(grams_set))
-            clauses = [f'text_ngram:"{g}"' for g in query_grams]
-            
-            # CRITICAL FIX: Removed @min_match syntax
-            raw_query = f"({' '.join(clauses)})"
-            
+            clauses = [
+                (tantivy.Occur.Should, tantivy.Query.term_query(self.lab_index.schema, "text_ngram", g))
+                for g in query_grams
+            ]
+
+            if not clauses:
+                continue
+
             try:
-                t_query = self._parse_lab_ngram_query(raw_query)
-                if t_query is None:
-                    continue
-                res = self.lab_searcher.search(t_query, 50) 
-            except Exception:
+                res = self.lab_searcher.search(tantivy.Query.boolean_query(clauses), 50)
+            except Exception as e:
+                LAB_LOGGER.error("Composition chunk search failed: %s", e)
                 continue
 
             for score, doc_addr in res.hits:
