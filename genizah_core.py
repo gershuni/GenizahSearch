@@ -15,11 +15,12 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
-from typing import Mapping
+from typing import Mapping, Iterable, Generator, Tuple, List
 import itertools
 import json
 import bisect
 import math
+import difflib
 
 from genizah_translations import TRANSLATIONS
 
@@ -41,9 +42,10 @@ class LabSettings:
     """Manages configuration for the Lab Mode."""
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
-        self.candidate_limit = 2000
+        self.candidate_limit = 50000
         self.ngram_size = 3
         self.ngram_min_match = 35
+        self.gap_penalty = 2
         self.ignore_matres = False
         self.phonetic_expansion = False
 
@@ -55,14 +57,16 @@ class LabSettings:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
-                    self.candidate_limit = data.get('candidate_limit', 2000)
+                    self.candidate_limit = data.get('candidate_limit', 50000)
                     self.ngram_size = data.get('ngram_size', 3)
                     self.ngram_min_match = data.get('ngram_min_match', 35)
+                    self.gap_penalty = data.get('gap_penalty', 2)
                     self.ignore_matres = data.get('ignore_matres', False)
                     self.phonetic_expansion = data.get('phonetic_expansion', False)
                     self.candidate_limit = max(500, min(self.candidate_limit, 50000))
                     self.ngram_size = max(2, min(self.ngram_size, 4))
                     self.ngram_min_match = max(1, min(self.ngram_min_match, 100))
+                    self.gap_penalty = max(0, min(self.gap_penalty, 50))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -75,6 +79,7 @@ class LabSettings:
                     'candidate_limit': max(500, min(self.candidate_limit, 50000)),
                     'ngram_size': self.ngram_size,
                     'ngram_min_match': self.ngram_min_match,
+                    'gap_penalty': self.gap_penalty,
                     'ignore_matres': self.ignore_matres,
                     'phonetic_expansion': self.phonetic_expansion
                 }, f, indent=4)
@@ -1046,6 +1051,10 @@ class MetadataManager:
 class LabEngine:
     """Handles advanced logic for Lab Mode: Two-Stage Retrieval, Normalization, Lab Indexing."""
     RARE_THRESHOLD = 0.001
+    BROAD_BATCH_SIZE = 1000
+    RERANK_BATCH_SIZE = 1000
+    WINDOW_SIZE = 15
+    WINDOW_OVERLAP = 5
 
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
@@ -1063,10 +1072,29 @@ class LabEngine:
         import gc
         gc.collect() 
 
+    def _register_lab_tokenizer(self, index, ngram_size=None):
+        """Register a robust character n-gram tokenizer for the Lab index."""
+        try:
+            target_n = max(2, min(4, ngram_size or self.settings.ngram_size))
+            analyzer = tantivy.TextAnalyzerBuilder(
+                tantivy.Tokenizer.ngram(min_gram=target_n, max_gram=target_n, prefix_only=False)
+            ).filter(tantivy.Filter.lowercase()).build()
+            index.register_tokenizer("lab_trigram", analyzer)
+            return target_n
+        except Exception as e:
+            LAB_LOGGER.error("Failed to register lab tokenizer: %s", e)
+            try:
+                fallback = tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build()
+                index.register_tokenizer("lab_trigram", fallback)
+            except Exception as e2:
+                LAB_LOGGER.error("Fallback tokenizer registration failed: %s", e2)
+            return None
+
     def _reload_lab_index(self):
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
+                self._register_lab_tokenizer(self.lab_index)
                 
                 # Robust check: Try to parse a query on the field
                 try:
@@ -1133,7 +1161,7 @@ class LabEngine:
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("text_normalized", stored=True, tokenizer_name="whitespace")
         # CRITICAL FIX: Ensure this field is added
-        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("text_ngram", stored=False, tokenizer_name="lab_trigram")
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
@@ -1141,6 +1169,9 @@ class LabEngine:
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        eff_n = self._register_lab_tokenizer(index, self.settings.ngram_size)
+        if eff_n:
+            self.settings.ngram_size = eff_n
         writer = index.writer(heap_size=50_000_000)
 
         # 5. Indexing Loop
@@ -1239,25 +1270,14 @@ class LabEngine:
     def _stage1_limit(self):
         return self._candidate_limit()
 
-    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
-        if not self.lab_searcher or self.lab_index_needs_rebuild:
-            LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
-            return []
-
-        LAB_LOGGER.info("N-Gram Search: %s", query_str)
-        start_time = time.time()
-
-        cleaned_query = self.lab_index_normalize(query_str)
-        cleaned_query = " ".join(cleaned_query.split())
-        if not cleaned_query: return []
-
+    def _expand_query_grams(self, cleaned_query):
         base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
         base_grams = base_ngrams.split()
-        if not base_grams: return []
+        if not base_grams:
+            return set()
 
         expanded_grams = set(base_grams)
 
-        # Spelling/Phonetic Expansion
         if self.settings.ignore_matres:
             skeleton = cleaned_query.replace("ו", "").replace("י", "")
             if skeleton and skeleton != cleaned_query:
@@ -1265,82 +1285,185 @@ class LabEngine:
 
         if self.settings.phonetic_expansion:
             words = cleaned_query.split()
-            for idx, word in enumerate(words):
+            for word in words:
                 variants = {word}
                 for i, char in enumerate(word):
                     for repl in self.var_mgr.basic_map.get(char, set()):
                         variants.add(word[:i] + repl + word[i+1:])
                 for variant in variants:
-                    if variant == word: continue
+                    if variant == word:
+                        continue
                     expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
 
-        # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        
-        if not query_terms: return []
-        
-        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
-        # Tantivy's BM25 will automatically rank documents with more matches higher.
-        if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})"
-        else:
-            final_query = query_terms[0]
+        return expanded_grams
 
-        LAB_LOGGER.info("N-Gram Query: %s", final_query)
+    def _build_broad_query(self, grams: Iterable[str]):
+        terms = [f'text_ngram:"{g}"' for g in sorted(set(grams)) if g]
+        if not terms:
+            return None
+        if len(terms) > Config.TANTIVY_CLAUSE_LIMIT:
+            terms = terms[:Config.TANTIVY_CLAUSE_LIMIT]
+        query_str = f"({' OR '.join(terms)})" if len(terms) > 1 else terms[0]
+        return self._parse_lab_ngram_query(query_str)
 
-        try:
-            t_query = self._parse_lab_ngram_query(final_query)
-            if t_query is None:
-                return []
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error("N-Gram search failed: %s", e)
+    def _tokenize_with_spans(self, text: str) -> List[Tuple[str, int, int]]:
+        return [(m.group(), m.start(), m.end()) for m in re.finditer(Config.WORD_TOKEN_PATTERN, text)]
+
+    def _sequence_alignment_score(self, query_tokens: List[str], doc_tokens: List[str], gap_penalty: float):
+        matcher = difflib.SequenceMatcher(None, query_tokens, doc_tokens, autojunk=False)
+        blocks = [b for b in matcher.get_matching_blocks() if b.size > 0]
+        if not blocks:
+            return None
+        ratio = matcher.ratio()
+        gaps = 0
+        prev = None
+        for blk in blocks:
+            if prev is not None:
+                gaps += max(0, blk.b - (prev.b + prev.size))
+            prev = blk
+        matched = sum(b.size for b in blocks)
+        coverage = matched / max(1, len(query_tokens))
+        score = (ratio * 100) - (gaps * gap_penalty)
+        return {'score': score, 'coverage': coverage, 'blocks': blocks}
+
+    def _alignment_snippet(self, text: str, spans: List[Tuple[str, int, int]], blocks, window_tokens=12):
+        doc_indices = []
+        for blk in blocks:
+            doc_indices.extend(range(blk.b, blk.b + blk.size))
+        if not doc_indices:
+            return text[:300], text
+
+        doc_indices.sort()
+        start_idx = max(0, doc_indices[0] - window_tokens)
+        end_idx = min(len(spans) - 1, doc_indices[-1] + window_tokens)
+        start_char = spans[start_idx][1]
+        end_char = spans[end_idx][2]
+        snippet = text[start_char:end_char]
+
+        rel_spans = []
+        abs_spans = []
+        for idx in doc_indices:
+            if idx < len(spans):
+                s, e = spans[idx][1], spans[idx][2]
+                abs_spans.append((s, e))
+                if start_char <= s <= e <= end_char:
+                    rel_spans.append((s - start_char, e - start_char))
+
+        hl_snippet = self._apply_highlights(snippet, self._merge_spans(rel_spans))
+        hl_full = self._apply_highlights(text, self._merge_spans(abs_spans))
+        return f"...{hl_snippet}...", hl_full
+
+    def _build_query_windows(self, tokens: List[str]) -> List[str]:
+        if len(tokens) <= self.WINDOW_SIZE:
+            return [" ".join(tokens)]
+        step = max(1, self.WINDOW_SIZE - self.WINDOW_OVERLAP)
+        windows = []
+        for i in range(0, len(tokens), step):
+            window_tokens = tokens[i:i + self.WINDOW_SIZE]
+            if not window_tokens:
+                continue
+            windows.append(" ".join(window_tokens))
+            if i + self.WINDOW_SIZE >= len(tokens):
+                break
+        return windows
+
+    def _collect_candidates(self, cleaned_query: str, progress_callback=None):
+        tokens = cleaned_query.split()
+        windows = self._build_query_windows(tokens)
+
+        candidates = {}
+        for idx, window_text in enumerate(windows):
+            grams = self._expand_query_grams(window_text)
+            t_query = self._build_broad_query(grams)
+            if not t_query:
+                continue
+            try:
+                res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
+            except Exception as e:
+                LAB_LOGGER.error("Broad search failed: %s", e)
+                continue
+
+            for score, doc_addr in res_obj.hits:
+                key = (doc_addr.segment_ord, doc_addr.doc)
+                existing = candidates.get(key)
+                if not existing or score > existing['score']:
+                    candidates[key] = {'score': score, 'addr': doc_addr}
+
+            if progress_callback:
+                progress_callback(idx + 1, len(windows))
+
+        ranked = sorted(candidates.values(), key=lambda x: x['score'], reverse=True)
+        ranked = ranked[:self._candidate_limit()]
+        return [entry['addr'] for entry in ranked]
+
+    def _rerank_candidates(self, doc_addrs: List, cleaned_query: str, min_should_match: float, gap_penalty: float) -> Generator[dict, None, None]:
+        query_tokens = re.findall(Config.WORD_TOKEN_PATTERN, cleaned_query)
+        if not query_tokens:
+            return
+
+        for start in range(0, len(doc_addrs), self.RERANK_BATCH_SIZE):
+            batch = doc_addrs[start:start + self.RERANK_BATCH_SIZE]
+            for doc_addr in batch:
+                try:
+                    doc = self.lab_searcher.doc(doc_addr)
+                except Exception as e:
+                    LAB_LOGGER.warning("Failed to fetch doc for rerank: %s", e)
+                    continue
+
+                content = doc.get('content', [""])
+                if not content:
+                    continue
+                content_text = content[0]
+                token_spans = self._tokenize_with_spans(content_text)
+                doc_tokens = [t[0] for t in token_spans]
+
+                score_data = self._sequence_alignment_score(query_tokens, doc_tokens, gap_penalty)
+                if not score_data:
+                    continue
+
+                if score_data['coverage'] < min_should_match:
+                    continue
+
+                snippet, full_hl = self._alignment_snippet(content_text, token_spans, score_data['blocks'])
+
+                uid = doc['unique_id'][0]
+                header = doc['full_header'][0]
+                source = doc['source'][0] if 'source' in doc else "Unknown"
+                shelf = doc['shelfmark'][0] if 'shelfmark' in doc else ""
+                sid = self.meta_mgr.extract_unique_id(header) or uid
+
+                yield {
+                    'display': {'id': sid, 'shelfmark': shelf, 'title': '', 'source': source, 'img': ''},
+                    'snippet': self._snippet_html(snippet),
+                    'full_text': content_text,
+                    'uid': uid,
+                    'raw_header': header,
+                    'raw_file_hl': full_hl,
+                    'highlight_pattern': None,
+                    'score': score_data['score']
+                }
+
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+        if not self.lab_searcher or self.lab_index_needs_rebuild:
+            LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
             return []
 
-        results = []
-        for score, doc_addr in res_obj.hits:
-            doc = self.lab_searcher.doc(doc_addr)
-            source = doc['source'][0] if 'source' in doc else "Unknown"
-            content = doc['content'][0]
-            
-            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
-            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
-            
-            results.append({
-                'bm25': score,
-                'content': content,
-                'header': doc['full_header'][0],
-                'shelfmark': doc['shelfmark'][0],
-                'source': source,
-                'uid': doc['unique_id'][0],
-                'snippet_data': self._snippet_html(snippet),
-                'raw_file_hl': hl_text
-            })
+        LAB_LOGGER.info("Lab Broad-Net Search: %s", query_str)
+        start_time = time.time()
 
-        results.sort(key=lambda x: x['bm25'], reverse=True)
-        
-        # Formatting
-        gui_results = []
-        seen = set()
-        for r in results:
-            sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
-            if sid in seen: continue
-            seen.add(sid)
-            
-            shelf = r['shelfmark']
-            title = "" 
-            
-            gui_results.append({
-                'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
-                'snippet': r['snippet_data'],
-                'full_text': r['content'],
-                'uid': r['uid'],
-                'raw_header': r['header'],
-                'raw_file_hl': r['raw_file_hl'],
-                'highlight_pattern': None
-            })
-            
-        return gui_results
+        cleaned_query = self.lab_index_normalize(query_str)
+        cleaned_query = " ".join(cleaned_query.split())
+        if not cleaned_query:
+            return []
+
+        doc_addrs = self._collect_candidates(cleaned_query, progress_callback=progress_callback)
+        min_should_match = max(0.01, min(1.0, self.settings.ngram_min_match / 100.0))
+
+        results = list(self._rerank_candidates(doc_addrs, cleaned_query, min_should_match, self.settings.gap_penalty))
+        results.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+        LAB_LOGGER.info("Lab search finished. %d results in %.2fs", len(results), time.time() - start_time)
+        return results
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
         if not self.lab_searcher or self.lab_index_needs_rebuild:
