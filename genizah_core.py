@@ -18,8 +18,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Mapping
 import itertools
 import json
-import bisect
-import math
+# Removed unused imports: bisect, math
 
 from genizah_translations import TRANSLATIONS
 
@@ -38,7 +37,7 @@ except ImportError:
 #  LAB SETTINGS
 # ==============================================================================
 class LabSettings:
-    """Manages configuration for the Lab Mode."""
+    """Manages configuration for the Lab Mode (experimental search features)."""
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
         self.candidate_limit = 2000
@@ -50,6 +49,7 @@ class LabSettings:
         self.load()
 
     def load(self):
+        """Loads configuration from JSON file."""
         if os.path.exists(Config.LAB_CONFIG_FILE):
             try:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -67,6 +67,7 @@ class LabSettings:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
     def save(self):
+        """Saves configuration to JSON file."""
         os.makedirs(Config.LAB_DIR, exist_ok=True)
         try:
             with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -96,7 +97,7 @@ class LabSettings:
                         new_vars[k].append(v)
                         # Also add reverse? Usually variants are symmetric but maybe not always.
                         # For now, let's assume symmetric for char swaps, maybe not for multi-char.
-                        # User request: "also for two to one words such as נו=מ".
+                        # User request: "also for two to one words such as nu=m (nun-vav = mem)".
                         if v not in new_vars: new_vars[v] = []
                         new_vars[v].append(k)
         self.custom_variants = new_vars
@@ -249,6 +250,7 @@ def configure_logger():
 
 
 def get_logger(name=None):
+    """Retrieve or create a logger instance."""
     base_logger = configure_logger()
     return base_logger.getChild(name) if name else base_logger
 
@@ -394,6 +396,7 @@ class AIManager:
         return AI_PROVIDER_ENDPOINTS.get(self.provider)
 
     def save_config(self, provider, model_name, key):
+        """Save AI settings to disk."""
         self.provider = provider
         self.model_name = model_name
         self.api_key = key.strip()
@@ -409,6 +412,7 @@ class AIManager:
         self.chat = None
 
     def _get_sys_inst(self):
+        """Returns the system instruction for the AI, localized if necessary."""
         base_inst = """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah).
             Your goal is to help the user construct Python Regex patterns.
             
@@ -426,6 +430,7 @@ class AIManager:
         return base_inst
 
     def init_session(self):
+        """Initialize the AI session (specifically for Google Gemini)."""
         if not self.api_key: return "Error: Missing API Key."
 
         if self.provider == "Google Gemini":
@@ -445,6 +450,7 @@ class AIManager:
         return None # Other providers are stateless or handled in send_prompt
 
     def send_prompt(self, user_text):
+        """Sends a user prompt to the configured AI provider and returns the parsed JSON response."""
         if self.provider == "Google Gemini" and not self.chat:
             err = self.init_session()
             if err: return None, err
@@ -514,6 +520,7 @@ class VariantManager:
 
     @staticmethod
     def make_multimap(pairs):
+        """Creates a bidirectional mapping from a list of pairs."""
         m = defaultdict(set)
         for a, b in pairs:
             m[a].add(b)
@@ -560,6 +567,7 @@ class VariantManager:
         ])
 
     def hamming_distance(self, term: str, variant: str) -> int:
+        """Calculate Hamming distance between two strings."""
         if len(term) != len(variant):
             # quite arbitrary, but ensures variants of different lengths are sorted last
             return len(term) + len(variant)
@@ -567,6 +575,7 @@ class VariantManager:
         return diff
 
     def generate_variants(self, term: str, mapping: Mapping[str, set[str]], max_changes: int, limit: int) -> set[str]:
+        """Generate variants by substituting characters based on the mapping."""
         indices = range(len(term))
         limit = min(limit, Config.VARIANT_GEN_LIMIT)
         result = set()
@@ -634,10 +643,10 @@ class VariantManager:
 #  METADATA MANAGER
 # ==============================================================================
 class MetadataManager:
+    """Handle metadata parsing, remote retrieval, and persistent caching."""
     def _make_session(self):
         return requests.Session()
         
-    """Handle metadata parsing, remote retrieval, and persistent caching."""
     def __init__(self):
         self.meta_map = {}
         self.nli_cache = {}
@@ -718,6 +727,7 @@ class MetadataManager:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 
     def get_meta_for_id(self, sys_id):
+        """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
         if sys_id is None:
             return "Unknown", ""
@@ -729,7 +739,6 @@ class MetadataManager:
             LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw, norm)
         sys_id = norm
 
-        """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
         shelf = "Unknown"
         title = ""
 
@@ -756,6 +765,7 @@ class MetadataManager:
         return shelf, title
 
     def get_shelfmark_from_header(self, full_header):
+        """Extract shelfmark from header string."""
         parsed = self.parse_full_id_components(full_header)
 
         sys_id = parsed.get('sys_id')
@@ -769,6 +779,7 @@ class MetadataManager:
         return ''
 
     def save_caches(self):
+        """Persist caches to disk."""
         try:
             with open(Config.CACHE_NLI, 'wb') as f: pickle.dump(self.nli_cache, f)
         except Exception as e:
@@ -792,6 +803,7 @@ class MetadataManager:
             LOGGER.warning("Failed to build or save file map cache from %s: %s", Config.FILE_V7, e)
 
     def extract_unique_id(self, text):
+        """Extract unique identifier from text."""
         match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
         if not match:
             sys = re.search(r'(99\d+)', text)
@@ -799,6 +811,7 @@ class MetadataManager:
         return match.group(1)
 
     def parse_header_smart(self, full_header):
+        """Parse header to extract system ID and page number."""
         sys_match = re.search(r'(99\d{8,})', full_header)
         sys_id = sys_match.group(1) if sys_match else None
         p_num = "Unknown"
@@ -811,6 +824,7 @@ class MetadataManager:
         return sys_id, p_num
         
     def parse_full_id_components(self, full_header):
+        """Parse full ID components from header string."""
         match = re.search(r'(99\d+)_?(IE\d+)?_?(P\d+)?_?(FL\d+)?', full_header)
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
         if match:
@@ -821,6 +835,7 @@ class MetadataManager:
         return result
 
     def fetch_nli_data(self, system_id):
+        """Fetch metadata from NLI for a given system ID."""
         if system_id in self.nli_cache: return self.nli_cache[system_id]
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
@@ -969,6 +984,7 @@ class MetadataManager:
         return []
 
     def get_thumbnail(self, system_id, size=320):
+        """Retrieve thumbnail URL for a system ID."""
         meta = self.nli_cache.get(system_id)
         if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
             return meta.get('thumb_url')
@@ -990,6 +1006,7 @@ class MetadataManager:
         return thumb_url
         
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
+        """Fetch metadata for multiple system IDs in parallel."""
         to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
         if not to_fetch: return
 
@@ -1023,6 +1040,7 @@ class MetadataManager:
         return list(results)
 
     def get_display_data(self, full_header, src_label):
+        """Generate display dictionary for UI."""
         sys_id, p_num = self.parse_header_smart(full_header)
 
         meta = self.nli_cache.get(sys_id, {'shelfmark': '', 'title': ''})
@@ -1064,6 +1082,7 @@ class LabEngine:
         gc.collect() 
 
     def _reload_lab_index(self):
+        """Load or reload the lab index."""
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
@@ -1091,10 +1110,12 @@ class LabEngine:
 
     @staticmethod
     def lab_index_normalize(text):
+        """Normalize text for indexing/search (remove accents, lowercase)."""
         return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
 
     @staticmethod
     def generate_ngrams(text, n=3):
+        """Generate n-grams from text."""
         if not text: return ""
         cleaned = "".join(ch for ch in text if "\u0590" <= ch <= "\u05FF")
         if n <= 1 or len(cleaned) <= n: return cleaned
@@ -1240,6 +1261,7 @@ class LabEngine:
         return self._candidate_limit()
 
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+        """Execute a search in Lab Mode."""
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
             return []
@@ -1343,6 +1365,7 @@ class LabEngine:
         return gui_results
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
+        """Execute composition search in Lab Mode."""
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not ready.")
             return {'main': [], 'filtered': []}
@@ -1525,6 +1548,7 @@ class Indexer:
         self.meta_mgr = meta_mgr
 
     def create_index(self, progress_callback=None):
+        """Create a new index from source files."""
         # Validation
         if not os.path.exists(Config.FILE_V8):
             raise FileNotFoundError(tr("Input file not found: {}\nPlease place 'Transcriptions.txt' next to the executable.").format(Config.FILE_V8))
@@ -1616,6 +1640,7 @@ class SearchEngine:
         self.reload_index()
 
     def reload_index(self):
+        """Reload the search index from disk."""
         db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
         if os.path.exists(db_path):
             try:
@@ -1627,6 +1652,7 @@ class SearchEngine:
         return False
 
     def build_tantivy_query(self, terms, mode):
+        """Build a Tantivy query string from user terms and mode."""
         if mode == 'Regex':
             regex_str = terms[0]
             candidates = re.findall(r'[\u0590-\u05FF]{2,}', regex_str)
@@ -1674,6 +1700,7 @@ class SearchEngine:
         return " AND ".join(parts)
 
     def build_regex_pattern(self, terms, mode, max_gap):
+        """Build a regex pattern for highlighting/matching."""
         if mode == 'Regex':
             try: return re.compile(" ".join(terms), re.IGNORECASE)
             except: return None
@@ -1714,6 +1741,7 @@ class SearchEngine:
             return None
 
     def highlight(self, text, regex, for_file=False):
+        """Highlight matches in text."""
         m = regex.search(text)
         if not m: return None
         s, e = m.span()
@@ -1797,6 +1825,7 @@ class SearchEngine:
         return best_page['text'], best_page['head'], best_page['src'], best_page['uid']
 
     def execute_search(self, query_str, mode, gap, progress_callback=None):
+        """Run a standard search."""
         if not self.searcher: return []
 
         # --- Metadata Search Modes ---
@@ -1872,6 +1901,7 @@ class SearchEngine:
         return self._deduplicate(results)
 
     def _deduplicate(self, results):
+        """Remove duplicates from results (prefer V0.8 over V0.7)."""
         v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
         final = list(v8.values())
         for r in results:
@@ -1879,6 +1909,7 @@ class SearchEngine:
         return final
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None):
+        """Run a composition search (find parallels)."""
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
@@ -2011,6 +2042,7 @@ class SearchEngine:
         return manuscripts
 
     def group_composition_results(self, items, threshold=5, progress_callback=None, status_callback=None, check_cancel=None):
+        """Group similar composition results based on title similarity."""
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
@@ -2093,6 +2125,7 @@ class SearchEngine:
         return main_list, appendix, summary
 
     def get_full_text_by_id(self, uid):
+        """Retrieve full text content for a document ID."""
         try:
             q = self.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
             res = self.searcher.search(q, 1)
@@ -2124,6 +2157,7 @@ class SearchEngine:
         return full_content
         
     def get_browse_page(self, sys_id, p_num=None, next_prev=0):
+        """Get browse data for a specific page or relative navigation."""
         if not os.path.exists(Config.BROWSE_MAP): return None
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
         if sys_id not in browse_map: return None
@@ -2147,6 +2181,7 @@ class SearchEngine:
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
+        """Find a page by its FL ID."""
         if not os.path.exists(Config.BROWSE_MAP): return None
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
 

@@ -37,6 +37,7 @@ class FilterTextDialog(QDialog):
         self.setLayout(layout)
 
     def load_file(self):
+        """Opens a file dialog to load text content into the text area."""
         path, _ = QFileDialog.getOpenFileName(self, tr("Load Text"), "", "Text Files (*.txt);;All Files (*)")
         if path:
             try:
@@ -47,4 +48,5 @@ class FilterTextDialog(QDialog):
                 pass
 
     def get_text(self):
+        """Returns the current text in the text area."""
         return self.text_area.toPlainText()
