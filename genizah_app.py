@@ -67,12 +67,7 @@ class LabSettingsDialog(QDialog):
         index_group = QGroupBox(tr("Index Settings (Requires Rebuild)"))
         index_layout = QGridLayout()
 
-        self.spin_ngram_size = QSpinBox()
-        self.spin_ngram_size.setRange(2, 4)
-        self.spin_ngram_size.setValue(self.settings.ngram_size)
-        self.spin_ngram_size.setToolTip(tr("Character n-gram size used for indexing and search."))
-
-        self.lbl_rebuild_notice = QLabel(tr("Changing this setting requires rebuilding the Lab Index."))
+        self.lbl_rebuild_notice = QLabel(tr("Rebuild the Lab Index after updating program files or settings that change indexing."))
         self.lbl_rebuild_notice.setWordWrap(True)
 
         self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
@@ -80,11 +75,9 @@ class LabSettingsDialog(QDialog):
         self.btn_rebuild.clicked.connect(self.run_rebuild)
         self.lbl_idx_status = QLabel("")
 
-        index_layout.addWidget(QLabel(tr("N-Gram Size:")), 0, 0)
-        index_layout.addWidget(self.spin_ngram_size, 0, 1)
-        index_layout.addWidget(self.lbl_rebuild_notice, 1, 0, 1, 2)
-        index_layout.addWidget(self.btn_rebuild, 2, 0)
-        index_layout.addWidget(self.lbl_idx_status, 2, 1)
+        index_layout.addWidget(self.lbl_rebuild_notice, 0, 0, 1, 2)
+        index_layout.addWidget(self.btn_rebuild, 1, 0)
+        index_layout.addWidget(self.lbl_idx_status, 1, 1)
 
         index_group.setLayout(index_layout)
         layout.addWidget(index_group)
@@ -95,14 +88,14 @@ class LabSettingsDialog(QDialog):
 
         self.slider_min_match = QSlider(Qt.Orientation.Horizontal)
         self.slider_min_match.setRange(10, 100)
-        self.slider_min_match.setValue(self.settings.ngram_min_match)
-        self.slider_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
+        self.slider_min_match.setValue(self.settings.min_should_match)
+        self.slider_min_match.setToolTip(tr("Minimum percentage of fingerprint tokens that must align (higher = stricter)."))
 
-        self.spin_ngram_min_match = QSpinBox()
-        self.spin_ngram_min_match.setRange(10, 100)
-        self.spin_ngram_min_match.setValue(self.settings.ngram_min_match)
-        self.spin_ngram_min_match.setSuffix("%")
-        self.spin_ngram_min_match.setToolTip(tr("Lower values find more broken text (OCR errors) but increase noise."))
+        self.spin_min_should_match = QSpinBox()
+        self.spin_min_should_match.setRange(10, 100)
+        self.spin_min_should_match.setValue(self.settings.min_should_match)
+        self.spin_min_should_match.setSuffix("%")
+        self.spin_min_should_match.setToolTip(tr("Minimum percentage of fingerprint tokens that must align (higher = stricter)."))
 
         self.spin_candidate_limit = QSpinBox()
         self.spin_candidate_limit.setRange(500, 50000)
@@ -110,11 +103,18 @@ class LabSettingsDialog(QDialog):
         self.spin_candidate_limit.setValue(self.settings.candidate_limit)
         self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
 
+        self.spin_gap_penalty = QSpinBox()
+        self.spin_gap_penalty.setRange(0, 10)
+        self.spin_gap_penalty.setValue(self.settings.gap_penalty)
+        self.spin_gap_penalty.setToolTip(tr("Allowed gap (slop) between fingerprint tokens in phrase search."))
+
         sens_layout.addWidget(QLabel(tr("Minimum Match %:")), 0, 0)
         sens_layout.addWidget(self.slider_min_match, 0, 1)
-        sens_layout.addWidget(self.spin_ngram_min_match, 0, 2)
-        sens_layout.addWidget(QLabel(tr("Result Limit:")), 1, 0)
-        sens_layout.addWidget(self.spin_candidate_limit, 1, 1)
+        sens_layout.addWidget(self.spin_min_should_match, 0, 2)
+        sens_layout.addWidget(QLabel(tr("Gap Penalty:")), 1, 0)
+        sens_layout.addWidget(self.spin_gap_penalty, 1, 1)
+        sens_layout.addWidget(QLabel(tr("Result Limit:")), 2, 0)
+        sens_layout.addWidget(self.spin_candidate_limit, 2, 1)
 
         sensitivity_group.setLayout(sens_layout)
         layout.addWidget(sensitivity_group)
@@ -153,16 +153,14 @@ class LabSettingsDialog(QDialog):
         layout.addLayout(btn_box)
 
         self.setLayout(layout)
-        self.spin_ngram_size.valueChanged.connect(self._mark_rebuild_required)
         self.slider_min_match.valueChanged.connect(self._sync_min_match_spin)
-        self.spin_ngram_min_match.valueChanged.connect(self._sync_min_match_slider)
-        if self.lab_engine.lab_index_needs_rebuild:
-            self._mark_rebuild_required()
+        self.spin_min_should_match.valueChanged.connect(self._sync_min_match_slider)
+        self._mark_rebuild_required()
 
     def save_and_close(self):
         self.settings.candidate_limit = self.spin_candidate_limit.value()
-        self.settings.ngram_min_match = self.spin_ngram_min_match.value()
-        self.settings.ngram_size = self.spin_ngram_size.value()
+        self.settings.min_should_match = self.spin_min_should_match.value()
+        self.settings.gap_penalty = self.spin_gap_penalty.value()
         self.settings.ignore_matres = self.chk_ignore_matres.isChecked()
         self.settings.phonetic_expansion = self.chk_phonetic.isChecked()
         self.settings.save()
@@ -171,8 +169,8 @@ class LabSettingsDialog(QDialog):
     def copy_json(self):
         cfg = {
             'candidate_limit': self.spin_candidate_limit.value(),
-            'ngram_size': self.spin_ngram_size.value(),
-            'ngram_min_match': self.spin_ngram_min_match.value(),
+            'min_should_match': self.spin_min_should_match.value(),
+            'gap_penalty': self.spin_gap_penalty.value(),
             'ignore_matres': self.chk_ignore_matres.isChecked(),
             'phonetic_expansion': self.chk_phonetic.isChecked()
         }
@@ -183,7 +181,6 @@ class LabSettingsDialog(QDialog):
         self.btn_rebuild.setEnabled(False)
         self.lbl_idx_status.setText(tr("Starting..."))
         QApplication.processEvents()
-        self.settings.ngram_size = self.spin_ngram_size.value()
 
         class RebuildThread(QThread):
             finished_sig = pyqtSignal(int)
@@ -216,7 +213,7 @@ class LabSettingsDialog(QDialog):
         self.worker.start()
 
     def _mark_rebuild_required(self):
-        needs_rebuild = self.spin_ngram_size.value() != self.settings.ngram_size or self.lab_engine.lab_index_needs_rebuild
+        needs_rebuild = self.lab_engine.lab_index_needs_rebuild
         self._rebuild_required = needs_rebuild
         if needs_rebuild:
             self.lbl_idx_status.setText(tr("Index schema updated. Please rebuild."))
@@ -228,10 +225,10 @@ class LabSettingsDialog(QDialog):
             self.btn_save.setEnabled(True)
 
     def _sync_min_match_spin(self, value):
-        if self.spin_ngram_min_match.value() != value:
-            self.spin_ngram_min_match.blockSignals(True)
-            self.spin_ngram_min_match.setValue(value)
-            self.spin_ngram_min_match.blockSignals(False)
+        if self.spin_min_should_match.value() != value:
+            self.spin_min_should_match.blockSignals(True)
+            self.spin_min_should_match.setValue(value)
+            self.spin_min_should_match.blockSignals(False)
 
     def _sync_min_match_slider(self, value):
         if self.slider_min_match.value() != value:
@@ -2178,8 +2175,8 @@ class GenizahGUI(QMainWindow):
             settings_dump = json.dumps({
                 'custom_variants': self.lab_engine.settings.custom_variants,
                 'candidate_limit': self.lab_engine.settings.candidate_limit,
-                'ngram_size': self.lab_engine.settings.ngram_size,
-                'ngram_min_match': self.lab_engine.settings.ngram_min_match,
+                'min_should_match': self.lab_engine.settings.min_should_match,
+                'gap_penalty': self.lab_engine.settings.gap_penalty,
                 'ignore_matres': self.lab_engine.settings.ignore_matres,
                 'phonetic_expansion': self.lab_engine.settings.phonetic_expansion,
             }, indent=2, ensure_ascii=False)

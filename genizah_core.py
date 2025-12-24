@@ -23,6 +23,38 @@ import math
 
 from genizah_translations import TRANSLATIONS
 
+HEBREW_FREQ = {
+    'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 'ב': 9, 'ש': 10,
+    'נ': 11, 'ד': 12, 'כ': 13, 'ע': 14, 'ח': 15, 'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19,
+    'ט': 20, 'ז': 21, 'צ': 22
+}
+
+
+def encode_word_shmidman(word: str) -> str:
+    """Encode a single word by selecting its two rarest Hebrew characters."""
+    letters = []
+    for idx, ch in enumerate(word):
+        if ch in HEBREW_FREQ:
+            letters.append((idx, ch, HEBREW_FREQ[ch]))
+
+    if not letters:
+        return ""
+
+    rarest = sorted(letters, key=lambda item: (-item[2], item[0]))[:2]
+    rarest_sorted = sorted(rarest, key=lambda item: item[0])
+    return "".join(ch for _, ch, _ in rarest_sorted)
+
+
+def text_to_fingerprint(text: str) -> str:
+    """Convert free text into a fingerprint representation."""
+    tokens = re.findall(Config.WORD_TOKEN_PATTERN, text or "")
+    encoded_tokens = []
+    for tok in tokens:
+        encoded = encode_word_shmidman(tok)
+        if encoded:
+            encoded_tokens.append(encoded)
+    return " ".join(encoded_tokens)
+
 try:
     import google.generativeai as genai
     HAS_GENAI = True
@@ -42,10 +74,10 @@ class LabSettings:
     def __init__(self):
         self.custom_variants = {} # dict mapping char/string -> set of replacements
         self.candidate_limit = 2000
-        self.ngram_size = 3
-        self.ngram_min_match = 35
         self.ignore_matres = False
         self.phonetic_expansion = False
+        self.min_should_match = 60
+        self.gap_penalty = 2
 
         self.load()
 
@@ -56,13 +88,13 @@ class LabSettings:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
                     self.candidate_limit = data.get('candidate_limit', 2000)
-                    self.ngram_size = data.get('ngram_size', 3)
-                    self.ngram_min_match = data.get('ngram_min_match', 35)
                     self.ignore_matres = data.get('ignore_matres', False)
                     self.phonetic_expansion = data.get('phonetic_expansion', False)
+                    self.min_should_match = int(data.get('min_should_match', 60))
+                    self.gap_penalty = int(data.get('gap_penalty', 2))
                     self.candidate_limit = max(500, min(self.candidate_limit, 50000))
-                    self.ngram_size = max(2, min(self.ngram_size, 4))
-                    self.ngram_min_match = max(1, min(self.ngram_min_match, 100))
+                    self.min_should_match = max(1, min(self.min_should_match, 100))
+                    self.gap_penalty = max(0, self.gap_penalty)
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -73,10 +105,10 @@ class LabSettings:
                 json.dump({
                     'custom_variants': self.custom_variants,
                     'candidate_limit': max(500, min(self.candidate_limit, 50000)),
-                    'ngram_size': self.ngram_size,
-                    'ngram_min_match': self.ngram_min_match,
                     'ignore_matres': self.ignore_matres,
-                    'phonetic_expansion': self.phonetic_expansion
+                    'phonetic_expansion': self.phonetic_expansion,
+                    'min_should_match': max(1, min(self.min_should_match, 100)),
+                    'gap_penalty': max(0, self.gap_penalty)
                 }, f, indent=4)
         except Exception as e:
             LOGGER.error("Failed to save Lab config: %s", e)
@@ -1046,6 +1078,7 @@ class MetadataManager:
 class LabEngine:
     """Handles advanced logic for Lab Mode: Two-Stage Retrieval, Normalization, Lab Indexing."""
     RARE_THRESHOLD = 0.001
+    NGRAM_SIZE = 3
 
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
@@ -1063,18 +1096,30 @@ class LabEngine:
         import gc
         gc.collect() 
 
+    def _ensure_lab_tokenizers(self, index):
+        """Register analyzers required by the Lab index schema."""
+        try:
+            index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
+        except Exception as e:
+            LAB_LOGGER.debug("Tokenizer registration (whitespace) skipped: %s", e)
+        try:
+            index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
+        except Exception as e:
+            LAB_LOGGER.debug("Tokenizer registration (simple) skipped: %s", e)
+
     def _reload_lab_index(self):
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
+                self._ensure_lab_tokenizers(self.lab_index)
                 
                 # Robust check: Try to parse a query on the field
                 try:
                     schema = self.lab_index.schema
-                    ngram_field = schema.get_field("text_ngram")
-                    self.lab_index.parse_query('"test"', [ngram_field])
+                    fingerprint_field = schema.get_field("fingerprint")
+                    tantivy.Query.phrase_query(schema, "fingerprint", ["בדיקה"], slop=int(self.settings.gap_penalty))
                 except Exception:
-                    LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
+                    LAB_LOGGER.warning("Lab index schema outdated (missing fingerprint).")
                     self.lab_index_needs_rebuild = True
                     self._close_index()
                     return False
@@ -1137,10 +1182,12 @@ class LabEngine:
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
-        builder.add_text_field("content", stored=True)
+        builder.add_text_field("content", stored=True, tokenizer_name="simple")
+        builder.add_text_field("fingerprint", stored=False, tokenizer_name="simple")
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        self._ensure_lab_tokenizers(index)
         writer = index.writer(heap_size=50_000_000)
 
         # 5. Indexing Loop
@@ -1167,7 +1214,8 @@ class LabEngine:
                         if cid and ctext:
                             original_content = "\n".join(ctext)
                             norm_content = self.lab_index_normalize(original_content)
-                            ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
+                            ngram_content = self.generate_ngrams(original_content, self.NGRAM_SIZE)
+                            fp_content = text_to_fingerprint(original_content)
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
 
                             writer.add_document(tantivy.Document(
@@ -1175,6 +1223,7 @@ class LabEngine:
                                 text_normalized=norm_content,
                                 text_ngram=ngram_content, # CRITICAL FIX: Populate field
                                 content=original_content,
+                                fingerprint=fp_content,
                                 full_header=str(chead),
                                 shelfmark=str(shelfmark),
                                 source=str(label)
@@ -1193,12 +1242,14 @@ class LabEngine:
                 if cid and ctext:
                     original_content = "\n".join(ctext)
                     norm_content = self.lab_index_normalize(original_content)
-                    ngram_content = self.generate_ngrams(original_content, self.settings.ngram_size)
+                    ngram_content = self.generate_ngrams(original_content, self.NGRAM_SIZE)
+                    fp_content = text_to_fingerprint(original_content)
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid),
                         text_normalized=norm_content,
                         text_ngram=ngram_content,
+                        fingerprint=fp_content,
                         content=original_content,
                         full_header=str(chead),
                         shelfmark=str(shelfmark),
@@ -1244,67 +1295,43 @@ class LabEngine:
             LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
             return []
 
-        LAB_LOGGER.info("N-Gram Search: %s", query_str)
+        LAB_LOGGER.info("Fingerprint Search: %s", query_str)
         start_time = time.time()
 
-        cleaned_query = self.lab_index_normalize(query_str)
-        cleaned_query = " ".join(cleaned_query.split())
-        if not cleaned_query: return []
-
-        base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
-        base_grams = base_ngrams.split()
-        if not base_grams: return []
-
-        expanded_grams = set(base_grams)
-
-        # Spelling/Phonetic Expansion
-        if self.settings.ignore_matres:
-            skeleton = cleaned_query.replace("ו", "").replace("י", "")
-            if skeleton and skeleton != cleaned_query:
-                expanded_grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
-
-        if self.settings.phonetic_expansion:
-            words = cleaned_query.split()
-            for idx, word in enumerate(words):
-                variants = {word}
-                for i, char in enumerate(word):
-                    for repl in self.var_mgr.basic_map.get(char, set()):
-                        variants.add(word[:i] + repl + word[i+1:])
-                for variant in variants:
-                    if variant == word: continue
-                    expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
-
-        # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        
-        if not query_terms: return []
-        
-        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
-        # Tantivy's BM25 will automatically rank documents with more matches higher.
-        if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})"
-        else:
-            final_query = query_terms[0]
-
-        LAB_LOGGER.info("N-Gram Query: %s", final_query)
-
-        try:
-            t_query = self._parse_lab_ngram_query(final_query)
-            if t_query is None:
-                return []
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error("N-Gram search failed: %s", e)
+        fingerprint_query = text_to_fingerprint(query_str)
+        fingerprint_terms = [term for term in fingerprint_query.split() if term]
+        if not fingerprint_terms:
             return []
 
+        required_terms = max(1, math.ceil(len(fingerprint_terms) * (self.settings.min_should_match / 100)))
+        phrase_terms = fingerprint_terms[:required_terms]
+
+        try:
+            t_query = tantivy.Query.phrase_query(
+                self.lab_index.schema,
+                "fingerprint",
+                phrase_terms,
+                slop=int(self.settings.gap_penalty),
+            )
+        except Exception as e:
+            LAB_LOGGER.error("Failed to build fingerprint query: %s", e)
+            return []
+
+        try:
+            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
+        except Exception as e:
+            LAB_LOGGER.error("Fingerprint search failed: %s", e)
+            return []
+
+        highlight_terms = [w for w in re.findall(Config.WORD_TOKEN_PATTERN, query_str) if w]
         results = []
         for score, doc_addr in res_obj.hits:
             doc = self.lab_searcher.doc(doc_addr)
             source = doc['source'][0] if 'source' in doc else "Unknown"
             content = doc['content'][0]
             
-            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
-            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
+            snippet = self._generate_ngram_snippet(content, highlight_terms)
+            hl_text = self._highlight_ngram_in_text(content, highlight_terms)
             
             results.append({
                 'bm25': score,
@@ -1321,15 +1348,17 @@ class LabEngine:
         
         # Formatting
         gui_results = []
-        seen = set()
+        seen_pages = set()
         for r in results:
-            sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
-            if sid in seen: continue
-            seen.add(sid)
+            uid = r['uid']
+            if uid in seen_pages:
+                continue
+            seen_pages.add(uid)
             
             shelf = r['shelfmark']
             title = "" 
-            
+
+            sid = self.meta_mgr.extract_unique_id(r['header']) or uid
             gui_results.append({
                 'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
                 'snippet': r['snippet_data'],
@@ -1369,20 +1398,20 @@ class LabEngine:
             if progress_callback and i % 5 == 0:
                 progress_callback(i, len(chunks))
 
-            base_ngrams = self.generate_ngrams(chunk_str, self.settings.ngram_size)
+            base_ngrams = self.generate_ngrams(chunk_str, self.NGRAM_SIZE)
             base_gram_list = base_ngrams.split()
             grams_set = set(base_gram_list)
             
             if self.settings.ignore_matres:
                 skeleton = chunk_str.replace("ו", "").replace("י", "")
-                grams_set.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
+                grams_set.update(self.generate_ngrams(skeleton, self.NGRAM_SIZE).split())
             
             if self.settings.phonetic_expansion:
                 for word in chunk_str.split():
                     for idx, char in enumerate(word):
                         for repl in self.var_mgr.basic_map.get(char, set()):
                              variant = word[:idx] + repl + word[idx+1:]
-                             grams_set.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
+                             grams_set.update(self.generate_ngrams(variant, self.NGRAM_SIZE).split())
 
             if not grams_set: continue
 
@@ -1422,7 +1451,7 @@ class LabEngine:
         results = results[:self.settings.candidate_limit]
 
         formatted_results = []
-        full_source_grams = self.generate_ngrams(full_text[:1000], self.settings.ngram_size).split()
+        full_source_grams = self.generate_ngrams(full_text[:1000], self.NGRAM_SIZE).split()
         
         for cand in results:
             hl_text = self._highlight_ngram_in_text(cand['content'], full_source_grams)
