@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import re
+import difflib
 import shutil
 import pickle
 import requests
@@ -31,6 +32,7 @@ except ImportError:
     
 try:
     import tantivy
+    from tantivy import Filter, Query, TextAnalyzerBuilder, Tokenizer, Occur
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
 
@@ -43,7 +45,8 @@ class LabSettings:
         self.custom_variants = {} # dict mapping char/string -> set of replacements
         self.candidate_limit = 2000
         self.ngram_size = 3
-        self.ngram_min_match = 35
+        self.min_should_match = 60
+        self.gap_penalty = 0.15
         self.ignore_matres = False
         self.phonetic_expansion = False
 
@@ -56,13 +59,16 @@ class LabSettings:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
                     self.candidate_limit = data.get('candidate_limit', 2000)
-                    self.ngram_size = data.get('ngram_size', 3)
-                    self.ngram_min_match = data.get('ngram_min_match', 35)
+                    self.ngram_size = 3  # enforced trigram for robustness
+                    legacy_min = data.get('ngram_min_match')
+                    self.min_should_match = data.get('min_should_match', legacy_min if legacy_min is not None else 60)
+                    self.gap_penalty = float(data.get('gap_penalty', 0.15))
                     self.ignore_matres = data.get('ignore_matres', False)
                     self.phonetic_expansion = data.get('phonetic_expansion', False)
                     self.candidate_limit = max(500, min(self.candidate_limit, 50000))
-                    self.ngram_size = max(2, min(self.ngram_size, 4))
-                    self.ngram_min_match = max(1, min(self.ngram_min_match, 100))
+                    self.ngram_size = 3
+                    self.min_should_match = max(1, min(int(self.min_should_match), 100))
+                    self.gap_penalty = max(0.0, min(self.gap_penalty, 1.0))
             except Exception as e:
                 LOGGER.warning("Failed to load Lab config: %s", e)
 
@@ -74,7 +80,8 @@ class LabSettings:
                     'custom_variants': self.custom_variants,
                     'candidate_limit': max(500, min(self.candidate_limit, 50000)),
                     'ngram_size': self.ngram_size,
-                    'ngram_min_match': self.ngram_min_match,
+                    'min_should_match': self.min_should_match,
+                    'gap_penalty': self.gap_penalty,
                     'ignore_matres': self.ignore_matres,
                     'phonetic_expansion': self.phonetic_expansion
                 }, f, indent=4)
@@ -1046,6 +1053,10 @@ class MetadataManager:
 class LabEngine:
     """Handles advanced logic for Lab Mode: Two-Stage Retrieval, Normalization, Lab Indexing."""
     RARE_THRESHOLD = 0.001
+    LAB_TRIGRAM_TOKENIZER = "lab_trigram_3"
+    MAX_RERANK_BATCH = 1000
+    MAX_DOC_TOKENS = 1500
+    SNIPPET_WINDOW = 160
 
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
@@ -1054,12 +1065,182 @@ class LabEngine:
         self.lab_index = None
         self.lab_searcher = None
         self.lab_index_needs_rebuild = False
+        self._ngram_field_validated = False
         self._reload_lab_index()
+
+    def _build_trigram_analyzer(self):
+        builder = TextAnalyzerBuilder(Tokenizer.ngram(min_gram=3, max_gram=3, prefix_only=False))
+        builder = builder.filter(Filter.lowercase())
+        builder = builder.filter(Filter.remove_long(64))
+        return builder.build()
+
+    def _register_trigram_tokenizer(self, index):
+        try:
+            analyzer = self._build_trigram_analyzer()
+            index.register_tokenizer(self.LAB_TRIGRAM_TOKENIZER, analyzer)
+        except Exception as e:
+            LAB_LOGGER.error("Failed to register trigram tokenizer: %s", e)
+
+    def _get_ngram_field(self):
+        if not self.lab_index:
+            return None
+        if self._ngram_field_validated:
+            return "text_ngram"
+        try:
+            Query.term_query(self.lab_index.schema, "text_ngram", "__probe__")
+            self._ngram_field_validated = True
+            return "text_ngram"
+        except Exception:
+            LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
+            self._ngram_field_validated = True
+            return None
+
+    def _build_ngram_query(self, grams):
+        if not grams:
+            return None
+        if self._get_ngram_field() is None:
+            return None
+        schema = self.lab_index.schema
+        subqueries = []
+        for gram in grams:
+            if not gram:
+                continue
+            try:
+                tq = Query.term_query(schema, "text_ngram", gram)
+                subqueries.append((Occur.Should, tq))
+            except Exception as e:
+                LAB_LOGGER.debug("Failed to build term query for %s: %s", gram, e)
+        if not subqueries:
+            return None
+        return Query.boolean_query(subqueries)
+
+    def _build_query_windows(self, tokens, window_size=15, overlap=5):
+        if not tokens:
+            return []
+        if len(tokens) <= window_size:
+            return [" ".join(tokens)]
+        step = max(1, window_size - overlap)
+        windows = []
+        for start in range(0, len(tokens), step):
+            slice_tokens = tokens[start:start + window_size]
+            if slice_tokens:
+                windows.append(" ".join(slice_tokens))
+            if start + window_size >= len(tokens):
+                break
+        return windows
+
+    def _expand_ngrams_from_text(self, text):
+        normalized = self.lab_index_normalize(text)
+        grams = set(self.generate_ngrams(normalized, 3).split())
+
+        if self.settings.ignore_matres:
+            skeleton = normalized.replace("ו", "").replace("י", "")
+            grams.update(self.generate_ngrams(skeleton, 3).split())
+
+        if self.settings.phonetic_expansion:
+            for word in normalized.split():
+                for idx, char in enumerate(word):
+                    for repl in self.var_mgr.basic_map.get(char, set()):
+                        variant = word[:idx] + repl + word[idx + 1:]
+                        grams.update(self.generate_ngrams(variant, 3).split())
+
+        return sorted(g for g in grams if g)
+
+    def _tokenize_with_spans(self, text):
+        tokens = []
+        for m in re.finditer(r"[\w\u0590-\u05FF]+", text):
+            tokens.append((m.group().lower(), m.start(), m.end()))
+            if len(tokens) >= self.MAX_DOC_TOKENS:
+                break
+        return tokens
+
+    def _score_alignment(self, query_tokens, doc_tokens, gap_penalty, gap_tolerance=0):
+        if not query_tokens or not doc_tokens:
+            return 0.0, []
+        matcher = difflib.SequenceMatcher(None, query_tokens, [t[0] for t in doc_tokens], autojunk=False)
+        blocks = [b for b in matcher.get_matching_blocks() if b.size]
+        if not blocks:
+            return 0.0, []
+        coverage = sum(b.size for b in blocks) / max(1, len(query_tokens))
+        gap_cost = 0
+        for prev, curr in zip(blocks, blocks[1:]):
+            q_gap = max(0, curr.a - (prev.a + prev.size))
+            d_gap = max(0, curr.b - (prev.b + prev.size))
+            gap_amount = max(q_gap, d_gap)
+            gap_cost += max(0, gap_amount - gap_tolerance)
+        normalized_gap = gap_cost / max(1, len(query_tokens))
+        score = (coverage * 0.6 + matcher.ratio() * 0.4) - gap_penalty * normalized_gap
+        return score, blocks
+
+    def _build_alignment_snippet(self, content, doc_tokens, blocks):
+        spans = []
+        for block in blocks:
+            for offset in range(block.size):
+                idx = block.b + offset
+                if idx < len(doc_tokens):
+                    span = doc_tokens[idx][1], doc_tokens[idx][2]
+                    spans.append(span)
+        merged = self._merge_spans(spans)
+        if not merged:
+            snippet_text = content[:300]
+            return snippet_text, snippet_text
+        start = max(0, merged[0][0] - self.SNIPPET_WINDOW)
+        end = min(len(content), merged[-1][1] + self.SNIPPET_WINDOW)
+        rel_spans = [
+            (max(0, s - start), min(end - start, e - start))
+            for s, e in merged if s < end and e > start
+        ]
+        snippet_text = content[start:end]
+        snippet_hl = self._apply_highlights(snippet_text, rel_spans)
+        full_hl = self._apply_highlights(content, merged)
+        return f"...{snippet_hl}...", full_hl
+
+    def _trigram_overlap(self, query_trigrams, content):
+        if not query_trigrams:
+            return 0.0
+        normalized = self.lab_index_normalize(content)
+        doc_trigrams = set(self.generate_ngrams(normalized, 3).split())
+        if not doc_trigrams:
+            return 0.0
+        return (len(query_trigrams & doc_trigrams) / len(query_trigrams)) * 100.0
+
+    def _gather_candidate_addresses(self, windows, progress_callback=None):
+        candidates = {}
+        stage_limit = self._stage1_limit()
+        total_windows = len(windows)
+
+        for idx, win in enumerate(windows):
+            grams = self._expand_ngrams_from_text(win)
+            query_obj = self._build_ngram_query(grams)
+            if not query_obj:
+                continue
+            try:
+                res_obj = self.lab_searcher.search(query_obj, stage_limit)
+            except Exception as e:
+                LAB_LOGGER.error("N-Gram search failed for window %s: %s", idx, e)
+                continue
+
+            for score, doc_addr in res_obj.hits:
+                prev = candidates.get(doc_addr)
+                if prev is None or score > prev:
+                    candidates[doc_addr] = score
+
+            if progress_callback:
+                progress_callback(idx + 1, max(1, total_windows))
+
+        ranked = sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)
+        return ranked[:self._candidate_limit()]
+
+    @staticmethod
+    def _chunk(seq, size):
+        for idx in range(0, len(seq), size):
+            yield seq[idx: idx + size]
 
     def _close_index(self):
         """Force release of Tantivy file handles."""
         self.lab_searcher = None
         self.lab_index = None
+        self._ngram_field_validated = False
         import gc
         gc.collect() 
 
@@ -1067,12 +1248,13 @@ class LabEngine:
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
-                
+                self._register_trigram_tokenizer(self.lab_index)
+
                 # Robust check: Try to parse a query on the field
                 try:
                     schema = self.lab_index.schema
-                    ngram_field = schema.get_field("text_ngram")
-                    self.lab_index.parse_query('"test"', [ngram_field])
+                    self._ngram_field_validated = False
+                    Query.term_query(schema, "text_ngram", "tst")
                 except Exception:
                     LAB_LOGGER.warning("Lab index schema outdated (missing text_ngram).")
                     self.lab_index_needs_rebuild = True
@@ -1133,7 +1315,7 @@ class LabEngine:
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("text_normalized", stored=True, tokenizer_name="whitespace")
         # CRITICAL FIX: Ensure this field is added
-        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("text_ngram", stored=False, tokenizer_name=self.LAB_TRIGRAM_TOKENIZER)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
@@ -1141,6 +1323,7 @@ class LabEngine:
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        self._register_trigram_tokenizer(index)
         writer = index.writer(heap_size=50_000_000)
 
         # 5. Indexing Loop
@@ -1215,14 +1398,11 @@ class LabEngine:
     # --- Search Methods (Fixing Syntax Error) ---
 
     def _parse_lab_ngram_query(self, query_str):
-        schema = self.lab_index.schema
-        try:
-            ngram_field = schema.get_field("text_ngram")
-        except Exception:
-            LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
+        ngram_field = self._get_ngram_field()
+        if not ngram_field:
             return None
 
-        fields = [ngram_field]  # Tantivy expects field handles, not strings
+        fields = [ngram_field]
         try:
             return self.lab_index.parse_query(query_str, fields)
         except Exception:
@@ -1242,105 +1422,92 @@ class LabEngine:
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
         if not self.lab_searcher or self.lab_index_needs_rebuild:
             LAB_LOGGER.warning("Lab Index not loaded or needs rebuild.")
-            return []
+            return iter(())
 
-        LAB_LOGGER.info("N-Gram Search: %s", query_str)
-        start_time = time.time()
+        LAB_LOGGER.info("Lab Mode Broad Net: %s", query_str)
 
         cleaned_query = self.lab_index_normalize(query_str)
-        cleaned_query = " ".join(cleaned_query.split())
-        if not cleaned_query: return []
+        tokens = [t for t in cleaned_query.split() if t]
+        if not tokens:
+            return iter(())
 
-        base_ngrams = self.generate_ngrams(cleaned_query, self.settings.ngram_size)
-        base_grams = base_ngrams.split()
-        if not base_grams: return []
+        windows = self._build_query_windows(tokens, window_size=15, overlap=5)
+        if not windows:
+            return iter(())
 
-        expanded_grams = set(base_grams)
+        candidates = self._gather_candidate_addresses(windows, progress_callback=progress_callback)
+        total_candidates = len(candidates)
+        query_trigrams = set(self.generate_ngrams(cleaned_query, 3).split())
+        gap_tolerance = max(0, gap)
+        gap_penalty = max(0.0, self.settings.gap_penalty)
 
-        # Spelling/Phonetic Expansion
-        if self.settings.ignore_matres:
-            skeleton = cleaned_query.replace("ו", "").replace("י", "")
-            if skeleton and skeleton != cleaned_query:
-                expanded_grams.update(self.generate_ngrams(skeleton, self.settings.ngram_size).split())
+        def _generator():
+            processed = 0
+            for batch in self._chunk(candidates, self.MAX_RERANK_BATCH):
+                docs = []
+                for doc_addr, bm25_score in batch:
+                    try:
+                        docs.append((bm25_score, self.lab_searcher.doc(doc_addr)))
+                    except Exception as e:
+                        LAB_LOGGER.debug("Failed to load doc %s: %s", doc_addr, e)
 
-        if self.settings.phonetic_expansion:
-            words = cleaned_query.split()
-            for idx, word in enumerate(words):
-                variants = {word}
-                for i, char in enumerate(word):
-                    for repl in self.var_mgr.basic_map.get(char, set()):
-                        variants.add(word[:i] + repl + word[i+1:])
-                for variant in variants:
-                    if variant == word: continue
-                    expanded_grams.update(self.generate_ngrams(variant, self.settings.ngram_size).split())
+                for bm25_score, doc in docs:
+                    try:
+                        source = doc['source'][0] if 'source' in doc else "Unknown"
+                        header = doc['full_header'][0]
+                        uid = doc['unique_id'][0]
+                        content = doc['content'][0]
+                    except Exception as e:
+                        LAB_LOGGER.debug("Malformed document skipped: %s", e)
+                        continue
 
-        # Build Query
-        query_terms = [f'text_ngram:"{gram}"' for gram in sorted(expanded_grams) if gram]
-        
-        if not query_terms: return []
-        
-        # CRITICAL FIX: Removed @min_match syntax to prevent Syntax Error.
-        # Tantivy's BM25 will automatically rank documents with more matches higher.
-        if len(query_terms) > 1:
-            final_query = f"({' OR '.join(query_terms)})"
-        else:
-            final_query = query_terms[0]
+                    overlap_pct = self._trigram_overlap(query_trigrams, content)
+                    if overlap_pct < self.settings.min_should_match:
+                        continue
 
-        LAB_LOGGER.info("N-Gram Query: %s", final_query)
+                    doc_tokens = self._tokenize_with_spans(content)
+                    score, blocks = self._score_alignment(tokens, doc_tokens, gap_penalty, gap_tolerance)
+                    if score <= 0:
+                        continue
 
-        try:
-            t_query = self._parse_lab_ngram_query(final_query)
-            if t_query is None:
-                return []
-            res_obj = self.lab_searcher.search(t_query, self._stage1_limit())
-        except Exception as e:
-            LAB_LOGGER.error("N-Gram search failed: %s", e)
-            return []
+                    snippet, hl_full = self._build_alignment_snippet(content, doc_tokens, blocks)
+                    display = self.meta_mgr.get_display_data(header, source)
 
-        results = []
-        for score, doc_addr in res_obj.hits:
-            doc = self.lab_searcher.doc(doc_addr)
-            source = doc['source'][0] if 'source' in doc else "Unknown"
-            content = doc['content'][0]
-            
-            snippet = self._generate_ngram_snippet(content, list(expanded_grams))
-            hl_text = self._highlight_ngram_in_text(content, list(expanded_grams))
-            
-            results.append({
-                'bm25': score,
-                'content': content,
-                'header': doc['full_header'][0],
-                'shelfmark': doc['shelfmark'][0],
-                'source': source,
-                'uid': doc['unique_id'][0],
-                'snippet_data': self._snippet_html(snippet),
-                'raw_file_hl': hl_text
-            })
+                    yield {
+                        'display': display,
+                        'snippet': self._snippet_html(snippet),
+                        'full_text': content,
+                        'uid': uid,
+                        'raw_header': header,
+                        'raw_file_hl': hl_full,
+                        'highlight_pattern': None,
+                        'score': score,
+                        'bm25': bm25_score,
+                        'overlap': overlap_pct
+                    }
 
-        results.sort(key=lambda x: x['bm25'], reverse=True)
-        
-        # Formatting
-        gui_results = []
-        seen = set()
+                processed += len(batch)
+                if progress_callback:
+                    progress_callback(processed, max(1, total_candidates))
+
+        return _generator()
+
+    def deduplicate_lab_results(self, results):
+        best = {}
         for r in results:
-            sid = self.meta_mgr.extract_unique_id(r['header']) or r['uid']
-            if sid in seen: continue
-            seen.add(sid)
-            
-            shelf = r['shelfmark']
-            title = "" 
-            
-            gui_results.append({
-                'display': {'id': sid, 'shelfmark': shelf, 'title': title, 'source': r['source'], 'img': ''},
-                'snippet': r['snippet_data'],
-                'full_text': r['content'],
-                'uid': r['uid'],
-                'raw_header': r['header'],
-                'raw_file_hl': r['raw_file_hl'],
-                'highlight_pattern': None
-            })
-            
-        return gui_results
+            sid = None
+            if r.get('display'):
+                sid = r['display'].get('id')
+            if not sid:
+                sid = self.meta_mgr.extract_unique_id(r.get('raw_header', '')) or r.get('uid')
+
+            existing = best.get(sid)
+            if existing is None or r.get('score', 0) > existing.get('score', 0):
+                best[sid] = r
+
+        final = list(best.values())
+        final.sort(key=lambda x: (x.get('score', 0), x.get('bm25', 0)), reverse=True)
+        return final
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
         if not self.lab_searcher or self.lab_index_needs_rebuild:
@@ -1386,17 +1553,11 @@ class LabEngine:
 
             if not grams_set: continue
 
-            query_grams = sorted(list(grams_set))
-            clauses = [f'text_ngram:"{g}"' for g in query_grams]
-            
-            # CRITICAL FIX: Removed @min_match syntax
-            raw_query = f"({' '.join(clauses)})"
-            
             try:
-                t_query = self._parse_lab_ngram_query(raw_query)
+                t_query = self._build_ngram_query(sorted(grams_set))
                 if t_query is None:
                     continue
-                res = self.lab_searcher.search(t_query, 50) 
+                res = self.lab_searcher.search(t_query, 50)
             except Exception:
                 continue
 

@@ -77,8 +77,10 @@ class LabSearchThread(QThread):
     def run(self):
         try:
             def cb(curr, total): self.progress_signal.emit(curr, total)
-            results = self.lab_engine.lab_search(self.query, mode=self.mode, progress_callback=cb, gap=self.gap)
-            self.results_signal.emit(results)
+            generator = self.lab_engine.lab_search(self.query, mode=self.mode, progress_callback=cb, gap=self.gap)
+            collected = list(generator)
+            deduped = self.lab_engine.deduplicate_lab_results(collected)
+            self.results_signal.emit(deduped)
         except Exception as e: self.error_signal.emit(str(e))
 
 class CompositionThread(QThread):
