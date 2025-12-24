@@ -843,12 +843,27 @@ class ExcludeDialog(QDialog):
         return "\n".join(entries)
 
 class ResultDialog(QDialog):
-    """Allow browsing a single search result and its surrounding pages."""
+    """
+    Dialog for viewing a specific search result in detail.
+
+    Allows browsing through pages of a manuscript, viewing the transcription,
+    and seeing the source context if applicable.
+    """
 
     metadata_loaded = pyqtSignal(int, dict)
     thumb_resolved = pyqtSignal(str, object)
 
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
+        """
+        Initialize the result viewer.
+
+        Args:
+            parent: The parent widget.
+            all_results: List of result dictionaries to navigate through.
+            current_index: Index of the currently selected result.
+            meta_mgr: Reference to the MetadataManager.
+            searcher: Reference to the SearchEngine.
+        """
         super().__init__(parent)
         
         self.all_results = all_results
@@ -1250,10 +1265,16 @@ class ResultDialog(QDialog):
         if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
 class GenizahGUI(QMainWindow):
-    """Main application window orchestrating search, browsing, and indexing."""
+    """
+    Main Application Window.
+
+    Orchestrates the primary tabs: Search, Composition Analysis, Browsing, and Settings.
+    Manages the lifecycle of background threads for searching, indexing, and AI operations.
+    """
     browse_thumb_resolved = pyqtSignal(str, object)
     
     def __init__(self):
+        """Initialize the main window and start background initialization threads."""
         super().__init__()
         self.comp_col_context = 4
         self.comp_col_ms_context = 5
@@ -3152,6 +3173,17 @@ class GenizahGUI(QMainWindow):
         self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        """
+        Populate the composition result tree with grouped and filtered data.
+
+        Args:
+            main_res: Main list of manuscript items.
+            main_appx: Dictionary of appendix groups (signature -> list of items).
+            main_summ: Summary metadata for appendix groups.
+            filt_res: List of items filtered by secondary text match.
+            filt_appx: Filtered appendix groups.
+            filt_summ: Filtered summary metadata.
+        """
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
@@ -3184,7 +3216,7 @@ class GenizahGUI(QMainWindow):
 
         self.comp_known = known
 
-        # Ensure metadata is loaded
+        # Ensure metadata is loaded for all items to display shelfmarks correctly
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
