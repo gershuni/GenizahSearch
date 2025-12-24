@@ -108,7 +108,7 @@ class LabSettingsDialog(QDialog):
         self.spin_candidate_limit.setRange(500, 50000)
         self.spin_candidate_limit.setSingleStep(500)
         self.spin_candidate_limit.setValue(self.settings.candidate_limit)
-        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 2000, max 50000)."))
+        self.spin_candidate_limit.setToolTip(tr("Max Stage 1 candidates (default 50000, max 50000)."))
 
         sens_layout.addWidget(QLabel(tr("Minimum Match %:")), 0, 0)
         sens_layout.addWidget(self.slider_min_match, 0, 1)
