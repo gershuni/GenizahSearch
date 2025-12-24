@@ -1116,10 +1116,10 @@ class LabEngine:
                 # Robust check: Try to parse a query on the field
                 try:
                     schema = self.lab_index.schema
-                    fingerprint_field = schema.get_field("fingerprint")
                     tantivy.Query.phrase_query(schema, "fingerprint", ["בדיקה"], slop=int(self.settings.gap_penalty))
-                except Exception:
-                    LAB_LOGGER.warning("Lab index schema outdated (missing fingerprint).")
+                    LAB_LOGGER.info("Lab index schema loaded. Fields available for search.")
+                except Exception as e:
+                    LAB_LOGGER.warning("Lab index schema outdated or missing fingerprint: %s", e)
                     self.lab_index_needs_rebuild = True
                     self._close_index()
                     return False
@@ -1189,6 +1189,7 @@ class LabEngine:
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
         self._ensure_lab_tokenizers(index)
         writer = index.writer(heap_size=50_000_000)
+        LAB_LOGGER.info("Lab index schema built with fields: unique_id, text_normalized, text_ngram, full_header, shelfmark, source, content, fingerprint")
 
         # 5. Indexing Loop
         total_docs = 0
@@ -1258,6 +1259,11 @@ class LabEngine:
                     total_docs += 1
 
         writer.commit()
+        try:
+            tantivy.Query.phrase_query(schema, "fingerprint", ["בדיקה"], slop=int(self.settings.gap_penalty))
+            LAB_LOGGER.info("Fingerprint field validated post-commit.")
+        except Exception as e:
+            LAB_LOGGER.error("Fingerprint field validation failed post-commit: %s", e)
         LAB_LOGGER.info("Lab Index rebuild complete. %d docs.", total_docs)
         
         self._reload_lab_index()
@@ -1266,20 +1272,12 @@ class LabEngine:
     # --- Search Methods (Fixing Syntax Error) ---
 
     def _parse_lab_ngram_query(self, query_str):
-        schema = self.lab_index.schema
         try:
-            ngram_field = schema.get_field("text_ngram")
-        except Exception:
-            LAB_LOGGER.error("Field 'text_ngram' not found in schema.")
-            return None
-
-        fields = [ngram_field]  # Tantivy expects field handles, not strings
-        try:
-            return self.lab_index.parse_query(query_str, fields)
+            return self.lab_index.parse_query(query_str, ["text_ngram"])
         except Exception:
             try:
                 scoped_query = f"text_ngram:({query_str})"
-                return self.lab_index.parse_query(scoped_query, fields)
+                return self.lab_index.parse_query(scoped_query, ["text_ngram"])
             except Exception as e2:
                 LAB_LOGGER.error(f"Query parsing failed: {e2}")
                 return None
@@ -1330,6 +1328,7 @@ class LabEngine:
             source = doc['source'][0] if 'source' in doc else "Unknown"
             content = doc['content'][0]
             
+            LAB_LOGGER.debug("Lab hit uid=%s header=%s score=%.3f", doc.get('unique_id', [''])[0], doc.get('full_header', [''])[0], score)
             snippet = self._generate_ngram_snippet(content, highlight_terms)
             hl_text = self._highlight_ngram_in_text(content, highlight_terms)
             
