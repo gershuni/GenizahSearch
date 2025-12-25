@@ -2519,32 +2519,16 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area.setFocus()
 
     def export_comp_report(self, fmt='xlsx'):
-        """
-        Export composition results to file.
-        ROBUST FIX: Prioritizes populated data structures regardless of view mode.
-        """
-        # 1. קביעת מקור הנתונים (Smart Selection)
-        # ננסה לקחת נתונים מהמבנים החדשים (Grouped) כי הם מתעדכנים גם במצב שטוח
-        src_main = self.comp_grouped_main
-        src_appx = self.comp_grouped_appendix
-        src_filt_main = self.comp_grouped_filtered_main
-        src_filt_appx = self.comp_grouped_filtered_appendix
-        
-        # fallback: אם המבנים החדשים ריקים (למשל אם נעצר באמצע), נשתמש בנתונים הגולמיים
-        if not (src_main or src_appx or src_filt_main or src_filt_appx):
-            src_main = self.comp_raw_items or []
-            src_filt_main = self.comp_raw_filtered or []
-            # מנקים את היתר
-            src_appx = {}
-            src_filt_appx = {}
+        # 1. איסוף נתונים (לוגיקה יציבה)
+        all_filtered = self.comp_filtered_main[:]
+        for v in self.comp_filtered_appendix.values():
+            all_filtered.extend(v)
 
-        # בדיקה סופית אם יש משהו לייצא
-        has_data = (src_main or src_appx or self.comp_known or src_filt_main or src_filt_appx)
-        if not has_data:
+        if not (self.comp_main or self.comp_appendix or self.comp_known or all_filtered):
             QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
-        # 2. השלמת מטא-דאטה חסרה (Load Metadata)
+        # 2. טעינת מטא-דאטה
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
@@ -2554,18 +2538,18 @@ class GenizahGUI(QMainWindow):
                     sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
                     if sid: all_ids.append(sid)
 
-        collect_ids(src_main)
-        for group_items in src_appx.values(): collect_ids(group_items)
+        collect_ids(self.comp_main)
+        for group_items in self.comp_appendix.values(): collect_ids(group_items)
         collect_ids(self.comp_known)
-        collect_ids(src_filt_main)
-        for group_items in src_filt_appx.values(): collect_ids(group_items)
+        collect_ids(all_filtered)
 
         unique_ids = list(set(all_ids))
         if unique_ids:
-            cancelled = self._fetch_metadata_with_dialog(unique_ids, title=tr("Fetching metadata before export..."))
-            if cancelled: return
+            missing = [uid for uid in unique_ids if uid not in self.meta_mgr.nli_cache]
+            if missing:
+                self._fetch_metadata_with_dialog(missing, title=tr("Fetching metadata before export..."))
 
-        # 3. בחירת נתיב שמירה
+        # 3. שמירה
         comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
         base_path = self._default_report_path(comp_title, tr("Composition_Report"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
@@ -2578,325 +2562,34 @@ class GenizahGUI(QMainWindow):
 
         credit_text = self._get_credit_header()
 
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')): return "'" + t
-            return t
+        # רג'קס לזיהוי תווים שהורסים קבצי XML/Excel
+        illegal_chars_re = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
 
-        def clean_for_export_text(text):
+        def sanitize_for_excel(text):
+            """Cleans text to prevent Excel XML corruption."""
+            if text is None: return ""
             t = str(text)
-            t = t.replace("<br>", " ").replace("\n", " ")
-            t = re.sub(r'<[^>]+>', '', t)
-            return t
-
-        # ==========================================
-        #  XLSX & CSV Logic
-        # ==========================================
-        if fmt in ['xlsx', 'csv']:
-            table_rows = []
             
-            def add_rows(items, category, group_name=""):
-                for ms_item in items:
-                    if ms_item.get('type') == 'manuscript':
-                        sid = ms_item['sys_id']
-                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                        if not shelf or shelf == "Unknown":
-                             shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        
-                        ms_score = ms_item.get('score', 0)
-
-                        for page in ms_item.get('pages', []):
-                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             table_rows.append([
-                                category,
-                                group_name,
-                                sid or "",
-                                shelf or "",
-                                title or "",
-                                str(p_num or ""),
-                                f"{ms_score} (P:{page.get('score',0)})", 
-                                clean_for_export_text(page.get('source_ctx', '') or '').strip(),
-                                clean_for_export_text(page.get('text', '') or '').strip()
-                             ])
-                    else:
-                        sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-                        table_rows.append([
-                            category,
-                            group_name,
-                            sid or "",
-                            shelf or "",
-                            title or "",
-                            str(p_num or ""),
-                            str(ms_item.get('score', 0)),
-                            clean_for_export_text(ms_item.get('source_ctx', '') or '').strip(),
-                            clean_for_export_text(ms_item.get('text', '') or '').strip()
-                        ])
-
-            # אם סומן "שטוח" - מאחדים הכל
-            if self.chk_comp_flat.isChecked():
-                flat_items = self._collect_comp_items(src_main, src_appx, src_filt_main, src_filt_appx, self.comp_known)
-                flat_items = self._sort_comp_items(flat_items)
-                add_rows(flat_items, tr("All Results"))
-            else:
-                add_rows(src_main, "Main Manuscripts")
-                for sig, items in sorted(src_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Appendix", sig)
-                
-                if src_filt_main: add_rows(src_filt_main, "Filtered Main")
-                for sig, items in sorted(src_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Filtered Appendix", sig)
-                
-                if self.comp_known: add_rows(self.comp_known, "Known Manuscripts")
-
-            lab_config = self._get_lab_config_block()
-
-            # --- XLSX (Rich Text) ---
-            if fmt == 'xlsx':
-                try:
-                    wb = openpyxl.Workbook()
-                    ws = wb.active
-                    ws.title = "Composition Report"
-                    ws.sheet_view.rightToLeft = True
-
-                    font_red = InlineFont(color='FF0000', b=True)
-                    font_normal = InlineFont(color='000000')
-
-                    def write_rich_cell(row, col, text):
-                        clean_text = clean_for_export_text(text)
-                        if '*' not in clean_text:
-                            ws.cell(row=row, column=col, value=clean_for_excel(clean_text))
-                            return
-                        parts = clean_text.split('*')
-                        rich_string = CellRichText()
-                        for i, part in enumerate(parts):
-                            if not part: continue
-                            if i % 2 == 1: rich_string.append(TextBlock(font_red, part))
-                            else: rich_string.append(TextBlock(font_normal, part))
-                        ws.cell(row=row, column=col, value=rich_string)
-
-                    curr_row = 1
-                    for line in credit_text.split('\n'):
-                        if not line.strip(): continue
-                        c = ws.cell(row=curr_row, column=1, value=clean_for_excel(line))
-                        c.font = Font(bold=True, color="555555")
-                        curr_row += 1
-                    curr_row += 1
-
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
-                    for idx, h in enumerate(headers, 1):
-                        c = ws.cell(row=curr_row, column=idx, value=h)
-                        c.font = Font(bold=True, color="FFFFFF")
-                        c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-                    curr_row += 1
-
-                    for row_data in table_rows:
-                        for idx, val in enumerate(row_data, 1):
-                            if idx in [8, 9]: write_rich_cell(curr_row, idx, str(val))
-                            else: ws.cell(row=curr_row, column=idx, value=clean_for_excel(str(val)))
-                        curr_row += 1
-
-                    ws.column_dimensions['D'].width = 20
-                    ws.column_dimensions['E'].width = 30
-                    ws.column_dimensions['H'].width = 50
-                    ws.column_dimensions['I'].width = 60
-
-                    if lab_config:
-                        curr_row += 1
-                        ws.cell(row=curr_row, column=1, value=str(lab_config))
-
-                    wb.save(path)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-                except Exception as e:
-                    QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
-
-            # --- CSV ---
-            elif fmt == 'csv':
-                try:
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
-                    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
-                        f.write(credit_text)
-                        writer = csv.writer(f)
-                        writer.writerow([])
-                        writer.writerow(headers)
-                        for row in table_rows:
-                            clean_row = [clean_for_export_text(val) for val in row]
-                            writer.writerow(clean_row)
-                        if lab_config: f.write("\n" + lab_config)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-                except Exception as e:
-                    QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
-
-        # ==========================================
-        #  TXT Logic
-        # ==========================================
-        else:
-            try:
-                sep = "=" * 80
-                lab_config = self._get_lab_config_block()
-
-                appendix_count = sum(len(v) for v in src_appx.values())
-                filtered_total = len(src_filt_main) + sum(len(v) for v in src_filt_appx.values())
-                known_count = len(self.comp_known)
-                total_count = len(src_main) + appendix_count + known_count + filtered_total
-
-                def _fmt_ms_entry(ms_item):
-                    if ms_item.get('type') == 'manuscript':
-                        sid = ms_item['sys_id']
-                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                        if not shelf or shelf == "Unknown":
-                            shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-
-                        ms_block = [sep, f"MANUSCRIPT: {shelf} | {title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
-
-                        for page in ms_item.get('pages', []):
-                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
-                             ms_block.append(tr("Source Context") + ":\n" + (page.get('source_ctx', '') or "").strip())
-                             ms_block.append(tr("Manuscript") + ":\n" + (page.get('text', '') or "").strip())
-                        return ms_block
-                    else:
-                        return self._fmt_item_legacy(ms_item)
-
-                summary_lines = [
-                    sep, tr("COMPOSITION REPORT SUMMARY"), sep,
-                    f"Title: {comp_title}",
-                    f"{tr('Total Manuscripts Found')}: {total_count}"
-                ]
-                detail_lines = [sep, tr("ALL RESULTS"), sep]
-
-                if self.chk_comp_flat.isChecked():
-                    flat_items = self._collect_comp_items(src_main, src_appx, src_filt_main, src_filt_appx, self.comp_known)
-                    flat_items = self._sort_comp_items(flat_items)
-                    for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
-                else:
-                    summary_lines.extend([
-                        f"{tr('Main Manuscripts')}: {len(src_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(src_appx)}",
-                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                        f"{tr('Known/Excluded Manuscripts')}: {known_count}"
-                    ])
-                    
-                    detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in src_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if src_appx:
-                        detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(src_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
-                    
-                    # --- הוספת תוצאות מסוננות (Filtered) ---
-                    if src_filt_main:
-                        detail_lines.extend([sep, tr("FILTERED"), sep])
-                        for item in src_filt_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if src_filt_appx:
-                        detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(src_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
-
-                    # --- הוספת כתבי יד ידועים (Known) ---
-                    if self.comp_known:
-                        detail_lines.extend([sep, tr("KNOWN / EXCLUDED MANUSCRIPTS"), sep])
-                        for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
-
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(credit_text)
-                    all_lines = summary_lines + detail_lines
-                    f.write("\n".join(all_lines).strip() + "\n")
-                    if lab_config: f.write(lab_config)
-                
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
-
-    def export_comp_report(self, fmt='xlsx'):
-        """
-        Export composition results to file.
-        Includes filtered/known results and fixes HTML tags in TXT export.
-        """
-        # 1. קביעת מקור הנתונים
-        src_main = self.comp_grouped_main
-        src_appx = self.comp_grouped_appendix
-        src_filt_main = self.comp_grouped_filtered_main
-        src_filt_appx = self.comp_grouped_filtered_appendix
-        
-        if not (src_main or src_appx or src_filt_main or src_filt_appx):
-            src_main = self.comp_raw_items or []
-            src_filt_main = self.comp_raw_filtered or []
-            src_appx = {}
-            src_filt_appx = {}
-
-        has_data = (src_main or src_appx or self.comp_known or src_filt_main or src_filt_appx)
-        if not has_data:
-            QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
-            return
-
-        # 2. השלמת מטא-דאטה
-        all_ids = []
-        def collect_ids(item_list):
-            for item in item_list:
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
-                    all_ids.append(item['sys_id'])
-                else:
-                    sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-                    if sid: all_ids.append(sid)
-
-        collect_ids(src_main)
-        for group_items in src_appx.values(): collect_ids(group_items)
-        collect_ids(self.comp_known)
-        collect_ids(src_filt_main)
-        for group_items in src_filt_appx.values(): collect_ids(group_items)
-
-        unique_ids = list(set(all_ids))
-        if unique_ids:
-            cancelled = self._fetch_metadata_with_dialog(unique_ids, title=tr("Fetching metadata before export..."))
-            if cancelled: return
-
-        # 3. בחירת נתיב שמירה
-        comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
-        base_path = self._default_report_path(comp_title, tr("Composition_Report"))
-        default_path = os.path.splitext(base_path)[0] + f".{fmt}"
-        
-        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
-        selected_filter = filters.get(fmt, "All Files (*.*)")
-
-        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
-        if not path: return
-
-        credit_text = self._get_credit_header()
-
-        # --- פונקציות עזר לניקוי טקסט (התיקון כאן) ---
-
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')): return "'" + t
-            return t
-
-        def clean_for_export_text(text):
-            """Cleans text for CSV/Excel: Removes newlines, converts spans to asterisks."""
-            t = str(text)
-            # המרת תגיות צבע לכוכביות (חשוב לאקסל כדי שיצבע באדום)
-            t = re.sub(r"<span[^>]*>", "*", t)
-            t = t.replace("</span>", "*")
+            # 1. הסרת תווים בלתי חוקיים (כמו Null bytes)
+            t = illegal_chars_re.sub('', t)
             
-            t = t.replace("<br>", " ").replace("\n", " ")
-            t = re.sub(r'<[^>]+>', '', t) # הסרת שאר התגיות
+            # 2. טיפול בנוסחאות זדוניות
+            t = t.strip()
+            if t.startswith(('=', '+', '-', '@')): 
+                t = "'" + t
+            
+            if len(t) > 32000:
+                t = t[:32000] + "..."
+            
             return t
 
-        def clean_for_txt(text):
-            """Cleans text for TXT file: Keeps newlines, converts spans to asterisks."""
+        def _clean_and_marker(text):
+            """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
-            # המרת תגיות צבע לכוכביות
-            t = re.sub(r"<span[^>]*>", "*", t)
-            t = t.replace("</span>", "*")
-            
-            # המרת תגיות ירידת שורה
+            if "<span" in t:
+                t = re.sub(r'<span[^>]*>', '*', t)
+                t = t.replace('</span>', '*')
             t = t.replace("<br>", "\n").replace("<br/>", "\n")
-            
-            # הסרת שאר התגיות
             t = re.sub(r'<[^>]+>', '', t)
             return t.strip()
 
@@ -2918,6 +2611,10 @@ class GenizahGUI(QMainWindow):
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+                             
                              table_rows.append([
                                 category,
                                 group_name,
@@ -2926,11 +2623,15 @@ class GenizahGUI(QMainWindow):
                                 title or "",
                                 str(p_num or ""),
                                 f"{ms_score} (P:{page.get('score',0)})", 
-                                clean_for_export_text(page.get('source_ctx', '') or '').strip(),
-                                clean_for_export_text(page.get('text', '') or '').strip()
+                                src_clean,
+                                ms_clean
                              ])
                     else:
+                        # Fallback
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                        src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
+                        ms_clean = _clean_and_marker(ms_item.get('text', ''))
+                        
                         table_rows.append([
                             category,
                             group_name,
@@ -2939,26 +2640,26 @@ class GenizahGUI(QMainWindow):
                             title or "",
                             str(p_num or ""),
                             str(ms_item.get('score', 0)),
-                            clean_for_export_text(ms_item.get('source_ctx', '') or '').strip(),
-                            clean_for_export_text(ms_item.get('text', '') or '').strip()
+                            src_clean,
+                            ms_clean
                         ])
 
             if self.chk_comp_flat.isChecked():
-                flat_items = self._collect_comp_items(src_main, src_appx, src_filt_main, src_filt_appx, self.comp_known)
-                flat_items = self._sort_comp_items(flat_items)
+                all_items = self._collect_comp_items(
+                    self.comp_main, self.comp_appendix, 
+                    self.comp_filtered_main, self.comp_filtered_appendix, 
+                    self.comp_known
+                )
+                flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
-                add_rows(src_main, "Main Manuscripts")
-                for sig, items in sorted(src_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                add_rows(self.comp_main, "Main Manuscripts")
+                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, "Appendix", sig)
-                
-                if src_filt_main: add_rows(src_filt_main, "Filtered Main")
-                for sig, items in sorted(src_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                add_rows(self.comp_filtered_main, "Filtered Main")
+                for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, "Filtered Appendix", sig)
-                
-                if self.comp_known: add_rows(self.comp_known, "Known Manuscripts")
-
-            lab_config = self._get_lab_config_block()
+                add_rows(self.comp_known, "Known Manuscripts")
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -2972,23 +2673,30 @@ class GenizahGUI(QMainWindow):
                     font_normal = InlineFont(color='000000')
 
                     def write_rich_cell(row, col, text):
-                        # clean_text already has asterisks thanks to clean_for_export_text
-                        clean_text = str(text) 
-                        if '*' not in clean_text:
-                            ws.cell(row=row, column=col, value=clean_for_excel(clean_text))
+                        # הגנה ראשונית: ניקוי תווים אסורים מהטקסט הגולמי
+                        safe_text = sanitize_for_excel(text)
+                        
+                        if '*' not in safe_text:
+                            ws.cell(row=row, column=col, value=safe_text)
                             return
-                        parts = clean_text.split('*')
+                        
+                        parts = safe_text.split('*')
                         rich_string = CellRichText()
+                        
                         for i, part in enumerate(parts):
-                            if not part: continue
-                            if i % 2 == 1: rich_string.append(TextBlock(font_red, part))
-                            else: rich_string.append(TextBlock(font_normal, part))
+                            if i % 2 == 1:
+                                rich_string.append(TextBlock(font_red, part))
+                            else:
+                                rich_string.append(TextBlock(font_normal, part))
+                                
                         ws.cell(row=row, column=col, value=rich_string)
 
                     curr_row = 1
                     for line in credit_text.split('\n'):
-                        if not line.strip(): continue
-                        c = ws.cell(row=curr_row, column=1, value=clean_for_excel(line))
+                        clean_line = line.strip()
+                        if not clean_line or "====" in clean_line: continue
+                        
+                        c = ws.cell(row=curr_row, column=1, value=sanitize_for_excel(line))
                         c.font = Font(bold=True, color="555555")
                         curr_row += 1
                     curr_row += 1
@@ -3002,18 +2710,17 @@ class GenizahGUI(QMainWindow):
 
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
-                            if idx in [8, 9]: write_rich_cell(curr_row, idx, str(val))
-                            else: ws.cell(row=curr_row, column=idx, value=clean_for_excel(str(val)))
+                            val_str = str(val)
+                            if idx in [8, 9]: 
+                                write_rich_cell(curr_row, idx, val_str)
+                            else: 
+                                ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
                         curr_row += 1
 
-                    ws.column_dimensions['D'].width = 20
-                    ws.column_dimensions['E'].width = 30
-                    ws.column_dimensions['H'].width = 50
-                    ws.column_dimensions['I'].width = 60
-
-                    if lab_config:
-                        curr_row += 1
-                        ws.cell(row=curr_row, column=1, value=str(lab_config))
+                    # רוחב עמודות
+                    dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
+                    for col, width in dims.items():
+                        ws.column_dimensions[col].width = width
 
                     wb.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -3030,25 +2737,20 @@ class GenizahGUI(QMainWindow):
                         writer.writerow([])
                         writer.writerow(headers)
                         for row in table_rows:
-                            # הפונקציה clean_for_export_text כבר רצה על הנתונים ב-table_rows
-                            writer.writerow(row)
-                        if lab_config: f.write("\n" + lab_config)
+                            clean_row = [str(val).replace('*', '') for val in row]
+                            writer.writerow(clean_row)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
 
-        # ==========================================
-        #  TXT Logic
-        # ==========================================
+        # --- TXT ---
         else:
             try:
                 sep = "=" * 80
-                lab_config = self._get_lab_config_block()
-
-                appendix_count = sum(len(v) for v in src_appx.values())
-                filtered_total = len(src_filt_main) + sum(len(v) for v in src_filt_appx.values())
+                appendix_count = sum(len(v) for v in self.comp_appendix.values())
+                filtered_total = len(self.comp_filtered_main) + sum(len(v) for v in self.comp_filtered_appendix.values())
                 known_count = len(self.comp_known)
-                total_count = len(src_main) + appendix_count + known_count + filtered_total
+                total_count = len(self.comp_main) + appendix_count + known_count + filtered_total
 
                 def _fmt_ms_entry(ms_item):
                     if ms_item.get('type') == 'manuscript':
@@ -3061,10 +2763,11 @@ class GenizahGUI(QMainWindow):
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             src_clean = _clean_and_marker(page.get('source_ctx', '')).replace('*', '')
+                             ms_clean = _clean_and_marker(page.get('text', '')).replace('*', '')
                              ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
-                             # שימוש ב-clean_for_txt לניקוי ה-HTML ושמירת כוכביות
-                             ms_block.append(tr("Source Context") + ":\n" + clean_for_txt(page.get('source_ctx', '')))
-                             ms_block.append(tr("Manuscript") + ":\n" + clean_for_txt(page.get('text', '')))
+                             ms_block.append(tr("Source Context") + ":\n" + src_clean)
+                             ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
                         return ms_block
                     else:
                         return self._fmt_item_legacy(ms_item)
@@ -3077,36 +2780,32 @@ class GenizahGUI(QMainWindow):
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
 
                 if self.chk_comp_flat.isChecked():
-                    flat_items = self._collect_comp_items(src_main, src_appx, src_filt_main, src_filt_appx, self.comp_known)
-                    flat_items = self._sort_comp_items(flat_items)
+                    flat_items = self._sort_comp_items(
+                        self._collect_comp_items(self.comp_main, self.comp_appendix, self.comp_filtered_main, self.comp_filtered_appendix, self.comp_known)
+                    )
                     for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
                 else:
                     summary_lines.extend([
-                        f"{tr('Main Manuscripts')}: {len(src_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(src_appx)}",
+                        f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
+                        f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
                         f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
                         f"{tr('Known/Excluded Manuscripts')}: {known_count}"
                     ])
-                    
                     detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in src_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if src_appx:
+                    for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_appendix:
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(src_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                        for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
-                    
-                    if src_filt_main:
+                    if self.comp_filtered_main:
                         detail_lines.extend([sep, tr("FILTERED / LOW SCORE"), sep])
-                        for item in src_filt_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if src_filt_appx:
+                        for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
+                    if self.comp_filtered_appendix:
                         detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(src_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                        for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
-
                     if self.comp_known:
                         detail_lines.extend([sep, tr("KNOWN / EXCLUDED MANUSCRIPTS"), sep])
                         for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
@@ -3115,8 +2814,6 @@ class GenizahGUI(QMainWindow):
                     f.write(credit_text)
                     all_lines = summary_lines + detail_lines
                     f.write("\n".join(all_lines).strip() + "\n")
-                    if lab_config: f.write(lab_config)
-                
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
             except Exception as e:
