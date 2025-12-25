@@ -25,17 +25,15 @@ import math
 from genizah_translations import TRANSLATIONS
 
 LAB_LOGGER = logging.getLogger("GenizahLab")
-LAB_LOGGER.setLevel(logging.DEBUG)
-if not LAB_LOGGER.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("[LAB DEBUG] %(message)s"))
-    LAB_LOGGER.addHandler(handler)
+LAB_LOGGER.addHandler(logging.NullHandler())
 
 # --- Shmidman Rare-Letter Helpers ---
 HEBREW_FREQ = {
     'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 
     'ב': 9, 'ש': 10, 'נ': 11, 'ד': 12, 'כ': 13, 'ע': 14, 'ח': 15, 
-    'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19, 'ט': 20, 'ז': 21, 'צ': 22
+    'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19, 'ט': 20, 'ז': 21, 'צ': 22,
+    # Final letters
+    'ך': 13, 'ם': 7, 'ן': 11, 'ף': 17, 'ץ': 22
 }
 
 def encode_word_shmidman(word: str) -> str:
@@ -48,7 +46,7 @@ def encode_word_shmidman(word: str) -> str:
     if not letters:
         return ""
 
-    rarest = sorted(letters, key=lambda item: (-item[2], item[0]))[:2]
+    rarest = sorted(letters, key=lambda item: (-item[2], item[0]))[:3]
     rarest_sorted = sorted(rarest, key=lambda item: item[0])
     return "".join(ch for _, ch, _ in rarest_sorted)
 
@@ -1087,9 +1085,20 @@ LOGGER = get_logger(__name__)
 
 def configure_lab_logger():
     """Configure a separate logger for Lab Mode operations."""
-    lab_logger = logging.getLogger("genizah_lab")
+    lab_logger = logging.getLogger("GenizahLab")
     if lab_logger.handlers:
-        return lab_logger
+        # Check if it only has NullHandler (length 1 and is NullHandler)
+        # If so, we still want to add the real handlers.
+        # But for simplicity in this specific task context:
+        # The user instruction says: "If using a global logger, use NullHandler as default".
+        # When this runs, we want to ADD file/stream handlers.
+        # However, `logging.getLogger` returns the same instance.
+        # So we should just check if we have "real" handlers or just clear and re-add.
+        # Let's follow the standard pattern:
+        # If it has handlers other than NullHandler, return.
+        has_real = any(not isinstance(h, logging.NullHandler) for h in lab_logger.handlers)
+        if has_real:
+            return lab_logger
 
     lab_logger.setLevel(logging.DEBUG)
 
