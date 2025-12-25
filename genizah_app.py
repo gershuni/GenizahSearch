@@ -2589,7 +2589,6 @@ class GenizahGUI(QMainWindow):
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
-            # Ensure we don't double-mark or leave open markers
             if "<span" in t:
                 # Replace styled span with asterisks
                 t = re.sub(r'<span[^>]*>', '*', t)
@@ -2598,23 +2597,6 @@ class GenizahGUI(QMainWindow):
             t = t.replace("<br>", "\n").replace("<br/>", "\n")
             # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
-
-            # Sanitization Step 2: Remove asterisk if it's at the very beginning of the string
-            # This fixes the "whole cell red" bug where context starts with a match.
-            # Rationale: Logic splits by '*'.
-            # If string is "*match* text", split -> ["", "match", " text"].
-            # i=0 ("") -> Normal. i=1 ("match") -> Red. i=2 (" text") -> Normal. This is CORRECT.
-
-            # However, user reported "whole column red".
-            # This happens if there is only ONE asterisk or if the logic fails.
-            # If the string is "*match text" (missing closing star), then:
-            # Split -> ["", "match text"]. i=1 is red.
-
-            # Let's ensure pairs.
-            if t.count('*') % 2 != 0:
-                # Odd number of stars? Remove the last one or all?
-                # Safest is to remove all to prevent formatting corruption
-                t = t.replace('*', '')
 
             return t.strip()
 
@@ -2736,9 +2718,7 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            # רק עמודה 8 (Source Context) נשארת עם הדגשות צבע.
-                            # עמודה 9 (Manuscript Text) הופכת לטקסט רגיל ללא הדגשה (לבקשת המשתמש).
-                            if idx == 8:
+                            if idx == 9:
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
