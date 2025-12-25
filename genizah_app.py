@@ -2736,7 +2736,9 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            if idx in [8, 9]: 
+                            # רק עמודה 8 (Source Context) נשארת עם הדגשות צבע.
+                            # עמודה 9 (Manuscript Text) הופכת לטקסט רגיל ללא הדגשה (לבקשת המשתמש).
+                            if idx == 8:
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
