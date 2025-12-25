@@ -2998,12 +2998,18 @@ class GenizahGUI(QMainWindow):
                 self.reset_comp_ui()
                 return
 
+            # Robustness: Pass resolved System IDs if available, to catch items excluded by shelfmark
+            # where the user didn't explicitly type the ID.
+            final_excluded_ids = excluded_ids
+            if self.excluded_sys_ids:
+                final_excluded_ids = list(self.excluded_sys_ids)
+
             self.comp_thread = LabCompositionThread(
                 self.lab_engine, 
                 txt, 
                 mode, 
                 chunk_size=chunk_size,
-                excluded_ids=excluded_ids
+                excluded_ids=final_excluded_ids
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -3406,7 +3412,9 @@ class GenizahGUI(QMainWindow):
         
         # איחוד הידועים
         if not hasattr(self, 'comp_known'): self.comp_known = []
-        self.comp_known = known_main + known_filt
+        # Fix: Extend existing known list instead of overwriting it,
+        # to preserve items excluded by LabEngine (which are already in self.comp_known)
+        self.comp_known.extend(known_main + known_filt)
 
         # === התיקון הקריטי למיון ===
         # עדכון משתני ה-Legacy כדי ש-_has_comp_results() יחזיר True והמיון יעבוד
