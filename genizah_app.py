@@ -2589,7 +2589,6 @@ class GenizahGUI(QMainWindow):
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
-            # Ensure we don't double-mark or leave open markers
             if "<span" in t:
                 # Replace styled span with asterisks
                 t = re.sub(r'<span[^>]*>', '*', t)
@@ -2598,23 +2597,6 @@ class GenizahGUI(QMainWindow):
             t = t.replace("<br>", "\n").replace("<br/>", "\n")
             # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
-
-            # Sanitization Step 2: Remove asterisk if it's at the very beginning of the string
-            # This fixes the "whole cell red" bug where context starts with a match.
-            # Rationale: Logic splits by '*'.
-            # If string is "*match* text", split -> ["", "match", " text"].
-            # i=0 ("") -> Normal. i=1 ("match") -> Red. i=2 (" text") -> Normal. This is CORRECT.
-
-            # However, user reported "whole column red".
-            # This happens if there is only ONE asterisk or if the logic fails.
-            # If the string is "*match text" (missing closing star), then:
-            # Split -> ["", "match text"]. i=1 is red.
-
-            # Let's ensure pairs.
-            if t.count('*') % 2 != 0:
-                # Odd number of stars? Remove the last one or all?
-                # Safest is to remove all to prevent formatting corruption
-                t = t.replace('*', '')
 
             return t.strip()
 
@@ -2705,17 +2687,12 @@ class GenizahGUI(QMainWindow):
                             ws.cell(row=row, column=col, value=safe_text)
                             return
                         
-                        # New Logic: Regex split to identify strict *match* pairs
-                        # This avoids coloring errors if asterisks are unpaired.
-                        # Matches parts like "*word*" keeping the delimiters in the list
-                        parts = re.split(r'(\*[^*]+\*)', safe_text)
+                        parts = safe_text.split('*')
                         rich_string = CellRichText()
                         
-                        for part in parts:
-                            # If part is exactly *content*, treat as Red
-                            if part.startswith('*') and part.endswith('*') and len(part) > 1:
-                                clean_part = part[1:-1] # Strip asterisks
-                                rich_string.append(TextBlock(font_red, clean_part))
+                        for i, part in enumerate(parts):
+                            if i % 2 == 1:
+                                rich_string.append(TextBlock(font_red, part))
                             else:
                                 rich_string.append(TextBlock(font_normal, part))
                                 
@@ -2741,9 +2718,7 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            # Apply rich text coloring to both Context (8) and Manuscript (9)
-                            # using the new strict regex logic.
-                            if idx in [8, 9]:
+                            if idx == 9:
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
