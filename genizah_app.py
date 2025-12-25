@@ -3688,7 +3688,7 @@ class GenizahGUI(QMainWindow):
         self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
-        # 1. איפוס וכנות
+        # 1. איפוס וניקוי
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
@@ -3699,145 +3699,185 @@ class GenizahGUI(QMainWindow):
             self.group_thread.wait()
         self.group_thread = None
 
-        # שמירת נתונים גולמיים ומקובצים
+        # שמירת נתונים גולמיים
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
+
+        # 2. החלת החרגות (Exclusions)
+        clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
+        clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
         
-        self.comp_grouped_main = main_res
-        self.comp_grouped_appendix = main_appx
+        # איחוד הידועים
+        if not hasattr(self, 'comp_known'): self.comp_known = []
+        self.comp_known = known_main + known_filt
+
+        # === התיקון הקריטי למיון ===
+        # עדכון משתני ה-Legacy כדי ש-_has_comp_results() יחזיר True והמיון יעבוד
+        self.comp_main = clean_main
+        self.comp_appendix = clean_appx
+        self.comp_summary = main_summ
+        self.comp_filtered_main = clean_filt
+        self.comp_filtered_appendix = clean_filt_appx
+        self.comp_filtered_summary = filt_summ
+        
+        # עדכון המשתנים החדשים (לייצוא ושימוש פנימי)
+        self.comp_grouped_main = clean_main
+        self.comp_grouped_appendix = clean_appx
         self.comp_grouped_summary = main_summ
-        self.comp_grouped_filtered_main = filt_res
-        self.comp_grouped_filtered_appendix = filt_appx
+        self.comp_grouped_filtered_main = clean_filt
+        self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
-        # עצירת טיימרים ישנים
-        if hasattr(self, 'load_timer') and self.load_timer.isActive():
-            self.load_timer.stop()
-
-        self.comp_tree.setUpdatesEnabled(False)
-        self.comp_tree.clear()
-
-        # --- רשימה לאיסוף IDs לטובת מטא-דאטה (התיקון החשוב) ---
+        # איסוף IDs לטעינת מטא-דאטה
         ids_to_fetch = set()
-
-        # --- פונקציית העזר הפנימית (התיקון החשוב) ---
         def _collect_id(item):
             sid = item.get('sys_id')
             if not sid:
                 sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-            
-            # אם יש מזהה והוא לא במטמון - נוסיף לרשימת ההורדה
             if sid and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
-        # -------------------------------------------
 
-        # איחוד כל התוצאות לרשימה אחת שטוחה (לצורך ספירה)
-        all_items = []
-        all_items.extend(main_res or [])
-        for items in (main_appx or {}).values(): all_items.extend(items)
-        all_items.extend(filt_res or [])
-        for items in (filt_appx or {}).values(): all_items.extend(items)
-        
-        if self.comp_known:
-            all_items.extend(self.comp_known)
-        
-        # הסרת כפילויות + תיקון חוסר ב-UID
-        seen_uids = set()
-        unique_items = []
-        
-        for item in all_items:
-            uid = item.get('uid')
-            if not uid:
-                header = item.get('raw_header', '')
-                uid = self.meta_mgr.extract_unique_id(header) or header
-                item['uid'] = uid 
+        # 3. הכנת העץ
+        self.comp_tree.setUpdatesEnabled(False)
+        self.comp_tree.clear()
 
-            if uid not in seen_uids:
-                unique_items.append(item)
-                seen_uids.add(uid)
+        # --- שחזור פונקציית התצוגה היציבה (כדי שיראה יפה כמו ב-STABLE) ---
+        def make_checkable(node):
+            node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            node.setCheckState(0, Qt.CheckState.Unchecked)
 
-        self.batch_items = unique_items # לשימוש ה-Batch Loader אם יופעל
+        def add_manuscript_node(parent, ms_item):
+            if ms_item.get('type') == 'manuscript':
+                sid = ms_item['sys_id']
+                shelf, t = self.meta_mgr.get_meta_for_id(sid)
+                if not shelf or shelf == "Unknown":
+                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                    if header_shelf: shelf = header_shelf
 
-        # --- מצב 1: תצוגה שטוחה (Flat) ---
-        if self.chk_comp_flat.isChecked():
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(unique_items))])
-            root.setExpanded(True)
-            root.setCheckState(0, Qt.CheckState.Unchecked)
-            self.batch_root = root
+                ms_node = QTreeWidgetItem(parent)
+                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
+                self._set_comp_tree_text(ms_node, 2, t or "")
+                self._set_comp_tree_text(ms_node, 3, sid)
+                make_checkable(ms_node)
+                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+                pages = ms_item.get('pages', [])
+                # Case A: עמוד בודד
+                if len(pages) == 1:
+                    p_item = pages[0]
+                    _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+                # Case B: מרובה עמודים
+                else:
+                    if pages:
+                        p0 = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
+
+                    for p_item in pages:
+                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                        page_node = QTreeWidgetItem(ms_node)
+                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
+                        self._set_comp_tree_text(page_node, 2, "")
+                        self._set_comp_tree_text(page_node, 3, "")
+                        make_checkable(page_node)
+                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+            else:
+                # Fallback
+                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                node = QTreeWidgetItem(parent)
+                self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(node, 1, shelf)
+                self._set_comp_tree_text(node, 2, title)
+                self._set_comp_tree_text(node, 3, sid)
+                make_checkable(node)
+                node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
             
-            # טעינה מדורגת
-            self.batch_index = 0
-            self.batch_size = 50
-            self.load_timer = QTimer()
-            self.load_timer.timeout.connect(self._load_next_batch)
-            self.load_timer.start(10)
-                      
-        # --- מצב 2: תצוגה היררכית (Hierarchical) ---
-        else:
-            # א. תוצאות ראשיות
-            if main_res:
-                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(main_res))])
-                root_main.setExpanded(True)
-                root_main.setCheckState(0, Qt.CheckState.Unchecked)
-                for item in main_res:
-                    self._add_single_node_to_tree(root_main, item)
-                    _collect_id(item)
+            _collect_id(ms_item)
 
-            # ב. נספח (קבוצות)
-            if main_appx:
-                total_appx = sum(len(v) for v in main_appx.values())
+        # --- לוגיקת תצוגה ---
+
+        # א. מצב שטוח (Flat)
+        if self.chk_comp_flat.isChecked():
+            all_flat = self._collect_comp_items(
+                clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
+            )
+            # מיון ידני באמצעות הלוגיקה שלך
+            sorted_flat = self._sort_comp_items(all_flat)
+            
+            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_flat))])
+            root.setExpanded(True)
+            make_checkable(root)
+            
+            for item in sorted_flat:
+                add_manuscript_node(root, item)
+
+        # ב. מצב היררכי (Grouped)
+        else:
+            # 1. Main Results
+            sorted_main = self._sort_comp_items(clean_main)
+            if sorted_main:
+                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(sorted_main))])
+                root_main.setExpanded(True)
+                make_checkable(root_main)
+                for item in sorted_main:
+                    add_manuscript_node(root_main, item)
+
+            # 2. Appendix
+            if clean_appx:
+                total_appx = sum(len(v) for v in clean_appx.values())
                 root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
                 root_appx.setExpanded(False)
-                root_appx.setCheckState(0, Qt.CheckState.Unchecked)
+                make_checkable(root_appx)
                 
-                sorted_groups = sorted(main_appx.items(), key=lambda x: len(x[1]), reverse=True)
+                # מיון הקבוצות לפי גודל, ואז מיון פנימי לפי העמודה הנבחרת
+                sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
                 for sig, items in sorted_groups:
                     group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
-                    group_node.setCheckState(0, Qt.CheckState.Unchecked)
-                    for item in items:
-                        self._add_single_node_to_tree(group_node, item)
-                        _collect_id(item)
+                    make_checkable(group_node)
+                    
+                    for item in self._sort_comp_items(items):
+                        add_manuscript_node(group_node, item)
 
-            # ג. ידועים / מוחרגים
+            # 3. Filtered / Low Score
+            total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
+            if total_filt > 0:
+                root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered / Low Score ({})").format(total_filt)])
+                root_filt.setForeground(0, Qt.GlobalColor.gray)
+                make_checkable(root_filt)
+                
+                # Filtered Main
+                for item in self._sort_comp_items(clean_filt):
+                    add_manuscript_node(root_filt, item)
+                
+                # Filtered Appendix
+                for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
+                    make_checkable(g_node)
+                    for item in self._sort_comp_items(items):
+                        add_manuscript_node(g_node, item)
+
+            # 4. Known / Excluded
             if self.comp_known:
                 root_known = QTreeWidgetItem(self.comp_tree, [tr("Known / Excluded ({})").format(len(self.comp_known))])
-                root_known.setExpanded(False)
                 root_known.setForeground(0, Qt.GlobalColor.darkGray)
-                root_known.setCheckState(0, Qt.CheckState.Unchecked)
+                make_checkable(root_known)
                 
-                for item in self.comp_known:
-                    self._add_single_node_to_tree(root_known, item)
-                    _collect_id(item)
+                for item in self._sort_comp_items(self.comp_known):
+                    add_manuscript_node(root_known, item)
 
-            # ד. מסוננים (Filtered)
-            if filt_res or filt_appx:
-                total_filt = len(filt_res or []) + sum(len(v) for v in (filt_appx or {}).values())
-                
-                if total_filt > 0:
-                    root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
-                    root_filt.setExpanded(False)
-                    root_filt.setForeground(0, Qt.GlobalColor.gray)
-                    root_filt.setCheckState(0, Qt.CheckState.Unchecked)
-                    
-                    # 1. פריטים בודדים
-                    sorted_filt = sorted(filt_res or [], key=lambda x: x.get('score', 0), reverse=True)
-                    for item in sorted_filt:
-                        self._add_single_node_to_tree(root_filt, item) 
-                        _collect_id(item)
-
-                    # 2. קבוצות
-                    sorted_filt_groups = sorted((filt_appx or {}).items(), key=lambda x: len(x[1]), reverse=True)
-                    for sig, items in sorted_filt_groups:
-                        group_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
-                        group_node.setCheckState(0, Qt.CheckState.Unchecked)
-                        for item in items:
-                            self._add_single_node_to_tree(group_node, item) 
-                            _collect_id(item)
-
-            self.comp_tree.setUpdatesEnabled(True)
-            
-            if ids_to_fetch:
-                self.start_metadata_loading(list(ids_to_fetch))
+        self.comp_tree.setUpdatesEnabled(True)
+        self._update_recursive_button_state()
+        
+        # טעינת מטא-דאטה חסרה
+        if ids_to_fetch:
+            self.start_metadata_loading(list(ids_to_fetch))
     
     def _add_single_node_to_tree(self, parent, ms_item):
         """Dedicated helper to add one row to the tree."""
