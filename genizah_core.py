@@ -16,6 +16,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
 from typing import Mapping
+from functools import lru_cache
 import itertools
 import json
 import bisect
@@ -23,7 +24,6 @@ import math
 
 from genizah_translations import TRANSLATIONS
 
-# --- Setup Logger (הוסף את זה מיד אחרי האימפורטים) ---
 LAB_LOGGER = logging.getLogger("GenizahLab")
 LAB_LOGGER.setLevel(logging.DEBUG)
 if not LAB_LOGGER.handlers:
@@ -37,25 +37,6 @@ HEBREW_FREQ = {
     'ב': 9, 'ש': 10, 'נ': 11, 'ד': 12, 'כ': 13, 'ע': 14, 'ח': 15, 
     'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19, 'ט': 20, 'ז': 21, 'צ': 22
 }
-
-def encode_word_shmidman(word):
-    """Encode a single Hebrew word using the Shmidman et al. rare-letter fingerprint."""
-    letters = [(idx, ch, HEBREW_FREQ.get(ch)) for idx, ch in enumerate(word) if ch in HEBREW_FREQ]
-    if not letters:
-        return ""
-    # Sort by rarity (descending freq rank), then by position
-    ranked = sorted(letters, key=lambda t: (-t[2], t[0]))
-    # Pick top two
-    top_two = ranked[:2]
-    # Restore order
-    ordered = sorted(top_two, key=lambda t: t[0])
-    return "".join(ch for _, ch, _ in ordered)
-
-def text_to_fingerprint(text):
-    """Convert full text into space-separated rare-letter fingerprints."""
-    words = re.findall(r"[\w\u0590-\u05FF\']+", text or "")
-    enc = [encode_word_shmidman(w) for w in words]
-    return " ".join([e for e in enc if e])
 
 def encode_word_shmidman(word: str) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
@@ -177,7 +158,7 @@ class LabSettings:
         except Exception: pass
 
 # ==============================================================================
-#  LAB ENGINE (ROBUST & DEBUGGED)
+#  LAB ENGINE 
 # ==============================================================================
 class LabEngine:
     LAB_FINGERPRINT_FIELD = "fingerprint"
@@ -685,17 +666,24 @@ class LabEngine:
             except Exception as e:
                 LAB_LOGGER.error(f"Error processing doc: {e}")
 
-        # 4. Sort & Dedup
-        results.sort(key=lambda x: x['sort_score'], reverse=True)
-        unique_map = {}
-        for r in results:
-            if r['uid'] not in unique_map:
-                unique_map[r['uid']] = r
+        # 4. Sort & Dedup (Logic Fixed: Prioritize V0.8 over V0.7)
+        v8_map = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
         
-        final_results = list(unique_map.values())
-        final_results.sort(key=lambda x: x['sort_score'], reverse=True)
+        final_list = []
+        
+        # מוסיפים את כל תוצאות V0.8
+        final_list.extend(v8_map.values())
+        
+        # מוסיפים תוצאות V0.7 *רק* אם ה-UID שלהן לא קיים ב-V0.8
+        for r in results:
+            if r['display']['source'] != "V0.8": # V0.7 or others
+                if r['uid'] not in v8_map:
+                    final_list.append(r)
 
-        return final_results
+        # לבסוף, ממיינים את הרשימה המאוחדת לפי הציון הגבוה ביותר
+        final_list.sort(key=lambda x: x['sort_score'], reverse=True)
+
+        return final_list
 
     def _generate_snippet(self, text, terms, window=100):
         # Basic highlighter finding first term
@@ -717,16 +705,22 @@ class LabEngine:
         return chunk
 
     def _html_snippet(self, text):
-        # Convert *bold* to html
-        return text.replace("*", "<b style='color:red'>", 1).replace("*", "</b>", 1).replace("*", "")
+        if not text: return ""
+        return re.sub(r'\*(.*?)\*', r"<b style='color:red'>\1</b>", text)
 
-    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None):
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None):
         """
         Scans a composition using Lab Mode.
-        Includes WIDE SOURCE CONTEXT and HTML HIGHLIGHTING.
+        UPGRADES:
+        1. Filters common phrases.
+        2. Boosts V0.8.
+        3. FIX: Separates excluded/known manuscripts.
         """
         if not full_text:
-            return {'main': [], 'filtered': []}
+            return {'main': [], 'filtered': [], 'known': []} # הוספנו known
+
+        # נרמול רשימת ההחרגה לחיפוש מהיר
+        excluded_set = set(str(x) for x in (excluded_ids or []))
 
         # הגדרות משתמש
         PER_CHUNK_LIMIT = self.settings.comp_chunk_limit
@@ -734,49 +728,47 @@ class LabEngine:
         MAX_FINAL = self.settings.comp_max_final_results
         min_pct_ratio = self.settings.min_should_match / 100.0
 
-        # 1. פירוק למקטעים (טוקנים)
+        # ... (חלק 1: פירוק לטוקנים - נשאר זהה) ...
         tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
         c_size = chunk_size if chunk_size else 15
         step = max(1, int(c_size * 0.5)) 
         
-        # יצירת הצ'אנקים עם מעקב אחרי אינדקס ההתחלה שלהם
         chunks_data = []
         for i in range(0, max(1, len(tokens) - c_size + 1), step):
-            chunk = tokens[i : i + c_size]
-            chunks_data.append((i, chunk)) # (start_token_index, chunk_tokens)
-        
-        if len(tokens) < c_size: 
-            chunks_data = [(0, tokens)]
+            chunks_data.append((i, tokens[i : i + c_size]))
+        if len(tokens) < c_size: chunks_data = [(0, tokens)]
 
         total_chunks = len(chunks_data)
         results_map = {} 
 
-        # 2. סריקה
+        # ... (חלק 2: סריקה - נשאר זהה לחלוטין לגרסה הקודמת והטובה) ...
         for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
-            if progress_callback and i % 5 == 0: 
-                progress_callback(i, total_chunks)
-
+            if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
             chunk_text = " ".join(chunk_tokens)
-            fp_str = text_to_fingerprint(chunk_text)
             
+            if self._is_phrase_statistically_weak(chunk_text): continue
+
+            fp_str = text_to_fingerprint(chunk_text)
             if not fp_str or len(chunk_tokens) < 4: continue
             
             fp_list = fp_str.split()
             needed_unique_fps = set(fp_list) 
-            
-            # חיפוש (שימוש בלוגיקה הפנימית של LabEngine)
-            slop = min(100, max(50, int(self.settings.gap_penalty) * 10))
-            # בניית שאילתת OR לטביעות אצבע
+
+            # שאילתה עם Boost
             query_tokens = fp_str.split()
             clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in query_tokens]
-            final_query_str = " OR ".join(clauses)
+            core_query = " OR ".join(clauses)
+            final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
             
             res_obj = None
             try:
                 q = self.lab_index.parse_query(final_query_str)
                 res_obj = self.lab_searcher.search(q, PER_CHUNK_LIMIT)
-            except Exception:
-                continue
+            except:
+                try:
+                    q = self.lab_index.parse_query(core_query)
+                    res_obj = self.lab_searcher.search(q, PER_CHUNK_LIMIT)
+                except: continue
 
             if not res_obj: continue
 
@@ -784,133 +776,79 @@ class LabEngine:
                 try:
                     doc = self.lab_searcher.doc(doc_addr)
                     content = doc['content'][0]
-                    
                     match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text)
                     
-                    # בדיקת אחוזים (Coverage)
                     found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
                     common_fps = found_unique_fps.intersection(needed_unique_fps)
                     if len(needed_unique_fps) > 0:
-                        coverage = len(common_fps) / len(needed_unique_fps)
-                        if coverage < min_pct_ratio: continue
+                        if (len(common_fps) / len(needed_unique_fps)) < min_pct_ratio: continue
                     
                     if match_score < MIN_SCORE_THRESHOLD: continue
 
-                    uid = doc['unique_id'][0]
-
+                    uid = doc['unique_id'][0] 
                     if uid not in results_map:
                         results_map[uid] = {
                             'uid': uid, 'total_score': 0, 'hits_count': 0,
                             'raw_header': doc['full_header'][0], 'source': doc['source'][0],
-                            'content': content, 
-                            'best_chunk_score': -1,
-                            'all_found_words': set(),
-                            'src_indices': set(), # אינדקסים בטקסט המקור שנמצאו
-                            'ms_matches': [] # (start, end) בטקסט כתב היד
+                            'content': content, 'best_chunk_score': -1,
+                            'all_found_words': set(), 'src_indices': set(), 'ms_matches': [] 
                         }
-                    
                     rec = results_map[uid]
                     rec['total_score'] += match_score
                     rec['hits_count'] += 1
-                    
-                    # מעקב אחרי מיקום בטקסט המקור (לטובת בניית Context רחב)
                     token_end_idx = token_start_idx + len(chunk_tokens)
                     rec['src_indices'].update(range(token_start_idx, token_end_idx))
-                    
-                    # מעקב אחרי מיקום בכתב היד (לטובת הדגשה בתוצאה)
                     start_m, end_m = best_window
                     if matches:
-                        # המרה מאינדקסים של matches למיקומים בטקסט (start/end chars)
-                        ms_start_char = matches[start_m]['start']
-                        ms_end_char = matches[end_m]['end']
-                        rec['ms_matches'].append((ms_start_char, ms_end_char))
-                        
-                        # שמירת מילים להדגשה
-                        for m in matches[start_m : end_m + 1]: 
-                            rec['all_found_words'].add(m['word'])
+                        rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
+                        for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
+                except: pass
 
-                except Exception: pass
-
-        # 3. בניית התוצאות הסופיות
-        final_items = []
+        # ... (חלק 3: עיבוד תוצאות - כאן השינוי המהותי בסוף) ...
+        raw_final_items = []
         is_short_search = (total_chunks <= 3)
 
         for uid, data in results_map.items():
-            
-            # --- מסננת עקביות ---
             if not is_short_search:
                 if data['hits_count'] < 2 and data['total_score'] < 1000: continue 
             else:
                 if data['total_score'] < 250: continue
 
-            # --- א. בניית הקשר מקור רחב (Wide Source Context) ---
+            # יצירת סניפטים (אותו קוד בדיוק כמו קודם)
             src_snippets = []
             src_indices = sorted(list(data['src_indices']))
-            
             if src_indices:
-                # קיבוץ אינדקסים קרובים (מרחק < 60 מילים)
                 clusters = []
                 curr_cluster = [src_indices[0]]
                 for idx in src_indices[1:]:
-                    if idx - curr_cluster[-1] < 60:
-                        curr_cluster.append(idx)
-                    else:
-                        clusters.append(curr_cluster)
-                        curr_cluster = [idx]
+                    if idx - curr_cluster[-1] < 60: curr_cluster.append(idx)
+                    else: clusters.append(curr_cluster); curr_cluster = [idx]
                 clusters.append(curr_cluster)
-                
-                # בניית הטקסט לכל קלאסטר
                 for cl in clusters:
-                    start_ctx = max(0, cl[0] - 50)
-                    end_ctx = min(len(tokens), cl[-1] + 51)
-                    
+                    start_ctx = max(0, cl[0] - 50); end_ctx = min(len(tokens), cl[-1] + 51)
                     cl_set = set(cl)
-                    words_out = []
-                    for k in range(start_ctx, end_ctx):
-                        word = tokens[k]
-                        if k in cl_set:
-                            words_out.append(f"*{word}*") # סימון להדגשה
-                        else:
-                            words_out.append(word)
+                    words_out = [f"*{tokens[k]}*" if k in cl_set else tokens[k] for k in range(start_ctx, end_ctx)]
                     src_snippets.append(f"... {' '.join(words_out)} ...")
 
-            # --- ב. בניית סניפטים מכתב היד (MS Snippets) ---
             ms_snips = []
-            # איחוד חפיפות בכתב היד
             spans = sorted(data['ms_matches'], key=lambda x: x[0])
             merged = []
             if spans:
                 curr_s, curr_e = spans[0]
                 for s, e in spans[1:]:
-                    if s <= curr_e + 20: curr_e = max(curr_e, e) # איחוד אם קרוב
+                    if s <= curr_e + 20: curr_e = max(curr_e, e)
                     else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
                 merged.append((curr_s, curr_e))
             
-            # יצירת HTML
             content = data['content']
             for s, e in merged:
-                start = max(0, s - 60)
-                end = min(len(content), e + 60)
-                
-                # הדגשה באדום
-                # זהירות: s ו-e הם יחסיים לטקסט המלא, צריך לחתוך נכון
-                snippet_text = content[start:end]
-                
-                # נסמן את החלק שנמצא בתוך הסניפט
-                # המיקום של s בתוך snippet_text הוא s - start
-                rel_s = s - start
-                rel_e = e - start
-                
-                # הרכבה מחדש עם תגיות HTML
-                fragment = snippet_text[:rel_s] + \
-                           f"<span style='color:#ff0000; font-weight:bold;'>{snippet_text[rel_s:rel_e]}</span>" + \
-                           snippet_text[rel_e:]
-                           
-                ms_snips.append(fragment)
+                start = max(0, s - 60); end = min(len(content), e + 60)
+                snip = content[start:end]
+                rs = max(0, s - start); re_ = min(len(snip), e - start)
+                if re_ > rs:
+                    ms_snips.append(snip[:rs] + f"<span style='color:#ff0000; font-weight:bold;'>{snip[rs:re_]}</span>" + snip[re_:])
 
-            # --- ג. סיום ---
-            found_words = sorted(list(data['all_found_words']), key=len, reverse=True)
-            if len(found_words) > 50: found_words = found_words[:50]
+            found_words = sorted(list(data['all_found_words']), key=len, reverse=True)[:50]
             hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""
 
             item = {
@@ -918,20 +856,92 @@ class LabEngine:
                 'uid': uid,
                 'raw_header': data['raw_header'],
                 'src_lbl': data['source'],
-                'source_ctx': "\n\n".join(src_snippets), # ההקשר הרחב החדש
-                'text': "\n...\n".join(ms_snips),        # הסניפט המודגש ב-HTML
+                'source_ctx': "\n\n".join(src_snippets),
+                'text': "\n...\n".join(ms_snips),        
                 'highlight_pattern': hl_pattern,
                 'full_text': data['content']
             }
-            final_items.append(item)
+            raw_final_items.append(item)
 
-        final_items.sort(key=lambda x: x['score'], reverse=True)
+        # --- מיון והפרדה (Sorting & Splitting Logic) ---
+        raw_final_items.sort(key=lambda x: x['score'], reverse=True)
         
-        if len(final_items) > MAX_FINAL:
-            final_items = final_items[:MAX_FINAL]
+        main_list = []
+        known_list = []
+        
+        for item in raw_final_items:
+            # בדיקה האם כתב היד מוחרג
+            is_excluded = False
+            
+            # 1. בדיקה לפי UID (למשל IE...)
+            if str(item['uid']) in excluded_set:
+                is_excluded = True
+            
+            # 2. בדיקה לפי System ID (המספר 99...) שנמצא בכותרת
+            # זה חשוב כי ברשימת ההחרגה יש בד"כ מספרי מערכת, ובמעבדה ה-UID הוא IE
+            if not is_excluded:
+                # מנסים לחלץ 99... מהכותרת
+                m = re.search(r'(99\d+)', str(item['raw_header']))
+                if m and m.group(1) in excluded_set:
+                    is_excluded = True
+            
+            if is_excluded:
+                known_list.append(item)
+            else:
+                main_list.append(item)
 
-        return {'main': final_items, 'filtered': []}
+        # חיתוך המגבלה רק על הרשימה הראשית
+        if len(main_list) > MAX_FINAL:
+            main_list = main_list[:MAX_FINAL]
+
+        # החזרה מפוצלת כדי שה-GUI ידע לבנות את העץ נכון
+        return {'main': main_list, 'known': known_list, 'filtered': []}    
+    
+    @lru_cache(maxsize=10000)
+    def _is_word_too_common(self, word, threshold=5000):
+        """
+        Check existing index stats to see if a word is essentially a stop-word.
+        Uses LRU Cache to avoid hitting the index repeatedly for 'אמר' or 'על'.
+        """
+        try:
+            # Tantivy allows checking document frequency for a term
+            # Note: Create a Term object for the specific field
+            term = self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)
+            # בגרסאות מסוימות של tantivy-py הפקודה היא doc_freq
+            # אנו בודקים כמה מסמכים מכילים את המילה
+            count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD), word)
+            return count > threshold
+        except Exception:
+            # במקרה של שגיאה או אם הפונקציה לא נתמכת, נניח שהמילה לא נפוצה מדי כדי לא לפספס
+            return False
+
+    def _is_phrase_statistically_weak(self, phrase_text):
+        """
+        Returns True if the phrase consists ONLY of extremely common words.
+        If it has at least one 'rare' anchor word, it returns False (keep it).
+        """
+        # מנקים סימני פיסוק ומפרקים למילים
+        words = re.findall(r"[\w\u0590-\u05FF]+", phrase_text)
+        if not words:
+            return True # Empty phrase is weak
+            
+        rare_anchors = 0
         
+        for w in words:
+            # אנו משתמשים בקידוד של שמידמן כי זה מה ששמור באינדקס,
+            # אבל לבדיקת תדירות אפשר לבדוק גם את המילה הגולמית אם האינדקס שומר אותה,
+            # או את ה-Fingerprint שלה.
+            # נניח שאנו בודקים את ה-Fingerprint כי זה השדה המאונדקס שלנו:
+            fp_word = encode_word_shmidman(w)
+            if not fp_word: continue
+            
+            # אם המילה *אינה* נפוצה מדי, מצאנו עוגן!
+            if not self._is_word_too_common(fp_word):
+                rare_anchors += 1
+        
+        # אם לא מצאנו אפילו מילה נדירה אחת, המשפט חלש
+        return rare_anchors == 0
+    
 # ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
@@ -1540,13 +1550,11 @@ class MetadataManager:
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
         if sys_id is None:
             return "Unknown", ""
-        sys_id = "".join(ch for ch in str(sys_id) if ch.isdigit())
-        # Log only if normalization changed the identifier
-        raw = str(sys_id)
-        norm = "".join(ch for ch in raw if ch.isdigit())
-        if raw != norm:
-            LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw, norm)
-        sys_id = norm
+        raw_input = str(sys_id) if sys_id is not None else ""
+        sys_id = "".join(ch for ch in raw_input if ch.isdigit())
+        
+        if raw_input != sys_id and raw_input:
+             LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw_input, sys_id)
 
         """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
         shelf = "Unknown"
@@ -2266,6 +2274,7 @@ class SearchEngine:
         """
         Scans composition chunks against the index.
         Returns aggregated results with WIDE source context.
+        FIX: Common phrases (> max_freq) are now moved to 'filtered' instead of being discarded.
         """
         # 1. פירוק הטקסט המקורי לטוקנים
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
@@ -2286,19 +2295,18 @@ class SearchEngine:
             regex = self.build_regex_pattern(chunk, mode, 0)
             if not regex: continue
 
-            # סינון מקדים (Sampling)
-            is_filtered = False
+            # בדיקה: האם הביטוי נמצא ב"טקסט לסינון" (Filter Text)?
+            is_text_filtered = False
             if filter_text:
                 if regex.search(filter_text):
-                    is_filtered = True
+                    is_text_filtered = True
 
             try:
                 # חיפוש באינדקס
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
                 
-                # סינון ביטויים נפוצים מדי (למשל "וידבר ה' אל משה")
-                if len(hits) > max_freq: continue 
+                is_freq_filtered = len(hits) > max_freq 
                 
                 for score, doc_addr in hits:
                     doc = self.searcher.doc(doc_addr)
@@ -2307,7 +2315,12 @@ class SearchEngine:
                     # וידוא התאמה מדויקת עם Regex
                     if regex.search(content):
                         uid = doc['unique_id'][0]
-                        rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
+                        
+                        # ניתוב למפה המתאימה
+                        if is_text_filtered or is_freq_filtered:
+                            rec = doc_hits_filtered[uid]
+                        else:
+                            rec = doc_hits_main[uid]
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
@@ -2324,43 +2337,38 @@ class SearchEngine:
             final_items = []
             
             for uid, data in hits_dict.items():
-                # --- לוגיקה חדשה: בניית הקשר מקור רחב ---
                 src_indices = sorted(list(data['src_indices']))
                 src_snippets = []
                 
                 if src_indices:
-                    # א. קיבוץ אינדקסים קרובים (Clustering)
-                    # אם המרחק בין מילים הוא פחות מ-60 מילים, נאחד אותן לפסקה אחת
+                    # א. קיבוץ אינדקסים קרובים
                     clusters = []
                     if src_indices:
                         curr_cluster = [src_indices[0]]
                         for idx in src_indices[1:]:
-                            if idx - curr_cluster[-1] < 60: # סף לאיחוד פסקאות
+                            if idx - curr_cluster[-1] < 60: 
                                 curr_cluster.append(idx)
                             else:
                                 clusters.append(curr_cluster)
                                 curr_cluster = [idx]
                         clusters.append(curr_cluster)
                     
-                    # ב. בניית הטקסט לכל קלאסטר עם שוליים רחבים
+                    # ב. בניית הטקסט לכל קלאסטר
                     for cl in clusters:
                         start_ctx = max(0, cl[0] - 200)
                         end_ctx = min(len(tokens), cl[-1] + 201)
                         
-                        # בניית רצף המילים עם סימון המילים שנמצאו
                         cl_set = set(cl)
                         words_out = []
                         for k in range(start_ctx, end_ctx):
                             word = tokens[k]
                             if k in cl_set:
-                                # סימון בכוכביות לצביעה באדום בממשק
                                 words_out.append(f"*{word}*") 
                             else:
                                 words_out.append(word)
                         
                         src_snippets.append(f"... {' '.join(words_out)} ...")
 
-                # --- המשך הלוגיקה הרגילה (חישוב ציון וכו') ---
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
                 if spans:
@@ -2372,11 +2380,9 @@ class SearchEngine:
 
                 score = sum(e-s for s,e in merged)
                 
-                # סניפטים מתוך כתב היד (Genizah Snippets)
                 ms_snips = []
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    # שימוש ב-HTML span לאדום בכתב היד
                     fragment = data['content'][start:s] + \
                                f"<span style='color:#ff0000; font-weight:bold;'>{data['content'][s:e]}</span>" + \
                                data['content'][e:end]
@@ -2389,7 +2395,7 @@ class SearchEngine:
                     'uid': uid,
                     'raw_header': data['head'], 
                     'src_lbl': data['src'],
-                    'source_ctx': "\n\n".join(src_snippets), # כאן נכנס ההקשר הרחב החדש
+                    'source_ctx': "\n\n".join(src_snippets),
                     'text': "\n...\n".join(ms_snips),
                     'highlight_pattern': combined_pattern
                 })
@@ -2397,9 +2403,8 @@ class SearchEngine:
             final_items.sort(key=lambda x: x['score'], reverse=True)
             return final_items
 
-        # Build both lists
         main_list = build_items(doc_hits_main)
-        filtered_list = build_items(doc_hits_filtered)
+        filtered_list = build_items(doc_hits_filtered) 
 
         return {'main': main_list, 'filtered': filtered_list}
     

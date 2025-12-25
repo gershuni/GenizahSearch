@@ -117,25 +117,30 @@ class LabCompositionThread(QThread):
 
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
-    scan_finished_signal = pyqtSignal(object) # Returns dict like standard comp
+    scan_finished_signal = pyqtSignal(object) 
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, text, mode, chunk_size=None):
+    # --- הוספנו כאן את excluded_ids ---
+    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
         self.chunk_size = chunk_size
         self.mode = mode
+        self.excluded_ids = excluded_ids # שמירה
 
     def run(self):
         try:
             self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
             def cb(curr, total): self.progress_signal.emit(curr, total)
+            
+            # --- העברה למנוע ---
             result = self.lab_engine.lab_composition_search(
                 self.text,
                 mode=self.mode,
                 progress_callback=cb,
                 chunk_size=self.chunk_size,
+                excluded_ids=self.excluded_ids 
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
@@ -199,6 +204,7 @@ class ShelfmarkLoaderThread(QThread):
     # Signal: current_count, total_count, current_sid
     progress_signal = pyqtSignal(int, int, str)
     finished_signal = pyqtSignal(bool)
+    error_signal = pyqtSignal(str)
 
     def __init__(self, meta_mgr, sids):
         super().__init__()
