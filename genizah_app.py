@@ -2563,7 +2563,9 @@ class GenizahGUI(QMainWindow):
         credit_text = self._get_credit_header()
 
         # רג'קס לזיהוי תווים שהורסים קבצי XML/Excel
-        illegal_chars_re = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
+        # הורחב לכלול גם תווים בעייתיים נוספים ב-XML (כמו 0x1-0x8, 0xB-0xC, 0xE-0x1F, וגם 0x7F)
+        # למרות שאלו חוקיים ב-Python, אקסל נכשל עליהם ב-XML.
+        illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
 
         def sanitize_for_excel(text):
             """Cleans text to prevent Excel XML corruption."""
@@ -2578,19 +2580,42 @@ class GenizahGUI(QMainWindow):
             if t.startswith(('=', '+', '-', '@')): 
                 t = "'" + t
             
-            if len(t) > 32000:
-                t = t[:32000] + "..."
+            # Excel cell limit
+            if len(t) > 32700:
+                t = t[:32700] + "..."
             
             return t
 
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
+            # Ensure we don't double-mark or leave open markers
             if "<span" in t:
+                # Replace styled span with asterisks
                 t = re.sub(r'<span[^>]*>', '*', t)
                 t = t.replace('</span>', '*')
+
             t = t.replace("<br>", "\n").replace("<br/>", "\n")
+            # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
+
+            # Sanitization Step 2: Remove asterisk if it's at the very beginning of the string
+            # This fixes the "whole cell red" bug where context starts with a match.
+            # Rationale: Logic splits by '*'.
+            # If string is "*match* text", split -> ["", "match", " text"].
+            # i=0 ("") -> Normal. i=1 ("match") -> Red. i=2 (" text") -> Normal. This is CORRECT.
+
+            # However, user reported "whole column red".
+            # This happens if there is only ONE asterisk or if the logic fails.
+            # If the string is "*match text" (missing closing star), then:
+            # Split -> ["", "match text"]. i=1 is red.
+
+            # Let's ensure pairs.
+            if t.count('*') % 2 != 0:
+                # Odd number of stars? Remove the last one or all?
+                # Safest is to remove all to prevent formatting corruption
+                t = t.replace('*', '')
+
             return t.strip()
 
         # ==========================================
