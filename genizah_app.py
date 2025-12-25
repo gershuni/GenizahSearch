@@ -2563,7 +2563,9 @@ class GenizahGUI(QMainWindow):
         credit_text = self._get_credit_header()
 
         # רג'קס לזיהוי תווים שהורסים קבצי XML/Excel
-        illegal_chars_re = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
+        # הורחב לכלול גם תווים בעייתיים נוספים ב-XML (כמו 0x1-0x8, 0xB-0xC, 0xE-0x1F, וגם 0x7F)
+        # למרות שאלו חוקיים ב-Python, אקסל נכשל עליהם ב-XML.
+        illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
 
         def sanitize_for_excel(text):
             """Cleans text to prevent Excel XML corruption."""
@@ -2578,8 +2580,9 @@ class GenizahGUI(QMainWindow):
             if t.startswith(('=', '+', '-', '@')): 
                 t = "'" + t
             
-            if len(t) > 32000:
-                t = t[:32000] + "..."
+            # Excel cell limit
+            if len(t) > 32700:
+                t = t[:32700] + "..."
             
             return t
 
@@ -2587,10 +2590,14 @@ class GenizahGUI(QMainWindow):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
             if "<span" in t:
+                # Replace styled span with asterisks
                 t = re.sub(r'<span[^>]*>', '*', t)
                 t = t.replace('</span>', '*')
+
             t = t.replace("<br>", "\n").replace("<br/>", "\n")
+            # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
+
             return t.strip()
 
         # ==========================================
@@ -2711,7 +2718,7 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            if idx in [8, 9]: 
+                            if idx == 9:
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
@@ -2998,12 +3005,18 @@ class GenizahGUI(QMainWindow):
                 self.reset_comp_ui()
                 return
 
+            # Robustness: Pass resolved System IDs if available, to catch items excluded by shelfmark
+            # where the user didn't explicitly type the ID.
+            final_excluded_ids = excluded_ids
+            if self.excluded_sys_ids:
+                final_excluded_ids = list(self.excluded_sys_ids)
+
             self.comp_thread = LabCompositionThread(
                 self.lab_engine, 
                 txt, 
                 mode, 
                 chunk_size=chunk_size,
-                excluded_ids=excluded_ids
+                excluded_ids=final_excluded_ids
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -3406,7 +3419,9 @@ class GenizahGUI(QMainWindow):
         
         # איחוד הידועים
         if not hasattr(self, 'comp_known'): self.comp_known = []
-        self.comp_known = known_main + known_filt
+        # Fix: Extend existing known list instead of overwriting it,
+        # to preserve items excluded by LabEngine (which are already in self.comp_known)
+        self.comp_known.extend(known_main + known_filt)
 
         # === התיקון הקריטי למיון ===
         # עדכון משתני ה-Legacy כדי ש-_has_comp_results() יחזיר True והמיון יעבוד
