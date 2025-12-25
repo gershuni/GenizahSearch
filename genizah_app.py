@@ -2518,6 +2518,66 @@ class GenizahGUI(QMainWindow):
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
 
+    def export_results(self, fmt='xlsx'):
+        if not self.last_results:
+            QMessageBox.warning(self, tr("Save"), tr("No results to export."))
+            return
+
+        default_name = f"{tr('Search_Results')}_{int(time.time())}"
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"),
+            os.path.join(Config.RESULTS_DIR, f"{default_name}.{fmt}"),
+            f"{fmt.upper()} (*.{fmt})")
+        if not path: return
+
+        try:
+            headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")]
+            rows = []
+
+            for res in self.last_results:
+                display = res.get('display', {})
+                sid = display.get('id', '')
+                shelf = display.get('shelfmark', '')
+                title = display.get('title', '')
+                snippet = res.get('snippet', '').replace("<br>", "\n")
+                snippet = re.sub(r'<[^>]+>', '', snippet)
+                img = display.get('img', '')
+                src = display.get('source', '')
+                rows.append([sid, shelf, title, snippet, img, src])
+
+            if fmt == 'xlsx':
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Search Results"
+                ws.sheet_view.rightToLeft = (CURRENT_LANG == 'he')
+                for col, h in enumerate(headers, 1):
+                    ws.cell(row=1, column=col, value=h).font = Font(bold=True)
+                for r_idx, row in enumerate(rows, 2):
+                    for c_idx, val in enumerate(row, 1):
+                        val_str = str(val)
+                        val_str = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', val_str)
+                        if len(val_str) > 32000: val_str = val_str[:32000] + "..."
+                        ws.cell(row=r_idx, column=c_idx, value=val_str)
+                wb.save(path)
+
+            elif fmt == 'csv':
+                with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(headers)
+                    writer.writerows(rows)
+
+            elif fmt == 'txt':
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(f"{tr('Search Results')}\n{'='*20}\n\n")
+                    for r in rows:
+                        f.write(f"ID: {r[0]} | Shelf: {r[1]} | Title: {r[2]}\n")
+                        f.write(f"{r[3]}\n")
+                        f.write("-" * 40 + "\n")
+
+            QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+
+        except Exception as e:
+            QMessageBox.critical(self, tr("Error"), f"Failed to save: {e}")
+
     def export_comp_report(self, fmt='xlsx'):
         # 1. איסוף נתונים (לוגיקה יציבה)
         all_filtered = self.comp_filtered_main[:]
