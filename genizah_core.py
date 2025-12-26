@@ -102,6 +102,9 @@ class LabSettings:
         self.comp_min_score = 70
         self.comp_max_final_results = 100
         
+        # Deep Scan Settings
+        self.lab_scan_limit = 50000
+
         self.load()
 
     def load(self):
@@ -128,6 +131,8 @@ class LabSettings:
                     self.comp_chunk_limit = data.get('comp_chunk_limit', 200)
                     self.comp_min_score = data.get('comp_min_score', 70)
                     self.comp_max_final_results = data.get('comp_max_final_results', 100)
+
+                    self.lab_scan_limit = data.get('lab_scan_limit', 50000)
             except Exception: pass
 
     def save(self):
@@ -153,7 +158,9 @@ class LabSettings:
 
                     'comp_chunk_limit': self.comp_chunk_limit,
                     'comp_min_score': self.comp_min_score,
-                    'comp_max_final_results': self.comp_max_final_results
+                    'comp_max_final_results': self.comp_max_final_results,
+
+                    'lab_scan_limit': self.lab_scan_limit
                 }, f, indent=4)
         except Exception: pass
 
@@ -342,7 +349,7 @@ class LabEngine:
         LAB_LOGGER.error("All query strategies failed.")
         return None
 
-    def _execute_batched_search(self, query_obj, progress_callback=None):
+    def _execute_batched_search(self, query_obj, progress_callback=None, limit_override=None):
         """
         Executes a Tantivy search in memory-safe batches.
         Yields (score, doc_address) tuples.
@@ -351,10 +358,10 @@ class LabEngine:
             return
 
         BATCH_SIZE = 5000
-        MAX_SCAN_LIMIT = 50000
+        MAX_SCAN_LIMIT = limit_override if limit_override else 50000
 
         # Determine strict limit
-        limit = min(self.settings.candidate_limit * 10, MAX_SCAN_LIMIT)
+        limit = MAX_SCAN_LIMIT
 
         # 1. Fetch all candidate pointers (lightweight tuples)
         # Note: tantivy-py search() returns all hits at once, but they are just (score, addr).
@@ -613,7 +620,7 @@ class LabEngine:
         # המרת ירידות שורה לרווחים כדי לא לשבור את הטבלה
         return final_html.replace("\n", " ").replace("\r", "")
 
-    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
 
         # 1. Prepare Fingerprints
@@ -631,17 +638,27 @@ class LabEngine:
         results = []
         min_match_pct = self.settings.min_should_match
 
-        # 3. Process using batched iterator
-        # We pass a simple lambda for progress if needed, or None
-        def batch_cb(status_msg):
-            if progress_callback:
-                # pass status message if supported, else ignore
-                try:
-                    progress_callback(status_msg)
-                except Exception:
-                    pass
+        # 3. Process
+        if deep_scan:
+            # Use Deep Scan batched iterator
+            def batch_cb(status_msg):
+                if progress_callback:
+                    try:
+                        progress_callback(status_msg)
+                    except Exception:
+                        pass
 
-        for score, doc_addr in self._execute_batched_search(query_obj, progress_callback=batch_cb):
+            iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
+        else:
+            # Standard Fast Method
+            try:
+                # Limit 5000 for standard scan
+                res = self.lab_searcher.search(query_obj, 5000)
+                iterator = res.hits
+            except Exception:
+                iterator = []
+
+        for score, doc_addr in iterator:
             try:
                 doc = self.lab_searcher.doc(doc_addr)
                 content = doc['content'][0]
@@ -743,7 +760,7 @@ class LabEngine:
         if not text: return ""
         return re.sub(r'\*(.*?)\*', r"<b style='color:red'>\1</b>", text)
 
-    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None):
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
         """
         Scans a composition using Lab Mode.
         UPGRADES:
@@ -806,12 +823,20 @@ class LabEngine:
 
             if not q_obj: continue
 
-            # Helper for progress callback logic
-            batch_cb = None
-            if progress_callback:
-                batch_cb = lambda msg: progress_callback(msg) if callable(progress_callback) else None
+            iterator = []
+            if deep_scan:
+                batch_cb = None
+                if progress_callback:
+                    batch_cb = lambda msg: progress_callback(msg) if callable(progress_callback) else None
+                iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
+            else:
+                try:
+                    res = self.lab_searcher.search(q_obj, 5000)
+                    iterator = res.hits
+                except Exception:
+                    iterator = []
 
-            for score, doc_addr in self._execute_batched_search(q_obj, progress_callback=batch_cb):
+            for score, doc_addr in iterator:
                 try:
                     doc = self.lab_searcher.doc(doc_addr)
                     content = doc['content'][0]

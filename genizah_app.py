@@ -188,6 +188,14 @@ class LabPanel(QFrame):
             self.spin_limit.valueChanged.connect(self.on_change)
             self.layout.addWidget(self.spin_limit)
 
+            # Deep Scan Limit
+            self.layout.addWidget(QLabel(tr("Deep Limit:")))
+            self.spin_scan_limit = QSpinBox()
+            self.spin_scan_limit.setRange(10000, 1000000)
+            self.spin_scan_limit.setSingleStep(10000)
+            self.spin_scan_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_scan_limit)
+
             self.layout.addStretch()
 
             # Advanced Scoring
@@ -231,6 +239,8 @@ class LabPanel(QFrame):
         if self.mode == 'search':
             self.spin_min.setValue(self.settings.min_should_match)
             self.spin_limit.setValue(self.settings.candidate_limit)
+            if hasattr(self, 'spin_scan_limit'):
+                self.spin_scan_limit.setValue(getattr(self.settings, 'lab_scan_limit', 50000))
         elif self.mode == 'comp':
             self.spin_chunk_limit.setValue(self.settings.comp_chunk_limit)
             self.spin_min_score.setValue(self.settings.comp_min_score)
@@ -242,6 +252,8 @@ class LabPanel(QFrame):
         if self.mode == 'search':
             self.settings.min_should_match = self.spin_min.value()
             self.settings.candidate_limit = self.spin_limit.value()
+            if hasattr(self, 'spin_scan_limit'):
+                self.settings.lab_scan_limit = self.spin_scan_limit.value()
         elif self.mode == 'comp':
             self.settings.comp_chunk_limit = self.spin_chunk_limit.value()
             self.settings.comp_min_score = self.spin_min_score.value()
@@ -1583,7 +1595,15 @@ class GenizahGUI(QMainWindow):
         top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
         top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
         top.addWidget(self.btn_search); top.addWidget(self.btn_ai)
+
+        # Deep Scan Checkbox
+        self.chk_lab_deep = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
+        self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
+
         top.addWidget(self.btn_lab_mode_toggle)
+        top.addWidget(self.chk_lab_deep)
         top.addWidget(btn_help)
         layout.addLayout(top)
 
@@ -1744,7 +1764,14 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+
+        self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep_comp.setEnabled(False)
+        self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
+
         cr.addWidget(self.btn_lab_mode_toggle_comp)
+        cr.addWidget(self.chk_lab_deep_comp)
         cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
 
@@ -2251,10 +2278,24 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
         if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
         if hasattr(self, 'btn_ai'): self.btn_ai.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep'): self.chk_lab_deep.setEnabled(checked)
 
         # Composition Tab
         if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
         if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep_comp'): self.chk_lab_deep_comp.setEnabled(checked)
+
+    def on_deep_scan_toggled_search(self, checked):
+        if hasattr(self, 'chk_lab_deep_comp'):
+            self.chk_lab_deep_comp.blockSignals(True)
+            self.chk_lab_deep_comp.setChecked(checked)
+            self.chk_lab_deep_comp.blockSignals(False)
+
+    def on_deep_scan_toggled_comp(self, checked):
+        if hasattr(self, 'chk_lab_deep'):
+            self.chk_lab_deep.blockSignals(True)
+            self.chk_lab_deep.setChecked(checked)
+            self.chk_lab_deep.blockSignals(False)
 
     def on_lab_mode_toggled_search(self, checked):
         # Show/Hide Panel
@@ -2324,7 +2365,11 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
                 return
-            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap)
+
+            deep = self.chk_lab_deep.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
             self.search_thread = SearchThread(self.searcher, query, mode, gap)
 
@@ -3259,13 +3304,18 @@ class GenizahGUI(QMainWindow):
             if self.excluded_sys_ids:
                 final_excluded_ids = list(self.excluded_sys_ids)
 
+            deep = self.chk_lab_deep_comp.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
             self.comp_thread = LabCompositionThread(
                 self.lab_engine, 
                 txt, 
                 mode, 
                 chunk_size=chunk_size,
                 excluded_ids=final_excluded_ids,
-                filter_text=self.filter_text_content
+                filter_text=self.filter_text_content,
+                deep_scan=deep,
+                scan_limit=limit
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -3299,7 +3349,7 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         
         if hasattr(self.comp_thread, 'status_signal'):
-             self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
+             self.comp_thread.status_signal.connect(self.on_comp_status_update)
              
         self.comp_thread.error_signal.connect(self.on_comp_error)
         
@@ -3357,6 +3407,11 @@ class GenizahGUI(QMainWindow):
 
         combined_text = base_text + "\n\n" + "\n\n".join(extra_texts)
         self.run_composition(custom_text=combined_text)
+
+    def on_comp_status_update(self, status):
+        self.comp_progress.setFormat(status)
+        if status.startswith("Scanning batch") or status.startswith("Scanning items"):
+            self.comp_progress.setRange(0, 0)
 
     def on_comp_progress(self, curr, total):
         if total:

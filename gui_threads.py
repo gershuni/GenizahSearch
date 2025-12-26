@@ -68,12 +68,14 @@ class LabSearchThread(QThread):
     status_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, query, mode, gap=0):
+    def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000):
         super().__init__()
         self.lab_engine = lab_engine
         self.query = query
         self.gap = gap
         self.mode = mode
+        self.deep_scan = deep_scan
+        self.scan_limit = scan_limit
 
     def run(self):
         try:
@@ -84,7 +86,14 @@ class LabSearchThread(QThread):
                 elif isinstance(arg1, int) and arg2 is not None:
                     self.progress_signal.emit(arg1, arg2)
 
-            results = self.lab_engine.lab_search(self.query, mode=self.mode, progress_callback=cb, gap=self.gap)
+            results = self.lab_engine.lab_search(
+                self.query,
+                mode=self.mode,
+                progress_callback=cb,
+                gap=self.gap,
+                deep_scan=self.deep_scan,
+                scan_limit=self.scan_limit
+            )
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
 
@@ -128,7 +137,7 @@ class LabCompositionThread(QThread):
     error_signal = pyqtSignal(str)
 
     # --- הוספנו כאן את excluded_ids ואת filter_text ---
-    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None):
+    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
@@ -136,6 +145,8 @@ class LabCompositionThread(QThread):
         self.mode = mode
         self.excluded_ids = excluded_ids # שמירה
         self.filter_text = filter_text
+        self.deep_scan = deep_scan
+        self.scan_limit = scan_limit
 
     def run(self):
         try:
@@ -155,7 +166,9 @@ class LabCompositionThread(QThread):
                 progress_callback=cb,
                 chunk_size=self.chunk_size,
                 excluded_ids=self.excluded_ids,
-                filter_text=self.filter_text
+                filter_text=self.filter_text,
+                deep_scan=self.deep_scan,
+                scan_limit=self.scan_limit
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
