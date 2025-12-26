@@ -32,7 +32,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -259,16 +259,7 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
     def __lt__(self, other):
         text1 = self.text()
         text2 = other.text()
-
-        # Normalize: Remove 'Ms.'/'Ms' prefix (case insensitive) and lower case
-        # We strip leading whitespace, then optional 'ms', optional '.', then whitespace
-        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE)
-        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE)
-
-        def natural_keys(text):
-            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
-
-        return natural_keys(norm1) < natural_keys(norm2)
+        return natural_sort_key(text1) < natural_sort_key(text2)
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
@@ -2518,6 +2509,152 @@ class GenizahGUI(QMainWindow):
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
 
+    def export_results(self, fmt='xlsx'):
+        """
+        Export results handling specific formats directly.
+        fmt: 'xlsx', 'csv', or 'txt'
+        """
+        def clean_for_excel(text):
+            t = str(text).strip()
+            if t.startswith(('=', '+', '-', '@')):
+                return "'" + t
+            return t
+
+        base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
+        default_path = os.path.splitext(base_path)[0] + f".{fmt}"
+
+        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
+        selected_filter = filters.get(fmt, "All Files (*.*)")
+
+        path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
+        if not path: return
+
+        # Prepare tabular data
+        headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+        data_rows = []
+        for r in self.last_results:
+            d = r['display']
+            # Use raw_file_hl so highlight markers remain intact
+            # Clean snippet: remove newlines for single-line export
+            snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+
+            data_rows.append([
+                d.get('id', ''),
+                d.get('shelfmark', ''),
+                d.get('title', ''),
+                str(d.get('img', '')),
+                d.get('source', ''),
+                snippet
+            ])
+
+        credit_text = self._get_credit_header()
+
+        # --- XLSX with inline highlighting ---
+        if fmt == 'xlsx':
+            try:
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Genizah Results"
+                ws.sheet_view.rightToLeft = True
+
+                # Fonts used for rich text snippets
+                font_red = InlineFont(color='FF0000', b=True)
+                font_normal = InlineFont(color='000000')
+
+                # Helper to write rich text cells
+                def write_rich_cell(row, col, text):
+                    # No markers: write as-is with formula guard
+                    if '*' not in text:
+                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                        return
+
+                    # Split by asterisk markers
+                    parts = text.split('*')
+                    rich_string = CellRichText()
+
+                    for i, part in enumerate(parts):
+                        if not part: continue
+                        # Odd indices represent highlighted text
+                        if i % 2 == 1:
+                            rich_string.append(TextBlock(font_red, part))
+                        else:
+                            # Even indices are plain text
+                            rich_string.append(TextBlock(font_normal, part))
+
+                    ws.cell(row=row, column=col, value=rich_string)
+
+                # Credit header
+                current_row = 1
+                for line in credit_text.split('\n'):
+                    if not line.strip(): continue
+                    cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                    cell.font = Font(bold=True, color="555555")
+                    current_row += 1
+                current_row += 1
+
+                # Table headers
+                for col_idx, header in enumerate(headers, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                current_row += 1
+
+                # Data rows
+                for row_data in data_rows:
+                    for col_idx, val in enumerate(row_data, 1):
+                        val_str = str(val)
+
+                        # Column 6 holds the snippet
+                        if col_idx == 6:
+                            write_rich_cell(current_row, col_idx, val_str)
+                        else:
+                            # Strip HTML tags in other columns
+                            clean_val = re.sub(r'<[^>]+>', '', val_str)
+                            ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
+
+                    current_row += 1
+
+                # Column widths
+                ws.column_dimensions['A'].width = 15
+                ws.column_dimensions['B'].width = 20
+                ws.column_dimensions['C'].width = 40
+                ws.column_dimensions['F'].width = 80  # Wider snippet column
+
+                wb.save(path)
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
+
+        # --- CSV ---
+        elif fmt == 'csv':
+            try:
+                with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                    f.write(credit_text)
+                    writer = csv.writer(f)
+                    writer.writerow([])
+                    writer.writerow(headers)
+                    for row in data_rows:
+                        # Strip HTML but keep highlight markers
+                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        writer.writerow(clean_row)
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
+
+        # --- TXT ---
+        else:
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(credit_text)
+                    for r in self.last_results:
+                        # Clean snippet: remove newlines for single-line export
+                        snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
+
     def export_comp_report(self, fmt='xlsx'):
         # 1. איסוף נתונים (לוגיקה יציבה)
         all_filtered = self.comp_filtered_main[:]
@@ -2594,9 +2731,13 @@ class GenizahGUI(QMainWindow):
                 t = re.sub(r'<span[^>]*>', '*', t)
                 t = t.replace('</span>', '*')
 
-            t = t.replace("<br>", "\n").replace("<br/>", "\n")
+            # Remove newlines for single-line output
+            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", "")
             # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
+
+            # Collapse multiple spaces
+            t = re.sub(r'\s+', ' ', t)
 
             return t.strip()
 
@@ -3287,10 +3428,6 @@ class GenizahGUI(QMainWindow):
             sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
         return sid or "", shelf or "", title or ""
 
-    def _natural_sort_key(self, text):
-        normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
-        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
-
     def _comp_sort_key(self, item, mode=None):
         sort_mode = mode or self._current_comp_sort_mode()
         if sort_mode == "score":
@@ -3303,8 +3440,8 @@ class GenizahGUI(QMainWindow):
         if sort_mode == "system_id":
             return sid.casefold()
 
-        shelf_key = self._natural_sort_key(shelf or sid)
-        sid_key = self._natural_sort_key(sid)
+        shelf_key = natural_sort_key(shelf or sid)
+        sid_key = natural_sort_key(sid)
         return (shelf_key, sid_key)
 
     def _sort_comp_items(self, items, mode=None):
@@ -3902,11 +4039,19 @@ class GenizahGUI(QMainWindow):
     def _fmt_item_legacy(self, item):
         # Fallback for old page style if needed
         sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+
+        def clean(t):
+            t = str(t or "")
+            t = re.sub(r'<span[^>]*>', '*', t).replace('</span>', '*')
+            t = t.replace("<br>", " ").replace("\n", " ").replace("\r", "")
+            t = re.sub(r'<[^>]+>', '', t)
+            return re.sub(r'\s+', ' ', t).strip()
+
         return [
             "=" * 80,
             f"{shelf or sid} | {title or 'Untitled'} | Img: {p_num} | Version: {item.get('src_lbl','')} | ID: {item.get('uid', sid)} (Score: {item.get('score', 0)})",
-            tr("Source Context") + ":", (item.get('source_ctx', '') or "").strip(), "",
-            tr("Manuscript") + ":", (item.get('text', '') or "").strip(), ""
+            tr("Source Context") + ":", clean(item.get('source_ctx', '')), "",
+            tr("Manuscript") + ":", clean(item.get('text', '')), ""
         ]
 
     def _format_comp_entry(self, item):

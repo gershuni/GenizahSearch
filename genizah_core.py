@@ -19,13 +19,8 @@ from typing import Mapping
 from functools import lru_cache
 import itertools
 import json
-import bisect
-import math
 
 from genizah_translations import TRANSLATIONS
-
-LAB_LOGGER = logging.getLogger("GenizahLab")
-LAB_LOGGER.addHandler(logging.NullHandler())
 
 # --- Shmidman Rare-Letter Helpers ---
 HEBREW_FREQ = {
@@ -60,6 +55,13 @@ def text_to_fingerprint(text: str) -> str:
         if encoded:
             encoded_tokens.append(encoded)
     return " ".join(encoded_tokens)
+
+
+def natural_sort_key(text):
+    """Sort strings containing numbers naturally (e.g. 'Item 2' < 'Item 10')."""
+    normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
+
 
 try:
     import google.generativeai as genai
@@ -211,12 +213,6 @@ class LabEngine:
     @staticmethod
     def lab_index_normalize(text):
         return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
-
-    @staticmethod
-    def generate_ngrams(text, n=3):
-        # Legacy helper for compatibility
-        if not text: return ""
-        return "".join(ch for ch in text if "\u0590" <= ch <= "\u05FF")
 
     def rebuild_lab_index(self, progress_callback=None):
         LAB_LOGGER.info(f"Starting REBUILD at: {Config.LAB_INDEX_DIR}")
@@ -904,7 +900,6 @@ class LabEngine:
         try:
             # Tantivy allows checking document frequency for a term
             # Note: Create a Term object for the specific field
-            term = self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)
             # בגרסאות מסוימות של tantivy-py הפקודה היא doc_freq
             # אנו בודקים כמה מסמכים מכילים את המילה
             count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD), word)
@@ -979,7 +974,6 @@ class Config:
     # 2. External Files (Must be placed NEXT to the EXE by the user)
     FILE_V8 = os.path.join(BASE_DIR, "Transcriptions.txt")
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
-    INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
 
     # 3. User Data Directory (Index, Caches) - Smart Logic
     _PORTABLE_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
@@ -1005,10 +999,6 @@ class Config:
         os.makedirs(INDEX_DIR, exist_ok=True)
 
     # 4. Output folders: try BASE_DIR first; fallback to INDEX_DIR
-    RESULTS_DIR = _pick_writable_dir(
-        os.path.join(BASE_DIR, "Results"),
-        os.path.join(INDEX_DIR, "Results"),
-    )
     REPORTS_DIR = _pick_writable_dir(
         os.path.join(BASE_DIR, "Reports"),
         os.path.join(INDEX_DIR, "Reports"),
@@ -1022,7 +1012,6 @@ class Config:
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
-    FL_MAP = os.path.join(INDEX_DIR, "fl_lookup.pkl")
     LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
 
     # Lab Mode Paths
@@ -1036,7 +1025,6 @@ class Config:
     HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
 
     # Settings
-    TANTIVY_CLAUSE_LIMIT = 5000
     SEARCH_LIMIT = 5000
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
