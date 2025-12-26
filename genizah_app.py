@@ -2245,6 +2245,17 @@ class GenizahGUI(QMainWindow):
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
+    def update_lab_ui_state(self, checked):
+        """Disable standard controls when Lab Mode is active."""
+        # Search Tab
+        if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
+        if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
+        if hasattr(self, 'btn_ai'): self.btn_ai.setEnabled(not checked)
+
+        # Composition Tab
+        if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
+        if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
+
     def on_lab_mode_toggled_search(self, checked):
         # Show/Hide Panel
         if hasattr(self, 'lab_panel_search'):
@@ -2259,6 +2270,8 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'lab_panel_comp'):
                 self.lab_panel_comp.setVisible(checked)
 
+        self.update_lab_ui_state(checked)
+
     def on_lab_mode_toggled_comp(self, checked):
         # Show/Hide Panel
         if hasattr(self, 'lab_panel_comp'):
@@ -2272,6 +2285,8 @@ class GenizahGUI(QMainWindow):
             # Ensure search panel visibility matches too
             if hasattr(self, 'lab_panel_search'):
                 self.lab_panel_search.setVisible(checked)
+
+        self.update_lab_ui_state(checked)
 
     def toggle_search(self):
         if not self.searcher: return
@@ -2315,6 +2330,10 @@ class GenizahGUI(QMainWindow):
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
+
+        if hasattr(self.search_thread, 'status_signal'):
+             self.search_thread.status_signal.connect(self.status_label.setText)
+
         self.search_thread.error_signal.connect(self.on_error)
         self.search_thread.start()
 
@@ -3245,7 +3264,8 @@ class GenizahGUI(QMainWindow):
                 txt, 
                 mode, 
                 chunk_size=chunk_size,
-                excluded_ids=final_excluded_ids
+                excluded_ids=final_excluded_ids,
+                filter_text=self.filter_text_content
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
