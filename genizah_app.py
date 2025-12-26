@@ -2648,7 +2648,9 @@ class GenizahGUI(QMainWindow):
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
                     for r in self.last_results:
-                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{r.get('raw_file_hl','')}\n\n")
+                        # Clean snippet: remove newlines for single-line export
+                        snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
@@ -4037,11 +4039,19 @@ class GenizahGUI(QMainWindow):
     def _fmt_item_legacy(self, item):
         # Fallback for old page style if needed
         sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+
+        def clean(t):
+            t = str(t or "")
+            t = re.sub(r'<span[^>]*>', '*', t).replace('</span>', '*')
+            t = t.replace("<br>", " ").replace("\n", " ").replace("\r", "")
+            t = re.sub(r'<[^>]+>', '', t)
+            return re.sub(r'\s+', ' ', t).strip()
+
         return [
             "=" * 80,
             f"{shelf or sid} | {title or 'Untitled'} | Img: {p_num} | Version: {item.get('src_lbl','')} | ID: {item.get('uid', sid)} (Score: {item.get('score', 0)})",
-            tr("Source Context") + ":", (item.get('source_ctx', '') or "").strip(), "",
-            tr("Manuscript") + ":", (item.get('text', '') or "").strip(), ""
+            tr("Source Context") + ":", clean(item.get('source_ctx', '')), "",
+            tr("Manuscript") + ":", clean(item.get('text', '')), ""
         ]
 
     def _format_comp_entry(self, item):
