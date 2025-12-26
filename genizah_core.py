@@ -565,34 +565,33 @@ class LabEngine:
 
     def _generate_highlighted_snippet(self, text, matches, best_window):
         """
-        Generates an HTML snippet with RED highlighting and surrounding context.
+        Generates a snippet with asterisk markers (*text*) for highlighting.
         """
         if not text: return ""
         if not matches: return text[:300]
 
         start_m_idx, end_m_idx = best_window
         
-        # הגנה על אינדקסים
+        # Guard indices
         start_m_idx = max(0, start_m_idx)
         end_m_idx = min(len(matches) - 1, end_m_idx)
 
-        # 1. קביעת גבולות הטקסט להצגה (100 תווים להקשר רחב)
+        # 1. Determine snippet bounds (100 chars context)
         padding = 100
         snippet_start_char = max(0, matches[start_m_idx]['start'] - padding)
         snippet_end_char = min(len(text), matches[end_m_idx]['end'] + padding)
         
-        # קוסמטיקה: לא לחתוך באמצע מילה
+        # Cosmetic: Don't cut in middle of word
         if snippet_start_char > 0:
             next_space = text.find(' ', snippet_start_char)
             if next_space != -1 and next_space < matches[start_m_idx]['start']:
                 snippet_start_char = next_space + 1
 
-        # 2. איסוף המילים הרלוונטיות
+        # 2. Collect relevant matches
         relevant_matches = matches[start_m_idx : end_m_idx + 1]
         
-        # 3. בניית ה-HTML
+        # 3. Build text
         out_parts = []
-        out_parts.append("<div dir='rtl' style='white-space: pre-wrap;'>") 
         
         if snippet_start_char > 0: out_parts.append("... ")
         
@@ -602,28 +601,26 @@ class LabEngine:
             if m['start'] < snippet_start_char: continue
             if m['end'] > snippet_end_char: break
             
-            # טקסט רגיל
+            # Plain text
             if m['start'] > current_idx:
                 plain = text[current_idx : m['start']]
                 out_parts.append(plain)
             
-            # מילה מודגשת באדום
+            # Highlighted word (Asterisks)
             word = text[m['start'] : m['end']]
-            out_parts.append(f"<span style='color:#ff0000; font-weight:bold;'>{word}</span>")
+            out_parts.append(f"*{word}*")
             
             current_idx = m['end']
         
-        # שארית
+        # Remainder
         if current_idx < snippet_end_char:
             out_parts.append(text[current_idx : snippet_end_char])
             
         if snippet_end_char < len(text): out_parts.append(" ...")
         
-        out_parts.append("</div>")
-
-        final_html = "".join(out_parts)
-        # המרת ירידות שורה לרווחים כדי לא לשבור את הטבלה
-        return final_html.replace("\n", " ").replace("\r", "")
+        final_text = "".join(out_parts)
+        # Flatten for table display
+        return final_text.replace("\n", " ").replace("\r", "")
 
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
@@ -685,7 +682,7 @@ class LabEngine:
 
                 # --- Highlight Snippet ---
                 smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
-                html_snippet = self._html_snippet(smart_snippet)
+                html_snippet = smart_snippet # No HTML conversion needed, pure markers
 
                 # --- FIX FOR VIEWER HIGHLIGHTING ---
                 # We extract the ACTUAL corrupted words found in the match window
@@ -926,7 +923,7 @@ class LabEngine:
                 snip = content[start:end]
                 rs = max(0, s - start); re_ = min(len(snip), e - start)
                 if re_ > rs:
-                    ms_snips.append(snip[:rs] + f"<span style='color:#ff0000; font-weight:bold;'>{snip[rs:re_]}</span>" + snip[re_:])
+                    ms_snips.append(snip[:rs] + f"*{snip[rs:re_]}*" + snip[re_:])
 
             found_words = sorted(list(data['all_found_words']), key=len, reverse=True)[:50]
             hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""

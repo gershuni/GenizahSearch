@@ -2404,6 +2404,14 @@ class GenizahGUI(QMainWindow):
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
 
+    def render_asterisks_to_html(self, text):
+        if not text: return ""
+        # Escape HTML chars
+        t = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Convert *word* to highlighted span
+        t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
+        return f"<div dir='rtl'>{t}</div>"
+
     def on_search_finished(self, results):
         self.reset_ui()
         if not results:
@@ -2476,7 +2484,9 @@ class GenizahGUI(QMainWindow):
                 self.title_items_by_sid[sid] = item_title
 
                 # Col 3: Snippet (Widget)
-                lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                # Render asterisks to HTML for display
+                html_snippet = self.render_asterisks_to_html(res['snippet'])
+                lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 self.results_table.setCellWidget(i, 3, lbl)
 
                 # Col 4: Img
@@ -2723,16 +2733,9 @@ class GenizahGUI(QMainWindow):
                 title = d.get('title', '')
 
             # Use raw_file_hl so highlight markers remain intact
-            # Clean snippet: remove newlines and HTML tags (convert span to *)
+            # Clean snippet: remove newlines (input is now clean text with asterisks)
             raw_hl = r.get('raw_file_hl', '')
-
-            # Clean HTML tags if present (Lab Mode)
-            snippet = str(raw_hl)
-            if "<" in snippet:
-                snippet = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", snippet, flags=re.DOTALL)
-                snippet = re.sub(r"<[^>]+>", "", snippet)
-
-            snippet = snippet.strip().replace('\n', ' ').replace('\r', '')
+            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', '')
             snippet = re.sub(r'\s+', ' ', snippet)
 
             data_rows.append([
