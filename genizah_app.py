@@ -32,7 +32,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -259,16 +259,7 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
     def __lt__(self, other):
         text1 = self.text()
         text2 = other.text()
-
-        # Normalize: Remove 'Ms.'/'Ms' prefix (case insensitive) and lower case
-        # We strip leading whitespace, then optional 'ms', optional '.', then whitespace
-        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE)
-        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE)
-
-        def natural_keys(text):
-            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
-
-        return natural_keys(norm1) < natural_keys(norm2)
+        return natural_sort_key(text1) < natural_sort_key(text2)
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
@@ -2544,13 +2535,16 @@ class GenizahGUI(QMainWindow):
         for r in self.last_results:
             d = r['display']
             # Use raw_file_hl so highlight markers remain intact
+            # Clean snippet: remove newlines for single-line export
+            snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+
             data_rows.append([
                 d.get('id', ''),
                 d.get('shelfmark', ''),
                 d.get('title', ''),
                 str(d.get('img', '')),
                 d.get('source', ''),
-                r.get('raw_file_hl', '').strip()
+                snippet
             ])
 
         credit_text = self._get_credit_header()
@@ -2735,9 +2729,13 @@ class GenizahGUI(QMainWindow):
                 t = re.sub(r'<span[^>]*>', '*', t)
                 t = t.replace('</span>', '*')
 
-            t = t.replace("<br>", "\n").replace("<br/>", "\n")
+            # Remove newlines for single-line output
+            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", "")
             # Remove any remaining HTML tags
             t = re.sub(r'<[^>]+>', '', t)
+
+            # Collapse multiple spaces
+            t = re.sub(r'\s+', ' ', t)
 
             return t.strip()
 
@@ -3428,10 +3426,6 @@ class GenizahGUI(QMainWindow):
             sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
         return sid or "", shelf or "", title or ""
 
-    def _natural_sort_key(self, text):
-        normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
-        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
-
     def _comp_sort_key(self, item, mode=None):
         sort_mode = mode or self._current_comp_sort_mode()
         if sort_mode == "score":
@@ -3444,8 +3438,8 @@ class GenizahGUI(QMainWindow):
         if sort_mode == "system_id":
             return sid.casefold()
 
-        shelf_key = self._natural_sort_key(shelf or sid)
-        sid_key = self._natural_sort_key(sid)
+        shelf_key = natural_sort_key(shelf or sid)
+        sid_key = natural_sort_key(sid)
         return (shelf_key, sid_key)
 
     def _sort_comp_items(self, items, mode=None):

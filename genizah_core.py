@@ -999,10 +999,6 @@ class Config:
         os.makedirs(INDEX_DIR, exist_ok=True)
 
     # 4. Output folders: try BASE_DIR first; fallback to INDEX_DIR
-    RESULTS_DIR = _pick_writable_dir(
-        os.path.join(BASE_DIR, "Results"),
-        os.path.join(INDEX_DIR, "Results"),
-    )
     REPORTS_DIR = _pick_writable_dir(
         os.path.join(BASE_DIR, "Reports"),
         os.path.join(INDEX_DIR, "Reports"),
