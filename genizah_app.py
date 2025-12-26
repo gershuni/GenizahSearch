@@ -51,45 +51,19 @@ from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
 
-class LabSettingsDialog(QDialog):
-    """Configuration for Lab Mode (Rare Letter Fingerprinting)."""
+class LabScoringDialog(QDialog):
+    """Configuration for Lab Mode Scoring (Advanced)."""
     def __init__(self, parent, lab_engine):
         super().__init__(parent)
-        self.setWindowTitle(tr("Lab Mode Settings"))
-        self.resize(600, 600) # הגדלתי קצת גובה
+        self.setWindowTitle(tr("Advanced Scoring"))
+        self.resize(500, 500)
         self.lab_engine = lab_engine
         self.settings = lab_engine.settings
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout()
-        tabs = QTabWidget()
-        
-        # --- TAB 1: General ---
-        tab_general = QWidget(); layout_gen = QVBoxLayout()
-        
-        index_group = QGroupBox(tr("Index Actions"))
-        idx_l = QVBoxLayout()
-        self.lbl_rebuild_notice = QLabel(tr("Rebuild the index if you changed the source text files."))
-        self.lbl_rebuild_notice.setStyleSheet("color: gray; font-style: italic;")
-        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
-        self.btn_rebuild.clicked.connect(self.run_rebuild)
-        self.lbl_idx_status = QLabel("")
-        idx_l.addWidget(self.lbl_rebuild_notice); idx_l.addWidget(self.btn_rebuild); idx_l.addWidget(self.lbl_idx_status)
-        index_group.setLayout(idx_l); layout_gen.addWidget(index_group)
-        
-        sens_group = QGroupBox(tr("Basic Filters"))
-        sens_l = QGridLayout()
-        self.spin_min_should_match = QSpinBox(); self.spin_min_should_match.setRange(10, 100); self.spin_min_should_match.setValue(self.settings.min_should_match); self.spin_min_should_match.setSuffix("%")
-        self.spin_candidate_limit = QSpinBox(); self.spin_candidate_limit.setRange(500, 1000000); self.spin_candidate_limit.setSingleStep(500); self.spin_candidate_limit.setValue(self.settings.candidate_limit)
-        sens_l.addWidget(QLabel(tr("Minimum Match %:")), 0, 0); sens_l.addWidget(self.spin_min_should_match, 0, 1)
-        sens_l.addWidget(QLabel(tr("Max Results to Process:")), 1, 0); sens_l.addWidget(self.spin_candidate_limit, 1, 1)
-        sens_group.setLayout(sens_l); layout_gen.addWidget(sens_group)
-        layout_gen.addStretch(); tab_general.setLayout(layout_gen)
-        
-        # --- TAB 2: Scoring & Algorithm ---
-        tab_scoring = QWidget(); layout_score = QVBoxLayout()
-        layout_score.addWidget(QLabel(tr("Adjust how the algorithm prioritizes results.")))
+        layout.addWidget(QLabel(tr("Adjust how the algorithm prioritizes results.")))
         
         grid = QGridLayout()
         
@@ -102,7 +76,7 @@ class LabSettingsDialog(QDialog):
         self.spin_coverage_power = QDoubleSpinBox(); self.spin_coverage_power.setRange(1.0, 10.0); self.spin_coverage_power.setValue(self.settings.coverage_power)
         grid.addWidget(QLabel(tr("Coverage Penalty Power:")), 1, 0); grid.addWidget(self.spin_coverage_power, 1, 1)
 
-        # Noise Suppression (New Section)
+        # Noise Suppression
         lbl_noise = QLabel(tr("Stop-Word Suppression:")); lbl_noise.setStyleSheet("font-weight: bold; margin-top: 10px;")
         grid.addWidget(lbl_noise, 2, 0, 1, 2)
 
@@ -132,57 +106,155 @@ class LabSettingsDialog(QDialog):
         self.spin_common_factor = QDoubleSpinBox(); self.spin_common_factor.setRange(0.0, 1.0); self.spin_common_factor.setValue(self.settings.common_penalty_factor)
         grid.addWidget(QLabel(tr("Repeated Word Factor:")), 9, 0); grid.addWidget(self.spin_common_factor, 9, 1)
 
-        layout_score.addLayout(grid); layout_score.addStretch(); tab_scoring.setLayout(layout_score)
+        layout.addLayout(grid)
+        layout.addStretch()
         
-        # --- TAB 3: Composition ---
-        tab_comp = QWidget(); layout_comp = QVBoxLayout()
-        layout_comp.addWidget(QLabel(tr("Settings for 'Analyze Composition' mode.")))
-        grid_c = QGridLayout()
-        self.spin_comp_limit = QSpinBox(); self.spin_comp_limit.setRange(50, 5000); self.spin_comp_limit.setSingleStep(50); self.spin_comp_limit.setValue(self.settings.comp_chunk_limit)
-        grid_c.addWidget(QLabel(tr("Max Candidates per Chunk:")), 0, 0); grid_c.addWidget(self.spin_comp_limit, 0, 1)
-        self.spin_comp_score = QSpinBox(); self.spin_comp_score.setRange(10, 500); self.spin_comp_score.setValue(self.settings.comp_min_score)
-        grid_c.addWidget(QLabel(tr("Min Chunk Score:")), 1, 0); grid_c.addWidget(self.spin_comp_score, 1, 1)
-        self.spin_comp_final = QSpinBox(); self.spin_comp_final.setRange(10, 10000); self.spin_comp_final.setValue(self.settings.comp_max_final_results)
-        grid_c.addWidget(QLabel(tr("Max Final Results:")), 2, 0); grid_c.addWidget(self.spin_comp_final, 2, 1)
-        layout_comp.addLayout(grid_c); layout_comp.addStretch(); tab_comp.setLayout(layout_comp)
-
-        tabs.addTab(tab_general, tr("General"))
-        tabs.addTab(tab_scoring, tr("Scoring & Algorithm"))
-        tabs.addTab(tab_comp, tr("Composition"))
-        layout.addWidget(tabs)
-
         btn_box = QHBoxLayout()
         self.btn_save = QPushButton(tr("Save & Close")); self.btn_save.clicked.connect(self.save_and_close)
         self.btn_cancel = QPushButton(tr("Cancel")); self.btn_cancel.clicked.connect(self.reject)
         btn_box.addStretch(); btn_box.addWidget(self.btn_cancel); btn_box.addWidget(self.btn_save)
         layout.addLayout(btn_box)
         self.setLayout(layout)
-        self._mark_rebuild_required()
 
     def save_and_close(self):
-        # General
-        self.settings.candidate_limit = self.spin_candidate_limit.value()
-        self.settings.min_should_match = self.spin_min_should_match.value()
-        # Scoring
         self.settings.coverage_power = self.spin_coverage_power.value()
         self.settings.length_bonus_factor = self.spin_len_bonus.value()
         self.settings.common_penalty_factor = self.spin_common_factor.value()
         self.settings.density_penalty = self.spin_density.value()
         self.settings.unique_bonus_base = self.spin_unique_base.value()
         if hasattr(self.settings, 'order_bonus'): self.settings.order_bonus = self.spin_order_bonus.value()
-        
-        # New Noise Settings
         if hasattr(self.settings, 'stop_word_score'):
             self.settings.stop_word_score = self.spin_stop_score.value()
             self.settings.common_3char_score = self.spin_common3_score.value()
-
-        # Comp
-        self.settings.comp_chunk_limit = self.spin_comp_limit.value()
-        self.settings.comp_min_score = self.spin_comp_score.value()
-        self.settings.comp_max_final_results = self.spin_comp_final.value()
         
         self.settings.save()
         self.accept()
+
+class LabPanel(QFrame):
+    def __init__(self, parent, mode):
+        super().__init__(parent)
+        self.mode = mode
+        self.lab_engine = None
+        self.settings = None
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        # Light gray background
+        self.setStyleSheet("background-color: #f0f0f0; border-radius: 5px; margin-bottom: 5px;")
+
+        self.init_ui()
+        self.setVisible(False)
+
+    def set_engine(self, engine):
+        self.lab_engine = engine
+        self.settings = engine.settings
+        self.refresh_values()
+        self.enable_controls(True)
+        self._mark_rebuild_required()
+
+    def enable_controls(self, enabled):
+        self.setEnabled(enabled)
+
+    def init_ui(self):
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 5, 10, 5)
+
+        # Shared: Rebuild
+        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
+        self.btn_rebuild.clicked.connect(self.run_rebuild)
+        self.layout.addWidget(self.btn_rebuild)
+
+        self.lbl_idx_status = QLabel("")
+        self.layout.addWidget(self.lbl_idx_status)
+
+        # Spacer
+        self.layout.addSpacing(20)
+        self.layout.addWidget(QLabel("|"))
+        self.layout.addSpacing(20)
+
+        if self.mode == 'search':
+            # Min Match
+            self.layout.addWidget(QLabel(tr("Minimum Match %:")))
+            self.spin_min = QSpinBox()
+            self.spin_min.setRange(10, 100)
+            self.spin_min.setSuffix("%")
+            self.spin_min.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_min)
+
+            # Candidate Limit
+            self.layout.addWidget(QLabel(tr("Max Results to Process:")))
+            self.spin_limit = QSpinBox()
+            self.spin_limit.setRange(500, 1000000)
+            self.spin_limit.setSingleStep(500)
+            self.spin_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_limit)
+
+            self.layout.addStretch()
+
+            # Advanced Scoring
+            self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.clicked.connect(self.open_scoring)
+            self.layout.addWidget(self.btn_scoring)
+
+        elif self.mode == 'comp':
+            # Chunk Limit
+            self.layout.addWidget(QLabel(tr("Max Candidates per Chunk:")))
+            self.spin_chunk_limit = QSpinBox()
+            self.spin_chunk_limit.setRange(50, 5000)
+            self.spin_chunk_limit.setSingleStep(50)
+            self.spin_chunk_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_chunk_limit)
+
+            # Min Score
+            self.layout.addWidget(QLabel(tr("Min Chunk Score:")))
+            self.spin_min_score = QSpinBox()
+            self.spin_min_score.setRange(10, 500)
+            self.spin_min_score.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_min_score)
+
+            # Max Final
+            self.layout.addWidget(QLabel(tr("Max Final Results:")))
+            self.spin_max_final = QSpinBox()
+            self.spin_max_final.setRange(10, 10000)
+            self.spin_max_final.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_max_final)
+
+            self.layout.addStretch()
+
+    def refresh_values(self):
+        if not self.settings: return
+        self.blockSignals(True)
+        if self.mode == 'search':
+            self.spin_min.setValue(self.settings.min_should_match)
+            self.spin_limit.setValue(self.settings.candidate_limit)
+        elif self.mode == 'comp':
+            self.spin_chunk_limit.setValue(self.settings.comp_chunk_limit)
+            self.spin_min_score.setValue(self.settings.comp_min_score)
+            self.spin_max_final.setValue(self.settings.comp_max_final_results)
+        self.blockSignals(False)
+
+    def on_change(self):
+        if not self.settings: return
+        if self.mode == 'search':
+            self.settings.min_should_match = self.spin_min.value()
+            self.settings.candidate_limit = self.spin_limit.value()
+        elif self.mode == 'comp':
+            self.settings.comp_chunk_limit = self.spin_chunk_limit.value()
+            self.settings.comp_min_score = self.spin_min_score.value()
+            self.settings.comp_max_final_results = self.spin_max_final.value()
+        self.settings.save()
+
+    def open_scoring(self):
+         if not self.lab_engine: return
+         d = LabScoringDialog(self, self.lab_engine)
+         d.exec()
+
+    def _mark_rebuild_required(self):
+        if self.lab_engine.lab_index_needs_rebuild:
+            self.lbl_idx_status.setText(tr("Index missing or outdated."))
+            self.lbl_idx_status.setStyleSheet("color: #c0392b;")
+        else:
+            self.lbl_idx_status.setText(tr("Index is ready."))
+            self.lbl_idx_status.setStyleSheet("color: #27ae60;")
 
     def run_rebuild(self):
         self.btn_rebuild.setEnabled(False)
@@ -215,14 +287,6 @@ class LabSettingsDialog(QDialog):
         self.worker.finished_sig.connect(self.on_rebuild_finished)
         self.worker.error_sig.connect(self.on_rebuild_error)
         self.worker.start()
-
-    def _mark_rebuild_required(self):
-        if self.lab_engine.lab_index_needs_rebuild:
-            self.lbl_idx_status.setText(tr("Index missing or outdated."))
-            self.lbl_idx_status.setStyleSheet("color: #c0392b;")
-        else:
-            self.lbl_idx_status.setText(tr("Index is ready."))
-            self.lbl_idx_status.setStyleSheet("color: #27ae60;")
 
     def on_rebuild_progress(self, current, total):
         self.lbl_idx_status.setText(tr("Processing docs: {}").format(current))
@@ -1395,6 +1459,17 @@ class GenizahGUI(QMainWindow):
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
 
+            # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
+            if hasattr(self, 'lab_panel_search'):
+                self.lab_panel_search.set_engine(self.lab_engine)
+            else:
+                logger.warning("lab_panel_search not found during startup finish")
+
+            if hasattr(self, 'lab_panel_comp'):
+                self.lab_panel_comp.set_engine(self.lab_engine)
+            else:
+                logger.warning("lab_panel_comp not found during startup finish")
+
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
 
@@ -1495,7 +1570,7 @@ class GenizahGUI(QMainWindow):
         self.btn_lab_settings = QPushButton()
         self.btn_lab_settings.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
         self.btn_lab_settings.setToolTip(tr("Lab Settings"))
-        self.btn_lab_settings.clicked.connect(self.open_lab_settings)
+        self.btn_lab_settings.clicked.connect(self.toggle_lab_panel_search)
         self.btn_lab_settings.setFixedWidth(30)
 
         # Help Button
@@ -1511,6 +1586,9 @@ class GenizahGUI(QMainWindow):
         top.addWidget(self.chk_lab_mode); top.addWidget(self.btn_lab_settings)
         top.addWidget(btn_help)
         layout.addLayout(top)
+
+        self.lab_panel_search = LabPanel(self, 'search')
+        layout.addWidget(self.lab_panel_search)
         
         self.search_progress = QProgressBar(); self.search_progress.setVisible(False)
         layout.addWidget(self.search_progress)
@@ -1657,7 +1735,7 @@ class GenizahGUI(QMainWindow):
         self.btn_lab_settings_comp = QPushButton()
         self.btn_lab_settings_comp.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
         self.btn_lab_settings_comp.setToolTip(tr("Lab Settings"))
-        self.btn_lab_settings_comp.clicked.connect(self.open_lab_settings)
+        self.btn_lab_settings_comp.clicked.connect(self.toggle_lab_panel_comp)
         self.btn_lab_settings_comp.setFixedWidth(30)
 
 
@@ -1675,6 +1753,10 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.chk_lab_mode_comp); cr.addWidget(self.btn_lab_settings_comp)
         cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
+
+        self.lab_panel_comp = LabPanel(self, 'comp')
+        in_l.addWidget(self.lab_panel_comp)
+
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
@@ -2178,12 +2260,13 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_mode.blockSignals(False)
         self.chk_lab_mode_comp.blockSignals(False)
 
-    def open_lab_settings(self):
-        if not self.lab_engine:
-            QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
-            return
-        d = LabSettingsDialog(self, self.lab_engine)
-        d.exec()
+    def toggle_lab_panel_search(self):
+        if not hasattr(self, 'lab_panel_search'): return
+        self.lab_panel_search.setVisible(not self.lab_panel_search.isVisible())
+
+    def toggle_lab_panel_comp(self):
+        if not hasattr(self, 'lab_panel_comp'): return
+        self.lab_panel_comp.setVisible(not self.lab_panel_comp.isVisible())
 
     def toggle_search(self):
         if not self.searcher: return
