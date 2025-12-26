@@ -220,6 +220,11 @@ class LabPanel(QFrame):
 
             self.layout.addStretch()
 
+            # Advanced Scoring
+            self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.clicked.connect(self.open_scoring)
+            self.layout.addWidget(self.btn_scoring)
+
     def refresh_values(self):
         if not self.settings: return
         self.blockSignals(True)
@@ -1564,14 +1569,9 @@ class GenizahGUI(QMainWindow):
         self.btn_ai.setEnabled(False)
 
         # Lab Mode Controls
-        self.chk_lab_mode = QCheckBox(tr("Lab Mode"))
-        self.chk_lab_mode.toggled.connect(self.toggle_lab_mode_sync)
-
-        self.btn_lab_settings = QPushButton()
-        self.btn_lab_settings.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self.btn_lab_settings.setToolTip(tr("Lab Settings"))
-        self.btn_lab_settings.clicked.connect(self.toggle_lab_panel_search)
-        self.btn_lab_settings.setFixedWidth(30)
+        self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
+        self.btn_lab_mode_toggle.setCheckable(True)
+        self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
 
         # Help Button
         btn_help = QPushButton("?")
@@ -1583,7 +1583,7 @@ class GenizahGUI(QMainWindow):
         top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
         top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
         top.addWidget(self.btn_search); top.addWidget(self.btn_ai)
-        top.addWidget(self.chk_lab_mode); top.addWidget(self.btn_lab_settings)
+        top.addWidget(self.btn_lab_mode_toggle)
         top.addWidget(btn_help)
         layout.addLayout(top)
 
@@ -1729,15 +1729,9 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
         # Lab Mode Controls (Comp Tab)
-        self.chk_lab_mode_comp = QCheckBox(tr("Lab Mode"))
-        self.chk_lab_mode_comp.toggled.connect(self.toggle_lab_mode_sync)
-
-        self.btn_lab_settings_comp = QPushButton()
-        self.btn_lab_settings_comp.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self.btn_lab_settings_comp.setToolTip(tr("Lab Settings"))
-        self.btn_lab_settings_comp.clicked.connect(self.toggle_lab_panel_comp)
-        self.btn_lab_settings_comp.setFixedWidth(30)
-
+        self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
+        self.btn_lab_mode_toggle_comp.setCheckable(True)
+        self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
@@ -1750,7 +1744,7 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.lbl_exclude_status)
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
-        cr.addWidget(self.chk_lab_mode_comp); cr.addWidget(self.btn_lab_settings_comp)
+        cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
         in_l.addLayout(cr)
 
@@ -2210,7 +2204,7 @@ class GenizahGUI(QMainWindow):
 
         # Lab Mode: save to Lab Dir
         base_dir = Config.REPORTS_DIR
-        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked():
+        if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked():
             base_dir = os.path.join(Config.BASE_DIR, "Reports")
 
         os.makedirs(base_dir, exist_ok=True)
@@ -2231,7 +2225,7 @@ class GenizahGUI(QMainWindow):
         return final_text + "\n"
 
     def _get_lab_config_block(self):
-        if getattr(self, 'chk_lab_mode', None) and self.chk_lab_mode.isChecked() and self.lab_engine:
+        if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
             settings_dump = json.dumps({
                 'custom_variants': self.lab_engine.settings.custom_variants,
                 'candidate_limit': self.lab_engine.settings.candidate_limit,
@@ -2251,22 +2245,33 @@ class GenizahGUI(QMainWindow):
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
-    def toggle_lab_mode_sync(self, checked):
-        # Sync the two checkboxes
-        self.chk_lab_mode.blockSignals(True)
-        self.chk_lab_mode_comp.blockSignals(True)
-        self.chk_lab_mode.setChecked(checked)
-        self.chk_lab_mode_comp.setChecked(checked)
-        self.chk_lab_mode.blockSignals(False)
-        self.chk_lab_mode_comp.blockSignals(False)
+    def on_lab_mode_toggled_search(self, checked):
+        # Show/Hide Panel
+        if hasattr(self, 'lab_panel_search'):
+            self.lab_panel_search.setVisible(checked)
 
-    def toggle_lab_panel_search(self):
-        if not hasattr(self, 'lab_panel_search'): return
-        self.lab_panel_search.setVisible(not self.lab_panel_search.isVisible())
+        # Sync Comp Button
+        if hasattr(self, 'btn_lab_mode_toggle_comp'):
+            self.btn_lab_mode_toggle_comp.blockSignals(True)
+            self.btn_lab_mode_toggle_comp.setChecked(checked)
+            self.btn_lab_mode_toggle_comp.blockSignals(False)
+            # Ensure comp panel visibility matches too
+            if hasattr(self, 'lab_panel_comp'):
+                self.lab_panel_comp.setVisible(checked)
 
-    def toggle_lab_panel_comp(self):
-        if not hasattr(self, 'lab_panel_comp'): return
-        self.lab_panel_comp.setVisible(not self.lab_panel_comp.isVisible())
+    def on_lab_mode_toggled_comp(self, checked):
+        # Show/Hide Panel
+        if hasattr(self, 'lab_panel_comp'):
+            self.lab_panel_comp.setVisible(checked)
+
+        # Sync Search Button
+        if hasattr(self, 'btn_lab_mode_toggle'):
+            self.btn_lab_mode_toggle.blockSignals(True)
+            self.btn_lab_mode_toggle.setChecked(checked)
+            self.btn_lab_mode_toggle.blockSignals(False)
+            # Ensure search panel visibility matches too
+            if hasattr(self, 'lab_panel_search'):
+                self.lab_panel_search.setVisible(checked)
 
     def toggle_search(self):
         if not self.searcher: return
@@ -2299,7 +2304,7 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
 
-        if self.chk_lab_mode.isChecked():
+        if self.btn_lab_mode_toggle.isChecked():
             if not self.lab_engine:
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
@@ -3223,7 +3228,7 @@ class GenizahGUI(QMainWindow):
         excluded_ids = self.excluded_raw_entries
 
         # 1. נתיב מעבדה (LAB MODE)
-        if self.chk_lab_mode_comp.isChecked():
+        if self.btn_lab_mode_toggle_comp.isChecked():
             if not self.lab_engine:
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_comp_ui()
