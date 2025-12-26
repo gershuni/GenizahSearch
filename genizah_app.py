@@ -2415,11 +2415,25 @@ class GenizahGUI(QMainWindow):
             self.btn_stop_meta.setEnabled(False)
             return
 
-        self.status_label.setText(tr("Found {}. Loading metadata...").format(len(results)))
         self.last_results = results 
+
+        # Display Limit Logic (Lab Mode)
+        display_limit = len(results)
+        if self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
+            display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500)
+
+        visible_count = min(len(results), display_limit)
+
+        if visible_count < len(results):
+            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(visible_count, len(results)))
+            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
+        else:
+            self.status_label.setText(tr("Found {} results. Loading metadata...").format(len(results)))
+            self.status_label.setStyleSheet("color: black;")
+
         for b in self.export_buttons: b.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
-        self.results_table.setRowCount(len(results))
+        self.results_table.setRowCount(visible_count)
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -2430,45 +2444,46 @@ class GenizahGUI(QMainWindow):
             meta = res['display']
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta.get('id')
-            # Col 0: System ID (Store full result data here for retrieval after sort)
-            item_sid = QTableWidgetItem(sid)
-            item_sid.setData(Qt.ItemDataRole.UserRole, res)
-            self.results_table.setItem(i, 0, item_sid)
 
+            # Metadata Collection (Always collect all IDs for export readiness)
             # Pull immediate metadata from CSV/cache
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
-
-            # Fallback decision: only queue background fetch if CSV/cache didn't provide useful data
             needs_fetch = (shelf == "Unknown" and (not title))
+            if needs_fetch: ids.append(sid)
 
-            if needs_fetch:
-                ids.append(sid)  
-                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
-                item_title = QTableWidgetItem(tr("Loading..."))
-            else:
-                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
+            # Table Population (Respect Display Limit)
+            if i < visible_count:
+                # Col 0: System ID (Store full result data here for retrieval after sort)
+                item_sid = QTableWidgetItem(sid)
+                item_sid.setData(Qt.ItemDataRole.UserRole, res)
+                self.results_table.setItem(i, 0, item_sid)
 
-            # Col 1: Shelfmark
-            self.results_table.setItem(i, 1, item_shelf)
-            self.shelfmark_items_by_sid[sid] = item_shelf
+                if needs_fetch:
+                    item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+                    item_title = QTableWidgetItem(tr("Loading..."))
+                else:
+                    item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
+                    item_title = QTableWidgetItem(title if title else "")
 
-            # Col 2: Title
-            self.results_table.setItem(i, 2, item_title)
-            self.title_items_by_sid[sid] = item_title
+                # Col 1: Shelfmark
+                self.results_table.setItem(i, 1, item_shelf)
+                self.shelfmark_items_by_sid[sid] = item_shelf
 
+                # Col 2: Title
+                self.results_table.setItem(i, 2, item_title)
+                self.title_items_by_sid[sid] = item_title
 
-            # Col 3: Snippet (Widget)
-            lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.results_table.setCellWidget(i, 3, lbl)
+                # Col 3: Snippet (Widget)
+                lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                self.results_table.setCellWidget(i, 3, lbl)
 
-            # Col 4: Img
-            self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
+                # Col 4: Img
+                self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
 
-            # Col 5: Source
-            self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+                # Col 5: Source
+                self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
 
-            self.result_row_by_sys_id[sid] = i
+                self.result_row_by_sys_id[sid] = i
 
         self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
