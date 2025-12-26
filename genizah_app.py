@@ -2519,64 +2519,145 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area.setFocus()
 
     def export_results(self, fmt='xlsx'):
-        if not self.last_results:
-            QMessageBox.warning(self, tr("Save"), tr("No results to export."))
-            return
+        """
+        Export results handling specific formats directly.
+        fmt: 'xlsx', 'csv', or 'txt'
+        """
+        def clean_for_excel(text):
+            t = str(text).strip()
+            if t.startswith(('=', '+', '-', '@')):
+                return "'" + t
+            return t
 
-        default_name = f"{tr('Search_Results')}_{int(time.time())}"
-        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"),
-            os.path.join(Config.RESULTS_DIR, f"{default_name}.{fmt}"),
-            f"{fmt.upper()} (*.{fmt})")
+        base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
+        default_path = os.path.splitext(base_path)[0] + f".{fmt}"
+
+        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
+        selected_filter = filters.get(fmt, "All Files (*.*)")
+
+        path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
 
-        try:
-            headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")]
-            rows = []
+        # Prepare tabular data
+        headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+        data_rows = []
+        for r in self.last_results:
+            d = r['display']
+            # Use raw_file_hl so highlight markers remain intact
+            data_rows.append([
+                d.get('id', ''),
+                d.get('shelfmark', ''),
+                d.get('title', ''),
+                str(d.get('img', '')),
+                d.get('source', ''),
+                r.get('raw_file_hl', '').strip()
+            ])
 
-            for res in self.last_results:
-                display = res.get('display', {})
-                sid = display.get('id', '')
-                shelf = display.get('shelfmark', '')
-                title = display.get('title', '')
-                snippet = res.get('snippet', '').replace("<br>", "\n")
-                snippet = re.sub(r'<[^>]+>', '', snippet)
-                img = display.get('img', '')
-                src = display.get('source', '')
-                rows.append([sid, shelf, title, snippet, img, src])
+        credit_text = self._get_credit_header()
 
-            if fmt == 'xlsx':
+        # --- XLSX with inline highlighting ---
+        if fmt == 'xlsx':
+            try:
                 wb = openpyxl.Workbook()
                 ws = wb.active
-                ws.title = "Search Results"
-                ws.sheet_view.rightToLeft = (CURRENT_LANG == 'he')
-                for col, h in enumerate(headers, 1):
-                    ws.cell(row=1, column=col, value=h).font = Font(bold=True)
-                for r_idx, row in enumerate(rows, 2):
-                    for c_idx, val in enumerate(row, 1):
+                ws.title = "Genizah Results"
+                ws.sheet_view.rightToLeft = True
+
+                # Fonts used for rich text snippets
+                font_red = InlineFont(color='FF0000', b=True)
+                font_normal = InlineFont(color='000000')
+
+                # Helper to write rich text cells
+                def write_rich_cell(row, col, text):
+                    # No markers: write as-is with formula guard
+                    if '*' not in text:
+                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                        return
+
+                    # Split by asterisk markers
+                    parts = text.split('*')
+                    rich_string = CellRichText()
+
+                    for i, part in enumerate(parts):
+                        if not part: continue
+                        # Odd indices represent highlighted text
+                        if i % 2 == 1:
+                            rich_string.append(TextBlock(font_red, part))
+                        else:
+                            # Even indices are plain text
+                            rich_string.append(TextBlock(font_normal, part))
+
+                    ws.cell(row=row, column=col, value=rich_string)
+
+                # Credit header
+                current_row = 1
+                for line in credit_text.split('\n'):
+                    if not line.strip(): continue
+                    cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                    cell.font = Font(bold=True, color="555555")
+                    current_row += 1
+                current_row += 1
+
+                # Table headers
+                for col_idx, header in enumerate(headers, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=header)
+                    cell.font = Font(bold=True, color="FFFFFF")
+                    cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                current_row += 1
+
+                # Data rows
+                for row_data in data_rows:
+                    for col_idx, val in enumerate(row_data, 1):
                         val_str = str(val)
-                        val_str = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', val_str)
-                        if len(val_str) > 32000: val_str = val_str[:32000] + "..."
-                        ws.cell(row=r_idx, column=c_idx, value=val_str)
+
+                        # Column 6 holds the snippet
+                        if col_idx == 6:
+                            write_rich_cell(current_row, col_idx, val_str)
+                        else:
+                            # Strip HTML tags in other columns
+                            clean_val = re.sub(r'<[^>]+>', '', val_str)
+                            ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
+
+                    current_row += 1
+
+                # Column widths
+                ws.column_dimensions['A'].width = 15
+                ws.column_dimensions['B'].width = 20
+                ws.column_dimensions['C'].width = 40
+                ws.column_dimensions['F'].width = 80  # Wider snippet column
+
                 wb.save(path)
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
-            elif fmt == 'csv':
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
+
+        # --- CSV ---
+        elif fmt == 'csv':
+            try:
                 with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                    f.write(credit_text)
                     writer = csv.writer(f)
+                    writer.writerow([])
                     writer.writerow(headers)
-                    writer.writerows(rows)
+                    for row in data_rows:
+                        # Strip HTML but keep highlight markers
+                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        writer.writerow(clean_row)
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
 
-            elif fmt == 'txt':
+        # --- TXT ---
+        else:
+            try:
                 with open(path, 'w', encoding='utf-8') as f:
-                    f.write(f"{tr('Search Results')}\n{'='*20}\n\n")
-                    for r in rows:
-                        f.write(f"ID: {r[0]} | Shelf: {r[1]} | Title: {r[2]}\n")
-                        f.write(f"{r[3]}\n")
-                        f.write("-" * 40 + "\n")
-
-            QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-
-        except Exception as e:
-            QMessageBox.critical(self, tr("Error"), f"Failed to save: {e}")
+                    f.write(credit_text)
+                    for r in self.last_results:
+                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{r.get('raw_file_hl','')}\n\n")
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
 
     def export_comp_report(self, fmt='xlsx'):
         # 1. איסוף נתונים (לוגיקה יציבה)

@@ -4,22 +4,16 @@ import shutil
 from unittest.mock import MagicMock
 import PyQt6.QtWidgets
 
-# Mock GUI elements to prevent blocking
+# Mock GUI elements
 PyQt6.QtWidgets.QMessageBox = MagicMock()
 PyQt6.QtWidgets.QFileDialog = MagicMock()
 PyQt6.QtWidgets.QFileDialog.getSaveFileName.return_value = ("test_export.csv", "CSV")
 
-# Force headless platform
+# Force headless
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from genizah_app import GenizahGUI
 from PyQt6.QtWidgets import QApplication
-
-print(f"GenizahGUI attributes: {dir(GenizahGUI)}")
-
-if not hasattr(GenizahGUI, 'export_results'):
-    print("FATAL: GenizahGUI class does not have export_results method.")
-    sys.exit(1)
 
 # Setup
 app = QApplication(sys.argv)
@@ -30,12 +24,14 @@ gui.last_results = [
     {
         'display': {'id': '123', 'shelfmark': 'Shelf 1', 'title': 'Title 1', 'img': '1', 'source': 'Src'},
         'snippet': 'Snippet 1',
-        'raw_header': '123_Header'
+        'raw_header': '123_Header',
+        'raw_file_hl': 'Snippet 1 *Highlight*'
     },
     {
         'display': {'id': '456', 'shelfmark': 'Shelf 2', 'title': 'Title 2', 'img': '2', 'source': 'Src'},
         'snippet': 'Snippet 2',
-        'raw_header': '456_Header'
+        'raw_header': '456_Header',
+        'raw_file_hl': 'Snippet 2'
     }
 ]
 
@@ -45,6 +41,8 @@ try:
     gui.export_results('csv')
 except Exception as e:
     print(f"Export crashed: {e}")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 
 # Verify file exists
