@@ -138,8 +138,8 @@ class LabPanel(QFrame):
         self.settings = None
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
-        # Light gray background
-        self.setStyleSheet("background-color: #f0f0f0; border-radius: 5px; margin-bottom: 5px;")
+        # Removed hardcoded background color to support both light and dark themes
+        self.setStyleSheet("border-radius: 5px; margin-bottom: 5px;")
 
         self.init_ui()
         self.setVisible(False)
