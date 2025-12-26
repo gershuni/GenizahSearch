@@ -1589,6 +1589,7 @@ class GenizahGUI(QMainWindow):
         # Lab Mode Controls
         self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle.setCheckable(True)
+        self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
 
         # Help Button
@@ -1757,6 +1758,7 @@ class GenizahGUI(QMainWindow):
         # Lab Mode Controls (Comp Tab)
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle_comp.setCheckable(True)
+        self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
@@ -2711,14 +2713,32 @@ class GenizahGUI(QMainWindow):
         data_rows = []
         for r in self.last_results:
             d = r['display']
+            sid = d.get('id', '')
+
+            # Fetch fresh metadata (Important for Lab Mode)
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                shelf = d.get('shelfmark', '')
+            if not title:
+                title = d.get('title', '')
+
             # Use raw_file_hl so highlight markers remain intact
-            # Clean snippet: remove newlines for single-line export
-            snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+            # Clean snippet: remove newlines and HTML tags (convert span to *)
+            raw_hl = r.get('raw_file_hl', '')
+
+            # Clean HTML tags if present (Lab Mode)
+            snippet = str(raw_hl)
+            if "<" in snippet:
+                snippet = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", snippet, flags=re.DOTALL)
+                snippet = re.sub(r"<[^>]+>", "", snippet)
+
+            snippet = snippet.strip().replace('\n', ' ').replace('\r', '')
+            snippet = re.sub(r'\s+', ' ', snippet)
 
             data_rows.append([
-                d.get('id', ''),
-                d.get('shelfmark', ''),
-                d.get('title', ''),
+                sid,
+                shelf,
+                title,
                 str(d.get('img', '')),
                 d.get('source', ''),
                 snippet
@@ -2903,17 +2923,16 @@ class GenizahGUI(QMainWindow):
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
-            if "<span" in t:
-                # Replace styled span with asterisks
-                t = re.sub(r'<span[^>]*>', '*', t)
-                t = t.replace('</span>', '*')
+            # 1. Convert Spans to Markers (Handle content inside)
+            t = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", t, flags=re.DOTALL)
 
-            # Remove newlines for single-line output
+            # 2. Remove newlines and BR
             t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", "")
-            # Remove any remaining HTML tags
+
+            # 3. Remove any remaining HTML tags (div, etc)
             t = re.sub(r'<[^>]+>', '', t)
 
-            # Collapse multiple spaces
+            # 4. Collapse multiple spaces
             t = re.sub(r'\s+', ' ', t)
 
             return t.strip()
@@ -3088,8 +3107,8 @@ class GenizahGUI(QMainWindow):
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             src_clean = _clean_and_marker(page.get('source_ctx', '')).replace('*', '')
-                             ms_clean = _clean_and_marker(page.get('text', '')).replace('*', '')
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
                              ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
                              ms_block.append(tr("Source Context") + ":\n" + src_clean)
                              ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
