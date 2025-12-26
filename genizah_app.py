@@ -106,6 +106,11 @@ class LabScoringDialog(QDialog):
         self.spin_common_factor = QDoubleSpinBox(); self.spin_common_factor.setRange(0.0, 1.0); self.spin_common_factor.setValue(self.settings.common_penalty_factor)
         grid.addWidget(QLabel(tr("Repeated Word Factor:")), 9, 0); grid.addWidget(self.spin_common_factor, 9, 1)
 
+        # Display Limit
+        self.spin_display_limit = QSpinBox(); self.spin_display_limit.setRange(50, 1000); self.spin_display_limit.setValue(getattr(self.settings, 'lab_display_limit', 500))
+        self.spin_display_limit.setToolTip(tr("Lower values prevent the app from freezing. All results are still exported."))
+        grid.addWidget(QLabel(tr("Max Results to Display:")), 10, 0); grid.addWidget(self.spin_display_limit, 10, 1)
+
         layout.addLayout(grid)
         layout.addStretch()
         
@@ -127,6 +132,7 @@ class LabScoringDialog(QDialog):
             self.settings.stop_word_score = self.spin_stop_score.value()
             self.settings.common_3char_score = self.spin_common3_score.value()
         
+        self.settings.lab_display_limit = self.spin_display_limit.value()
         self.settings.save()
         self.accept()
 
@@ -1762,6 +1768,10 @@ class GenizahGUI(QMainWindow):
 
         cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
         cr.addWidget(self.lbl_exclude_status)
+
+        self.lbl_comp_status = QLabel("")
+        cr.addWidget(self.lbl_comp_status)
+
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
 
@@ -3740,6 +3750,23 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
+        # Display Limit Logic
+        display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500) if self.lab_engine else 500
+
+        full_main_count = len(clean_main)
+        visible_main = clean_main[:display_limit]
+
+        msg_color = "black"
+        if len(visible_main) < full_main_count:
+            status_msg = tr("Showing top {} of {} results. (Export for full list)").format(len(visible_main), full_main_count)
+            msg_color = "#e67e22" # Orange
+        else:
+            status_msg = tr("Found {} results.").format(full_main_count)
+
+        if hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(status_msg)
+            self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
+
         # איסוף IDs לטעינת מטא-דאטה
         ids_to_fetch = set()
         def _collect_id(item):
@@ -3822,23 +3849,26 @@ class GenizahGUI(QMainWindow):
             )
             # מיון ידני באמצעות הלוגיקה שלך
             sorted_flat = self._sort_comp_items(all_flat)
+            visible_flat = sorted_flat[:display_limit]
             
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_flat))])
+            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
             make_checkable(root)
             
-            for item in sorted_flat:
+            for item in visible_flat:
                 add_manuscript_node(root, item)
 
         # ב. מצב היררכי (Grouped)
         else:
-            # 1. Main Results
+            # 1. Main Results (Sliced)
             sorted_main = self._sort_comp_items(clean_main)
-            if sorted_main:
-                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(sorted_main))])
+            visible_sorted_main = sorted_main[:display_limit]
+
+            if visible_sorted_main:
+                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
                 root_main.setExpanded(True)
                 make_checkable(root_main)
-                for item in sorted_main:
+                for item in visible_sorted_main:
                     add_manuscript_node(root_main, item)
 
             # 2. Appendix

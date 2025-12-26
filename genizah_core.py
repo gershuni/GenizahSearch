@@ -105,6 +105,9 @@ class LabSettings:
         # Deep Scan Settings
         self.lab_scan_limit = 50000
 
+        # Display Limit
+        self.lab_display_limit = 500
+
         self.load()
 
     def load(self):
@@ -133,6 +136,7 @@ class LabSettings:
                     self.comp_max_final_results = data.get('comp_max_final_results', 100)
 
                     self.lab_scan_limit = data.get('lab_scan_limit', 50000)
+                    self.lab_display_limit = data.get('lab_display_limit', 500)
             except Exception: pass
 
     def save(self):
@@ -160,7 +164,8 @@ class LabSettings:
                     'comp_min_score': self.comp_min_score,
                     'comp_max_final_results': self.comp_max_final_results,
 
-                    'lab_scan_limit': self.lab_scan_limit
+                    'lab_scan_limit': self.lab_scan_limit,
+                    'lab_display_limit': self.lab_display_limit
                 }, f, indent=4)
         except Exception: pass
 
