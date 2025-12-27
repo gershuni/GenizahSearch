@@ -3819,7 +3819,7 @@ class GenizahGUI(QMainWindow):
         else:
             # 1. Main Results (Sliced)
             sorted_main = self._sort_comp_items(clean_main)
-            visible_sorted_main = sorted_main[:display_limit]
+            visible_sorted_main = sorted_main
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
