@@ -265,6 +265,14 @@ TRANSLATIONS = {
     "Copied": "הועתק",
     "Configuration JSON copied to clipboard.": "קובץ תצורה JSON הועתק ללוח.",
 
+    # --- Lab Tooltips ---
+    "Minimum percentage of query terms required to consider a result relevant.": "אחוז מינימלי של מונחי שאילתה הדרוש כדי להחשיב תוצאה כרלוונטית.",
+    "Maximum number of raw candidates to fetch from the index before detailed scoring.": "מספר מקסימלי של מועמדים גולמיים לשליפה מהאינדקס לפני ניקוד מפורט.",
+    "Maximum number of documents to scan in Deep Scan mode.": "מספר מקסימלי של מסמכים לסריקה במצב סריקה עמוקה.",
+    "Maximum number of index hits to process per text chunk.": "מספר מקסימלי של תוצאות אינדקס לעיבוד עבור כל גוש טקסט.",
+    "Minimum score required for a chunk to be considered a match.": "ציון מינימלי הדרוש לגוש כדי להיחשב כהתאמה.",
+    "Maximum number of results to display in the tree (prevents freezing). All results are exported.": "מספר מקסימלי של תוצאות להצגה בעץ (מונע קפיאה). כל התוצאות מיוצאות.",
+
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
     "Result {} of {}": "תוצאה {} מתוך {}", 

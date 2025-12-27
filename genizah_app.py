@@ -166,6 +166,7 @@ class LabPanel(QFrame):
 
         # Shared: Rebuild
         self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
+        self.btn_rebuild.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
         self.btn_rebuild.clicked.connect(self.run_rebuild)
         self.layout.addWidget(self.btn_rebuild)
 
@@ -181,6 +182,7 @@ class LabPanel(QFrame):
             # Min Match
             self.layout.addWidget(QLabel(tr("Minimum Match %:")))
             self.spin_min = QSpinBox()
+            self.spin_min.setToolTip(tr("Minimum percentage of query terms required to consider a result relevant."))
             self.spin_min.setRange(10, 100)
             self.spin_min.setSuffix("%")
             self.spin_min.valueChanged.connect(self.on_change)
@@ -189,6 +191,7 @@ class LabPanel(QFrame):
             # Candidate Limit
             self.layout.addWidget(QLabel(tr("Max Results to Process:")))
             self.spin_limit = QSpinBox()
+            self.spin_limit.setToolTip(tr("Maximum number of raw candidates to fetch from the index before detailed scoring."))
             self.spin_limit.setRange(500, 1000000)
             self.spin_limit.setSingleStep(500)
             self.spin_limit.valueChanged.connect(self.on_change)
@@ -197,6 +200,7 @@ class LabPanel(QFrame):
             # Deep Scan Limit
             self.layout.addWidget(QLabel(tr("Deep Limit:")))
             self.spin_scan_limit = QSpinBox()
+            self.spin_scan_limit.setToolTip(tr("Maximum number of documents to scan in Deep Scan mode."))
             self.spin_scan_limit.setRange(10000, 1000000)
             self.spin_scan_limit.setSingleStep(10000)
             self.spin_scan_limit.valueChanged.connect(self.on_change)
@@ -206,6 +210,7 @@ class LabPanel(QFrame):
 
             # Advanced Scoring
             self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
             self.btn_scoring.clicked.connect(self.open_scoring)
             self.layout.addWidget(self.btn_scoring)
 
@@ -213,6 +218,7 @@ class LabPanel(QFrame):
             # Chunk Limit
             self.layout.addWidget(QLabel(tr("Max Candidates per Chunk:")))
             self.spin_chunk_limit = QSpinBox()
+            self.spin_chunk_limit.setToolTip(tr("Maximum number of index hits to process per text chunk."))
             self.spin_chunk_limit.setRange(50, 5000)
             self.spin_chunk_limit.setSingleStep(50)
             self.spin_chunk_limit.valueChanged.connect(self.on_change)
@@ -221,6 +227,7 @@ class LabPanel(QFrame):
             # Min Score
             self.layout.addWidget(QLabel(tr("Min Chunk Score:")))
             self.spin_min_score = QSpinBox()
+            self.spin_min_score.setToolTip(tr("Minimum score required for a chunk to be considered a match."))
             self.spin_min_score.setRange(10, 500)
             self.spin_min_score.valueChanged.connect(self.on_change)
             self.layout.addWidget(self.spin_min_score)
@@ -228,7 +235,9 @@ class LabPanel(QFrame):
             # Max Final
             self.layout.addWidget(QLabel(tr("Max Final Results:")))
             self.spin_max_final = QSpinBox()
-            self.spin_max_final.setRange(10, 10000)
+            self.spin_max_final.setToolTip(tr("Maximum number of results to display in the tree (prevents freezing). All results are exported."))
+            self.spin_max_final.setRange(10, 250)
+            self.spin_max_final.setValue(200)
             self.spin_max_final.valueChanged.connect(self.on_change)
             self.layout.addWidget(self.spin_max_final)
 
@@ -236,6 +245,7 @@ class LabPanel(QFrame):
 
             # Advanced Scoring
             self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
             self.btn_scoring.clicked.connect(self.open_scoring)
             self.layout.addWidget(self.btn_scoring)
 
@@ -3698,8 +3708,10 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
-        # Display Limit Logic
-        display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500) if self.lab_engine else 500
+        # Display Limit Logic (Composition Tree only - stricter limit to prevent freeze)
+        display_limit = 200
+        if self.lab_engine and hasattr(self.lab_engine.settings, 'comp_max_final_results'):
+            display_limit = self.lab_engine.settings.comp_max_final_results
 
         full_main_count = len(clean_main)
         visible_main = clean_main[:display_limit]
