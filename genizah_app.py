@@ -4573,7 +4573,19 @@ class GenizahGUI(QMainWindow):
             stored_data = item.data(1, Qt.ItemDataRole.UserRole)
             if stored_data:
                 ctx, snippet = stored_data
-                self._set_comp_node_previews(item, ctx, snippet)
+
+                # Try to retrieve highlight pattern from the main item data (Role 0)
+                item_data = item.data(0, Qt.ItemDataRole.UserRole)
+                pattern = None
+                if item_data:
+                    if item_data.get('type') == 'manuscript':
+                        pages = item_data.get('pages', [])
+                        if pages:
+                            pattern = pages[0].get('highlight_pattern')
+                    else:
+                        pattern = item_data.get('highlight_pattern')
+
+                self._set_comp_node_previews(item, ctx, snippet, pattern)
 
     def on_comp_item_double_clicked(self, item, column):
         """
