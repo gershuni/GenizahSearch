@@ -1728,6 +1728,10 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
+        # Load Button moved to top row
+        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        top_row.addWidget(btn_load)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -1740,27 +1744,21 @@ class GenizahGUI(QMainWindow):
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
-        # Controls Container
-        controls_container = QWidget()
-        controls_layout = QVBoxLayout(controls_container)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
+        # Single Row for Controls
+        cr = QHBoxLayout()
 
-        # Row 1: File Operations & Status
-        row1 = QHBoxLayout()
-        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        # 1. Exclude & Filter
         btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
         btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
         self.lbl_comp_status = QLabel("")
 
-        row1.addWidget(btn_load); row1.addWidget(btn_exclude); row1.addWidget(btn_filter_text)
-        row1.addWidget(self.lbl_exclude_status)
-        row1.addWidget(self.lbl_comp_status)
-        row1.addStretch()
+        cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
+        cr.addWidget(self.lbl_exclude_status)
+        cr.addWidget(self.lbl_comp_status)
 
-        # Row 2: Search Parameters
-        row2 = QHBoxLayout()
+        # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         
@@ -1777,17 +1775,15 @@ class GenizahGUI(QMainWindow):
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
-        self.chk_comp_flat = QCheckBox(tr("Sort by System ID/Shelfmark only"))
+        # Shortened Text
+        self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
-        row2.addWidget(self.spin_chunk); row2.addWidget(self.spin_freq)
-        row2.addWidget(self.comp_mode_combo); row2.addWidget(self.spin_filter); row2.addWidget(self.chk_comp_flat)
-        row2.addStretch()
+        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
 
-        # Row 3: Actions & Lab Mode
-        row3 = QHBoxLayout()
-        # Lab Mode Controls (Comp Tab)
+        # 3. Lab & Action
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle_comp.setCheckable(True)
         self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
@@ -1798,24 +1794,20 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep_comp.setEnabled(False)
         self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
 
-        self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        # Shortened Text
+        self.btn_comp_run = QPushButton(tr("Analyze")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
         self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
 
-        row3.addWidget(self.btn_lab_mode_toggle_comp)
-        row3.addWidget(self.chk_lab_deep_comp)
-        row3.addStretch()
-        row3.addWidget(self.btn_comp_run)
-        row3.addWidget(self.btn_comp_recursive)
+        cr.addWidget(self.btn_lab_mode_toggle_comp)
+        cr.addWidget(self.chk_lab_deep_comp)
+        cr.addWidget(self.btn_comp_run)
+        cr.addWidget(self.btn_comp_recursive)
 
-        controls_layout.addLayout(row1)
-        controls_layout.addLayout(row2)
-        controls_layout.addLayout(row3)
-
-        in_l.addWidget(controls_container)
+        in_l.addLayout(cr)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
         in_l.addWidget(self.lab_panel_comp)
