@@ -102,6 +102,12 @@ class LabSettings:
         self.comp_min_score = 70
         self.comp_max_final_results = 100
         
+        # Deep Scan Settings
+        self.lab_scan_limit = 50000
+
+        # Display Limit
+        self.lab_display_limit = 500
+
         self.load()
 
     def load(self):
@@ -128,6 +134,9 @@ class LabSettings:
                     self.comp_chunk_limit = data.get('comp_chunk_limit', 200)
                     self.comp_min_score = data.get('comp_min_score', 70)
                     self.comp_max_final_results = data.get('comp_max_final_results', 100)
+
+                    self.lab_scan_limit = data.get('lab_scan_limit', 50000)
+                    self.lab_display_limit = data.get('lab_display_limit', 500)
             except Exception: pass
 
     def save(self):
@@ -153,7 +162,10 @@ class LabSettings:
 
                     'comp_chunk_limit': self.comp_chunk_limit,
                     'comp_min_score': self.comp_min_score,
-                    'comp_max_final_results': self.comp_max_final_results
+                    'comp_max_final_results': self.comp_max_final_results,
+
+                    'lab_scan_limit': self.lab_scan_limit,
+                    'lab_display_limit': self.lab_display_limit
                 }, f, indent=4)
         except Exception: pass
 
@@ -310,49 +322,80 @@ class LabEngine:
         self._reload_lab_index()
         return total_docs
 
-    def _execute_safe_search(self, query_str, slop=0):
+    def _create_lab_query(self, query_str, slop=0):
         """
-        Modified to support fuzzy matching based on sensitivity settings.
-        If min_should_match is 100%, uses a strict Phrase Query.
-        Otherwise, constructs a Boolean OR query to fetch candidates for filtering.
+        Helper to construct the Tantivy query object based on settings.
         """
         tokens = query_str.split()
         if not tokens:
             return None
 
-        # אם המשתמש דורש 100% התאמה, נשתמש בחיפוש המקורי (Phrase Query) שהוא המחמיר ביותר
+        # If 100% match required, use Phrase Query
         if self.settings.min_should_match >= 100:
             final_query_str = f'{self.LAB_FINGERPRINT_FIELD}:"{query_str}"~{slop}'
         else:
-            # אחרת, נבנה שאילתת OR כדי לקבל כל מסמך שמכיל לפחות חלק מהמילים
-            # הסינון המדויק לפי אחוזים יתבצע בפונקציה lab_search
-            # מבנה: fingerprint:token1 OR fingerprint:token2 ...
+            # OR query
             clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in tokens]
             final_query_str = " OR ".join(clauses)
 
-        # Strategy A: Call parse_query with ONE argument
-        try:
-            q = self.lab_index.parse_query(final_query_str)
-            return self.lab_searcher.search(q, self.settings.candidate_limit)
-        except Exception as e1:
-            pass
+        # Try parsing strategies
+        strategies = [
+            lambda: self.lab_index.parse_query(final_query_str),
+            lambda: self.lab_index.parse_query(final_query_str, [self.LAB_FINGERPRINT_FIELD]),
+            lambda: self.lab_index.parse_query(final_query_str, [self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)])
+        ]
 
-        # Strategy B: Call parse_query with explicit field list (STRINGS)
-        try:
-            # בחיפוש בוליאני מורכב, לפעמים צריך לציין את השדות ברירת המחדל
-            q = self.lab_index.parse_query(final_query_str, [self.LAB_FINGERPRINT_FIELD])
-            return self.lab_searcher.search(q, self.settings.candidate_limit)
-        except Exception as e2:
-            pass
+        for strategy in strategies:
+            try:
+                return strategy()
+            except Exception:
+                continue
 
-        # Strategy C: Call parse_query with explicit field list (INTS - Schema objects)
+        LAB_LOGGER.error("All query strategies failed.")
+        return None
+
+    def _execute_batched_search(self, query_obj, progress_callback=None, limit_override=None):
+        """
+        Executes a Tantivy search in memory-safe batches.
+        Yields (score, doc_address) tuples.
+        """
+        if not query_obj or not self.lab_searcher:
+            return
+
+        BATCH_SIZE = 5000
+        MAX_SCAN_LIMIT = limit_override if limit_override else 50000
+
+        # Determine strict limit
+        limit = MAX_SCAN_LIMIT
+
+        # 1. Fetch all candidate pointers (lightweight tuples)
+        # Note: tantivy-py search() returns all hits at once, but they are just (score, addr).
+        # This is memory-safe even for 50k items. The heavy lifting (doc loading) happens in the loop.
         try:
-            field_handle = self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)
-            q = self.lab_index.parse_query(final_query_str, [field_handle])
+            res = self.lab_searcher.search(query_obj, limit)
+        except Exception as e:
+            LAB_LOGGER.warning(f"Search execution failed: {e}")
+            return
+
+        hits = res.hits
+        total_hits = len(hits)
+
+        # 2. Iterate in batches to allow for progress updates / UI breathing
+        for i in range(0, total_hits, BATCH_SIZE):
+            batch = hits[i : i + BATCH_SIZE]
+
+            if progress_callback:
+                progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
+
+            for hit in batch:
+                yield hit
+
+    def _execute_safe_search(self, query_str, slop=0):
+        # Legacy wrapper kept if needed, but we mostly use _create_lab_query + _execute_batched_search now
+        q = self._create_lab_query(query_str, slop)
+        if q:
             return self.lab_searcher.search(q, self.settings.candidate_limit)
-        except Exception as e3:
-            LAB_LOGGER.error(f"All query strategies failed. Last: {e3}")
-            return None
+        return None
 
     def _get_term_weight(self, fp):
         """
@@ -522,34 +565,33 @@ class LabEngine:
 
     def _generate_highlighted_snippet(self, text, matches, best_window):
         """
-        Generates an HTML snippet with RED highlighting and surrounding context.
+        Generates a snippet with asterisk markers (*text*) for highlighting.
         """
         if not text: return ""
         if not matches: return text[:300]
 
         start_m_idx, end_m_idx = best_window
         
-        # הגנה על אינדקסים
+        # Guard indices
         start_m_idx = max(0, start_m_idx)
         end_m_idx = min(len(matches) - 1, end_m_idx)
 
-        # 1. קביעת גבולות הטקסט להצגה (100 תווים להקשר רחב)
+        # 1. Determine snippet bounds (100 chars context)
         padding = 100
         snippet_start_char = max(0, matches[start_m_idx]['start'] - padding)
         snippet_end_char = min(len(text), matches[end_m_idx]['end'] + padding)
         
-        # קוסמטיקה: לא לחתוך באמצע מילה
+        # Cosmetic: Don't cut in middle of word
         if snippet_start_char > 0:
             next_space = text.find(' ', snippet_start_char)
             if next_space != -1 and next_space < matches[start_m_idx]['start']:
                 snippet_start_char = next_space + 1
 
-        # 2. איסוף המילים הרלוונטיות
+        # 2. Collect relevant matches
         relevant_matches = matches[start_m_idx : end_m_idx + 1]
         
-        # 3. בניית ה-HTML
+        # 3. Build text
         out_parts = []
-        out_parts.append("<div dir='rtl' style='white-space: pre-wrap;'>") 
         
         if snippet_start_char > 0: out_parts.append("... ")
         
@@ -559,30 +601,28 @@ class LabEngine:
             if m['start'] < snippet_start_char: continue
             if m['end'] > snippet_end_char: break
             
-            # טקסט רגיל
+            # Plain text
             if m['start'] > current_idx:
                 plain = text[current_idx : m['start']]
                 out_parts.append(plain)
             
-            # מילה מודגשת באדום
+            # Highlighted word (Asterisks)
             word = text[m['start'] : m['end']]
-            out_parts.append(f"<span style='color:#ff0000; font-weight:bold;'>{word}</span>")
+            out_parts.append(f"*{word}*")
             
             current_idx = m['end']
         
-        # שארית
+        # Remainder
         if current_idx < snippet_end_char:
             out_parts.append(text[current_idx : snippet_end_char])
             
         if snippet_end_char < len(text): out_parts.append(" ...")
         
-        out_parts.append("</div>")
+        final_text = "".join(out_parts)
+        # Flatten for table display
+        return final_text.replace("\n", " ").replace("\r", "")
 
-        final_html = "".join(out_parts)
-        # המרת ירידות שורה לרווחים כדי לא לשבור את הטבלה
-        return final_html.replace("\n", " ").replace("\r", "")
-
-    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0):
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
 
         # 1. Prepare Fingerprints
@@ -593,14 +633,34 @@ class LabEngine:
         
         # 2. Fetch Candidates
         slop = max(50, int(self.settings.gap_penalty) * 10) 
-        res_obj = self._execute_safe_search(fp_str, slop)
-        if not res_obj: return []
+
+        query_obj = self._create_lab_query(fp_str, slop)
+        if not query_obj: return []
 
         results = []
         min_match_pct = self.settings.min_should_match
 
         # 3. Process
-        for score, doc_addr in res_obj.hits:
+        if deep_scan:
+            # Use Deep Scan batched iterator
+            def batch_cb(status_msg):
+                if progress_callback:
+                    try:
+                        progress_callback(status_msg)
+                    except Exception:
+                        pass
+
+            iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
+        else:
+            # Standard Fast Method
+            try:
+                # Limit 5000 for standard scan
+                res = self.lab_searcher.search(query_obj, 5000)
+                iterator = res.hits
+            except Exception:
+                iterator = []
+
+        for score, doc_addr in iterator:
             try:
                 doc = self.lab_searcher.doc(doc_addr)
                 content = doc['content'][0]
@@ -622,7 +682,7 @@ class LabEngine:
 
                 # --- Highlight Snippet ---
                 smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
-                html_snippet = self._html_snippet(smart_snippet)
+                html_snippet = smart_snippet # No HTML conversion needed, pure markers
 
                 # --- FIX FOR VIEWER HIGHLIGHTING ---
                 # We extract the ACTUAL corrupted words found in the match window
@@ -702,13 +762,14 @@ class LabEngine:
         if not text: return ""
         return re.sub(r'\*(.*?)\*', r"<b style='color:red'>\1</b>", text)
 
-    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None):
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
         """
         Scans a composition using Lab Mode.
         UPGRADES:
         1. Filters common phrases.
         2. Boosts V0.8.
         3. FIX: Separates excluded/known manuscripts.
+        4. Supports Filter Text and Batching.
         """
         if not full_text:
             return {'main': [], 'filtered': [], 'known': []} # הוספנו known
@@ -754,22 +815,40 @@ class LabEngine:
             core_query = " OR ".join(clauses)
             final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
             
-            res_obj = None
+            q_obj = None
             try:
-                q = self.lab_index.parse_query(final_query_str)
-                res_obj = self.lab_searcher.search(q, PER_CHUNK_LIMIT)
+                q_obj = self.lab_index.parse_query(final_query_str)
             except:
                 try:
-                    q = self.lab_index.parse_query(core_query)
-                    res_obj = self.lab_searcher.search(q, PER_CHUNK_LIMIT)
+                    q_obj = self.lab_index.parse_query(core_query)
                 except: continue
 
-            if not res_obj: continue
+            if not q_obj: continue
 
-            for score, doc_addr in res_obj.hits:
+            iterator = []
+            if deep_scan:
+                batch_cb = None
+                if progress_callback:
+                    batch_cb = lambda msg: progress_callback(msg) if callable(progress_callback) else None
+                iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
+            else:
+                try:
+                    res = self.lab_searcher.search(q_obj, 5000)
+                    iterator = res.hits
+                except Exception:
+                    iterator = []
+
+            for score, doc_addr in iterator:
                 try:
                     doc = self.lab_searcher.doc(doc_addr)
                     content = doc['content'][0]
+                    uid = doc['unique_id'][0]
+
+                    # --- Filter Text Logic ---
+                    is_filtered_match = False
+                    if filter_text and filter_text in content:
+                        is_filtered_match = True
+
                     match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text)
                     
                     found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
@@ -779,15 +858,19 @@ class LabEngine:
                     
                     if match_score < MIN_SCORE_THRESHOLD: continue
 
-                    uid = doc['unique_id'][0] 
                     if uid not in results_map:
                         results_map[uid] = {
                             'uid': uid, 'total_score': 0, 'hits_count': 0,
                             'raw_header': doc['full_header'][0], 'source': doc['source'][0],
                             'content': content, 'best_chunk_score': -1,
-                            'all_found_words': set(), 'src_indices': set(), 'ms_matches': [] 
+                            'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
+                            'is_text_filtered': False
                         }
                     rec = results_map[uid]
+
+                    if is_filtered_match:
+                        rec['is_text_filtered'] = True
+
                     rec['total_score'] += match_score
                     rec['hits_count'] += 1
                     token_end_idx = token_start_idx + len(chunk_tokens)
@@ -840,7 +923,7 @@ class LabEngine:
                 snip = content[start:end]
                 rs = max(0, s - start); re_ = min(len(snip), e - start)
                 if re_ > rs:
-                    ms_snips.append(snip[:rs] + f"<span style='color:#ff0000; font-weight:bold;'>{snip[rs:re_]}</span>" + snip[re_:])
+                    ms_snips.append(snip[:rs] + f"*{snip[rs:re_]}*" + snip[re_:])
 
             found_words = sorted(list(data['all_found_words']), key=len, reverse=True)[:50]
             hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""
@@ -853,7 +936,8 @@ class LabEngine:
                 'source_ctx': "\n\n".join(src_snippets),
                 'text': "\n...\n".join(ms_snips),        
                 'highlight_pattern': hl_pattern,
-                'full_text': data['content']
+                'full_text': data['content'],
+                'is_text_filtered': data.get('is_text_filtered', False)
             }
             raw_final_items.append(item)
 
@@ -862,6 +946,7 @@ class LabEngine:
         
         main_list = []
         known_list = []
+        filtered_list = []
         
         for item in raw_final_items:
             # בדיקה האם כתב היד מוחרג
@@ -872,15 +957,15 @@ class LabEngine:
                 is_excluded = True
             
             # 2. בדיקה לפי System ID (המספר 99...) שנמצא בכותרת
-            # זה חשוב כי ברשימת ההחרגה יש בד"כ מספרי מערכת, ובמעבדה ה-UID הוא IE
             if not is_excluded:
-                # מנסים לחלץ 99... מהכותרת
                 m = re.search(r'(99\d+)', str(item['raw_header']))
                 if m and m.group(1) in excluded_set:
                     is_excluded = True
             
             if is_excluded:
                 known_list.append(item)
+            elif item.get('is_text_filtered'):
+                filtered_list.append(item)
             else:
                 main_list.append(item)
 
@@ -889,7 +974,7 @@ class LabEngine:
             main_list = main_list[:MAX_FINAL]
 
         # החזרה מפוצלת כדי שה-GUI ידע לבנות את העץ נכון
-        return {'main': main_list, 'known': known_list, 'filtered': []}    
+        return {'main': main_list, 'known': known_list, 'filtered': filtered_list}
     
     @lru_cache(maxsize=10000)
     def _is_word_too_common(self, word, threshold=5000):
@@ -2116,25 +2201,15 @@ class SearchEngine:
         # Grab raw snippet
         snippet = text[start:end]
         
-        # If showing in table (HTML), verify valid HTML and remove newlines for compactness
+        # Insert Asterisks for Unified Highlighting
+        hl_snippet = snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+
         if not for_file:
-            # Clean newlines for table display so rows don't explode
-            snippet_clean = snippet.replace('\n', ' ')
-
-            # Since we removed newlines, indices might shift if newlines were before the match.
-            # However, simpler approach: Split snippet into pre-match, match, post-match based on INDICES.
-            # But 'replace' logic assumes we are working on the string WITH newlines removed.
-            # If we remove newlines first, we lose index fidelity if newlines were inside the snippet range.
-            # A safer way: Highlight FIRST, then clean newlines.
-
-            # 1. Highlight in raw text snippet
-            hl_snippet = snippet[:rel_s] + f"<b style='color:red;'>{snippet[rel_s:rel_e]}</b>" + snippet[rel_e:]
-
-            # 2. Now clean newlines
+            # For UI Table: Flatten newlines
             return hl_snippet.replace('\n', ' ')
         
-        # If for export file, keep newlines or mark them
-        return snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+        # For File/Export: Keep newlines
+        return hl_snippet
 
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""
@@ -2381,7 +2456,7 @@ class SearchEngine:
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
                     fragment = data['content'][start:s] + \
-                               f"<span style='color:#ff0000; font-weight:bold;'>{data['content'][s:e]}</span>" + \
+                               f"*{data['content'][s:e]}*" + \
                                data['content'][e:end]
                     ms_snips.append(fragment)
 
