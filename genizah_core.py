@@ -604,23 +604,23 @@ class LabEngine:
             # Plain text
             if m['start'] > current_idx:
                 plain = text[current_idx : m['start']]
-                out_parts.append(plain)
+                out_parts.append(plain.replace('*', ''))
             
             # Highlighted word (Asterisks)
             word = text[m['start'] : m['end']]
-            out_parts.append(f"*{word}*")
+            out_parts.append(f"*{word.replace('*', '')}*")
             
             current_idx = m['end']
         
         # Remainder
         if current_idx < snippet_end_char:
-            out_parts.append(text[current_idx : snippet_end_char])
+            out_parts.append(text[current_idx : snippet_end_char].replace('*', ''))
             
         if snippet_end_char < len(text): out_parts.append(" ...")
         
         final_text = "".join(out_parts)
         # Flatten for table display
-        return final_text.replace("\n", " ").replace("\r", "")
+        return final_text.replace("\n", " ").replace("\r", " ")
 
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
@@ -2201,8 +2201,11 @@ class SearchEngine:
         # Grab raw snippet
         snippet = text[start:end]
         
+        # Sanitize snippet to prevent interference with markers (replace with space to keep indices)
+        snippet_safe = snippet.replace('*', ' ')
+
         # Insert Asterisks for Unified Highlighting
-        hl_snippet = snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+        hl_snippet = snippet_safe[:rel_s] + f"*{snippet_safe[rel_s:rel_e]}*" + snippet_safe[rel_e:]
 
         if not for_file:
             # For UI Table: Flatten newlines

@@ -2735,7 +2735,7 @@ class GenizahGUI(QMainWindow):
             # Use raw_file_hl so highlight markers remain intact
             # Clean snippet: remove newlines (input is now clean text with asterisks)
             raw_hl = r.get('raw_file_hl', '')
-            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', '')
+            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
             snippet = re.sub(r'\s+', ' ', snippet)
 
             data_rows.append([
@@ -2930,7 +2930,7 @@ class GenizahGUI(QMainWindow):
             t = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", t, flags=re.DOTALL)
 
             # 2. Remove newlines and BR
-            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", "")
+            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", " ")
 
             # 3. Remove any remaining HTML tags (div, etc)
             t = re.sub(r'<[^>]+>', '', t)
