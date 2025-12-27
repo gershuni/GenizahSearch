@@ -46,7 +46,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
@@ -1365,16 +1365,11 @@ class GenizahGUI(QMainWindow):
         self.browse_img_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
-        self._connectivity_thread = None
-        self._connectivity_start_time = 0
-        self._last_connectivity_state = None
-        self._last_connectivity_ui_state = {"status": "degraded", "details": [tr("Checking connectivity...")]}
         self.comp_thread = None 
         self.comp_worker = None
 
 
         self.init_ui()
-        self.init_connectivity_monitor()
 
         # Step 2: Start heavy initialization in background
         self.status_label.setText(tr("Initializing components... Please wait."))
@@ -1389,87 +1384,6 @@ class GenizahGUI(QMainWindow):
             self.startup_thread.start()
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
-
-    def init_connectivity_monitor(self):
-        self.connectivity_timer = QTimer(self)
-        self.connectivity_timer.setInterval(60_000)
-        self.connectivity_timer.timeout.connect(self.refresh_connectivity_status)
-        self.refresh_connectivity_status()
-        self.connectivity_timer.start()
-
-    def refresh_connectivity_status(self):
-        # Manage the worker thread
-        if self._connectivity_thread and self._connectivity_thread.isRunning():
-            # If stuck for > 30 seconds, kill and restart
-            if time.time() - self._connectivity_start_time > 30:
-                logger.warning("Connectivity thread stuck (>30s). Terminating.")
-                self._connectivity_thread.terminate()
-                self._connectivity_thread.wait()
-            else:
-                # Still running normally, skip this check cycle
-                return
-
-        self._connectivity_start_time = time.time()
-        self._connectivity_thread = ConnectivityThread(self.ai_mgr)
-        self._connectivity_thread.finished_signal.connect(self._on_connectivity_finished)
-        self._connectivity_thread.start()
-
-    def _on_connectivity_finished(self, statuses):
-        if "error" in statuses:
-            logger.error("Connectivity check error: %s", statuses["error"])
-            state = {"status": "degraded", "details": [tr("Check failed")]}
-        else:
-            logger.debug("Connectivity raw statuses: %r", statuses)
-            state = self._summarize_connectivity(statuses)
-
-        self._last_connectivity_ui_state = state
-        state_key = (state['status'], tuple(state['details']))
-
-        if state_key != self._last_connectivity_state:
-            self._last_connectivity_state = state_key
-            readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
-            logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
-
-        self._update_connectivity_ui(state)
-
-    def _summarize_connectivity(self, statuses):
-        def is_reachable(obj, default=False):
-            if isinstance(obj, dict):
-                return bool(obj.get("reachable", default))
-            return bool(obj) if obj is not None else default
-
-        offline = not is_reachable(statuses.get("network"), default=False)
-
-        degraded = []
-        if not is_reachable(statuses.get("nli"), default=True):
-            degraded.append(tr("NLI service unavailable"))
-        if "ai_provider" in statuses and not is_reachable(statuses.get("ai_provider"), default=True):
-            degraded.append(tr("AI provider unavailable"))
-
-        if offline:
-            return {"status": "offline", "details": [tr("No internet connection")] + degraded}
-        if degraded:
-            return {"status": "degraded", "details": degraded}
-        return {"status": "online", "details": []}
-
-
- 
-    def _update_connectivity_ui(self, state):
-        status = state['status']
-        if status == "offline":
-            text = tr("Offline")
-            color = "#c0392b"
-        elif status == "degraded":
-            text = tr("Degraded")
-            color = "#f39c12"
-        else:
-            text = tr("Online")
-            color = "#27ae60"
-
-        tooltip = "\n".join(state['details']) if state['details'] else tr("All external services responding.")
-        self.connectivity_label.setText(text)
-        self.connectivity_label.setStyleSheet(f"padding:6px; border-radius:6px; color: white; background-color: {color};")
-        self.connectivity_label.setToolTip(tooltip)
 
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
         try:
@@ -1501,7 +1415,6 @@ class GenizahGUI(QMainWindow):
                 self.combo_provider.setCurrentText(self.ai_mgr.provider)
                 self.txt_model.setText(self.ai_mgr.model_name)
                 self.txt_api_key.setText(self.ai_mgr.api_key)
-                self.refresh_connectivity_status()
 
             # Enable UI interactions
             self.btn_search.setEnabled(True)
@@ -1660,11 +1573,6 @@ class GenizahGUI(QMainWindow):
         layout.addWidget(results_container)
 
         bot = QHBoxLayout()
-        self.connectivity_label = QLabel(tr("Checking connectivity..."))
-        self.connectivity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.connectivity_label.setMinimumWidth(150)
-        self.connectivity_label.setStyleSheet("padding:6px; border-radius:6px; color: white; background-color: #f39c12;")
-        QTimer.singleShot(0, lambda: self._update_connectivity_ui(getattr(self, "_last_connectivity_ui_state", {"status": "online", "details": []})))
 
         self.status_label = QLabel(tr("Ready."))
         lbl_export = QLabel(tr("Export Results") + ":")
@@ -1686,22 +1594,8 @@ class GenizahGUI(QMainWindow):
         self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt]
         for b in self.export_buttons: b.setEnabled(False)
 
-        self.btn_reload_meta = QPushButton()
-        self.btn_reload_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
-        self.btn_reload_meta.setToolTip("Reload shelfmark/title metadata")
-        self.btn_reload_meta.clicked.connect(self.reload_metadata)
-
-        self.btn_stop_meta = QPushButton()
-        self.btn_stop_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserStop))
-        self.btn_stop_meta.setToolTip("Stop metadata loading")
-        self.btn_stop_meta.clicked.connect(self.stop_metadata_loading)
-        self.btn_stop_meta.setEnabled(False)
-
         # Add controls to status row
-        bot.addWidget(self.connectivity_label)
         bot.addWidget(self.status_label, 1)
-        bot.addWidget(self.btn_reload_meta)
-        bot.addWidget(self.btn_stop_meta)
 
         # Append export controls to the right
         bot.addWidget(QLabel("|"))
@@ -2444,7 +2338,6 @@ class GenizahGUI(QMainWindow):
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
-            self.btn_stop_meta.setEnabled(False)
             return
 
         self.last_results = results 
@@ -2556,14 +2449,12 @@ class GenizahGUI(QMainWindow):
 
         if self.meta_to_fetch_count == 0:
             self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
-            self.btn_stop_meta.setEnabled(False)
             return
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
         self.meta_loader.finished_signal.connect(self.on_meta_finished)
         self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, tr("Metadata Error"), err))
-        self.btn_stop_meta.setEnabled(True)
         self.status_label.setText(self._format_metadata_status())
         self.meta_loader.start()
 
@@ -2617,20 +2508,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected))
         else:
             self.status_label.setText(tr("Loaded {} items.").format(total_expected))
-        self.btn_stop_meta.setEnabled(False)
         self.meta_loader = None
-
-    def reload_metadata(self):
-        if not self.last_results:
-            return
-        ids = [res['display'].get('id', '') for res in self.last_results]
-        self.start_metadata_loading(ids)
-
-    def stop_metadata_loading(self):
-        if self.meta_loader and self.meta_loader.isRunning():
-            self.meta_loader.request_cancel()
-            self.status_label.setText(tr("Stopping metadata load..."))
-            self.btn_stop_meta.setEnabled(False)
 
     def _format_metadata_status(self):
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
