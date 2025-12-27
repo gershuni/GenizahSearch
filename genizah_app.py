@@ -2670,7 +2670,7 @@ class GenizahGUI(QMainWindow):
 
                 # Fonts used for rich text snippets
                 font_red = InlineFont(color='FF0000', b=True)
-                font_normal = InlineFont(color='000000')
+                font_normal = InlineFont(color='000000', b=False)
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
@@ -2685,6 +2685,8 @@ class GenizahGUI(QMainWindow):
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
+                        if not part:
+                            continue
                         # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
@@ -2928,7 +2930,7 @@ class GenizahGUI(QMainWindow):
                     ws.sheet_view.rightToLeft = True
 
                     font_red = InlineFont(color='FF0000', b=True)
-                    font_normal = InlineFont(color='000000')
+                    font_normal = InlineFont(color='000000', b=False)
 
                     def write_rich_cell(row, col, text):
                         # הגנה ראשונית: ניקוי תווים אסורים מהטקסט הגולמי
@@ -2942,6 +2944,8 @@ class GenizahGUI(QMainWindow):
                         rich_string = CellRichText()
                         
                         for i, part in enumerate(parts):
+                            if not part:
+                                continue
                             if i % 2 == 1:
                                 rich_string.append(TextBlock(font_red, part))
                             else:
