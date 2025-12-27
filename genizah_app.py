@@ -1558,10 +1558,34 @@ class GenizahGUI(QMainWindow):
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
-        top = QHBoxLayout()
+
+        # Top Container with Multi-Row Layout
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Row 1: Query & Search Buttons
+        row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.returnPressed.connect(self.toggle_search)
         
+        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
+        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
+        self.btn_search.setEnabled(False)
+
+        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
+        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
+        self.btn_ai.clicked.connect(self.open_ai)
+        self.btn_ai.setEnabled(False)
+
+        row1.addWidget(QLabel(tr("Query:")))
+        row1.addWidget(self.query_input)
+        row1.addWidget(self.btn_search)
+        row1.addWidget(self.btn_ai)
+
+        # Row 2: Search Parameters & Lab Mode
+        row2 = QHBoxLayout()
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([tr("Exact"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex"), tr("Title"), tr("Shelfmark")])
         # Tooltips
@@ -1577,31 +1601,10 @@ class GenizahGUI(QMainWindow):
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
         
-        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
-        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
-        self.btn_search.setEnabled(False)
-        
-        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
-        self.btn_ai.clicked.connect(self.open_ai)
-        self.btn_ai.setEnabled(False)
-
-        # Lab Mode Controls
         self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle.setCheckable(True)
         self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
-
-        # Help Button
-        btn_help = QPushButton("?")
-        btn_help.setFixedWidth(30)
-        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
-
-        top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
-        top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
-        top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
-        top.addWidget(self.btn_search); top.addWidget(self.btn_ai)
 
         # Deep Scan Checkbox
         self.chk_lab_deep = QCheckBox(tr("Deep Scan"))
@@ -1609,10 +1612,24 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
         self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
-        top.addWidget(self.btn_lab_mode_toggle)
-        top.addWidget(self.chk_lab_deep)
-        top.addWidget(btn_help)
-        layout.addLayout(top)
+        # Help Button
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(30)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
+
+        row2.addWidget(QLabel(tr("Mode:")))
+        row2.addWidget(self.mode_combo)
+        row2.addWidget(QLabel(tr("Gap:")))
+        row2.addWidget(self.gap_input)
+        row2.addWidget(self.btn_lab_mode_toggle)
+        row2.addWidget(self.chk_lab_deep)
+        row2.addStretch()
+        row2.addWidget(btn_help)
+
+        top_layout.addLayout(row1)
+        top_layout.addLayout(row2)
+        layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
         layout.addWidget(self.lab_panel_search)
@@ -1723,18 +1740,27 @@ class GenizahGUI(QMainWindow):
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
-        cr = QHBoxLayout()
+        # Controls Container
+        controls_container = QWidget()
+        controls_layout = QVBoxLayout(controls_container)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Row 1: File Operations & Status
+        row1 = QHBoxLayout()
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
-
-        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
-        btn_exclude.clicked.connect(self.open_exclude_dialog)
-
-        btn_filter_text = QPushButton(tr("Filter Text"))
-        btn_filter_text.clicked.connect(self.open_filter_dialog)
-
+        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
+        self.lbl_comp_status = QLabel("")
 
+        row1.addWidget(btn_load); row1.addWidget(btn_exclude); row1.addWidget(btn_filter_text)
+        row1.addWidget(self.lbl_exclude_status)
+        row1.addWidget(self.lbl_comp_status)
+        row1.addStretch()
+
+        # Row 2: Search Parameters
+        row2 = QHBoxLayout()
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         
@@ -1755,11 +1781,22 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
+        row2.addWidget(self.spin_chunk); row2.addWidget(self.spin_freq)
+        row2.addWidget(self.comp_mode_combo); row2.addWidget(self.spin_filter); row2.addWidget(self.chk_comp_flat)
+        row2.addStretch()
+
+        # Row 3: Actions & Lab Mode
+        row3 = QHBoxLayout()
         # Lab Mode Controls (Comp Tab)
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle_comp.setCheckable(True)
         self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
+
+        self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep_comp.setEnabled(False)
+        self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
 
         self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
@@ -1768,24 +1805,17 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
 
-        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
-        cr.addWidget(self.lbl_exclude_status)
+        row3.addWidget(self.btn_lab_mode_toggle_comp)
+        row3.addWidget(self.chk_lab_deep_comp)
+        row3.addStretch()
+        row3.addWidget(self.btn_comp_run)
+        row3.addWidget(self.btn_comp_recursive)
 
-        self.lbl_comp_status = QLabel("")
-        cr.addWidget(self.lbl_comp_status)
+        controls_layout.addLayout(row1)
+        controls_layout.addLayout(row2)
+        controls_layout.addLayout(row3)
 
-        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
-
-        self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
-        self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
-        self.chk_lab_deep_comp.setEnabled(False)
-        self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
-
-        cr.addWidget(self.btn_lab_mode_toggle_comp)
-        cr.addWidget(self.chk_lab_deep_comp)
-        cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
-        in_l.addLayout(cr)
+        in_l.addWidget(controls_container)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
         in_l.addWidget(self.lab_panel_comp)
