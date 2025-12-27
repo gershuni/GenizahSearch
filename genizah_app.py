@@ -3708,13 +3708,10 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
-        # Display Limit Logic (Composition Tree only - stricter limit to prevent freeze)
-        display_limit = 200
-        if self.lab_engine and hasattr(self.lab_engine.settings, 'comp_max_final_results'):
-            display_limit = self.lab_engine.settings.comp_max_final_results
-
+        # Display Limit Logic
+        # Note: The engine now truncates 'clean_main' to MAX_FINAL, so we display all available items.
         full_main_count = len(clean_main)
-        visible_main = clean_main[:display_limit]
+        visible_main = clean_main
 
         msg_color = "black"
         if len(visible_main) < full_main_count:

@@ -972,6 +972,10 @@ class LabEngine:
             else:
                 main_list.append(item)
 
+        # חיתוך המגבלה רק על הרשימה הראשית
+        if len(main_list) > MAX_FINAL:
+            main_list = main_list[:MAX_FINAL]
+
         # החזרה מפוצלת כדי שה-GUI ידע לבנות את העץ נכון
         return {'main': main_list, 'known': known_list, 'filtered': filtered_list}
     
