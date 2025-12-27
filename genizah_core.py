@@ -385,6 +385,12 @@ class LabEngine:
             batch = hits[i : i + BATCH_SIZE]
 
             if progress_callback:
+                # Send numeric progress for ProgressBar (i, total)
+                try:
+                    progress_callback(i, total_hits)
+                except Exception:
+                    pass
+                # Send text status for Label
                 progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
 
             for hit in batch:
@@ -643,10 +649,10 @@ class LabEngine:
         # 3. Process
         if deep_scan:
             # Use Deep Scan batched iterator
-            def batch_cb(status_msg):
+            def batch_cb(*args):
                 if progress_callback:
                     try:
-                        progress_callback(status_msg)
+                        progress_callback(*args)
                     except Exception:
                         pass
 
@@ -826,7 +832,7 @@ class LabEngine:
             if deep_scan:
                 batch_cb = None
                 if progress_callback:
-                    batch_cb = lambda msg: progress_callback(msg) if callable(progress_callback) else None
+                    batch_cb = lambda *args: progress_callback(*args) if callable(progress_callback) else None
                 iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
             else:
                 try:
