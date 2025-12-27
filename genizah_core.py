@@ -2201,25 +2201,15 @@ class SearchEngine:
         # Grab raw snippet
         snippet = text[start:end]
         
-        # If showing in table (HTML), verify valid HTML and remove newlines for compactness
+        # Insert Asterisks for Unified Highlighting
+        hl_snippet = snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+
         if not for_file:
-            # Clean newlines for table display so rows don't explode
-            snippet_clean = snippet.replace('\n', ' ')
-
-            # Since we removed newlines, indices might shift if newlines were before the match.
-            # However, simpler approach: Split snippet into pre-match, match, post-match based on INDICES.
-            # But 'replace' logic assumes we are working on the string WITH newlines removed.
-            # If we remove newlines first, we lose index fidelity if newlines were inside the snippet range.
-            # A safer way: Highlight FIRST, then clean newlines.
-
-            # 1. Highlight in raw text snippet
-            hl_snippet = snippet[:rel_s] + f"<b style='color:red;'>{snippet[rel_s:rel_e]}</b>" + snippet[rel_e:]
-
-            # 2. Now clean newlines
+            # For UI Table: Flatten newlines
             return hl_snippet.replace('\n', ' ')
         
-        # If for export file, keep newlines or mark them
-        return snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+        # For File/Export: Keep newlines
+        return hl_snippet
 
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""
@@ -2466,7 +2456,7 @@ class SearchEngine:
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
                     fragment = data['content'][start:s] + \
-                               f"<span style='color:#ff0000; font-weight:bold;'>{data['content'][s:e]}</span>" + \
+                               f"*{data['content'][s:e]}*" + \
                                data['content'][e:end]
                     ms_snips.append(fragment)
 

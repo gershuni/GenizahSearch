@@ -2808,8 +2808,8 @@ class GenizahGUI(QMainWindow):
                         if col_idx == 6:
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
-                            # Strip HTML tags in other columns
-                            clean_val = re.sub(r'<[^>]+>', '', val_str)
+                            # Strip markers/HTML in other columns
+                            clean_val = val_str.replace('*', '')
                             ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
 
                     current_row += 1
@@ -2835,8 +2835,8 @@ class GenizahGUI(QMainWindow):
                     writer.writerow([])
                     writer.writerow(headers)
                     for row in data_rows:
-                        # Strip HTML but keep highlight markers
-                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        # Strip highlight markers for CSV
+                        clean_row = [str(val).replace('*', '') for val in row]
                         writer.writerow(clean_row)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
