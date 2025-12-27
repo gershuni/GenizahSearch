@@ -3806,7 +3806,7 @@ class GenizahGUI(QMainWindow):
             )
             # מיון ידני באמצעות הלוגיקה שלך
             sorted_flat = self._sort_comp_items(all_flat)
-            visible_flat = sorted_flat[:display_limit]
+            visible_flat = sorted_flat
             
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
