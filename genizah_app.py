@@ -106,6 +106,11 @@ class LabScoringDialog(QDialog):
         self.spin_common_factor = QDoubleSpinBox(); self.spin_common_factor.setRange(0.0, 1.0); self.spin_common_factor.setValue(self.settings.common_penalty_factor)
         grid.addWidget(QLabel(tr("Repeated Word Factor:")), 9, 0); grid.addWidget(self.spin_common_factor, 9, 1)
 
+        # Display Limit
+        self.spin_display_limit = QSpinBox(); self.spin_display_limit.setRange(50, 1000); self.spin_display_limit.setValue(getattr(self.settings, 'lab_display_limit', 500))
+        self.spin_display_limit.setToolTip(tr("Lower values prevent the app from freezing. All results are still exported."))
+        grid.addWidget(QLabel(tr("Max Results to Display:")), 10, 0); grid.addWidget(self.spin_display_limit, 10, 1)
+
         layout.addLayout(grid)
         layout.addStretch()
         
@@ -127,6 +132,7 @@ class LabScoringDialog(QDialog):
             self.settings.stop_word_score = self.spin_stop_score.value()
             self.settings.common_3char_score = self.spin_common3_score.value()
         
+        self.settings.lab_display_limit = self.spin_display_limit.value()
         self.settings.save()
         self.accept()
 
@@ -188,6 +194,14 @@ class LabPanel(QFrame):
             self.spin_limit.valueChanged.connect(self.on_change)
             self.layout.addWidget(self.spin_limit)
 
+            # Deep Scan Limit
+            self.layout.addWidget(QLabel(tr("Deep Limit:")))
+            self.spin_scan_limit = QSpinBox()
+            self.spin_scan_limit.setRange(10000, 1000000)
+            self.spin_scan_limit.setSingleStep(10000)
+            self.spin_scan_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_scan_limit)
+
             self.layout.addStretch()
 
             # Advanced Scoring
@@ -231,6 +245,8 @@ class LabPanel(QFrame):
         if self.mode == 'search':
             self.spin_min.setValue(self.settings.min_should_match)
             self.spin_limit.setValue(self.settings.candidate_limit)
+            if hasattr(self, 'spin_scan_limit'):
+                self.spin_scan_limit.setValue(getattr(self.settings, 'lab_scan_limit', 50000))
         elif self.mode == 'comp':
             self.spin_chunk_limit.setValue(self.settings.comp_chunk_limit)
             self.spin_min_score.setValue(self.settings.comp_min_score)
@@ -242,6 +258,8 @@ class LabPanel(QFrame):
         if self.mode == 'search':
             self.settings.min_should_match = self.spin_min.value()
             self.settings.candidate_limit = self.spin_limit.value()
+            if hasattr(self, 'spin_scan_limit'):
+                self.settings.lab_scan_limit = self.spin_scan_limit.value()
         elif self.mode == 'comp':
             self.settings.comp_chunk_limit = self.spin_chunk_limit.value()
             self.settings.comp_min_score = self.spin_min_score.value()
@@ -1540,10 +1558,34 @@ class GenizahGUI(QMainWindow):
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
-        top = QHBoxLayout()
+
+        # Top Container with Multi-Row Layout
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Row 1: Query & Search Buttons
+        row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.returnPressed.connect(self.toggle_search)
         
+        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
+        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
+        self.btn_search.setEnabled(False)
+
+        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
+        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
+        self.btn_ai.clicked.connect(self.open_ai)
+        self.btn_ai.setEnabled(False)
+
+        row1.addWidget(QLabel(tr("Query:")))
+        row1.addWidget(self.query_input)
+        row1.addWidget(self.btn_search)
+        row1.addWidget(self.btn_ai)
+
+        # Row 2: Search Parameters & Lab Mode
+        row2 = QHBoxLayout()
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([tr("Exact"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex"), tr("Title"), tr("Shelfmark")])
         # Tooltips
@@ -1559,19 +1601,16 @@ class GenizahGUI(QMainWindow):
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
         
-        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
-        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
-        self.btn_search.setEnabled(False)
-        
-        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
-        self.btn_ai.clicked.connect(self.open_ai)
-        self.btn_ai.setEnabled(False)
-
-        # Lab Mode Controls
         self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle.setCheckable(True)
+        self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
+
+        # Deep Scan Checkbox
+        self.chk_lab_deep = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
+        self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
         # Help Button
         btn_help = QPushButton("?")
@@ -1579,13 +1618,18 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
 
-        top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
-        top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
-        top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
-        top.addWidget(self.btn_search); top.addWidget(self.btn_ai)
-        top.addWidget(self.btn_lab_mode_toggle)
-        top.addWidget(btn_help)
-        layout.addLayout(top)
+        row2.addWidget(QLabel(tr("Mode:")))
+        row2.addWidget(self.mode_combo)
+        row2.addWidget(QLabel(tr("Gap:")))
+        row2.addWidget(self.gap_input)
+        row2.addWidget(self.btn_lab_mode_toggle)
+        row2.addWidget(self.chk_lab_deep)
+        row2.addStretch()
+        row2.addWidget(btn_help)
+
+        top_layout.addLayout(row1)
+        top_layout.addLayout(row2)
+        layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
         layout.addWidget(self.lab_panel_search)
@@ -1684,6 +1728,10 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
+        # Load Button moved to top row
+        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        top_row.addWidget(btn_load)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -1696,18 +1744,21 @@ class GenizahGUI(QMainWindow):
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
+        # Single Row for Controls
         cr = QHBoxLayout()
-        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
 
-        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
-        btn_exclude.clicked.connect(self.open_exclude_dialog)
-
-        btn_filter_text = QPushButton(tr("Filter Text"))
-        btn_filter_text.clicked.connect(self.open_filter_dialog)
-
+        # 1. Exclude & Filter
+        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
+        self.lbl_comp_status = QLabel("")
 
+        cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
+        cr.addWidget(self.lbl_exclude_status)
+        cr.addWidget(self.lbl_comp_status)
+
+        # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         
@@ -1724,28 +1775,38 @@ class GenizahGUI(QMainWindow):
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
-        self.chk_comp_flat = QCheckBox(tr("Sort by System ID/Shelfmark only"))
+        # Shortened Text
+        self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
-        # Lab Mode Controls (Comp Tab)
+        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+
+        # 3. Lab & Action
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle_comp.setCheckable(True)
+        self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
         self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
 
-        self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep_comp.setEnabled(False)
+        self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
+
+        # Shortened Text
+        self.btn_comp_run = QPushButton(tr("Analyze")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
         self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
 
-        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
-        cr.addWidget(self.lbl_exclude_status)
-        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
         cr.addWidget(self.btn_lab_mode_toggle_comp)
-        cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
+        cr.addWidget(self.chk_lab_deep_comp)
+        cr.addWidget(self.btn_comp_run)
+        cr.addWidget(self.btn_comp_recursive)
+
         in_l.addLayout(cr)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
@@ -2245,6 +2306,31 @@ class GenizahGUI(QMainWindow):
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
+    def update_lab_ui_state(self, checked):
+        """Disable standard controls when Lab Mode is active."""
+        # Search Tab
+        if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
+        if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
+        if hasattr(self, 'btn_ai'): self.btn_ai.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep'): self.chk_lab_deep.setEnabled(checked)
+
+        # Composition Tab
+        if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
+        if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep_comp'): self.chk_lab_deep_comp.setEnabled(checked)
+
+    def on_deep_scan_toggled_search(self, checked):
+        if hasattr(self, 'chk_lab_deep_comp'):
+            self.chk_lab_deep_comp.blockSignals(True)
+            self.chk_lab_deep_comp.setChecked(checked)
+            self.chk_lab_deep_comp.blockSignals(False)
+
+    def on_deep_scan_toggled_comp(self, checked):
+        if hasattr(self, 'chk_lab_deep'):
+            self.chk_lab_deep.blockSignals(True)
+            self.chk_lab_deep.setChecked(checked)
+            self.chk_lab_deep.blockSignals(False)
+
     def on_lab_mode_toggled_search(self, checked):
         # Show/Hide Panel
         if hasattr(self, 'lab_panel_search'):
@@ -2259,6 +2345,8 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'lab_panel_comp'):
                 self.lab_panel_comp.setVisible(checked)
 
+        self.update_lab_ui_state(checked)
+
     def on_lab_mode_toggled_comp(self, checked):
         # Show/Hide Panel
         if hasattr(self, 'lab_panel_comp'):
@@ -2272,6 +2360,8 @@ class GenizahGUI(QMainWindow):
             # Ensure search panel visibility matches too
             if hasattr(self, 'lab_panel_search'):
                 self.lab_panel_search.setVisible(checked)
+
+        self.update_lab_ui_state(checked)
 
     def toggle_search(self):
         if not self.searcher: return
@@ -2309,12 +2399,20 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
                 self.reset_ui()
                 return
-            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap)
+
+            deep = self.chk_lab_deep.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
             self.search_thread = SearchThread(self.searcher, query, mode, gap)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
+
+        if hasattr(self.search_thread, 'status_signal'):
+             self.search_thread.status_signal.connect(self.status_label.setText)
+
         self.search_thread.error_signal.connect(self.on_error)
         self.search_thread.start()
 
@@ -2327,6 +2425,14 @@ class GenizahGUI(QMainWindow):
         self.search_progress.setVisible(False)
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
+
+    def render_asterisks_to_html(self, text):
+        if not text: return ""
+        # Escape HTML chars
+        t = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Convert *word* to highlighted span
+        t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
+        return f"<div dir='rtl'>{t}</div>"
 
     def on_search_finished(self, results):
         self.reset_ui()
@@ -2341,11 +2447,25 @@ class GenizahGUI(QMainWindow):
             self.btn_stop_meta.setEnabled(False)
             return
 
-        self.status_label.setText(tr("Found {}. Loading metadata...").format(len(results)))
         self.last_results = results 
+
+        # Display Limit Logic (Lab Mode)
+        display_limit = len(results)
+        if self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
+            display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500)
+
+        visible_count = min(len(results), display_limit)
+
+        if visible_count < len(results):
+            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(visible_count, len(results)))
+            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
+        else:
+            self.status_label.setText(tr("Found {} results. Loading metadata...").format(len(results)))
+            self.status_label.setStyleSheet("color: black;")
+
         for b in self.export_buttons: b.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
-        self.results_table.setRowCount(len(results))
+        self.results_table.setRowCount(visible_count)
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -2356,45 +2476,48 @@ class GenizahGUI(QMainWindow):
             meta = res['display']
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta.get('id')
-            # Col 0: System ID (Store full result data here for retrieval after sort)
-            item_sid = QTableWidgetItem(sid)
-            item_sid.setData(Qt.ItemDataRole.UserRole, res)
-            self.results_table.setItem(i, 0, item_sid)
 
+            # Metadata Collection (Always collect all IDs for export readiness)
             # Pull immediate metadata from CSV/cache
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
-
-            # Fallback decision: only queue background fetch if CSV/cache didn't provide useful data
             needs_fetch = (shelf == "Unknown" and (not title))
+            if needs_fetch: ids.append(sid)
 
-            if needs_fetch:
-                ids.append(sid)  
-                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
-                item_title = QTableWidgetItem(tr("Loading..."))
-            else:
-                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
+            # Table Population (Respect Display Limit)
+            if i < visible_count:
+                # Col 0: System ID (Store full result data here for retrieval after sort)
+                item_sid = QTableWidgetItem(sid)
+                item_sid.setData(Qt.ItemDataRole.UserRole, res)
+                self.results_table.setItem(i, 0, item_sid)
 
-            # Col 1: Shelfmark
-            self.results_table.setItem(i, 1, item_shelf)
-            self.shelfmark_items_by_sid[sid] = item_shelf
+                if needs_fetch:
+                    item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+                    item_title = QTableWidgetItem(tr("Loading..."))
+                else:
+                    item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
+                    item_title = QTableWidgetItem(title if title else "")
 
-            # Col 2: Title
-            self.results_table.setItem(i, 2, item_title)
-            self.title_items_by_sid[sid] = item_title
+                # Col 1: Shelfmark
+                self.results_table.setItem(i, 1, item_shelf)
+                self.shelfmark_items_by_sid[sid] = item_shelf
 
+                # Col 2: Title
+                self.results_table.setItem(i, 2, item_title)
+                self.title_items_by_sid[sid] = item_title
 
-            # Col 3: Snippet (Widget)
-            lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.results_table.setCellWidget(i, 3, lbl)
+                # Col 3: Snippet (Widget)
+                # Render asterisks to HTML for display
+                html_snippet = self.render_asterisks_to_html(res['snippet'])
+                lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                self.results_table.setCellWidget(i, 3, lbl)
 
-            # Col 4: Img
-            self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
+                # Col 4: Img
+                self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
 
-            # Col 5: Source
-            self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+                # Col 5: Source
+                self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
 
-            self.result_row_by_sys_id[sid] = i
+                self.result_row_by_sys_id[sid] = i
 
         self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
@@ -2597,17 +2720,28 @@ class GenizahGUI(QMainWindow):
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
 
+    def _sanitize_for_excel(self, text):
+        """Cleans text to prevent Excel XML corruption."""
+        if text is None: return ""
+        t = str(text)
+        # Remove illegal characters
+        t = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', t)
+
+        # Handle malicious formulas
+        t = t.strip()
+        if t.startswith(('=', '+', '-', '@')):
+            t = "'" + t
+
+        # Excel cell limit
+        if len(t) > 32700:
+            t = t[:32700] + "..."
+        return t
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
         fmt: 'xlsx', 'csv', or 'txt'
         """
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')):
-                return "'" + t
-            return t
-
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
 
@@ -2622,14 +2756,25 @@ class GenizahGUI(QMainWindow):
         data_rows = []
         for r in self.last_results:
             d = r['display']
+            sid = d.get('id', '')
+
+            # Fetch fresh metadata (Important for Lab Mode)
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                shelf = d.get('shelfmark', '')
+            if not title:
+                title = d.get('title', '')
+
             # Use raw_file_hl so highlight markers remain intact
-            # Clean snippet: remove newlines for single-line export
-            snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+            # Clean snippet: remove newlines (input is now clean text with asterisks)
+            raw_hl = r.get('raw_file_hl', '')
+            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
+            snippet = re.sub(r'\s+', ' ', snippet)
 
             data_rows.append([
-                d.get('id', ''),
-                d.get('shelfmark', ''),
-                d.get('title', ''),
+                sid,
+                shelf,
+                title,
                 str(d.get('img', '')),
                 d.get('source', ''),
                 snippet
@@ -2651,17 +2796,17 @@ class GenizahGUI(QMainWindow):
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
-                    # No markers: write as-is with formula guard
-                    if '*' not in text:
-                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                    safe_text = self._sanitize_for_excel(text)
+
+                    if '*' not in safe_text:
+                        ws.cell(row=row, column=col, value=safe_text)
                         return
 
                     # Split by asterisk markers
-                    parts = text.split('*')
+                    parts = safe_text.split('*')
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
-                        if not part: continue
                         # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
@@ -2675,7 +2820,7 @@ class GenizahGUI(QMainWindow):
                 current_row = 1
                 for line in credit_text.split('\n'):
                     if not line.strip(): continue
-                    cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
                     cell.font = Font(bold=True, color="555555")
                     current_row += 1
                 current_row += 1
@@ -2696,9 +2841,9 @@ class GenizahGUI(QMainWindow):
                         if col_idx == 6:
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
-                            # Strip HTML tags in other columns
-                            clean_val = re.sub(r'<[^>]+>', '', val_str)
-                            ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
+                            # Strip markers/HTML in other columns
+                            clean_val = val_str.replace('*', '')
+                            ws.cell(row=current_row, column=col_idx, value=self._sanitize_for_excel(clean_val))
 
                     current_row += 1
 
@@ -2723,8 +2868,8 @@ class GenizahGUI(QMainWindow):
                     writer.writerow([])
                     writer.writerow(headers)
                     for row in data_rows:
-                        # Strip HTML but keep highlight markers
-                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        # Strip highlight markers for CSV
+                        clean_row = [str(val).replace('*', '') for val in row]
                         writer.writerow(clean_row)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
@@ -2814,17 +2959,16 @@ class GenizahGUI(QMainWindow):
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""
             t = str(text or "")
-            if "<span" in t:
-                # Replace styled span with asterisks
-                t = re.sub(r'<span[^>]*>', '*', t)
-                t = t.replace('</span>', '*')
+            # 1. Convert Spans to Markers (Handle content inside)
+            t = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", t, flags=re.DOTALL)
 
-            # Remove newlines for single-line output
-            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", "")
-            # Remove any remaining HTML tags
+            # 2. Remove newlines and BR
+            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", " ")
+
+            # 3. Remove any remaining HTML tags (div, etc)
             t = re.sub(r'<[^>]+>', '', t)
 
-            # Collapse multiple spaces
+            # 4. Collapse multiple spaces
             t = re.sub(r'\s+', ' ', t)
 
             return t.strip()
@@ -2999,8 +3143,8 @@ class GenizahGUI(QMainWindow):
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             src_clean = _clean_and_marker(page.get('source_ctx', '')).replace('*', '')
-                             ms_clean = _clean_and_marker(page.get('text', '')).replace('*', '')
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
                              ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
                              ms_block.append(tr("Source Context") + ":\n" + src_clean)
                              ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
@@ -3240,12 +3384,18 @@ class GenizahGUI(QMainWindow):
             if self.excluded_sys_ids:
                 final_excluded_ids = list(self.excluded_sys_ids)
 
+            deep = self.chk_lab_deep_comp.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
             self.comp_thread = LabCompositionThread(
                 self.lab_engine, 
                 txt, 
                 mode, 
                 chunk_size=chunk_size,
-                excluded_ids=final_excluded_ids
+                excluded_ids=final_excluded_ids,
+                filter_text=self.filter_text_content,
+                deep_scan=deep,
+                scan_limit=limit
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -3279,7 +3429,7 @@ class GenizahGUI(QMainWindow):
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         
         if hasattr(self.comp_thread, 'status_signal'):
-             self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
+             self.comp_thread.status_signal.connect(self.on_comp_status_update)
              
         self.comp_thread.error_signal.connect(self.on_comp_error)
         
@@ -3337,6 +3487,11 @@ class GenizahGUI(QMainWindow):
 
         combined_text = base_text + "\n\n" + "\n\n".join(extra_texts)
         self.run_composition(custom_text=combined_text)
+
+    def on_comp_status_update(self, status):
+        self.comp_progress.setFormat(status)
+        if status.startswith("Scanning batch") or status.startswith("Scanning items"):
+            self.comp_progress.setRange(0, 0)
 
     def on_comp_progress(self, curr, total):
         if total:
@@ -3665,6 +3820,23 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
+        # Display Limit Logic
+        display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500) if self.lab_engine else 500
+
+        full_main_count = len(clean_main)
+        visible_main = clean_main[:display_limit]
+
+        msg_color = "black"
+        if len(visible_main) < full_main_count:
+            status_msg = tr("Showing top {} of {} results. (Export for full list)").format(len(visible_main), full_main_count)
+            msg_color = "#e67e22" # Orange
+        else:
+            status_msg = tr("Found {} results.").format(full_main_count)
+
+        if hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(status_msg)
+            self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
+
         # איסוף IDs לטעינת מטא-דאטה
         ids_to_fetch = set()
         def _collect_id(item):
@@ -3747,23 +3919,26 @@ class GenizahGUI(QMainWindow):
             )
             # מיון ידני באמצעות הלוגיקה שלך
             sorted_flat = self._sort_comp_items(all_flat)
+            visible_flat = sorted_flat[:display_limit]
             
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_flat))])
+            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
             make_checkable(root)
             
-            for item in sorted_flat:
+            for item in visible_flat:
                 add_manuscript_node(root, item)
 
         # ב. מצב היררכי (Grouped)
         else:
-            # 1. Main Results
+            # 1. Main Results (Sliced)
             sorted_main = self._sort_comp_items(clean_main)
-            if sorted_main:
-                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(sorted_main))])
+            visible_sorted_main = sorted_main[:display_limit]
+
+            if visible_sorted_main:
+                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
                 root_main.setExpanded(True)
                 make_checkable(root_main)
-                for item in sorted_main:
+                for item in visible_sorted_main:
                     add_manuscript_node(root_main, item)
 
             # 2. Appendix

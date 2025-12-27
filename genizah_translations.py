@@ -110,6 +110,7 @@ TRANSLATIONS = {
     "Filter > ": "סינון > ",
     "Move titles appearing > X times to Appendix": "העבר כותרות המופיעות מעל X פעמים לנספח",
     "Sort by System ID/Shelfmark only": "מיין לפי מספר מערכת/מדף בלבד",
+    "Sort by shelfmark only": "מיין לפי מספר מדף בלבד",
     "Disable Main/Appendix grouping": "בטל חלוקה לראשי/נספח",
     "Analyze Composition": "נתח חיבור",
     "Analyze": "נתח",
