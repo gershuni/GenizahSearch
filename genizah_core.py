@@ -700,15 +700,12 @@ class LabEngine:
                 # We use re.escape to handle any special chars in the text
                 highlight_regex_str = "|".join(re.escape(w) for w in found_words) if found_words else ""
                 
+                # Populate display metadata correctly
+                display_meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+
                 results.append({
                     'sort_score': custom_score,
-                    'display': {
-                        'id': self.meta_mgr.extract_unique_id(doc['full_header'][0]) or uid, 
-                        'shelfmark': doc['shelfmark'][0], 
-                        'title': '', 
-                        'source': doc['source'][0], 
-                        'img': ''
-                    },
+                    'display': display_meta,
                     'snippet': html_snippet,
                     'full_text': content,
                     'uid': uid,

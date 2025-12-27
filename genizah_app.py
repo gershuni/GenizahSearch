@@ -2698,17 +2698,28 @@ class GenizahGUI(QMainWindow):
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
 
+    def _sanitize_for_excel(self, text):
+        """Cleans text to prevent Excel XML corruption."""
+        if text is None: return ""
+        t = str(text)
+        # Remove illegal characters
+        t = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', t)
+
+        # Handle malicious formulas
+        t = t.strip()
+        if t.startswith(('=', '+', '-', '@')):
+            t = "'" + t
+
+        # Excel cell limit
+        if len(t) > 32700:
+            t = t[:32700] + "..."
+        return t
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
         fmt: 'xlsx', 'csv', or 'txt'
         """
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')):
-                return "'" + t
-            return t
-
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
 
@@ -2763,17 +2774,17 @@ class GenizahGUI(QMainWindow):
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
-                    # No markers: write as-is with formula guard
-                    if '*' not in text:
-                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                    safe_text = self._sanitize_for_excel(text)
+
+                    if '*' not in safe_text:
+                        ws.cell(row=row, column=col, value=safe_text)
                         return
 
                     # Split by asterisk markers
-                    parts = text.split('*')
+                    parts = safe_text.split('*')
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
-                        if not part: continue
                         # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
@@ -2787,7 +2798,7 @@ class GenizahGUI(QMainWindow):
                 current_row = 1
                 for line in credit_text.split('\n'):
                     if not line.strip(): continue
-                    cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
                     cell.font = Font(bold=True, color="555555")
                     current_row += 1
                 current_row += 1
@@ -2810,7 +2821,7 @@ class GenizahGUI(QMainWindow):
                         else:
                             # Strip markers/HTML in other columns
                             clean_val = val_str.replace('*', '')
-                            ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
+                            ws.cell(row=current_row, column=col_idx, value=self._sanitize_for_excel(clean_val))
 
                     current_row += 1
 
