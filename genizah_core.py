@@ -1801,7 +1801,9 @@ class MetadataManager:
             'dimensions': '',
             'people': [],
             'current_owner': '',
-            'shelfmark_alt': ''
+            'shelfmark_alt': '',
+            'date': '',
+            'subjects': []
         }
 
         try:
@@ -1836,11 +1838,19 @@ class MetadataManager:
                         if "English" in val_i:
                             result['english_title'] = val_a
 
+                    elif tag == '260' or tag == '264': # Date
+                        val = get_sub('c')
+                        if val: result['date'] = val
+
                     elif tag == '300': # Dimensions
                         val_a = get_sub('a') # Extent (pages)
                         val_c = get_sub('c') # Dimensions
                         parts = [p for p in [val_a, val_c] if p]
                         result['dimensions'] = " | ".join(parts)
+
+                    elif tag == '650': # Subjects
+                        val = get_sub('a')
+                        if val: result['subjects'].append(val)
 
                     elif tag == '700': # People / Owners
                         name = get_sub('a')

@@ -1008,7 +1008,8 @@ class ResultDialog(QDialog):
         self.txt_extended_info = QTextBrowser()
         self.txt_extended_info.setVisible(False)
         self.txt_extended_info.setMaximumHeight(200)
-        self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; background: #f9f9f9; padding: 5px;")
+        # Use standard palette (transparent background allowed) to support dark mode
+        self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
 
         meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addWidget(self.txt_extended_info)
         
@@ -1242,6 +1243,11 @@ class ResultDialog(QDialog):
 
         html = "<div style='font-family:Arial;'>"
 
+        # Date
+        date_val = marc.get('date')
+        if date_val:
+            html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
         # Dimensions & Physical
         dims = marc.get('dimensions')
         phys = meta.get('physical_desc')
@@ -1252,6 +1258,11 @@ class ResultDialog(QDialog):
         eng_title = marc.get('english_title')
         if eng_title:
             html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+
+        # Subjects
+        subjects = marc.get('subjects', [])
+        if subjects:
+            html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
 
         # Notes
         notes = marc.get('notes', [])
@@ -1270,6 +1281,17 @@ class ResultDialog(QDialog):
         if bib:
             html += f"<p><b>{tr('Bibliography')}:</b><ul>"
             for b in bib: html += f"<li>{b}</li>"
+            html += "</ul></p>"
+
+        # Image List
+        canvas_map = meta.get('canvas_map', {})
+        if canvas_map:
+            html += f"<p><b>{tr('Images')}:</b><ul>"
+            # Sort by FL ID naturally? Or just list them.
+            # Usually FL IDs are somewhat sequential.
+            sorted_fls = sorted(canvas_map.items(), key=lambda x: x[0])
+            for fl, label in sorted_fls:
+                html += f"<li>FL{fl}: {label}</li>"
             html += "</ul></p>"
 
         html += "</div>"
@@ -1994,7 +2016,8 @@ class GenizahGUI(QMainWindow):
         self.browse_side_panel = QTextBrowser()
         self.browse_side_panel.setFixedWidth(300)
         self.browse_side_panel.setVisible(False)
-        self.browse_side_panel.setStyleSheet("border-left: 1px solid #ccc; background: #f9f9f9;")
+        # Remove hardcoded background color to support dark mode
+        self.browse_side_panel.setStyleSheet("border-left: 1px solid #ccc;")
 
         layout.addWidget(main_col)
         layout.addWidget(self.browse_side_panel)
@@ -2011,6 +2034,11 @@ class GenizahGUI(QMainWindow):
         marc = meta.get('marc', {})
         html = "<div style='font-family:Arial; padding:5px;'>"
 
+        # Date
+        date_val = marc.get('date')
+        if date_val:
+            html += f"<p><b>{tr('Date')}:</b><br>{date_val}</p>"
+
         dims = marc.get('dimensions')
         phys = meta.get('physical_desc')
         if dims or phys:
@@ -2019,6 +2047,10 @@ class GenizahGUI(QMainWindow):
         eng_title = marc.get('english_title')
         if eng_title:
             html += f"<p><b>{tr('English Title')}:</b><br>{eng_title}</p>"
+
+        subjects = marc.get('subjects', [])
+        if subjects:
+            html += f"<p><b>{tr('Subjects')}:</b><br>{'; '.join(subjects)}</p>"
 
         if marc.get('notes'):
             html += f"<p><b>{tr('Notes')}:</b><ul>"
@@ -2031,6 +2063,15 @@ class GenizahGUI(QMainWindow):
         if marc.get('bibliography'):
             html += f"<p><b>{tr('Bibliography')}:</b><ul>"
             for b in marc['bibliography']: html += f"<li>{b}</li>"
+            html += "</ul></p>"
+
+        # Image List
+        canvas_map = meta.get('canvas_map', {})
+        if canvas_map:
+            html += f"<p><b>{tr('Images')}:</b><ul>"
+            sorted_fls = sorted(canvas_map.items(), key=lambda x: x[0])
+            for fl, label in sorted_fls:
+                html += f"<li>FL{fl}: {label}</li>"
             html += "</ul></p>"
 
         html += "</div>"
