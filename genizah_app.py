@@ -1181,8 +1181,13 @@ class ResultDialog(QDialog):
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
         self.lbl_img_label.setText("")
-        self.txt_extended_info.setVisible(False)
-        self.btn_ext_info.setVisible(False)
+        # Don't hide extended info here, let it persist if user opened it, but clear outdated data?
+        # Better to keep it closed by default on new result, but on page nav same result?
+        # This function loads a page for the SAME result context usually.
+        # But if switching results, load_result_by_index calls this.
+        # Let's reset visibility only if result changed. But here we are just paging.
+        # Actually, if we switch pages, the extended info (Biblio etc) remains the same for the manuscript.
+        # Only image label changes.
 
         cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
         if cached_meta:

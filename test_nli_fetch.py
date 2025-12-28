@@ -19,19 +19,15 @@ def test_enrichment():
     for k, v in marc.items():
         print(f"{k}: {v}")
 
-    print("\n[IIIF Data]")
-    print(f"Physical Desc: {data.get('physical_desc')}")
-    print(f"Canvas Map (First 5): {list(data.get('canvas_map', {}).items())[:5]}...")
-
-    if 'date' not in marc:
-        print("\n[FAIL] Date field missing from schema!")
+    if 'physical_medium' not in marc:
+        print("\n[FAIL] physical_medium missing!")
         sys.exit(1)
 
-    if 'subjects' not in marc:
-        print("\n[FAIL] Subjects field missing from schema!")
+    if 'online_link' not in marc:
+        print("\n[FAIL] online_link missing!")
         sys.exit(1)
 
-    print("\n[SUCCESS] Metadata schema updated successfully.")
+    print("\n[SUCCESS] New fields integrated.")
 
 if __name__ == "__main__":
     test_enrichment()

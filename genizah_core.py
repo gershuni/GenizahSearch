@@ -1786,12 +1786,10 @@ class MetadataManager:
 
     def fetch_marc_data(self, system_id):
         """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
-        url = f"https://www.nli.org.il/openurl/xml?id=PNX_MANUSCRIPTS{system_id}"
+        # Use the specific IIIF/MARC endpoint which is more reliable
+        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Referer": "https://www.nli.org.il/",
-            "Accept-Language": "en-US,en;q=0.9,he;q=0.8"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
         }
 
         result = {
@@ -1803,7 +1801,9 @@ class MetadataManager:
             'current_owner': '',
             'shelfmark_alt': '',
             'date': '',
-            'subjects': []
+            'subjects': [],
+            'physical_medium': '',
+            'online_link': None
         }
 
         try:
@@ -1848,6 +1848,10 @@ class MetadataManager:
                         parts = [p for p in [val_a, val_c] if p]
                         result['dimensions'] = " | ".join(parts)
 
+                    elif tag == '340': # Physical Medium / Condition
+                        val = get_sub('a')
+                        if val: result['physical_medium'] = val
+
                     elif tag == '650': # Subjects
                         val = get_sub('a')
                         if val: result['subjects'].append(val)
@@ -1859,9 +1863,15 @@ class MetadataManager:
                             full = f"{name} ({role})" if role else name
                             result['people'].append(full)
 
-                    elif tag == '710': # Current Owner
+                    elif tag == '710': # Current Owner (Library Name)
                         val = get_sub('a')
                         if val: result['current_owner'] = val
+
+                    elif tag == '856': # Online Link
+                        url = get_sub('u')
+                        label = get_sub('z') or "Online Version"
+                        if url:
+                            result['online_link'] = {'url': url, 'label': label}
 
                     elif tag == '942': # Alt Shelfmark
                         val = get_sub('z')
