@@ -93,9 +93,9 @@ class LabSettings:
         self.coverage_power = 2.0
         self.order_bonus = 10.0
         
-        # --- הגדרות חדשות: דיכוי רעשים (Stop Words) ---
-        self.stop_word_score = 1.0       # ניקוד למילים קצרות (<3 אותיות)
-        self.common_3char_score = 2.0    # ניקוד למילים נפוצות בנות 3 אותיות
+        # --- New Settings: Noise Suppression (Stop Words) ---
+        self.stop_word_score = 1.0       # Score for short words (<3 chars)
+        self.common_3char_score = 2.0    # Score for common 3-letter words
         
         # Composition Settings
         self.comp_chunk_limit = 500
@@ -127,7 +127,7 @@ class LabSettings:
                     self.coverage_power = data.get('coverage_power', 2.0)
                     self.order_bonus = data.get('order_bonus', 10.0)
 
-                    # טעינת הגדרות רעש
+                    # Load noise settings
                     self.stop_word_score = data.get('stop_word_score', 1.0)
                     self.common_3char_score = data.get('common_3char_score', 2.0)
 
@@ -156,7 +156,7 @@ class LabSettings:
                     'coverage_power': self.coverage_power,
                     'order_bonus': self.order_bonus,
                     
-                    # שמירת הגדרות רעש
+                    # Save noise settings
                     'stop_word_score': self.stop_word_score,
                     'common_3char_score': self.common_3char_score,
 
@@ -411,13 +411,6 @@ class LabEngine:
             for hit in batch:
                 yield hit
 
-    def _execute_safe_search(self, query_str, slop=0):
-        # Legacy wrapper kept if needed, but we mostly use _create_lab_query + _execute_batched_search now
-        q = self._create_lab_query(query_str, slop)
-        if q:
-            return self.lab_searcher.search(q, self.settings.candidate_limit)
-        return None
-
     def _get_term_weight(self, fp):
         """
         Calculates importance using User Configurable Stop-Word scores.
@@ -426,18 +419,18 @@ class LabEngine:
         for char in fp:
             raw_weight += HEBREW_FREQ.get(char, 0)
         
-        # 1. מילים קצרות מדי (<3 תווים)
+        # 1. Words too short (<3 chars)
         if len(fp) < 3:
             return self.settings.stop_word_score 
         
-        # 2. מילים נפוצות בנות 3 תווים (משקל נמוך)
+        # 2. Common 3-letter words (low weight)
         if len(fp) == 3 and raw_weight < 18:
             return self.settings.common_3char_score
 
-        # 3. מילים רגילות/נדירות
+        # 3. Regular/Rare words
         final_weight = raw_weight
         
-        # בונוס אורך רק למילים משמעותיות
+        # Length bonus only for significant words
         if len(fp) > 3:
             final_weight *= self.settings.length_bonus_factor
             
@@ -505,43 +498,43 @@ class LabEngine:
         for i in range(total_matches):
             current_window_score = 0
             
-            # מעקב אחרי כמויות: כמה פעמים ראינו כל מילה בחלון הנוכחי?
+            # Track quantities: how many times have we seen each word in the current window?
             seen_counts = defaultdict(int)
             
-            # מעקב אחרי סדר
+            # Track order
             last_valid_query_idx = -1
             sequential_chain_length = 0
             
-            # אתחול לפי מילת ההתחלה
+            # Initialize by start word
             if matches[i]['q_indices']:
                 last_valid_query_idx = matches[i]['q_indices'][0]
 
             for j in range(i, min(total_matches, i + lookahead_limit)):
                 m = matches[j]
                 
-                # בדיקת מרחק פיזי
+                # Check physical distance
                 dist = m['end'] - matches[i]['start']
                 if dist > 450: break 
                 
                 fp = m['fp']
                 w = m['weight']
                 
-                # כמה פעמים המילה הזו מופיעה בשאילתה המקורית?
+                # How many times does this word appear in the original query?
                 allowed_count = len(fp_to_query_indices[fp])
                 
-                # כמה פעמים ראינו אותה בחלון הזה עד כה?
+                # How many times have we seen it in this window so far?
                 seen_counts[fp] += 1
                 
-                # חישוב הניקוד למילה הספציפית הזו
+                # Calculate score for this specific word
                 word_score = 0
                 
                 if seen_counts[fp] <= allowed_count:
-                    # זוהי הופעה "חוקית" (ראשונה או שניה אם יש כפילות בשאילתה)
-                    # ניתן ניקוד מלא
+                    # Valid occurrence (first or second allowed)
+                    # Full score
                     word_score = (w * unique_bonus)
                 else:
-                    # זוהי הופעה מיותרת (זבל). המילה כבר נמצאה מספיק פעמים.
-                    # ניתן ניקוד מופחת דרסטית (או אפס אם המשתמש קבע 0)
+                    # Redundant occurrence (garbage). Word found enough times.
+                    # Drastically reduced score (or 0 if user set 0)
                     word_score = (w * common_factor) 
                 
                 current_window_score += word_score
@@ -743,42 +736,19 @@ class LabEngine:
         
         final_list = []
         
-        # מוסיפים את כל תוצאות V0.8
+        # Add all V0.8 results
         final_list.extend(v8_map.values())
         
-        # מוסיפים תוצאות V0.7 *רק* אם ה-UID שלהן לא קיים ב-V0.8
+        # Add V0.7 results *only* if UID not in V0.8
         for r in results:
             if r['display']['source'] != "V0.8": # V0.7 or others
                 if r['uid'] not in v8_map:
                     final_list.append(r)
 
-        # לבסוף, ממיינים את הרשימה המאוחדת לפי הציון הגבוה ביותר
+        # Finally, sort unified list by highest score
         final_list.sort(key=lambda x: x['sort_score'], reverse=True)
 
         return final_list
-
-    def _generate_snippet(self, text, terms, window=100):
-        # Basic highlighter finding first term
-        low = text.lower()
-        idx = -1
-        for t in terms:
-            idx = low.find(t.lower())
-            if idx != -1: break
-        
-        if idx == -1: return text[:300]
-        
-        start = max(0, idx - window)
-        end = min(len(text), idx + window)
-        chunk = text[start:end]
-        
-        # Highlight in chunk
-        for t in terms:
-            chunk = re.sub(f"({re.escape(t)})", r"*\1*", chunk, flags=re.IGNORECASE)
-        return chunk
-
-    def _html_snippet(self, text):
-        if not text: return ""
-        return re.sub(r'\*(.*?)\*', r"<b style='color:red'>\1</b>", text)
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
         """
@@ -790,18 +760,18 @@ class LabEngine:
         4. Supports Filter Text and Batching.
         """
         if not full_text:
-            return {'main': [], 'filtered': [], 'known': []} # הוספנו known
+            return {'main': [], 'filtered': [], 'known': []} # Added known
 
-        # נרמול רשימת ההחרגה לחיפוש מהיר
+        # Normalize exclusion list for fast lookup
         excluded_set = set(str(x) for x in (excluded_ids or []))
 
-        # הגדרות משתמש
+        # User settings
         PER_CHUNK_LIMIT = self.settings.comp_chunk_limit
         MIN_SCORE_THRESHOLD = self.settings.comp_min_score
         MAX_FINAL = self.settings.comp_max_final_results
         min_pct_ratio = self.settings.min_should_match / 100.0
 
-        # ... (חלק 1: פירוק לטוקנים - נשאר זהה) ...
+        # (Part 1: Tokenization)
         tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
         c_size = chunk_size if chunk_size else 15
         step = max(1, int(c_size * 0.5)) 
@@ -814,7 +784,7 @@ class LabEngine:
         total_chunks = len(chunks_data)
         results_map = {} 
 
-        # ... (חלק 2: סריקה - נשאר זהה לחלוטין לגרסה הקודמת והטובה) ...
+        # (Part 2: Scanning)
         for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
             if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
             chunk_text = " ".join(chunk_tokens)
@@ -827,7 +797,7 @@ class LabEngine:
             fp_list = fp_str.split()
             needed_unique_fps = set(fp_list) 
 
-            # שאילתה עם Boost
+            # Query with Boost
             query_tokens = fp_str.split()
             clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in query_tokens]
             core_query = " OR ".join(clauses)
@@ -899,7 +869,7 @@ class LabEngine:
                         for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
                 except: pass
 
-        # ... (חלק 3: עיבוד תוצאות - כאן השינוי המהותי בסוף) ...
+        # (Part 3: Result Processing)
         raw_final_items = []
         is_short_search = (total_chunks <= 3)
 
@@ -909,7 +879,7 @@ class LabEngine:
             else:
                 if data['total_score'] < 250: continue
 
-            # יצירת סניפטים (אותו קוד בדיוק כמו קודם)
+            # Generate snippets
             src_snippets = []
             src_indices = sorted(list(data['src_indices']))
             if src_indices:
@@ -959,7 +929,7 @@ class LabEngine:
             }
             raw_final_items.append(item)
 
-        # --- מיון והפרדה (Sorting & Splitting Logic) ---
+        # --- Sorting & Splitting Logic ---
         raw_final_items.sort(key=lambda x: x['score'], reverse=True)
         
         main_list = []
@@ -967,14 +937,14 @@ class LabEngine:
         filtered_list = []
         
         for item in raw_final_items:
-            # בדיקה האם כתב היד מוחרג
+            # Check if manuscript is excluded
             is_excluded = False
             
-            # 1. בדיקה לפי UID (למשל IE...)
+            # 1. Check by UID (e.g. IE...)
             if str(item['uid']) in excluded_set:
                 is_excluded = True
             
-            # 2. בדיקה לפי System ID (המספר 99...) שנמצא בכותרת
+            # 2. Check by System ID (99...) found in header
             if not is_excluded:
                 m = re.search(r'(99\d+)', str(item['raw_header']))
                 if m and m.group(1) in excluded_set:
@@ -987,11 +957,11 @@ class LabEngine:
             else:
                 main_list.append(item)
 
-        # חיתוך המגבלה רק על הרשימה הראשית
+        # Truncate limit only on main list
         if len(main_list) > MAX_FINAL:
             main_list = main_list[:MAX_FINAL]
 
-        # החזרה מפוצלת כדי שה-GUI ידע לבנות את העץ נכון
+        # Split return so GUI builds tree correctly
         return {'main': main_list, 'known': known_list, 'filtered': filtered_list}
     
     @lru_cache(maxsize=10000)
@@ -1003,12 +973,12 @@ class LabEngine:
         try:
             # Tantivy allows checking document frequency for a term
             # Note: Create a Term object for the specific field
-            # בגרסאות מסוימות של tantivy-py הפקודה היא doc_freq
-            # אנו בודקים כמה מסמכים מכילים את המילה
+            # In some tantivy-py versions command is doc_freq
+            # We check how many documents contain the word
             count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD), word)
             return count > threshold
         except Exception:
-            # במקרה של שגיאה או אם הפונקציה לא נתמכת, נניח שהמילה לא נפוצה מדי כדי לא לפספס
+            # If error/unsupported, assume word is not too common to avoid missing it
             return False
 
     def _is_phrase_statistically_weak(self, phrase_text):
@@ -1016,7 +986,7 @@ class LabEngine:
         Returns True if the phrase consists ONLY of extremely common words.
         If it has at least one 'rare' anchor word, it returns False (keep it).
         """
-        # מנקים סימני פיסוק ומפרקים למילים
+        # Clean punctuation and split to words
         words = re.findall(r"[\w\u0590-\u05FF]+", phrase_text)
         if not words:
             return True # Empty phrase is weak
@@ -1024,18 +994,18 @@ class LabEngine:
         rare_anchors = 0
         
         for w in words:
-            # אנו משתמשים בקידוד של שמידמן כי זה מה ששמור באינדקס,
-            # אבל לבדיקת תדירות אפשר לבדוק גם את המילה הגולמית אם האינדקס שומר אותה,
-            # או את ה-Fingerprint שלה.
-            # נניח שאנו בודקים את ה-Fingerprint כי זה השדה המאונדקס שלנו:
+            # We use Shmidman encoding as stored in index,
+            # but could check raw word if stored,
+            # or its Fingerprint.
+            # Assuming Fingerprint check as it's our indexed field:
             fp_word = encode_word_shmidman(w)
             if not fp_word: continue
             
-            # אם המילה *אינה* נפוצה מדי, מצאנו עוגן!
+            # If word is *not* too common, anchor found!
             if not self._is_word_too_common(fp_word):
                 rare_anchors += 1
         
-        # אם לא מצאנו אפילו מילה נדירה אחת, המשפט חלש
+        # If no rare word found, phrase is weak
         return rare_anchors == 0
     
 # ==============================================================================
@@ -1212,11 +1182,6 @@ def configure_lab_logger():
 
 LAB_LOGGER = configure_lab_logger()
 
-SERVICE_ENDPOINTS = {
-    'network': 'https://www.google.com/generate_204',
-    'nli': 'https://iiif.nli.org.il/IIIFv21/',
-}
-
 AI_PROVIDER_ENDPOINTS = {
     "Google Gemini": "https://generativelanguage.googleapis.com",
     "OpenAI": "https://api.openai.com/v1/models",
@@ -1258,33 +1223,6 @@ try:
     import tantivy
 except ImportError:
     raise ImportError(tr("Tantivy library missing. Please install it."))
-
-def check_external_services(extra_endpoints=None, timeout=3):
-    """Check whether core external services respond within a short timeout."""
-    endpoints = dict(SERVICE_ENDPOINTS)
-    if extra_endpoints:
-        endpoints.update(extra_endpoints)
-
-    results = {}
-    for name, url in endpoints.items():
-        detail = {"reachable": False, "status_code": None, "note": None}
-        try:
-            if name == "network":
-                resp = requests.get(url, timeout=timeout, allow_redirects=True, stream=True)
-            else:
-                resp = requests.head(url, timeout=timeout, allow_redirects=True)
-            detail["status_code"] = resp.status_code
-            detail["reachable"] = resp.status_code < 500
-            if resp.status_code in (401, 403):
-                detail["note"] = "reachable but unauthorized"
-            if name == "network":
-                resp.close()
-        except Exception as e:
-            LOGGER.warning("Health check failed for %s at %s: %s", name, url, e)
-            detail["note"] = str(e)
-            detail["reachable"] = False
-        results[name] = detail
-    return results
 
 # ==============================================================================
 #  AI MANAGER
@@ -1724,12 +1662,12 @@ class MetadataManager:
         Instead of expecting a fixed string 'IE_P_FL', we scan for components anywhere.
         This fixes issues with file paths containing backslashes (e.g. Russia Library).
         """
-        # ניסיון ראשון: חיפוש המבנה הקלאסי הרציף
+        # First attempt: classic continuous structure
         match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
         if match:
             return match.group(1)
 
-        # ניסיון שני: הרכבה מרכיבים נפרדים (חסין לשבירת נתיבים)
+        # Second attempt: components assembly (robust to path breaks)
         ie = re.search(r'(IE\d+)', text)
         p = re.search(r'(P\d+)', text)
         fl = re.search(r'(FL\d+)', text)
@@ -1737,7 +1675,7 @@ class MetadataManager:
         if ie and p and fl:
             return f"{ie.group(1)}_{p.group(1)}_{fl.group(1)}"
 
-        # ברירת מחדל: System ID (רק אם הכל נכשל)
+        # Default: System ID (only if all else fails)
         sys = re.search(r'(99\d+)', text)
         return sys.group(1) if sys else "UNKNOWN"
 
@@ -1773,7 +1711,7 @@ class MetadataManager:
         # 3. Page Number (P...)
         p_match = re.search(r'_?(P\d+)', full_header)
         if p_match:
-            # מסירים את ה-P כדי לקבל מספר נקי
+            # Remove P to get clean number
             raw_p = p_match.group(1) # P0001
             result['p_num'] = str(int(raw_p[1:]))
 
@@ -1785,11 +1723,11 @@ class MetadataManager:
         return result
 
     def fetch_nli_data(self, system_id):
-        # 1. בדיקה במטמון הקיים
+        # 1. Check existing cache
         if system_id in self.nli_cache: 
             return self.nli_cache[system_id]
         
-        # 2. בדיקה ב-CSV Bank (התיקון המרכזי: שליפה מקומית במקום רשת)
+        # 2. Check CSV Bank (local fetch)
         if system_id in self.csv_bank:
             row = self.csv_bank[system_id]
             meta = {
@@ -1798,12 +1736,12 @@ class MetadataManager:
                 'desc': '', 
                 'fl_ids': [], 
                 'thumb_url': None, 
-                'thumb_checked': True # מסמנים כבדוק כדי למנוע ניסיונות חוזרים להורדת תמונה
+                'thumb_checked': True # Mark as checked to prevent repeated image download attempts
             }
             self.nli_cache[system_id] = meta
             return meta
 
-        # 3. רק אם אין ברירה (לא במטמון ולא ב-CSV) - פנייה לרשת
+        # 3. Only if necessary (not in cache/CSV) - Network request
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
         return meta
@@ -1977,16 +1915,16 @@ class MetadataManager:
         use_network=False -> Only loads from local CSV/Cache (Instant).
         use_network=True  -> Fetches missing items from NLI.
         """
-        # שלב א': שליפה מהירה מה-CSV (ללא רשת)
+        # Step A: Fast fetch from CSV (no network)
         for sid in system_ids:
             if sid not in self.nli_cache and sid in self.csv_bank:
-                self.fetch_nli_data(sid) # זה שולף מה-CSV אוטומטית כעת
+                self.fetch_nli_data(sid) # This fetches from CSV automatically now
         
-        # אם ביקשנו רק עבודה מקומית, עוצרים כאן
+        # If only local work requested, stop here
         if not use_network:
             return
 
-        # שלב ב': זיהוי מה *באמת* חסר 
+        # Step B: Identify what is *really* missing
         to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
         
         if not to_fetch:
@@ -1995,7 +1933,7 @@ class MetadataManager:
                      progress_callback(i + 1, len(system_ids), sid)
             return
 
-        # שלב ג': הורדה מהרשת (רק אם use_network=True)
+        # Step C: Network download (only if use_network=True)
         futures = {self.nli_executor.submit(self._fetch_single_worker, sid): sid for sid in to_fetch}
         current_progress = len(system_ids) - len(to_fetch)
         
@@ -2406,7 +2344,7 @@ class SearchEngine:
         Returns aggregated results with WIDE source context.
         FIX: Common phrases (> max_freq) are now moved to 'filtered' instead of being discarded.
         """
-        # 1. פירוק הטקסט המקורי לטוקנים
+        # 1. Tokenize original text
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
@@ -2416,23 +2354,23 @@ class SearchEngine:
 
         total_chunks = len(chunks)
         
-        # 2. סריקת הצ'אנקים
+        # 2. Scan chunks
         for i, chunk in enumerate(chunks):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
             
-            # בניית שאילתה
+            # Build query
             t_query = self.build_tantivy_query(chunk, mode)
             regex = self.build_regex_pattern(chunk, mode, 0)
             if not regex: continue
 
-            # בדיקה: האם הביטוי נמצא ב"טקסט לסינון" (Filter Text)?
+            # Check: Is phrase in "Filter Text"?
             is_text_filtered = False
             if filter_text:
                 if regex.search(filter_text):
                     is_text_filtered = True
 
             try:
-                # חיפוש באינדקס
+                # Search index
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
                 
@@ -2442,11 +2380,11 @@ class SearchEngine:
                     doc = self.searcher.doc(doc_addr)
                     content = doc['content'][0]
                     
-                    # וידוא התאמה מדויקת עם Regex
+                    # Verify exact Regex match
                     if regex.search(content):
                         uid = doc['unique_id'][0]
                         
-                        # ניתוב למפה המתאימה
+                        # Route to appropriate map
                         if is_text_filtered or is_freq_filtered:
                             rec = doc_hits_filtered[uid]
                         else:
@@ -2456,13 +2394,13 @@ class SearchEngine:
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
                         rec['matches'].append(regex.search(content).span())
-                        # שמירת האינדקסים של המילים בטקסט *המקור* שנמצאו
+                        # Save indices of found words in *source* text
                         rec['src_indices'].update(range(i, i + chunk_size))
                         rec['patterns'].add(regex.pattern)
             except Exception as e:
                 LAB_LOGGER.warning(f"Failed composition chunk processing at token {i}: {e}")
 
-        # 3. בניית התוצאות עם הקשר רחב (Wide Context Logic)
+        # 3. Build results with Wide Context
         def build_items(hits_dict):
             final_items = []
             
@@ -2471,7 +2409,7 @@ class SearchEngine:
                 src_snippets = []
                 
                 if src_indices:
-                    # א. קיבוץ אינדקסים קרובים
+                    # A. Group nearby indices
                     clusters = []
                     if src_indices:
                         curr_cluster = [src_indices[0]]
@@ -2483,7 +2421,7 @@ class SearchEngine:
                                 curr_cluster = [idx]
                         clusters.append(curr_cluster)
                     
-                    # ב. בניית הטקסט לכל קלאסטר
+                    # B. Build text for each cluster
                     for cl in clusters:
                         start_ctx = max(0, cl[0] - 200)
                         end_ctx = min(len(tokens), cl[-1] + 201)
@@ -2581,7 +2519,7 @@ class SearchEngine:
         return manuscripts
 
     def group_composition_results(self, items, threshold=5, progress_callback=None, status_callback=None, check_cancel=None):
-        # 1. איסוף IDs לטובת מטא-דאטה
+        # 1. Collect IDs for metadata
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
@@ -2594,13 +2532,13 @@ class SearchEngine:
         if status_callback:
             status_callback(tr("Fetching metadata..."))
 
-        # טעינת מטא-דאטה (כעת מהירה בזכות התיקון הקודם)
+        # Load metadata (fast due to previous fix)
         self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=progress_callback)
 
         if status_callback:
             status_callback(tr("Grouping results..."))
 
-        # 2. הכנת נתונים למיון
+        # 2. Prepare data for sorting
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
 
         def _get_clean_words(t):
@@ -2612,24 +2550,24 @@ class SearchEngine:
             words = _get_clean_words(title_str)
             while words and words[0] in IGNORE_PREFIXES: words.pop(0)
             if not words: return None
-            # חתימה: שתי המילים המשמעותיות הראשונות
+            # Signature: First two significant words
             return f"{words[0]} {words[1]}" if len(words) >= 2 else words[0]
 
-        # 3. אלגוריתם ה-Grouping החדש (Dictionary Based - O(N))
-        # במקום לולאה כפולה, אנו ממפים את כל הפריטים לפי החתימה שלהם
+        # 3. New Grouping Algorithm (Dictionary Based - O(N))
+        # Instead of double loop, map all items by signature
         
         groups_map = defaultdict(list)
         wrapped_items = []
         total_items = len(items)
 
         for idx, item in enumerate(items):
-            # עדכון GUI בתדירות נמוכה למניעת קיפאון
+            # Update GUI infrequently to prevent freezing
             if progress_callback and idx % 100 == 0:
                 progress_callback(idx, total_items)
             
             if check_cancel and check_cancel(): return None, None, None
 
-            # חילוץ כותרת
+            # Extract title
             if item.get('type') == 'manuscript' and item.get('sys_id'):
                 sid = item['sys_id']
             else:
@@ -2653,25 +2591,25 @@ class SearchEngine:
             if sig:
                 groups_map[sig].append(w_item)
 
-        # 4. סינון קבוצות לפי הסף (Threshold)
+        # 4. Filter groups by Threshold
         appendix = defaultdict(list)
         summary = defaultdict(list)
 
         for sig, group_items in groups_map.items():
             if len(group_items) > threshold:
-                # הקבוצה גדולה מספיק - מעבירים לנספח
+                # Group large enough - move to appendix
                 for w in group_items:
                     w['grouped'] = True
                     appendix[sig].append(w['item'])
                     summary[sig].append(w['shelfmark'])
 
-        # 5. יצירת הרשימה הראשית (כל מה שלא קובץ)
+        # 5. Create Main List (ungrouped)
         main_list = [w['item'] for w in wrapped_items if not w['grouped']]
         
-        # מיון לפי ציון יורד
+        # Sort by score descending
         main_list.sort(key=lambda x: x['score'], reverse=True)
         
-        # עדכון סופי ל-GUI
+        # Final GUI update
         if progress_callback:
             progress_callback(total_items, total_items)
 
