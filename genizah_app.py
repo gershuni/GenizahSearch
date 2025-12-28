@@ -2680,7 +2680,7 @@ class GenizahGUI(QMainWindow):
 
                 # Fonts used for rich text snippets
                 font_red = InlineFont(color='FF0000', b=True)
-                font_normal = InlineFont(color='000000')
+                font_normal = InlineFont(color='000000', b=False)
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
@@ -2695,6 +2695,8 @@ class GenizahGUI(QMainWindow):
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
+                        if not part:
+                            continue
                         # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
@@ -2938,7 +2940,7 @@ class GenizahGUI(QMainWindow):
                     ws.sheet_view.rightToLeft = True
 
                     font_red = InlineFont(color='FF0000', b=True)
-                    font_normal = InlineFont(color='000000')
+                    font_normal = InlineFont(color='000000', b=False)
 
                     def write_rich_cell(row, col, text):
                         # הגנה ראשונית: ניקוי תווים אסורים מהטקסט הגולמי
@@ -2952,6 +2954,8 @@ class GenizahGUI(QMainWindow):
                         rich_string = CellRichText()
                         
                         for i, part in enumerate(parts):
+                            if not part:
+                                continue
                             if i % 2 == 1:
                                 rich_string.append(TextBlock(font_red, part))
                             else:
@@ -3650,7 +3654,17 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_context, QLabel(""))
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
-    def _set_comp_node_previews(self, node, source_text, ms_text):
+    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None):
+        if highlight_pattern and source_text:
+            try:
+                # Apply highlighting to Source Text if pattern exists
+                regex = re.compile(highlight_pattern, re.IGNORECASE)
+                # Only apply if not already highlighted (simple check)
+                if '*' not in source_text:
+                    source_text = regex.sub(r'*\g<0>*', source_text)
+            except Exception:
+                pass
+
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
         
@@ -3764,14 +3778,14 @@ class GenizahGUI(QMainWindow):
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
                 # Case B: מרובה עמודים
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -3782,7 +3796,7 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 3, "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
             else:
                 # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -3793,7 +3807,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, 3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
             
             _collect_id(ms_item)
 
@@ -3908,14 +3922,14 @@ class GenizahGUI(QMainWindow):
                 if p_num_extracted: p_num = p_num_extracted
             
             self._set_comp_tree_text(node, 1, f"{display_shelf} (Img {p_num})")
-            self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''))
+            self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
         
         elif len(pages) > 1:
              self._set_comp_tree_text(node, 1, f"{display_shelf} ({len(pages)} matches)")
              
              if pages:
                  first_p = pages[0]
-                 self._set_comp_node_previews(node, first_p.get('source_ctx', ''), first_p.get('text', ''))
+                 self._set_comp_node_previews(node, first_p.get('source_ctx', ''), first_p.get('text', ''), first_p.get('highlight_pattern'))
              # ---------------------------------------------------------
 
              for p_item in pages:
@@ -3930,7 +3944,7 @@ class GenizahGUI(QMainWindow):
                 child.setText(1, f"Img {p_num_child}") 
 
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''))
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
     
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
@@ -4530,7 +4544,8 @@ class GenizahGUI(QMainWindow):
         node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
 
         # הצגת הסניפט בהורה
-        self._set_comp_node_previews(node, best_ctx, best_snippet)
+        pattern = pages[0].get('highlight_pattern') if pages else None
+        self._set_comp_node_previews(node, best_ctx, best_snippet, pattern)
 
         if len(pages) > 1:
             node.setText(1, f"{display_shelf} ({len(pages)} matches)")
@@ -4548,7 +4563,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
                 child.setText(1, p_num_str)
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''))
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
         
         elif len(pages) == 1:
             p_item = pages[0]
@@ -4567,7 +4582,19 @@ class GenizahGUI(QMainWindow):
             stored_data = item.data(1, Qt.ItemDataRole.UserRole)
             if stored_data:
                 ctx, snippet = stored_data
-                self._set_comp_node_previews(item, ctx, snippet)
+
+                # Try to retrieve highlight pattern from the main item data (Role 0)
+                item_data = item.data(0, Qt.ItemDataRole.UserRole)
+                pattern = None
+                if item_data:
+                    if item_data.get('type') == 'manuscript':
+                        pages = item_data.get('pages', [])
+                        if pages:
+                            pattern = pages[0].get('highlight_pattern')
+                    else:
+                        pattern = item_data.get('highlight_pattern')
+
+                self._set_comp_node_previews(item, ctx, snippet, pattern)
 
     def on_comp_item_double_clicked(self, item, column):
         """
