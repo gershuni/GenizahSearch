@@ -1704,11 +1704,27 @@ class MetadataManager:
             LOGGER.warning("Failed to build or save file map cache from %s: %s", Config.FILE_V7, e)
 
     def extract_unique_id(self, text):
+        """
+        Robust extraction of Unique ID.
+        Instead of expecting a fixed string 'IE_P_FL', we scan for components anywhere.
+        This fixes issues with file paths containing backslashes (e.g. Russia Library).
+        """
+        # ניסיון ראשון: חיפוש המבנה הקלאסי הרציף
         match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
-        if not match:
-            sys = re.search(r'(99\d+)', text)
-            return sys.group(1) if sys else "UNKNOWN"
-        return match.group(1)
+        if match:
+            return match.group(1)
+
+        # ניסיון שני: הרכבה מרכיבים נפרדים (חסין לשבירת נתיבים)
+        ie = re.search(r'(IE\d+)', text)
+        p = re.search(r'(P\d+)', text)
+        fl = re.search(r'(FL\d+)', text)
+
+        if ie and p and fl:
+            return f"{ie.group(1)}_{p.group(1)}_{fl.group(1)}"
+
+        # ברירת מחדל: System ID (רק אם הכל נכשל)
+        sys = re.search(r'(99\d+)', text)
+        return sys.group(1) if sys else "UNKNOWN"
 
     def parse_header_smart(self, full_header):
         sys_match = re.search(r'(99\d{8,})', full_header)
@@ -1723,13 +1739,34 @@ class MetadataManager:
         return sys_id, p_num
         
     def parse_full_id_components(self, full_header):
-        match = re.search(r'(99\d+)_?(IE\d+)?_?(P\d+)?_?(FL\d+)?', full_header)
+        """
+        Parse header into components regardless of order or separators.
+        Fixes display issues for V0.7 paths.
+        """
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
-        if match:
-            result['sys_id'] = match.group(1)
-            if match.group(2): result['ie_id'] = match.group(2)
-            if match.group(3): result['p_num'] = str(int(match.group(3)[1:])) 
-            if match.group(4): result['fl_id'] = match.group(4).replace("FL", "") 
+
+        # 1. System ID (99...)
+        sys_match = re.search(r'(99\d{8,})', full_header)
+        if sys_match:
+            result['sys_id'] = sys_match.group(1)
+
+        # 2. IE ID
+        ie_match = re.search(r'(IE\d+)', full_header)
+        if ie_match:
+            result['ie_id'] = ie_match.group(1)
+
+        # 3. Page Number (P...)
+        p_match = re.search(r'_?(P\d+)', full_header)
+        if p_match:
+            # מסירים את ה-P כדי לקבל מספר נקי
+            raw_p = p_match.group(1) # P0001
+            result['p_num'] = str(int(raw_p[1:]))
+
+        # 4. FL ID
+        fl_match = re.search(r'(FL\d+)', full_header)
+        if fl_match:
+            result['fl_id'] = fl_match.group(1).replace("FL", "")
+
         return result
 
     def fetch_nli_data(self, system_id):
