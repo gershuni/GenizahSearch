@@ -1049,10 +1049,18 @@ class ResultDialog(QDialog):
     def search_for_parallels(self):
         parent = self.parent()
         if parent and hasattr(parent, "send_result_to_composition"):
+            # Trim title to first 6 words and append ... if longer
+            full_title = self.lbl_title.text() or ""
+            words = full_title.split()
+            if len(words) > 6:
+                short_title = " ".join(words[:6]) + "..."
+            else:
+                short_title = full_title
+
             parent.send_result_to_composition(
                 self.data,
                 source_text=self.current_page_text,
-                title=self.lbl_title.text(),
+                title=short_title,
             )
             self.close()
 
