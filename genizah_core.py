@@ -1746,6 +1746,153 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return meta
 
+    def fetch_iiif_manifest(self, system_id):
+        """Fetch and parse IIIF manifest for physical description and image labels."""
+        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
+        result = {'physical_desc': '', 'canvas_map': {}}
+        try:
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=10, verify=False)
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # 1. Physical Description
+                result['physical_desc'] = data.get('attribution', '')
+
+                # 2. Canvas Map (FL -> Label)
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        label = canvas.get('label', '')
+                        # Extract FL ID from image service ID
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            service_id = service.get('@id', '')
+                            # Extract FL number (e.g. .../FL7734473/...)
+                            fl_match = re.search(r'FL(\d+)', service_id)
+                            if fl_match:
+                                fl_digits = fl_match.group(1)
+                                result['canvas_map'][fl_digits] = label
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"IIIF fetch failed for {system_id}: {e}")
+            return result
+
+    def fetch_marc_data(self, system_id):
+        """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
+        url = f"https://www.nli.org.il/openurl/xml?id=PNX_MANUSCRIPTS{system_id}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Referer": "https://www.nli.org.il/",
+            "Accept-Language": "en-US,en;q=0.9,he;q=0.8"
+        }
+
+        result = {
+            'bibliography': [],
+            'notes': [],
+            'english_title': '',
+            'dimensions': '',
+            'people': [],
+            'current_owner': '',
+            'shelfmark_alt': ''
+        }
+
+        try:
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                # Remove namespaces to simplify parsing
+                xml_content = re.sub(r'\sxmlns="[^"]+"', '', resp.text, count=1)
+                xml_content = re.sub(r'\sxmlns:marc="[^"]+"', '', xml_content, count=1)
+                xml_content = xml_content.replace('marc:', '') # Bruteforce namespace removal
+
+                root = ET.fromstring(xml_content)
+
+                for df in root.findall(".//datafield"):
+                    tag = df.get('tag')
+
+                    def get_sub(code):
+                        sf = df.find(f"subfield[@code='{code}']")
+                        return sf.text.strip() if sf is not None and sf.text else ""
+
+                    if tag == '581': # Bibliography
+                        val = get_sub('a')
+                        if val: result['bibliography'].append(val)
+
+                    elif tag == '500': # Notes
+                        val = get_sub('a')
+                        if val: result['notes'].append(val)
+
+                    elif tag == '246': # English Title
+                        val_a = get_sub('a')
+                        val_i = get_sub('i')
+                        if "English" in val_i:
+                            result['english_title'] = val_a
+
+                    elif tag == '300': # Dimensions
+                        val_a = get_sub('a') # Extent (pages)
+                        val_c = get_sub('c') # Dimensions
+                        parts = [p for p in [val_a, val_c] if p]
+                        result['dimensions'] = " | ".join(parts)
+
+                    elif tag == '700': # People / Owners
+                        name = get_sub('a')
+                        role = get_sub('e')
+                        if name:
+                            full = f"{name} ({role})" if role else name
+                            result['people'].append(full)
+
+                    elif tag == '710': # Current Owner
+                        val = get_sub('a')
+                        if val: result['current_owner'] = val
+
+                    elif tag == '942': # Alt Shelfmark
+                        val = get_sub('z')
+                        if val: result['shelfmark_alt'] = val
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
+            return result
+
+    def enrich_metadata(self, system_id):
+        """Fetch extended metadata (IIIF/MARC) and merge into cache."""
+        if not system_id: return {}
+
+        # Ensure basic meta exists
+        if system_id not in self.nli_cache:
+            self.fetch_nli_data(system_id)
+
+        current_meta = self.nli_cache.get(system_id, {})
+
+        # 1. Fetch IIIF
+        iiif_data = self.fetch_iiif_manifest(system_id)
+
+        # 2. Fetch MARC
+        marc_data = self.fetch_marc_data(system_id)
+
+        # 3. Merge Updates
+        current_meta['physical_desc'] = iiif_data.get('physical_desc', '')
+        current_meta['canvas_map'] = iiif_data.get('canvas_map', {})
+        current_meta['marc'] = marc_data # Store structured MARC data
+
+        # Update cache precedence (Enrichment overrides basic placeholders)
+        if marc_data.get('english_title') and not current_meta.get('title'):
+            current_meta['title'] = marc_data['english_title']
+
+        if marc_data.get('shelfmark_alt') and (not current_meta.get('shelfmark') or current_meta.get('shelfmark') == 'Unknown'):
+            current_meta['shelfmark'] = marc_data['shelfmark_alt']
+
+        self.nli_cache[system_id] = current_meta
+        return current_meta
+
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
         # Initialize default meta structure

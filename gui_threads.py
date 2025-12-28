@@ -268,3 +268,22 @@ class StartupThread(QThread):
             self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer, ai_mgr)
         except Exception as e:
             self.error_signal.emit(str(e))
+
+
+class EnrichMetadataThread(QThread):
+    """Fetch extended metadata (IIIF/MARC) in the background."""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, meta_mgr, system_id):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.system_id = system_id
+
+    def run(self):
+        try:
+            # This method (in genizah_core.py) handles network errors gracefully
+            data = self.meta_mgr.enrich_metadata(self.system_id)
+            self.finished_signal.emit(data)
+        except Exception:
+            # If something unexpected happens, just emit empty to avoid hanging
+            self.finished_signal.emit({})

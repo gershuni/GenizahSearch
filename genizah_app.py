@@ -46,7 +46,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
@@ -933,6 +933,7 @@ class ResultDialog(QDialog):
         self.current_page_uid = None
         
         self.current_meta_request = 0
+        self.extended_info_visible = False
 
         self.init_ui()
         self.metadata_loaded.connect(self.on_metadata_loaded)
@@ -982,18 +983,34 @@ class ResultDialog(QDialog):
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
         btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
-        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
+
+        self.lbl_img_label = QLabel("")
+        self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
+
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
         self.btn_view_transcription = QPushButton(tr("View full transcription"))
         self.btn_view_transcription.clicked.connect(self.open_full_transcription)
         self.btn_search_parallels = QPushButton(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
+
+        self.btn_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_ext_info.setCheckable(True)
+        self.btn_ext_info.toggled.connect(self.toggle_extended_info)
+        self.btn_ext_info.setVisible(False)
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
+        action_row.addWidget(self.btn_ext_info)
         action_row.addStretch()
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row)
+        self.txt_extended_info = QTextBrowser()
+        self.txt_extended_info.setVisible(False)
+        self.txt_extended_info.setMaximumHeight(200)
+        self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; background: #f9f9f9; padding: 5px;")
+
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addWidget(self.txt_extended_info)
         
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
@@ -1162,7 +1179,10 @@ class ResultDialog(QDialog):
         # Handle Metadata & Image
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
-        
+        self.lbl_img_label.setText("")
+        self.txt_extended_info.setVisible(False)
+        self.btn_ext_info.setVisible(False)
+
         cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
         if cached_meta:
             self.apply_metadata(cached_meta)
@@ -1175,6 +1195,15 @@ class ResultDialog(QDialog):
                 self.metadata_loaded.emit(request_id, meta or {})
             threading.Thread(target=worker, daemon=True).start()
 
+        # --- TRIGGER ENRICHED METADATA FETCH ---
+        # Only fetch if we haven't already fetched MARC/IIIF data for this ID
+        if not cached_meta or 'marc' not in cached_meta:
+            self.enrich_worker = EnrichMetadataThread(self.meta_mgr, self.current_sys_id)
+            self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
+            self.enrich_worker.start()
+        else:
+            self.on_enriched_data_loaded(cached_meta)
+
     def apply_metadata(self, meta):
         # 1. Update Text Labels
         shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
@@ -1185,6 +1214,74 @@ class ResultDialog(QDialog):
         # 2. Trigger Image Fetch using the FRESH metadata
         # (This meta object now contains 'thumb_url' from the XML 907 $d field)
         self.fetch_image(self.current_sys_id, meta)
+
+    def toggle_extended_info(self, checked):
+        self.extended_info_visible = checked
+        self.txt_extended_info.setVisible(checked)
+        self.btn_ext_info.setText(tr("Hide Extended Info") if checked else tr("Show Extended Info"))
+
+    def on_enriched_data_loaded(self, meta):
+        if not meta: return
+        if self.current_sys_id not in self.meta_mgr.nli_cache:
+            return # Context switched
+
+        # 1. Update Image Label (e.g. Frag 001r)
+        fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
+        canvas_map = meta.get('canvas_map', {})
+        label = canvas_map.get(fl_digits)
+        if label:
+            self.lbl_img_label.setText(f"({label})")
+        else:
+            self.lbl_img_label.setText("")
+
+        # 2. Build Extended Info HTML
+        marc = meta.get('marc', {})
+        if not marc and not meta.get('physical_desc'):
+            self.btn_ext_info.setVisible(False)
+            return
+
+        html = "<div style='font-family:Arial;'>"
+
+        # Dimensions & Physical
+        dims = marc.get('dimensions')
+        phys = meta.get('physical_desc')
+        if dims or phys:
+            html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        # English Title
+        eng_title = marc.get('english_title')
+        if eng_title:
+            html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+
+        # Notes
+        notes = marc.get('notes', [])
+        if notes:
+            html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for n in notes: html += f"<li>{n}</li>"
+            html += "</ul></p>"
+
+        # People
+        people = marc.get('people', [])
+        if people:
+            html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+
+        # Bibliography
+        bib = marc.get('bibliography', [])
+        if bib:
+            html += f"<p><b>{tr('Bibliography')}:</b><ul>"
+            for b in bib: html += f"<li>{b}</li>"
+            html += "</ul></p>"
+
+        html += "</div>"
+
+        self.txt_extended_info.setHtml(html)
+        self.btn_ext_info.setVisible(True)
+
+        # Re-apply standard metadata if improved
+        self.lbl_title.setText(meta.get('title', ''))
+        shelf = meta.get('shelfmark')
+        if shelf and shelf != "Unknown":
+            self.lbl_shelf.setText(shelf)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -1795,7 +1892,10 @@ class GenizahGUI(QMainWindow):
         return panel
 
     def create_browse_tab(self):
-        panel = QWidget(); layout = QVBoxLayout()
+        panel = QWidget(); layout = QHBoxLayout(panel)
+
+        # Main Column
+        main_col = QWidget(); main_layout = QVBoxLayout(main_col)
         
         # --- Top Area ---
         top_container = QWidget(); top_container.setFixedHeight(120)
@@ -1842,9 +1942,15 @@ class GenizahGUI(QMainWindow):
         self.btn_b_save.clicked.connect(self.browse_save_full)
         self.btn_b_save.setEnabled(False)
 
+        self.btn_b_ext = QPushButton(tr("Extended Info"))
+        self.btn_b_ext.setCheckable(True)
+        self.btn_b_ext.clicked.connect(self.toggle_browse_side_panel)
+        self.btn_b_ext.setEnabled(False)
+
         btn_row.addWidget(self.btn_b_catalog)
         btn_row.addWidget(self.btn_b_all)
         btn_row.addWidget(self.btn_b_save)
+        btn_row.addWidget(self.btn_b_ext)
         btn_row.addStretch()
 
         btn_browse_help = QPushButton("?")
@@ -1866,14 +1972,14 @@ class GenizahGUI(QMainWindow):
 
         top_layout.addLayout(left_col, 1)
         top_layout.addWidget(self.browse_thumb)
-        layout.addWidget(top_container)
+        main_layout.addWidget(top_container)
         
         self.browse_title_lbl = QLabel(); self.browse_title_lbl.setVisible(False)
 
         # Main Text Browser
         self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
-        layout.addWidget(self.browse_text)
+        main_layout.addWidget(self.browse_text)
         
         # Navigation Footer
         nav = QHBoxLayout()
@@ -1882,9 +1988,70 @@ class GenizahGUI(QMainWindow):
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
         self.lbl_page_count = QLabel("0/0")
         nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
-        layout.addLayout(nav); panel.setLayout(layout)
+        main_layout.addLayout(nav)
+
+        # Add Side Panel (Hidden by default)
+        self.browse_side_panel = QTextBrowser()
+        self.browse_side_panel.setFixedWidth(300)
+        self.browse_side_panel.setVisible(False)
+        self.browse_side_panel.setStyleSheet("border-left: 1px solid #ccc; background: #f9f9f9;")
+
+        layout.addWidget(main_col)
+        layout.addWidget(self.browse_side_panel)
         return panel
     
+    def toggle_browse_side_panel(self, checked):
+        self.browse_side_panel.setVisible(checked)
+
+    def on_browse_enriched_loaded(self, meta):
+        if not meta: return
+        # Verify context hasn't changed (though less critical here than dialog)
+
+        # 1. Populate Side Panel
+        marc = meta.get('marc', {})
+        html = "<div style='font-family:Arial; padding:5px;'>"
+
+        dims = marc.get('dimensions')
+        phys = meta.get('physical_desc')
+        if dims or phys:
+            html += f"<p><b>{tr('Physical Description')}:</b><br>{phys or ''} {dims or ''}</p>"
+
+        eng_title = marc.get('english_title')
+        if eng_title:
+            html += f"<p><b>{tr('English Title')}:</b><br>{eng_title}</p>"
+
+        if marc.get('notes'):
+            html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for n in marc['notes']: html += f"<li>{n}</li>"
+            html += "</ul></p>"
+
+        if marc.get('people'):
+            html += f"<p><b>{tr('People')}:</b><br>{'; '.join(marc['people'])}</p>"
+
+        if marc.get('bibliography'):
+            html += f"<p><b>{tr('Bibliography')}:</b><ul>"
+            for b in marc['bibliography']: html += f"<li>{b}</li>"
+            html += "</ul></p>"
+
+        html += "</div>"
+        self.browse_side_panel.setHtml(html)
+
+        # Enable toggle if content exists
+        has_content = bool(marc or phys)
+        self.btn_b_ext.setEnabled(has_content)
+        if has_content and self.btn_b_ext.isChecked():
+            self.browse_side_panel.setVisible(True)
+
+        # 2. Refresh View to show new labels (e.g. Frag 001r) if needed
+        # If we are in "View All" mode, we might want to refresh the whole text?
+        # Or just let the next navigation update it.
+        # For now, let's just trigger a view update if we are single-page mode.
+        if self.btn_b_all.isEnabled(): # Means we are NOT in View All mode (or View All button is active)
+             self.browse_update_view(0)
+        else:
+             # In View All mode, reload to apply labels
+             self.browse_load_all()
+
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
         if not self.current_browse_sid: return
@@ -1897,6 +2064,10 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
+        # Get enriched map if available
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        canvas_map = meta.get('canvas_map', {})
+
         html_content = []
         for p in pages:
             # Anchor for scrolling
@@ -1905,10 +2076,17 @@ class GenizahGUI(QMainWindow):
             # Visual Separator
             img_lbl = tr("Image")
             fl_id = p.get('fl_id')
+
+            # Resolve Label
+            fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+            label = canvas_map.get(fl_digits, "")
+
             fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+            label_suffix = f" - {label}" if label else ""
+
             separator = f"""
             <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}{fl_suffix}</b>
+                <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
             </div>
             """
             
@@ -1923,6 +2101,7 @@ class GenizahGUI(QMainWindow):
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
+        self.btn_b_all.setEnabled(False)
         self.lbl_page_count.setText(tr("Continuous View"))
         
         # Scroll to the page we were looking at
@@ -4338,7 +4517,17 @@ class GenizahGUI(QMainWindow):
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_all.setEnabled(True)   # Enable
         self.btn_b_save.setEnabled(True)  # Enable
+        self.btn_b_ext.setVisible(True)
         self.browse_update_view(0)
+
+        # Trigger Enrich
+        meta = self.meta_mgr.nli_cache.get(sid, {})
+        if not meta or 'marc' not in meta:
+            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+            self.enrich_browse_worker.start()
+        else:
+            self.on_browse_enriched_loaded(meta)
 
     def browse_navigate(self, d): self.browse_update_view(d)
 
@@ -4347,20 +4536,43 @@ class GenizahGUI(QMainWindow):
         if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
 
         self.current_browse_p = pd['p_num']
+
+        # Resolve dynamic label
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        canvas_map = meta.get('canvas_map', {})
+
+        # Extract FL for this page
+        full_header = pd.get('full_header', '')
+        parsed = self.meta_mgr.parse_full_id_components(full_header)
+        fl_digits = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
+
+        label = canvas_map.get(fl_digits, "")
+        label_html = f" <span style='color:#7f8c8d; font-size:0.8em'>({label})</span>" if label else ""
+
         # Preprocess the text outside the f-string to avoid backslash parsing issues
         browse_html_text = pd['text'].replace('\n', '<br>')
-        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
-        full_header = pd.get('full_header', '')
+        # Add Header inside the text view
+        header_html = f"<div style='border-bottom:1px solid #ccc; margin-bottom:10px; color:#555;'><b>Image {pd['p_num']}</b>{label_html}</div>"
+
+        self.browse_text.setHtml(f"<div dir='rtl'>{header_html}{browse_html_text}</div>")
+
         _, _, shelf, title = self._get_meta_for_header(full_header)
 
         # --- UPDATE: Combined Label Text ---
+        # Update shelfmark/title from cache if enrichment happened
+        if meta.get('title'): title = meta.get('title')
+        if meta.get('shelfmark') and meta.get('shelfmark') != "Unknown": shelf = meta.get('shelfmark')
+
         info_text = f"<b>{shelf}</b><br>{title or ''}"
         self.browse_info_lbl.setText(info_text)
         # -----------------------------------
 
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
+
+        # Ensure Single Page mode buttons are enabled
+        self.btn_b_all.setEnabled(True)
 
         if self.current_browse_sid in self.meta_mgr.nli_cache:
             self.fetch_browse_thumbnail(self.current_browse_sid)
