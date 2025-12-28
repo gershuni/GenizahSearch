@@ -260,6 +260,21 @@ class LabEngine:
         self._ensure_lab_tokenizers(index)
         writer = index.writer(heap_size=50_000_000)
 
+        # --- Pre-calculation for progress percentage ---
+        def count_documents(fname, label):
+            if not os.path.exists(fname): return 0
+            count = 0
+            try:
+                with open(fname, 'r', encoding='utf-8-sig') as f:
+                    for line in f:
+                        if label == "V0.8" and line.startswith("==>"): count += 1
+                        elif label == "V0.7" and line.startswith("###"): count += 1
+            except Exception: pass
+            return count
+
+        estimated_total = count_documents(Config.FILE_V8, "V0.8") + count_documents(Config.FILE_V7, "V0.7")
+        LAB_LOGGER.info(f"Estimated total docs: {estimated_total}")
+
         total_docs = 0
         
         def process_file(fpath, label):
@@ -291,7 +306,7 @@ class LabEngine:
                             ))
                             total_docs += 1
                             if progress_callback and total_docs % 1000 == 0:
-                                progress_callback(total_docs, 0)
+                                progress_callback(total_docs, estimated_total)
                         
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
