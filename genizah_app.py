@@ -1283,17 +1283,6 @@ class ResultDialog(QDialog):
             for b in bib: html += f"<li>{b}</li>"
             html += "</ul></p>"
 
-        # Image List
-        canvas_map = meta.get('canvas_map', {})
-        if canvas_map:
-            html += f"<p><b>{tr('Images')}:</b><ul>"
-            # Sort by FL ID naturally? Or just list them.
-            # Usually FL IDs are somewhat sequential.
-            sorted_fls = sorted(canvas_map.items(), key=lambda x: x[0])
-            for fl, label in sorted_fls:
-                html += f"<li>FL{fl}: {label}</li>"
-            html += "</ul></p>"
-
         html += "</div>"
 
         self.txt_extended_info.setHtml(html)
@@ -2063,15 +2052,6 @@ class GenizahGUI(QMainWindow):
         if marc.get('bibliography'):
             html += f"<p><b>{tr('Bibliography')}:</b><ul>"
             for b in marc['bibliography']: html += f"<li>{b}</li>"
-            html += "</ul></p>"
-
-        # Image List
-        canvas_map = meta.get('canvas_map', {})
-        if canvas_map:
-            html += f"<p><b>{tr('Images')}:</b><ul>"
-            sorted_fls = sorted(canvas_map.items(), key=lambda x: x[0])
-            for fl, label in sorted_fls:
-                html += f"<li>FL{fl}: {label}</li>"
             html += "</ul></p>"
 
         html += "</div>"
