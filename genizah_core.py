@@ -81,8 +81,8 @@ class LabSettings:
     """Manages configuration for the Lab Mode, including scoring weights."""
     def __init__(self):
         self.custom_variants = {} 
-        self.candidate_limit = 2000
-        self.min_should_match = 60
+        self.candidate_limit = 5000
+        self.min_should_match = 75
         self.gap_penalty = 2
         
         # Scoring Weights
@@ -98,9 +98,9 @@ class LabSettings:
         self.common_3char_score = 2.0    # ניקוד למילים נפוצות בנות 3 אותיות
         
         # Composition Settings
-        self.comp_chunk_limit = 200
+        self.comp_chunk_limit = 500
         self.comp_min_score = 70
-        self.comp_max_final_results = 100
+        self.comp_max_final_results = 200
         
         # Deep Scan Settings
         self.lab_scan_limit = 50000
