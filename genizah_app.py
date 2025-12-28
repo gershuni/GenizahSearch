@@ -1049,10 +1049,18 @@ class ResultDialog(QDialog):
     def search_for_parallels(self):
         parent = self.parent()
         if parent and hasattr(parent, "send_result_to_composition"):
+            # Trim title to first 6 words and append ... if longer
+            full_title = self.lbl_title.text() or ""
+            words = full_title.split()
+            if len(words) > 6:
+                short_title = " ".join(words[:6]) + "..."
+            else:
+                short_title = full_title
+
             parent.send_result_to_composition(
                 self.data,
                 source_text=self.current_page_text,
-                title=self.lbl_title.text(),
+                title=short_title,
             )
             self.close()
 
@@ -2861,6 +2869,9 @@ class GenizahGUI(QMainWindow):
             # 4. Collapse multiple spaces
             t = re.sub(r'\s+', ' ', t)
 
+            # 5. Merge adjacent asterisks
+            t = re.sub(r'\*(\s+)\*', r'\1', t)
+
             return t.strip()
 
         # ==========================================
@@ -2983,7 +2994,8 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            if idx == 9:
+                            # Apply rich text to Source Context (8) and Manuscript Text (9)
+                            if idx in (8, 9):
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
@@ -4209,7 +4221,9 @@ class GenizahGUI(QMainWindow):
             t = re.sub(r'<span[^>]*>', '*', t).replace('</span>', '*')
             t = t.replace("<br>", " ").replace("\n", " ").replace("\r", "")
             t = re.sub(r'<[^>]+>', '', t)
-            return re.sub(r'\s+', ' ', t).strip()
+            t = re.sub(r'\s+', ' ', t)
+            t = re.sub(r'\*(\s+)\*', r'\1', t)
+            return t.strip()
 
         return [
             "=" * 80,
