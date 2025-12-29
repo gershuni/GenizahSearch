@@ -1612,8 +1612,16 @@ class ResultDialog(QDialog):
         has_labels = False
         if canvas_map:
             self.combo_img_labels.addItem(tr("Select Image"), -1)
-            # Sort by FL for approximate order
-            for fl, lbl in sorted(canvas_map.items()):
+
+            def _fl_sort_key(item):
+                fl_digits = re.sub(r"\\D", "", str(item[0]))
+                try:
+                    return int(fl_digits)
+                except Exception:
+                    return fl_digits or 0
+
+            # Sort numerically so dropdown order mirrors manuscript pagination
+            for fl, lbl in sorted(canvas_map.items(), key=_fl_sort_key):
                 # We need to find which P corresponds to this FL.
                 # This is tricky without full manuscript map.
                 # However, SearchEngine.get_browse_page_by_fl can find P from FL.

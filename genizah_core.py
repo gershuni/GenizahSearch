@@ -1922,7 +1922,15 @@ class MetadataManager:
         # 2b. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)
         if nli_iiif_data.get('canvas_map'):
-            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            # Sort numerically so image order matches manuscript pagination
+            def _fl_sort_key(item):
+                fl_digits = re.sub(r"\D", "", str(item[0]))
+                try:
+                    return int(fl_digits)
+                except Exception:
+                    return fl_digits or 0
+
+            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=_fl_sort_key)
             for fl_id, label in sorted_map:
                 url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
                 images_nli.append({'label': label, 'url': url})
