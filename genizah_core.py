@@ -2917,6 +2917,7 @@ class SearchEngine:
         if sys_id not in browse_map: return None
         pages = browse_map[sys_id]
         if not pages: return None
+        parsed_components = None
         
         # Robust casting to ensure we match the integer keys in browse_map
         if p_num is not None:
@@ -2932,11 +2933,13 @@ class SearchEngine:
         if new_idx < 0 or new_idx >= len(pages): return None
         
         target_page = pages[new_idx]
+        parsed_components = self.meta_mgr.parse_full_id_components(target_page.get('full_header', '')) if self.meta_mgr else {}
         text = self.get_full_text_by_id(target_page['uid'])
         return {
             'uid': target_page['uid'], 'p_num': target_page['p_num'],
             'full_header': target_page['full_header'], 'text': text,
-            'total_pages': len(pages), 'current_idx': new_idx + 1
+            'total_pages': len(pages), 'current_idx': new_idx + 1,
+            'fl_id': parsed_components.get('fl_id') if parsed_components else None
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):

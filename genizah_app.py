@@ -573,6 +573,41 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def _find_index_by_fl(self, fl_id):
+        """Resolve the image index by FL ID (digits only)."""
+        if not self.active_list:
+            return None
+
+        digits = re.sub(r"\D", "", str(fl_id or ""))
+        if not digits:
+            return None
+
+        normalized_target = digits.lstrip("0") or "0"
+        pattern = re.compile(rf"FL0*{re.escape(normalized_target)}", re.IGNORECASE)
+
+        for idx, img in enumerate(self.active_list):
+            url = img.get('url', '')
+            label = img.get('label', '')
+
+            # Try matching URL (NLI style contains FL{digits})
+            if pattern.search(url):
+                return idx
+
+            # Fallback: try digits from label (some external manifests)
+            label_digits = re.sub(r"\D", "", str(label))
+            if (label_digits.lstrip("0") or "0") == normalized_target:
+                return idx
+        return None
+
+    def set_page_by_fl(self, fl_id, fallback_index=None):
+        """Navigate to an image by FL ID, falling back to the provided index if needed."""
+        target_idx = self._find_index_by_fl(fl_id)
+        if target_idx is None:
+            if fallback_index is not None:
+                self.set_page(fallback_index)
+            return
+        self.set_page(target_idx)
+
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
@@ -1477,7 +1512,7 @@ class ResultDialog(QDialog):
 
         self.current_p_num = page_data['p_num']
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
-        self.current_fl_id = parsed_new['fl_id']
+        self.current_fl_id = page_data.get('fl_id') or parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
@@ -1649,6 +1684,8 @@ class ResultDialog(QDialog):
             except: initial_idx = 0
 
             self.ms_viewer.load_images(meta, initial_idx)
+            if self.current_fl_id:
+                self.ms_viewer.set_page_by_fl(self.current_fl_id, fallback_index=initial_idx)
         else:
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
@@ -1703,7 +1740,10 @@ class ResultDialog(QDialog):
         # Determine index
         try: idx = int(self.current_p_num) - 1
         except: idx = 0
-        self.ms_viewer.set_page(idx)
+        if self.current_fl_id:
+            self.ms_viewer.set_page_by_fl(self.current_fl_id, fallback_index=idx)
+        else:
+            self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -1898,6 +1938,7 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.current_browse_sid = None
         self.current_browse_p = None
+        self.current_browse_fl = None
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -2469,6 +2510,10 @@ class GenizahGUI(QMainWindow):
             return
 
         self.current_browse_p = page_data['p_num']
+        self.current_browse_fl = page_data.get('fl_id')
+        if not self.current_browse_fl and self.meta_mgr:
+            parsed = self.meta_mgr.parse_full_id_components(page_data.get('full_header', ''))
+            self.current_browse_fl = parsed.get('fl_id')
 
         # Update Nav
         self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
@@ -2483,7 +2528,10 @@ class GenizahGUI(QMainWindow):
         # Sync Image Viewer
         try: idx = int(self.current_browse_p) - 1
         except: idx = 0
-        self.browse_viewer.set_page(idx)
+        if self.current_browse_fl:
+            self.browse_viewer.set_page_by_fl(self.current_browse_fl, fallback_index=idx)
+        else:
+            self.browse_viewer.set_page(idx)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
@@ -4950,6 +4998,7 @@ class GenizahGUI(QMainWindow):
 
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
+        self.current_browse_fl = page_data.get('fl_id') if page_data else None
         
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
@@ -4989,6 +5038,7 @@ class GenizahGUI(QMainWindow):
 
         if page_data:
             self.current_browse_p = page_data['p_num']
+            self.current_browse_fl = page_data.get('fl_id')
             self.browse_load_page()
 
             # --- Preload Logic (Next/Prev) ---
