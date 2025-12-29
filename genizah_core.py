@@ -1887,7 +1887,7 @@ class MetadataManager:
             return result
 
     def enrich_metadata(self, system_id):
-        """Fetch extended metadata (IIIF/MARC) and merge into cache."""
+        """Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache."""
         if not system_id: return {}
 
         # Ensure basic meta exists
@@ -1896,16 +1896,44 @@ class MetadataManager:
 
         current_meta = self.nli_cache.get(system_id, {})
 
-        # 1. Fetch IIIF
-        iiif_data = self.fetch_iiif_manifest(system_id)
-
-        # 2. Fetch MARC
+        # 1. Fetch MARC (Bibliographic Data)
         marc_data = self.fetch_marc_data(system_id)
+        current_meta['marc'] = marc_data
 
-        # 3. Merge Updates
-        current_meta['physical_desc'] = iiif_data.get('physical_desc', '')
-        current_meta['canvas_map'] = iiif_data.get('canvas_map', {})
-        current_meta['marc'] = marc_data # Store structured MARC data
+        # 2. Determine Image Source (External CUDL vs Fallback NLI)
+        image_list = []
+        external_meta = {}
+
+        # Check for External Link from MARC (e.g. CUDL)
+        ext_link = marc_data.get('external_iiif_link')
+
+        if ext_link:
+            # Fetch External IIIF
+            ext_data = self.fetch_external_iiif_data(ext_link)
+            if ext_data.get('canvases'):
+                # Use External Images
+                image_list = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
+                external_meta = ext_data.get('metadata', {})
+                current_meta['attribution'] = ext_data.get('attribution')
+
+        # Fallback: Fetch NLI IIIF if no external images found
+        if not image_list:
+            nli_iiif_data = self.fetch_iiif_manifest(system_id)
+            # Convert NLI canvas_map to Image List format
+            # NLI fetch returns 'canvas_map' {fl_id: label}
+            # We need to construct full URLs
+            if nli_iiif_data.get('canvas_map'):
+                sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+                for fl_id, label in sorted_map:
+                    # Construct basic IIIF URL for NLI
+                    url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
+                    image_list.append({'label': label, 'url': url})
+
+            current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+
+        # Store consolidated Image List
+        current_meta['images'] = image_list
+        current_meta['external_meta'] = external_meta
 
         # Update cache precedence (Enrichment overrides basic placeholders)
         if marc_data.get('english_title') and not current_meta.get('title'):
@@ -1921,19 +1949,16 @@ class MetadataManager:
         """
         Generic handler to fetch external IIIF data.
         Currently supports CUDL logic: /view/ -> /iiif/ manifest.
+        Returns: {'attribution': str, 'metadata': dict, 'canvases': [{'label': str, 'url': str}]}
         """
         if not view_url: return {}
 
         # CUDL Conversion Logic
-        # http://cudl.lib.cam.ac.uk/view/MS-TS-NS-00321-00008/1 -> https://cudl.lib.cam.ac.uk/iiif/MS-TS-NS-00321-00008
         manifest_url = view_url
         if "cudl.lib.cam.ac.uk/view/" in view_url:
             base = view_url.replace("/view/", "/iiif/")
-            # Remove trailing page number (e.g. /1 or /10)
-            # Regex: ends with /digits
             manifest_url = re.sub(r'/\d+$', '', base)
 
-        # Ensure HTTPS
         if manifest_url.startswith("http://"):
             manifest_url = manifest_url.replace("http://", "https://")
 
@@ -1950,16 +1975,15 @@ class MetadataManager:
                 data = resp.json()
 
                 # Attribution
-                # IIIF 2.0 uses "attribution", 3.0 "requiredStatement"
                 attr = data.get('attribution')
                 if isinstance(attr, str):
                     result['attribution'] = attr
-                elif isinstance(attr, list): # Multi-language
+                elif isinstance(attr, list) and attr:
                     result['attribution'] = str(attr[0])
-                elif not attr and data.get('label'):
+                elif data.get('label'):
                     result['attribution'] = str(data.get('label'))
 
-                # Metadata (Abstract, Condition etc)
+                # Metadata
                 if 'metadata' in data:
                     for item in data['metadata']:
                         label = str(item.get('label', '')).lower()
@@ -1967,16 +1991,19 @@ class MetadataManager:
                         if label in ['abstract', 'condition', 'provenance', 'physical description']:
                             result['metadata'][label.title()] = val
 
-                # Canvases (Images)
-                # We need a flat list of Image URLs for the main resource
+                # Canvases (Images with Labels)
                 if 'sequences' in data and data['sequences']:
-                    for canvas in data['sequences'][0].get('canvases', []):
+                    for idx, canvas in enumerate(data['sequences'][0].get('canvases', [])):
+                        lbl = canvas.get('label', f"Img {idx + 1}")
                         images = canvas.get('images', [])
                         if images:
                             resource = images[0].get('resource', {})
-                            img_id = resource.get('@id')
+                            service = resource.get('service', {})
+                            # Try to get the service ID (base URL) for flexible resizing
+                            img_id = service.get('@id') if service else resource.get('@id')
+
                             if img_id:
-                                result['canvases'].append(img_id)
+                                result['canvases'].append({'label': lbl, 'url': img_id})
 
             return result
         except Exception as e:

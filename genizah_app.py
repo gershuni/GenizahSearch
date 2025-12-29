@@ -358,6 +358,128 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
         text2 = other.text()
         return natural_sort_key(text1) < natural_sort_key(text2)
 
+class ZoomImageLabel(QLabel):
+    """A QLabel that supports zooming and panning."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setScaledContents(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setText(tr("No Image"))
+        self.setStyleSheet("background: #222; color: #bbb; font-size: 14px;")
+
+class ManuscriptViewerWidget(QWidget):
+    """Reusable widget for displaying manuscript images with navigation."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_images = []
+        self.current_idx = 0
+        self.loader_thread = None
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Controls
+        nav_bar = QHBoxLayout()
+        self.btn_prev = QPushButton("◀")
+        self.btn_prev.setFixedWidth(30)
+        self.btn_prev.clicked.connect(lambda: self.change_image(-1))
+
+        self.combo_pages = QComboBox()
+        self.combo_pages.currentIndexChanged.connect(self.on_page_selected)
+
+        self.btn_next = QPushButton("▶")
+        self.btn_next.setFixedWidth(30)
+        self.btn_next.clicked.connect(lambda: self.change_image(1))
+
+        self.btn_external = QPushButton(tr("External Site"))
+        self.btn_external.setVisible(False)
+        self.btn_external.clicked.connect(self.open_external)
+
+        nav_bar.addWidget(self.btn_prev)
+        nav_bar.addWidget(self.combo_pages, 1)
+        nav_bar.addWidget(self.btn_next)
+        nav_bar.addWidget(self.btn_external)
+
+        layout.addLayout(nav_bar)
+
+        # Image Area
+        self.lbl_img = ZoomImageLabel()
+        self.lbl_img.setMinimumSize(300, 400)
+        layout.addWidget(self.lbl_img, 1)
+
+    def load_images(self, image_list, initial_idx=0, external_url=None):
+        self.current_images = image_list
+        self.external_url = external_url
+
+        self.combo_pages.blockSignals(True)
+        self.combo_pages.clear()
+
+        if not image_list:
+            self.lbl_img.setText(tr("No images available"))
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+            self.combo_pages.setEnabled(False)
+        else:
+            for img in image_list:
+                self.combo_pages.addItem(img['label'])
+            self.combo_pages.setEnabled(True)
+            self.btn_prev.setEnabled(True)
+            self.btn_next.setEnabled(True)
+
+            # Bounds check
+            if initial_idx < 0 or initial_idx >= len(image_list):
+                initial_idx = 0
+            self.combo_pages.setCurrentIndex(initial_idx)
+            self.on_page_selected(initial_idx)
+
+        self.btn_external.setVisible(bool(external_url))
+        self.combo_pages.blockSignals(False)
+
+    def change_image(self, offset):
+        if not self.current_images: return
+        new_idx = (self.combo_pages.currentIndex() + offset) % len(self.current_images)
+        self.combo_pages.setCurrentIndex(new_idx)
+
+    def on_page_selected(self, index):
+        if index < 0 or index >= len(self.current_images): return
+
+        img_data = self.current_images[index]
+        base_url = img_data['url']
+
+        self.lbl_img.setText(tr("Loading..."))
+
+        if self.loader_thread and self.loader_thread.isRunning():
+            self.loader_thread.cancel()
+            self.loader_thread.wait()
+
+        # Determine URL format
+        # If it's a full IIIF ID (no extension), append parameters
+        # If it already looks like a jpg, leave it (though usually we get base IDs)
+        final_url = base_url
+        if not final_url.endswith('.jpg'):
+             final_url = f"{base_url}/full/600,/0/default.jpg"
+
+        self.loader_thread = ImageLoaderThread(final_url)
+        self.loader_thread.image_loaded.connect(self.display_image)
+        self.loader_thread.load_failed.connect(lambda: self.lbl_img.setText(tr("Failed")))
+        self.loader_thread.start()
+
+    def display_image(self, image):
+        pix = QPixmap.fromImage(image)
+        # Simple scale for now, Zoom to be added if time permits (requested "if possible")
+        if not pix.isNull():
+             # Fit to label size
+             scaled = pix.scaled(self.lbl_img.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+             self.lbl_img.setPixmap(scaled)
+             self.lbl_img.setText("")
+
+    def open_external(self):
+        if self.external_url:
+             QDesktopServices.openUrl(QUrl(self.external_url))
+
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
         super().__init__(parent)
@@ -1070,16 +1192,12 @@ class ResultDialog(QDialog):
         self.txt_ext_meta.setMaximumHeight(100)
         self.txt_ext_meta.setStyleSheet("font-size: 11px;")
 
-        # Image Area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        self.lbl_ext_image = QLabel(tr("Loading External Image..."))
-        self.lbl_ext_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scroll.setWidget(self.lbl_ext_image)
+        # New: Reusable Viewer Widget
+        self.ms_viewer = ManuscriptViewerWidget()
 
         ext_layout.addWidget(self.lbl_ext_attr)
         ext_layout.addWidget(self.txt_ext_meta)
-        ext_layout.addWidget(scroll)
+        ext_layout.addWidget(self.ms_viewer, 1)
 
         self.main_splitter.addWidget(self.external_pane)
         self.main_splitter.setStretchFactor(0, 3)
@@ -1278,68 +1396,81 @@ class ResultDialog(QDialog):
             self.sync_external_view()
 
     def on_enriched_data_loaded(self, meta):
-        if not meta: return
-        if self.current_sys_id not in self.meta_mgr.nli_cache:
-            return # Context switched
+        # ... existing logic ...
+        # Check for External Link from MARC is now handled inside enrich_metadata which returns 'images'
 
-        # 1. Update Image Label (e.g. Frag 001r)
+        if not meta: return
+        if self.current_sys_id not in self.meta_mgr.nli_cache: return
+
+        # 1. Update Image Label
         fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
         canvas_map = meta.get('canvas_map', {})
         label = canvas_map.get(fl_digits)
-        if label:
-            self.lbl_img_label.setText(f"({label})")
-        else:
-            self.lbl_img_label.setText("")
+        self.lbl_img_label.setText(f"({label})" if label else "")
 
-        # 2. Check for External Viewer Link
+        # 2. Populate External / Image Viewer
+        # Unified 'images' list from core (CUDL or NLI)
+        images = meta.get('images', [])
+
+        if images:
+            self.ext_canvases = images # Store for sync
+            self.btn_external_view.setVisible(True)
+            self.btn_external_view.setText(tr("Show Images"))
+
+            # Metadata for side pane
+            attr = meta.get('attribution', '')
+            ext_meta = meta.get('external_meta', {})
+
+            self.lbl_ext_attr.setText(attr or tr("Image Viewer"))
+            meta_html = ""
+            for k, v in ext_meta.items():
+                meta_html += f"<b>{k}:</b> {v}<br>"
+            self.txt_ext_meta.setHtml(meta_html)
+            self.txt_ext_meta.setVisible(bool(meta_html))
+
+            # Load images into widget
+            # Determine initial index from current page number
+            try: initial_idx = int(self.current_p_num) - 1
+            except: initial_idx = 0
+
+            # Pass external link if exists (for "Open External Site" button)
+            marc = meta.get('marc', {})
+            ext_link = marc.get('external_iiif_link')
+
+            self.ms_viewer.load_images(images, initial_idx, ext_link)
+
+            if self.btn_external_view.isChecked():
+                self.external_pane.setVisible(True)
+
+        # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})
-        ext_link = marc.get('external_iiif_link')
-        if ext_link:
-            self.ext_thread = ExternalResourceThread(self.meta_mgr, ext_link)
-            self.ext_thread.finished_signal.connect(self.on_external_data_loaded)
-            self.ext_thread.start()
-
-        # 3. Build Extended Info HTML
         if not marc and not meta.get('physical_desc'):
             self.btn_ext_info.setVisible(False)
             return
 
+        # ... (rest of extended info logic) ...
         html = "<div style='font-family:Arial;'>"
+        date_val = marc.get('date');
+        if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
 
-        # Date
-        date_val = marc.get('date')
-        if date_val:
-            html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys: html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
 
-        # Dimensions & Physical
-        dims = marc.get('dimensions')
-        phys = meta.get('physical_desc')
-        if dims or phys:
-            html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
-
-        # English Title
         eng_title = marc.get('english_title')
-        if eng_title:
-            html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+        if eng_title: html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
 
-        # Subjects
         subjects = marc.get('subjects', [])
-        if subjects:
-            html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+        if subjects: html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
 
-        # Notes
         notes = marc.get('notes', [])
         if notes:
             html += f"<p><b>{tr('Notes')}:</b><ul>"
             for n in notes: html += f"<li>{n}</li>"
             html += "</ul></p>"
 
-        # People
         people = marc.get('people', [])
-        if people:
-            html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+        if people: html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
 
-        # Bibliography
         bib = marc.get('bibliography', [])
         if bib:
             html += f"<p><b>{tr('Bibliography')}:</b><ul>"
@@ -1347,73 +1478,24 @@ class ResultDialog(QDialog):
             html += "</ul></p>"
 
         html += "</div>"
-
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
 
-        # Re-apply standard metadata if improved
         self.lbl_title.setText(meta.get('title', ''))
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
+            library = marc.get('current_owner')
+            if library: shelf = f"{library} | {shelf}"
             self.lbl_shelf.setText(shelf)
 
-    def on_external_data_loaded(self, data):
-        if not data: return
-        self.ext_data = data
-        self.ext_canvases = data.get('canvases', [])
-
-        self.btn_external_view.setVisible(True)
-        self.lbl_ext_attr.setText(data.get('attribution', 'External Viewer'))
-
-        # Populate mini metadata
-        meta_html = ""
-        for k, v in data.get('metadata', {}).items():
-            meta_html += f"<b>{k}:</b> {v}<br>"
-        self.txt_ext_meta.setHtml(meta_html)
-        self.txt_ext_meta.setVisible(bool(meta_html))
-
-        if self.btn_external_view.isChecked():
-            self.sync_external_view()
-
     def sync_external_view(self):
+        # Now handled internally by ms_viewer via load_images,
+        # but we might need to update page if navigation happens here
         if not self.ext_canvases: return
-
-        # Determine index (1-based page num -> 0-based index)
-        try:
-            idx = int(self.current_p_num) - 1
-        except:
-            idx = 0
-
-        # Bounds check
-        if idx < 0: idx = 0
-        if idx >= len(self.ext_canvases): idx = 0 # Default to first if out of bounds
-
-        image_id = self.ext_canvases[idx]
-        # Construct full size URL (IIIF convention)
-        # Usually ID + /full/max/0/default.jpg or similar
-        # CUDL: https://images.lib.cam.ac.uk/iiif/MS-TS-NS-00321-00008-000-00001.jp2/full/400,/0/default.jpg
-        # We start with a reasonable size for the side pane
-        img_url = f"{image_id}/full/600,/0/default.jpg"
-
-        self.lbl_ext_image.setText(tr("Loading..."))
-
-        if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
-            self.ext_img_thread.cancel()
-            self.ext_img_thread.wait()
-
-        self.ext_img_thread = ImageLoaderThread(img_url)
-        self.ext_img_thread.image_loaded.connect(self.on_ext_img_loaded)
-        self.ext_img_thread.load_failed.connect(lambda: self.lbl_ext_image.setText(tr("Image Load Failed")))
-        self.ext_img_thread.start()
-
-    def on_ext_img_loaded(self, image):
-        pix = QPixmap.fromImage(image)
-        # Use full size of label but keep aspect ratio
-        w = self.external_pane.width()
-        if w < 100: w = 400
-        scaled = pix.scaledToWidth(w - 20, Qt.TransformationMode.SmoothTransformation)
-        self.lbl_ext_image.setPixmap(scaled)
-        self.lbl_ext_image.setText("")
+        try: idx = int(self.current_p_num) - 1
+        except: idx = 0
+        if 0 <= idx < len(self.ext_canvases):
+            self.ms_viewer.combo_pages.setCurrentIndex(idx)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -2028,20 +2110,11 @@ class GenizahGUI(QMainWindow):
         return panel
 
     def create_browse_tab(self):
-        panel = QWidget(); layout = QHBoxLayout(panel)
-
-        # Main Column
-        main_col = QWidget(); main_layout = QVBoxLayout(main_col)
+        panel = QWidget(); layout = QVBoxLayout(panel)
         
-        # --- Top Area ---
-        top_container = QWidget(); top_container.setFixedHeight(120)
-        top_layout = QHBoxLayout(top_container); top_layout.setContentsMargins(0, 0, 0, 0)
+        # --- Top Area: Search ---
+        top_container = QWidget(); top_layout = QHBoxLayout(top_container); top_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Left Side
-        left_col = QVBoxLayout(); left_col.setSpacing(5); left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
-        # Row 1: Search
-        search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
         self.browse_fl_input.setFixedWidth(140)
@@ -2049,104 +2122,92 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
-        search_row.addWidget(QLabel(tr("System ID:"))); search_row.addWidget(self.browse_sys_input)
-        search_row.addWidget(QLabel(tr("FL:"))); search_row.addWidget(self.browse_fl_input)
-        search_row.addWidget(self.btn_browse_go)
         
-        # Row 2: Metadata
-        self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
-        self.browse_info_lbl.setStyleSheet("font-size: 13px;") 
-        self.browse_info_lbl.setWordWrap(True)
-        self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
-        # Row 3: Buttons (Catalog | Continuous | Save)
-        btn_row = QHBoxLayout()
+        top_layout.addWidget(QLabel(tr("System ID:"))); top_layout.addWidget(self.browse_sys_input)
+        top_layout.addWidget(QLabel(tr("FL:"))); top_layout.addWidget(self.browse_fl_input)
+        top_layout.addWidget(self.btn_browse_go)
         
         self.btn_b_catalog = QPushButton(tr("Ktiv"))
         self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
         self.btn_b_catalog.setEnabled(False)
         
-        self.btn_b_all = QPushButton(tr("View All"))
-        self.btn_b_all.setToolTip(tr("Show full text continuously (Infinite Scroll)"))
-        self.btn_b_all.clicked.connect(self.browse_load_all)
-        self.btn_b_all.setEnabled(False)
-        self.btn_b_all.setStyleSheet("font-weight: bold; color: #2980b9;")
-
         self.btn_b_save = QPushButton(tr("Save"))
         self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
         self.btn_b_save.clicked.connect(self.browse_save_full)
         self.btn_b_save.setEnabled(False)
 
-        self.btn_b_ext = QPushButton(tr("Extended Info"))
-        self.btn_b_ext.setCheckable(True)
-        self.btn_b_ext.clicked.connect(self.toggle_browse_side_panel)
-        self.btn_b_ext.setEnabled(False)
-
-        btn_row.addWidget(self.btn_b_catalog)
-        btn_row.addWidget(self.btn_b_all)
-        btn_row.addWidget(self.btn_b_save)
-        btn_row.addWidget(self.btn_b_ext)
-        btn_row.addStretch()
+        top_layout.addSpacing(20)
+        top_layout.addWidget(self.btn_b_catalog)
+        top_layout.addWidget(self.btn_b_save)
+        top_layout.addStretch()
 
         btn_browse_help = QPushButton("?")
         btn_browse_help.setFixedWidth(30)
         btn_browse_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_browse_help.clicked.connect(lambda: self.open_help_center(anchor="browse"))
-        btn_row.addWidget(btn_browse_help)
+        top_layout.addWidget(btn_browse_help)
 
-        left_col.addLayout(search_row)
-        left_col.addWidget(self.browse_info_lbl)
-        left_col.addLayout(btn_row)
-        
-        # Right Side: Thumbnail
-        self.browse_thumb = QLabel(tr("No Preview"))
-        self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.browse_thumb.setFixedSize(110, 110)
-        self.browse_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #ecf0f1; font-size: 9px;")
-        self.browse_thumb.setScaledContents(True)
+        layout.addWidget(top_container)
 
-        top_layout.addLayout(left_col, 1)
-        top_layout.addWidget(self.browse_thumb)
-        main_layout.addWidget(top_container)
-        
-        self.browse_title_lbl = QLabel(); self.browse_title_lbl.setVisible(False)
+        # --- Main Splitter (Left: Info, Right: Images) ---
+        self.browse_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Main Text Browser
-        self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # Left: Info Panel (Metadata + Text)
+        left_widget = QWidget(); left_layout = QVBoxLayout(left_widget); left_layout.setContentsMargins(0,0,0,0)
+
+        self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
+        self.browse_info_lbl.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 5px;")
+        self.browse_info_lbl.setWordWrap(True)
+        self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        self.browse_text = QTextBrowser()
+        self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
-        main_layout.addWidget(self.browse_text)
         
-        # Navigation Footer
+        # Navigation (Bottom Left)
         nav = QHBoxLayout()
         self.btn_b_prev = QPushButton(tr("<< Prev")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
         self.btn_b_next = QPushButton(tr("Next >>")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
         self.lbl_page_count = QLabel("0/0")
         nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
-        main_layout.addLayout(nav)
 
-        # Add Side Panel (Hidden by default)
-        self.browse_side_panel = QTextBrowser()
-        self.browse_side_panel.setFixedWidth(300)
-        self.browse_side_panel.setVisible(False)
-        # Remove hardcoded background color to support dark mode
-        self.browse_side_panel.setStyleSheet("border-left: 1px solid #ccc;")
+        left_layout.addWidget(self.browse_info_lbl)
+        left_layout.addWidget(self.browse_text)
+        left_layout.addLayout(nav)
 
-        layout.addWidget(main_col)
-        layout.addWidget(self.browse_side_panel)
+        # Right: Image Viewer
+        self.browse_viewer = ManuscriptViewerWidget()
+
+        self.browse_splitter.addWidget(left_widget)
+        self.browse_splitter.addWidget(self.browse_viewer)
+        self.browse_splitter.setStretchFactor(0, 1)
+        self.browse_splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(self.browse_splitter)
+
+        # Dummy placeholders for compatibility if referenced elsewhere
+        self.browse_thumb = QLabel()
+        self.btn_b_all = QPushButton() # Deprecated in this view logic
+        self.btn_b_ext = QPushButton() # Deprecated
+        self.browse_side_panel = QTextBrowser() # Deprecated
+
         return panel
-    
-    def toggle_browse_side_panel(self, checked):
-        self.browse_side_panel.setVisible(checked)
 
     def on_browse_enriched_loaded(self, meta):
         if not meta: return
         # Verify context hasn't changed (though less critical here than dialog)
+        if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
-        # 1. Populate Side Panel
+        # 1. Populate Info Panel
         marc = meta.get('marc', {})
         html = "<div style='font-family:Arial; padding:5px;'>"
+
+        # External Attribution
+        attr = meta.get('attribution')
+        if attr:
+            html += f"<div style='background:#eef; padding:5px; border-radius:3px;'><b>{tr('Source')}:</b> {attr}</div><br>"
 
         # Date
         date_val = marc.get('date')
@@ -2180,23 +2241,32 @@ class GenizahGUI(QMainWindow):
             html += "</ul></p>"
 
         html += "</div>"
-        self.browse_side_panel.setHtml(html)
 
-        # Enable toggle if content exists
-        has_content = bool(marc or phys)
-        self.btn_b_ext.setEnabled(has_content)
-        if has_content and self.btn_b_ext.isChecked():
-            self.browse_side_panel.setVisible(True)
+        # Update Info Label with enriched title/shelf
+        shelf = meta.get('shelfmark')
+        title = meta.get('title')
+        if shelf and shelf != "Unknown":
+            library = marc.get('current_owner')
+            if library: shelf = f"{library} | {shelf}"
 
-        # 2. Refresh View to show new labels (e.g. Frag 001r) if needed
-        # If we are in "View All" mode, we might want to refresh the whole text?
-        # Or just let the next navigation update it.
-        # For now, let's just trigger a view update if we are single-page mode.
-        if self.btn_b_all.isEnabled(): # Means we are NOT in View All mode (or View All button is active)
-             self.browse_update_view(0)
+        info_header = f"<h3 style='margin:0;'>{shelf}</h3><p style='margin-top:5px; color:#555;'>{title or ''}</p><hr>"
+        self.browse_text.setHtml(info_header + html)
+
+        # 2. Populate Image Viewer
+        images = meta.get('images', [])
+        if images:
+            # Determine index
+            try: idx = int(self.current_browse_p) - 1
+            except: idx = 0
+
+            ext_link = marc.get('external_iiif_link')
+            self.browse_viewer.load_images(images, idx, ext_link)
         else:
-             # In View All mode, reload to apply labels
-             self.browse_load_all()
+            self.browse_viewer.load_images([])
+
+        # 3. Enable buttons
+        self.btn_b_catalog.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
@@ -4643,6 +4713,10 @@ class GenizahGUI(QMainWindow):
         fl_id = self.browse_fl_input.text().strip()
         if not sid and not fl_id: return
 
+        # Reset UI
+        self.browse_text.setText(tr("Loading metadata..."))
+        self.browse_viewer.load_images([]) # Clear viewer
+
         page_data = None
         if fl_id:
             page_data = self.searcher.get_browse_page_by_fl(fl_id, sid or None)
@@ -4660,74 +4734,23 @@ class GenizahGUI(QMainWindow):
 
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
-        self.btn_b_catalog.setEnabled(True)
-        self.btn_b_all.setEnabled(True)   # Enable
-        self.btn_b_save.setEnabled(True)  # Enable
-        self.btn_b_ext.setVisible(True)
-        self.browse_update_view(0)
-
-        # Trigger Enrich
-        meta = self.meta_mgr.nli_cache.get(sid, {})
-        if not meta or 'marc' not in meta:
-            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
-            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-            self.enrich_browse_worker.start()
-        else:
-            self.on_browse_enriched_loaded(meta)
-
-    def browse_navigate(self, d): self.browse_update_view(d)
-
-    def browse_update_view(self, d):
-        pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
-        if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
-
-        self.current_browse_p = pd['p_num']
-
-        # Resolve dynamic label
-        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-        canvas_map = meta.get('canvas_map', {})
-
-        # Extract FL for this page
-        full_header = pd.get('full_header', '')
-        parsed = self.meta_mgr.parse_full_id_components(full_header)
-        fl_digits = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
-
-        label = canvas_map.get(fl_digits, "")
-        label_html = f" <span style='color:#7f8c8d; font-size:0.8em'>({label})</span>" if label else ""
-
-        # Preprocess the text outside the f-string to avoid backslash parsing issues
-        browse_html_text = pd['text'].replace('\n', '<br>')
         
-        # Add Header inside the text view
-        header_html = f"<div style='border-bottom:1px solid #ccc; margin-bottom:10px; color:#555;'><b>Image {pd['p_num']}</b>{label_html}</div>"
+        # Disable controls until loaded
+        self.btn_b_catalog.setEnabled(False)
+        self.btn_b_save.setEnabled(False)
 
-        self.browse_text.setHtml(f"<div dir='rtl'>{header_html}{browse_html_text}</div>")
+        # Trigger Unified Enrichment (Meta + Images)
+        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+        self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+        self.enrich_browse_worker.start()
 
-        _, _, shelf, title = self._get_meta_for_header(full_header)
-
-        # --- UPDATE: Combined Label Text ---
-        # Update shelfmark/title from cache if enrichment happened
-        if meta.get('title'): title = meta.get('title')
-        if meta.get('shelfmark') and meta.get('shelfmark') != "Unknown": shelf = meta.get('shelfmark')
-
-        info_text = f"<b>{shelf}</b><br>{title or ''}"
-        self.browse_info_lbl.setText(info_text)
-        # -----------------------------------
-
-        self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
-        self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
-
-        # Ensure Single Page mode buttons are enabled
-        self.btn_b_all.setEnabled(True)
-
-        if self.current_browse_sid in self.meta_mgr.nli_cache:
-            self.fetch_browse_thumbnail(self.current_browse_sid)
-        else:
-            self.browse_thumb.setText("Loading Meta...")
-            def worker():
-                self.meta_mgr.fetch_nli_data(self.current_browse_sid)
-                self.browse_thumb_resolved.emit(self.current_browse_sid, "") 
-            threading.Thread(target=worker, daemon=True).start()
+    def browse_navigate(self, d):
+        # This function is now mostly redundant for image navigation (handled by widget),
+        # but could be used to sync text if we had full text per page.
+        # Currently the "Left Side" is just Metadata info in the new design.
+        # If we want to show transcription alongside, we'd need to fetch it.
+        # For now, let's keep it simple: Browse Tab = Metadata + Image Viewer.
+        pass
         
     def browse_open_catalog(self):
         if self.current_browse_sid:
