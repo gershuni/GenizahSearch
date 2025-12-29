@@ -1184,6 +1184,7 @@ class ResultDialog(QDialog):
         self.current_fl_id = None
         self.current_page_text = None
         self.current_page_uid = None
+        self.current_page_idx = None
         
         self.current_meta_request = 0
         self.extended_info_visible = False
@@ -1398,6 +1399,7 @@ class ResultDialog(QDialog):
         if not data.get('full_text'):
             data['full_text'] = self.searcher.get_full_text_by_id(data['uid']) or data.get('text', '')
         self.data = data
+        self.current_page_idx = None
         
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
@@ -1476,6 +1478,7 @@ class ResultDialog(QDialog):
         if not page_data: return
 
         self.current_p_num = page_data['p_num']
+        self.current_page_idx = page_data.get('current_idx')
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
@@ -1645,7 +1648,11 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(bool(meta_html))
 
             # Load images into widget
-            try: initial_idx = int(self.current_p_num) - 1
+            try:
+                if self.current_page_idx:
+                    initial_idx = int(self.current_page_idx) - 1
+                else:
+                    initial_idx = int(self.current_p_num) - 1
             except: initial_idx = 0
 
             self.ms_viewer.load_images(meta, initial_idx)
@@ -1701,7 +1708,11 @@ class ResultDialog(QDialog):
 
     def sync_external_view(self):
         # Determine index
-        try: idx = int(self.current_p_num) - 1
+        try:
+            if self.current_page_idx:
+                idx = int(self.current_page_idx) - 1
+            else:
+                idx = int(self.current_p_num) - 1
         except: idx = 0
         self.ms_viewer.set_page(idx)
 
@@ -1898,6 +1909,7 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.current_browse_sid = None
         self.current_browse_p = None
+        self.current_browse_idx = None
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -2437,7 +2449,13 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
-        try: idx = int(self.current_browse_p) - 1
+        try:
+            if self.current_browse_idx:
+                idx = int(self.current_browse_idx) - 1
+            elif self.current_browse_p:
+                idx = int(self.current_browse_p) - 1
+            else:
+                idx = 0
         except: idx = 0
         self.browse_viewer.load_images(meta, idx)
 
@@ -2457,18 +2475,20 @@ class GenizahGUI(QMainWindow):
             self.browse_viewer.setVisible(True)
             self.browse_load_page()
 
-    def browse_load_page(self):
+    def browse_load_page(self, page_data=None):
         """Load single page text and sync viewer."""
         if not self.current_browse_sid: return
 
-        p = self.current_browse_p or 1
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p)
+        if page_data is None:
+            p = self.current_browse_p or 1
+            page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p)
 
         if not page_data:
             self.browse_text.setText(tr("Page not found."))
             return
 
         self.current_browse_p = page_data['p_num']
+        self.current_browse_idx = page_data.get('current_idx')
 
         # Update Nav
         self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
@@ -2481,7 +2501,11 @@ class GenizahGUI(QMainWindow):
         self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
 
         # Sync Image Viewer
-        try: idx = int(self.current_browse_p) - 1
+        try:
+            if self.current_browse_idx:
+                idx = int(self.current_browse_idx) - 1
+            else:
+                idx = int(self.current_browse_p) - 1
         except: idx = 0
         self.browse_viewer.set_page(idx)
 
@@ -4950,6 +4974,7 @@ class GenizahGUI(QMainWindow):
 
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
+        self.current_browse_idx = page_data.get('current_idx') if page_data else None
         
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
@@ -4989,7 +5014,8 @@ class GenizahGUI(QMainWindow):
 
         if page_data:
             self.current_browse_p = page_data['p_num']
-            self.browse_load_page()
+            self.current_browse_idx = page_data.get('current_idx')
+            self.browse_load_page(page_data)
 
             # --- Preload Logic (Next/Prev) ---
             next_idx = page_data['current_idx'] + d
