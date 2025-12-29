@@ -1907,32 +1907,33 @@ class MetadataManager:
         # Check for External Link from MARC (e.g. CUDL)
         ext_link = marc_data.get('external_iiif_link')
 
+        # Lists for multiple sources
+        images_nli = []
+        images_ext = []
+
+        # 2a. Fetch External IIIF
         if ext_link:
-            # Fetch External IIIF
             ext_data = self.fetch_external_iiif_data(ext_link)
             if ext_data.get('canvases'):
-                # Use External Images
-                image_list = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
+                images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
                 external_meta = ext_data.get('metadata', {})
                 current_meta['attribution'] = ext_data.get('attribution')
 
-        # Fallback: Fetch NLI IIIF if no external images found
-        if not image_list:
-            nli_iiif_data = self.fetch_iiif_manifest(system_id)
-            # Convert NLI canvas_map to Image List format
-            # NLI fetch returns 'canvas_map' {fl_id: label}
-            # We need to construct full URLs
-            if nli_iiif_data.get('canvas_map'):
-                sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
-                for fl_id, label in sorted_map:
-                    # Construct basic IIIF URL for NLI
-                    url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
-                    image_list.append({'label': label, 'url': url})
+        # 2b. Always Fetch NLI IIIF (for fallback or toggle)
+        nli_iiif_data = self.fetch_iiif_manifest(system_id)
+        if nli_iiif_data.get('canvas_map'):
+            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url})
 
+        if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
-        # Store consolidated Image List
-        current_meta['images'] = image_list
+        # Prioritize External if available, but keep both sets
+        current_meta['images'] = images_ext if images_ext else images_nli
+        current_meta['images_nli'] = images_nli
+        current_meta['images_ext'] = images_ext
         current_meta['external_meta'] = external_meta
 
         # Update cache precedence (Enrichment overrides basic placeholders)
