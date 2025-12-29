@@ -1317,7 +1317,7 @@ class ResultDialog(QDialog):
 
         self.main_splitter.addWidget(self.external_pane)
         self.main_splitter.setStretchFactor(0, 3)
-        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter.setStretchFactor(1, 7)
 
         main_layout.addWidget(self.main_splitter, 1)
         
@@ -2242,7 +2242,8 @@ class GenizahGUI(QMainWindow):
         # --- Top Area: Metadata (Gray Bar) ---
         top_container = QFrame();
         top_container.setFrameShape(QFrame.Shape.StyledPanel)
-        top_container.setStyleSheet("background-color: #ecf0f1; border-radius: 5px;")
+        # Removed hardcoded background color for dark mode compatibility
+        # top_container.setStyleSheet("background-color: #ecf0f1; border-radius: 5px;")
         
         top_layout = QVBoxLayout(top_container)
         top_layout.setContentsMargins(10, 5, 10, 5)
@@ -4849,7 +4850,7 @@ class GenizahGUI(QMainWindow):
 
         # Reset UI
         self.browse_text.setText(tr("Loading metadata..."))
-        self.browse_viewer.load_images([]) # Clear viewer
+        self.browse_viewer.load_images({}) # Clear viewer
 
         page_data = None
         if fl_id:
