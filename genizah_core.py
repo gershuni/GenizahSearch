@@ -2918,11 +2918,6 @@ class SearchEngine:
         pages = browse_map[sys_id]
         if not pages: return None
         
-        # Robust casting to ensure we match the integer keys in browse_map
-        if p_num is not None:
-            try: p_num = int(p_num)
-            except: pass
-
         target_idx = 0
         if p_num is not None:
             for i, p in enumerate(pages):
