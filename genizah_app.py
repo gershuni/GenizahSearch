@@ -1458,12 +1458,20 @@ class ResultDialog(QDialog):
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         
+        # Ensure current_p_num is safely cast to int if it exists, to avoid type mismatch
+        current_p = None
+        if self.current_p_num is not None:
+            try: current_p = int(self.current_p_num)
+            except: current_p = 1
+
         # 1. Load Text (Blocking - Fast)
         if target is not None:
-            p = target
+            # Target is usually from spinbox (int) but safeguard anyway
+            try: p = int(target)
+            except: p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
         else:
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=self.current_p_num, next_prev=offset)
+            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=current_p, next_prev=offset)
             
         if not page_data: return
 
@@ -4955,8 +4963,29 @@ class GenizahGUI(QMainWindow):
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
+        # Ensure p_num is int. If None (initial state), treat as 0 so 'next' (+1) goes to Page 1
+        current_p = 0
+        if self.current_browse_p is not None:
+            try: current_p = int(self.current_browse_p)
+            except: current_p = 0
+
         # Load Page Data
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=self.current_browse_p, next_prev=d)
+        # Note: If current_p is 0, it means "Before first page".
+        # If d=1 (Next), it fetches Index 0+1-1 = 0? No.
+        # Core logic: new_idx = target_idx + next_prev.
+        # If p_num is None, target_idx=0.
+        # So if we pass p_num=None, next_prev=1 -> new_idx=1 (Page 2).
+        # We want strict control.
+        # If we pass p_num=current_p (int), we find its index.
+
+        # If we are just starting (current_browse_p is None), we want to start from the beginning?
+        # Actually, browse_load sets current_browse_p if FL was found.
+        # If loaded by SID only, current_browse_p might be None.
+
+        # If current_browse_p is None, let's pass None to get_browse_page (defaults to index 0)
+        p_arg = current_p if self.current_browse_p is not None else None
+
+        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p_arg, next_prev=d)
 
         if page_data:
             self.current_browse_p = page_data['p_num']
