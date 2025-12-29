@@ -573,6 +573,28 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def set_page_by_fl(self, fl_id):
+        """Sets the page by searching for the FL ID in the active list (URLs or Labels)."""
+        if not fl_id or not self.active_list:
+            # Fallback to index 0 if list exists but no FL match
+            self.set_page(0)
+            return
+
+        target_idx = 0
+        search_str = str(fl_id)
+
+        for i, item in enumerate(self.active_list):
+            url = item.get('url', '')
+            label = item.get('label', '')
+
+            # Robust check: Is FL ID (digits) in URL?
+            # Example URL: .../FL7734473/...
+            if search_str in url or search_str in label:
+                target_idx = i
+                break
+
+        self.set_page(target_idx)
+
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
@@ -1458,12 +1480,26 @@ class ResultDialog(QDialog):
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         
+        # Ensure current_p_num is safely cast to int if it exists, to avoid type mismatch
+        current_p = None
+        if self.current_p_num is not None:
+            try: current_p = int(self.current_p_num)
+            except: current_p = 1
+
         # 1. Load Text (Blocking - Fast)
         if target is not None:
-            p = target
+            # Absolute jump (Spinbox) - Use P_Num
+            try: p = int(target)
+            except: p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
         else:
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=self.current_p_num, next_prev=offset)
+            # Relative jump (Next/Prev) - Use UID to follow List Order (File Sequence)
+            page_data = self.searcher.get_browse_page(
+                self.current_sys_id,
+                p_num=current_p,
+                next_prev=offset,
+                current_uid=self.current_page_uid
+            )
             
         if not page_data: return
 
@@ -1692,10 +1728,14 @@ class ResultDialog(QDialog):
             self.lbl_shelf.setText(shelf)
 
     def sync_external_view(self):
-        # Determine index
-        try: idx = int(self.current_p_num) - 1
-        except: idx = 0
-        self.ms_viewer.set_page(idx)
+        # Determine index by FL ID (Robust image sync)
+        if self.current_fl_id:
+            self.ms_viewer.set_page_by_fl(self.current_fl_id)
+        else:
+            # Fallback
+            try: idx = int(self.current_p_num) - 1
+            except: idx = 0
+            self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -2454,13 +2494,17 @@ class GenizahGUI(QMainWindow):
         if not self.current_browse_sid: return
 
         p = self.current_browse_p or 1
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p)
+        # If we have a UID, prefer it (e.g. if just navigated)
+        uid_arg = getattr(self, 'current_browse_uid', None)
+
+        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p, current_uid=uid_arg)
 
         if not page_data:
             self.browse_text.setText(tr("Page not found."))
             return
 
         self.current_browse_p = page_data['p_num']
+        self.current_browse_uid = page_data['uid']
 
         # Update Nav
         self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
@@ -2472,10 +2516,16 @@ class GenizahGUI(QMainWindow):
         html = raw_text.replace("\n", "<br>")
         self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
 
-        # Sync Image Viewer
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
-        self.browse_viewer.set_page(idx)
+        # Sync Image Viewer by FL ID
+        parsed = self.meta_mgr.parse_full_id_components(page_data.get('full_header', ''))
+        fl_id = parsed.get('fl_id')
+
+        if fl_id:
+            self.browse_viewer.set_page_by_fl(fl_id)
+        else:
+            try: idx = int(self.current_browse_p) - 1
+            except: idx = 0
+            self.browse_viewer.set_page(idx)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
@@ -4955,11 +5005,41 @@ class GenizahGUI(QMainWindow):
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
+        # Ensure p_num is int. If None (initial state), treat as 0 so 'next' (+1) goes to Page 1
+        current_p = 0
+        if self.current_browse_p is not None:
+            try: current_p = int(self.current_browse_p)
+            except: current_p = 0
+
         # Load Page Data
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=self.current_browse_p, next_prev=d)
+        # Note: If current_p is 0, it means "Before first page".
+        # If d=1 (Next), it fetches Index 0+1-1 = 0? No.
+        # Core logic: new_idx = target_idx + next_prev.
+        # If p_num is None, target_idx=0.
+        # So if we pass p_num=None, next_prev=1 -> new_idx=1 (Page 2).
+        # We want strict control.
+        # If we pass p_num=current_p (int), we find its index.
+
+        # If we are just starting (current_browse_p is None), we want to start from the beginning?
+        # Actually, browse_load sets current_browse_p if FL was found.
+        # If loaded by SID only, current_browse_p might be None.
+
+        # If current_browse_p is None, let's pass None to get_browse_page (defaults to index 0)
+        p_arg = current_p if self.current_browse_p is not None else None
+
+        # Use UID for robust list traversal if available
+        uid_arg = getattr(self, 'current_browse_uid', None)
+
+        page_data = self.searcher.get_browse_page(
+            self.current_browse_sid,
+            p_num=p_arg,
+            next_prev=d,
+            current_uid=uid_arg
+        )
 
         if page_data:
             self.current_browse_p = page_data['p_num']
+            self.current_browse_uid = page_data['uid'] # Track UID
             self.browse_load_page()
 
             # --- Preload Logic (Next/Prev) ---
