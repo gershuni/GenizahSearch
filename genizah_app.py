@@ -491,11 +491,26 @@ class ManuscriptViewerWidget(QWidget):
 
         layout.addLayout(top_bar)
 
+        # Attribution
+        self.lbl_attribution = QLabel("")
+        self.lbl_attribution.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_attribution.setStyleSheet("font-size: 10px; color: #7f8c8d; background: transparent; margin: 0px;")
+        self.lbl_attribution.setVisible(False)
+        layout.addWidget(self.lbl_attribution)
+
         # Image Area
         self.scroll_area = ZoomableScrollArea()
         layout.addWidget(self.scroll_area, 1)
 
     def load_images(self, meta, initial_idx=0):
+        # Attribution
+        attr = meta.get('attribution')
+        if attr:
+            self.lbl_attribution.setText(attr)
+            self.lbl_attribution.setVisible(True)
+        else:
+            self.lbl_attribution.setVisible(False)
+
         # meta contains 'images_nli' and 'images_ext'
         self.images_nli = meta.get('images_nli', [])
         self.images_ext = meta.get('images_ext', [])
@@ -582,7 +597,7 @@ class ManuscriptViewerWidget(QWidget):
 
         self.loader_thread = ImageLoaderThread(final_url)
         self.loader_thread.image_loaded.connect(self.display_image)
-        self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("Failed")))
+        self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
         self.loader_thread.start()
 
         # Preload next image
@@ -1226,13 +1241,21 @@ class ResultDialog(QDialog):
         btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
 
+        # Image Label Dropdown
+        self.combo_img_labels = QComboBox()
+        self.combo_img_labels.setFixedWidth(120)
+        self.combo_img_labels.setVisible(False)
+        self.combo_img_labels.currentIndexChanged.connect(self._on_img_label_selected)
+
         self.lbl_img_label = QLabel("")
         self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
 
-        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page);
+        nav_row.addWidget(self.combo_img_labels) # Added dropdown
+        nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
-        self.btn_view_transcription = QPushButton(tr("View full transcription"))
+        self.btn_view_transcription = QPushButton(tr("Browse manuscript")) # Renamed
         self.btn_view_transcription.clicked.connect(self.open_full_transcription)
         self.btn_search_parallels = QPushButton(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
@@ -1242,16 +1265,20 @@ class ResultDialog(QDialog):
         self.btn_ext_info.toggled.connect(self.toggle_extended_info)
         self.btn_ext_info.setVisible(False)
 
-        self.btn_external_view = QPushButton(tr("Show External Viewer"))
-        self.btn_external_view.setCheckable(True)
-        self.btn_external_view.toggled.connect(self.toggle_external_viewer)
-        self.btn_external_view.setVisible(False)
-        self.btn_external_view.setStyleSheet("background-color: #2c3e50; color: white; font-weight: bold;")
+        # Toggle Image Button
+        self.btn_toggle_image = QPushButton(tr("Image"))
+        self.btn_toggle_image.setCheckable(True)
+        self.btn_toggle_image.setChecked(True) # Default open
+        self.btn_toggle_image.clicked.connect(self.toggle_external_viewer)
+        self.btn_toggle_image.setVisible(False) # Hidden until images avail
+
+        # Deprecated: btn_external_view replaced/merged logic
+        self.btn_external_view = self.btn_toggle_image
 
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_ext_info)
-        action_row.addWidget(self.btn_external_view)
+        action_row.addWidget(self.btn_toggle_image)
         action_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
@@ -1430,8 +1457,8 @@ class ResultDialog(QDialog):
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
-        self.cancel_image_thread()
         
+        # 1. Load Text (Blocking - Fast)
         if target is not None:
             p = target
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
@@ -1455,8 +1482,10 @@ class ResultDialog(QDialog):
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
+        # 2. Sync Image (Non-Blocking)
         if self.btn_external_view.isChecked():
-            self.sync_external_view()
+            # Don't cancel image thread here, let widget handle it
+            QTimer.singleShot(0, self.sync_external_view)
 
         # --- Render Text with Highlights ---
         raw_text = page_data['text']
@@ -1528,32 +1557,77 @@ class ResultDialog(QDialog):
     def toggle_external_viewer(self, checked):
         self.external_pane.setVisible(checked)
         if checked:
-            self.sync_external_view()
+            QTimer.singleShot(0, self.sync_external_view)
+
+    def _on_img_label_selected(self):
+        # Handle jump from dropdown
+        fl_val = self.combo_img_labels.currentData()
+        if fl_val == -1: return
+
+        # We need to find the Page Number (p_num) that corresponds to this FL.
+        # This is a reverse lookup.
+        # Since we don't have the full map in memory easily, we can use the searcher helper.
+        # But that might be slow if we do it on UI thread.
+        # Let's fire a quick thread to find it? Or assume searcher is fast enough (it uses pickle map).
+
+        try:
+            page_data = self.searcher.get_browse_page_by_fl(str(fl_val), self.current_sys_id)
+            if page_data:
+                target_p = page_data['p_num']
+                self.load_page(target=target_p)
+        except Exception:
+            pass
 
     def on_enriched_data_loaded(self, meta):
         if not meta: return
         if self.current_sys_id not in self.meta_mgr.nli_cache: return
 
-        # 1. Update Image Label
+        # 1. Update Image Labels & Dropdown
         fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
         canvas_map = meta.get('canvas_map', {})
         label = canvas_map.get(fl_digits)
         self.lbl_img_label.setText(f"({label})" if label else "")
 
+        # Populate combo box with sorted labels
+        self.combo_img_labels.blockSignals(True)
+        self.combo_img_labels.clear()
+
+        # Filter map to only show labels relevant to current manuscript context if possible,
+        # but here we likely get map for full manuscript.
+        # We need to map Label -> Page Number.
+        # NLI canvas map is FL -> Label.
+        # We need a way to jump to page P based on Label selection.
+        # Since we don't have direct P->FL mapping for all pages in RAM unless loaded,
+        # we might just list them.
+        # For NLI, P usually correlates with sequence index + 1.
+
+        has_labels = False
+        if canvas_map:
+            self.combo_img_labels.addItem(tr("Select Image"), -1)
+            # Sort by FL for approximate order
+            for fl, lbl in sorted(canvas_map.items()):
+                # We need to find which P corresponds to this FL.
+                # This is tricky without full manuscript map.
+                # However, SearchEngine.get_browse_page_by_fl can find P from FL.
+                self.combo_img_labels.addItem(lbl, fl)
+            has_labels = True
+
+        self.combo_img_labels.setVisible(has_labels)
+        self.combo_img_labels.blockSignals(False)
+
         # 2. Populate External / Image Viewer
-        # meta contains 'images_nli' and 'images_ext'
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
+
+        self.btn_toggle_image.setVisible(has_images)
 
         if has_images:
             # Show viewer by default
             self.external_pane.setVisible(True)
-            self.btn_external_view.setChecked(True)
+            self.btn_toggle_image.setChecked(True)
 
             # Metadata for side pane
-            attr = meta.get('attribution', '')
             ext_meta = meta.get('external_meta', {})
 
-            # Removed redundant header
             self.lbl_ext_attr.setVisible(False)
 
             meta_html = ""
@@ -1563,14 +1637,13 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(bool(meta_html))
 
             # Load images into widget
-            # Determine initial index from current page number
             try: initial_idx = int(self.current_p_num) - 1
             except: initial_idx = 0
 
             self.ms_viewer.load_images(meta, initial_idx)
         else:
             self.external_pane.setVisible(False)
-            self.btn_external_view.setChecked(False)
+            self.btn_toggle_image.setChecked(False)
 
         # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})

@@ -72,9 +72,14 @@ TRANSLATIONS = {
     "Metadata Error": "שגיאת נתונים",
     "Metadata load cancelled. Loaded {}/{}.": "טעינת נתונים בוטלה. נטענו {}/{}.",
     "Loaded {} items.": "נטענו {} פריטים.",
-    "View full transcription": "צפה בתעתיק מלא",
+    "Browse manuscript": "עיין בכתב היד",
     "Search for parallels": "חפש מקבילות",
     "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
+    "Image": "תמונה",
+    "Toggle Image Pane": "הצג/הסתר תמונה",
+    "Select Image": "בחר תמונה",
+    "Image": "תמונה",
+    "Toggle Image Pane": "הצג/הסתר תמונה",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
