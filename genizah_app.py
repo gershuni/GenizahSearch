@@ -2091,23 +2091,37 @@ class GenizahGUI(QMainWindow):
         self.search_progress = QProgressBar(); self.search_progress.setVisible(False)
         layout.addWidget(self.search_progress)
         
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels([tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
-        self.results_table.setColumnWidth(0, 135) 
-        self.results_table.setColumnWidth(1, 175)
-        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        # Results Table Setup
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(7)
+        self.results_table.setHorizontalHeaderLabels(["", tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+        self.results_table.setColumnWidth(0, 30) # Checkbox column
+        self.results_table.setColumnWidth(1, 135)
+        self.results_table.setColumnWidth(2, 175)
+        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
+        self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         
         self.results_placeholder = QLabel(tr("Please wait while components load..."))
         self.results_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_placeholder.setWordWrap(True)
         self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b;")
 
+        # Container for table and "Select All"
+        self.table_container = QWidget()
+        table_layout = QVBoxLayout(self.table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.chk_search_select_all = QCheckBox(tr("Select All"))
+        self.chk_search_select_all.setVisible(False)
+        self.chk_search_select_all.toggled.connect(self.on_search_select_all_toggled)
+        table_layout.addWidget(self.chk_search_select_all)
+        table_layout.addWidget(self.results_table)
+
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
-        self.results_stack.addWidget(self.results_table)
+        self.results_stack.addWidget(self.table_container)
 
         results_container = QWidget()
         results_container.setLayout(self.results_stack)
@@ -2116,7 +2130,7 @@ class GenizahGUI(QMainWindow):
         bot = QHBoxLayout()
 
         self.status_label = QLabel(tr("Ready."))
-        lbl_export = QLabel(tr("Export Results") + ":")
+        self.lbl_search_export = QLabel(tr("Export Results") + ":")
         
         # Separate export buttons
         self.btn_exp_xlsx = QPushButton("XLSX")
@@ -2140,7 +2154,7 @@ class GenizahGUI(QMainWindow):
 
         # Append export controls to the right
         bot.addWidget(QLabel("|"))
-        bot.addWidget(lbl_export)
+        bot.addWidget(self.lbl_search_export)
         bot.addWidget(self.btn_exp_xlsx)
         bot.addWidget(self.btn_exp_csv)
         bot.addWidget(self.btn_exp_txt)
@@ -2288,10 +2302,16 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
+
+        self.chk_comp_select_all = QCheckBox(tr("Select All"))
+        self.chk_comp_select_all.clicked.connect(self.on_comp_select_all_clicked)
+
+        rl.addWidget(self.chk_comp_select_all)
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
-        exp_layout.addWidget(QLabel(tr("Save Report")))
+        self.lbl_comp_export = QLabel(tr("Save Report"))
+        exp_layout.addWidget(self.lbl_comp_export)
         
         self.btn_comp_xlsx = QPushButton("XLSX")
         self.btn_comp_xlsx.clicked.connect(lambda: self.export_comp_report('xlsx'))
@@ -2959,11 +2979,18 @@ class GenizahGUI(QMainWindow):
 
     def on_search_finished(self, results):
         self.reset_ui()
+        # Reset Select All Checkbox
+        self.chk_search_select_all.blockSignals(True)
+        self.chk_search_select_all.setChecked(False)
+        self.chk_search_select_all.blockSignals(False)
+        self.lbl_search_export.setText(tr("Export Results") + ":")
+
         if not results:
             self.status_label.setText(tr("No results found."))
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            self.chk_search_select_all.setVisible(False)
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -2988,6 +3015,8 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
         self.results_table.setRowCount(visible_count)
+        self.chk_search_select_all.setVisible(visible_count > 0)
+
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -3007,10 +3036,18 @@ class GenizahGUI(QMainWindow):
 
             # Table Population (Respect Display Limit)
             if i < visible_count:
-                # Col 0: System ID (Store full result data here for retrieval after sort)
+                # Col 0: Checkbox
+                item_chk = QTableWidgetItem()
+                item_chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                item_chk.setCheckState(Qt.CheckState.Unchecked)
+                # Store full result data here for retrieval after sort
+                item_chk.setData(Qt.ItemDataRole.UserRole, res)
+                self.results_table.setItem(i, 0, item_chk)
+
+                # Col 1: System ID
                 item_sid = QTableWidgetItem(sid)
                 item_sid.setData(Qt.ItemDataRole.UserRole, res)
-                self.results_table.setItem(i, 0, item_sid)
+                self.results_table.setItem(i, 1, item_sid)
 
                 if needs_fetch:
                     item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
@@ -3019,25 +3056,25 @@ class GenizahGUI(QMainWindow):
                     item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
                     item_title = QTableWidgetItem(title if title else "")
 
-                # Col 1: Shelfmark
-                self.results_table.setItem(i, 1, item_shelf)
+                # Col 2: Shelfmark
+                self.results_table.setItem(i, 2, item_shelf)
                 self.shelfmark_items_by_sid[sid] = item_shelf
 
-                # Col 2: Title
-                self.results_table.setItem(i, 2, item_title)
+                # Col 3: Title
+                self.results_table.setItem(i, 3, item_title)
                 self.title_items_by_sid[sid] = item_title
 
-                # Col 3: Snippet (Widget)
+                # Col 4: Snippet (Widget)
                 # Render asterisks to HTML for display
                 html_snippet = self.render_asterisks_to_html(res['snippet'])
                 lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                self.results_table.setCellWidget(i, 3, lbl)
+                self.results_table.setCellWidget(i, 4, lbl)
 
-                # Col 4: Img
-                self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
+                # Col 5: Img
+                self.results_table.setItem(i, 5, QTableWidgetItem(meta['img']))
 
-                # Col 5: Source
-                self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+                # Col 6: Source
+                self.results_table.setItem(i, 6, QTableWidgetItem(meta['source']))
 
                 self.result_row_by_sys_id[sid] = i
 
@@ -3155,7 +3192,8 @@ class GenizahGUI(QMainWindow):
         sorted_results = []
         rows = self.results_table.rowCount()
         for i in range(rows):
-            item = self.results_table.item(i, 0)
+            # Use column 1 for data retrieval (System ID column)
+            item = self.results_table.item(i, 1)
             if item:
                 res = item.data(Qt.ItemDataRole.UserRole)
                 if res:
@@ -3166,6 +3204,62 @@ class GenizahGUI(QMainWindow):
             sorted_results = self.last_results
 
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+
+    def on_search_select_all_toggled(self, checked):
+        """Handle Select All checkbox toggle."""
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        self.results_table.blockSignals(True)
+        for i in range(self.results_table.rowCount()):
+            item = self.results_table.item(i, 0)
+            if item:
+                item.setCheckState(state)
+        self.results_table.blockSignals(False)
+        self._update_search_export_label()
+
+    def on_search_result_item_changed(self, item):
+        """Handle individual checkbox changes in search results."""
+        if item.column() != 0:
+            return
+
+        # Check if all items are checked to sync "Select All"
+        all_checked = True
+        has_selection = False
+
+        # Avoid full iteration if possible, but we need to check "Select All" status
+        rows = self.results_table.rowCount()
+        # To optimize, we just iterate. Rows are usually < 500.
+        for i in range(rows):
+            it = self.results_table.item(i, 0)
+            if it:
+                if it.checkState() == Qt.CheckState.Unchecked:
+                    all_checked = False
+                else:
+                    has_selection = True
+
+        # If no items, all_checked is trivially true but we don't want to check the box
+        if rows == 0:
+            all_checked = False
+
+        self.chk_search_select_all.blockSignals(True)
+        self.chk_search_select_all.setChecked(all_checked)
+        self.chk_search_select_all.blockSignals(False)
+
+        self._update_search_export_label(has_selection)
+
+    def _update_search_export_label(self, has_selection=None):
+        if has_selection is None:
+            # Check if any selected
+            has_selection = False
+            for i in range(self.results_table.rowCount()):
+                it = self.results_table.item(i, 0)
+                if it and it.checkState() == Qt.CheckState.Checked:
+                    has_selection = True
+                    break
+
+        if has_selection:
+            self.lbl_search_export.setText(tr("Export selected results") + ":")
+        else:
+            self.lbl_search_export.setText(tr("Export Results") + ":")
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
         sid = None
@@ -3261,7 +3355,31 @@ class GenizahGUI(QMainWindow):
         # Prepare tabular data
         headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
         data_rows = []
-        for r in self.last_results:
+
+        # Collect results to export (Selected or All)
+        results_to_export = []
+
+        # Check if any are selected in the table
+        has_selection = False
+        selected_rows_data = []
+
+        # Iterate table to respect user selection and visual order
+        rows = self.results_table.rowCount()
+        for i in range(rows):
+            chk_item = self.results_table.item(i, 0)
+            if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
+                has_selection = True
+                res = chk_item.data(Qt.ItemDataRole.UserRole)
+                if res:
+                    selected_rows_data.append(res)
+
+        if has_selection:
+            results_to_export = selected_rows_data
+        else:
+            # Fallback to last_results (original order) if nothing selected
+            results_to_export = self.last_results
+
+        for r in results_to_export:
             d = r['display']
             sid = d.get('id', '')
 
@@ -3399,11 +3517,26 @@ class GenizahGUI(QMainWindow):
 
     def export_comp_report(self, fmt='xlsx'):
         # 1. איסוף נתונים (לוגיקה יציבה)
-        all_filtered = self.comp_filtered_main[:]
-        for v in self.comp_filtered_appendix.values():
+
+        # Check for Selection
+        has_selection = bool(self._collect_checked_comp_page_uids())
+
+        if has_selection:
+            # Reconstruct lists from tree selection
+            c_main, c_appx, c_filt, c_filt_appx, c_known = self._collect_checked_comp_items_struct()
+        else:
+            # Use all data
+            c_main = self.comp_main
+            c_appx = self.comp_appendix
+            c_filt = self.comp_filtered_main
+            c_filt_appx = self.comp_filtered_appendix
+            c_known = self.comp_known
+
+        all_filtered = c_filt[:]
+        for v in c_filt_appx.values():
             all_filtered.extend(v)
 
-        if not (self.comp_main or self.comp_appendix or self.comp_known or all_filtered):
+        if not (c_main or c_appx or c_known or all_filtered):
             QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
@@ -3417,9 +3550,9 @@ class GenizahGUI(QMainWindow):
                     sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
                     if sid: all_ids.append(sid)
 
-        collect_ids(self.comp_main)
-        for group_items in self.comp_appendix.values(): collect_ids(group_items)
-        collect_ids(self.comp_known)
+        collect_ids(c_main)
+        for group_items in c_appx.values(): collect_ids(group_items)
+        collect_ids(c_known)
         collect_ids(all_filtered)
 
         unique_ids = list(set(all_ids))
@@ -3538,20 +3671,20 @@ class GenizahGUI(QMainWindow):
 
             if self.chk_comp_flat.isChecked():
                 all_items = self._collect_comp_items(
-                    self.comp_main, self.comp_appendix, 
-                    self.comp_filtered_main, self.comp_filtered_appendix, 
-                    self.comp_known
+                    c_main, c_appx,
+                    c_filt, c_filt_appx,
+                    c_known
                 )
                 flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
-                add_rows(self.comp_main, "Main Manuscripts")
-                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                add_rows(c_main, "Main Manuscripts")
+                for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, "Appendix", sig)
-                add_rows(self.comp_filtered_main, "Filtered Main")
-                for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                add_rows(c_filt, "Filtered Main")
+                for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, "Filtered Appendix", sig)
-                add_rows(self.comp_known, "Known Manuscripts")
+                add_rows(c_known, "Known Manuscripts")
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -3642,10 +3775,10 @@ class GenizahGUI(QMainWindow):
         else:
             try:
                 sep = "=" * 80
-                appendix_count = sum(len(v) for v in self.comp_appendix.values())
-                filtered_total = len(self.comp_filtered_main) + sum(len(v) for v in self.comp_filtered_appendix.values())
-                known_count = len(self.comp_known)
-                total_count = len(self.comp_main) + appendix_count + known_count + filtered_total
+                appendix_count = sum(len(v) for v in c_appx.values())
+                filtered_total = len(c_filt) + sum(len(v) for v in c_filt_appx.values())
+                known_count = len(c_known)
+                total_count = len(c_main) + appendix_count + known_count + filtered_total
 
                 def _fmt_ms_entry(ms_item):
                     if ms_item.get('type') == 'manuscript':
@@ -3676,34 +3809,34 @@ class GenizahGUI(QMainWindow):
 
                 if self.chk_comp_flat.isChecked():
                     flat_items = self._sort_comp_items(
-                        self._collect_comp_items(self.comp_main, self.comp_appendix, self.comp_filtered_main, self.comp_filtered_appendix, self.comp_known)
+                        self._collect_comp_items(c_main, c_appx, c_filt, c_filt_appx, c_known)
                     )
                     for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
                 else:
                     summary_lines.extend([
-                        f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
+                        f"{tr('Main Manuscripts')}: {len(c_main)}",
+                        f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
                         f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
                         f"{tr('Known/Excluded Manuscripts')}: {known_count}"
                     ])
                     detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
-                    if self.comp_appendix:
+                    for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_appx:
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                        for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
-                    if self.comp_filtered_main:
+                    if c_filt:
                         detail_lines.extend([sep, tr("FILTERED / LOW SCORE"), sep])
-                        for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
-                    if self.comp_filtered_appendix:
+                        for item in c_filt: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_filt_appx:
                         detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
+                        for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
-                    if self.comp_known:
+                    if c_known:
                         detail_lines.extend([sep, tr("KNOWN / EXCLUDED MANUSCRIPTS"), sep])
-                        for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
+                        for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
@@ -4599,6 +4732,164 @@ class GenizahGUI(QMainWindow):
         self._sync_parent_check_state(item)
         self.comp_tree_updating = False
         self._update_recursive_button_state()
+        self._update_comp_export_label()
+
+    def on_comp_select_all_clicked(self):
+        """Toggle all root items in the composition tree."""
+        checked = self.chk_comp_select_all.isChecked()
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+
+        self.comp_tree.blockSignals(True)
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            item.setCheckState(0, state)
+            # Recursively set children?
+            # on_comp_tree_item_changed handles recursion but we blocked signals.
+            # So we must do it manually or unblock and set one by one?
+            # Setting recursively manually is faster.
+            self._set_check_state_recursive(item, state)
+        self.comp_tree.blockSignals(False)
+
+        self._update_comp_export_label()
+        self._update_recursive_button_state()
+
+    def _set_check_state_recursive(self, item, state):
+        for i in range(item.childCount()):
+            child = item.child(i)
+            child.setCheckState(0, state)
+            self._set_check_state_recursive(child, state)
+
+    def _update_comp_export_label(self):
+        has_selection = bool(self._collect_checked_comp_page_uids())
+        if has_selection:
+            self.lbl_comp_export.setText(tr("Export selected results"))
+        else:
+            self.lbl_comp_export.setText(tr("Save Report"))
+
+    def _collect_checked_comp_items_struct(self):
+        """
+        Collect checked items maintaining the structure (Main, Appendix, etc.)
+        Returns: (main, appendix, filtered_main, filtered_appendix, known)
+        Only items that are CHECKED (or have checked descendants) are returned.
+        """
+        sel_main = []
+        sel_appx = {}
+        sel_filt = []
+        sel_filt_appx = {}
+        sel_known = []
+
+        # Helper to collect checked children from a node
+        def collect_from_node(node):
+            collected = []
+            # If node is a leaf (Manuscript or Page)
+            data = node.data(0, Qt.ItemDataRole.UserRole)
+            if data:
+                if node.checkState(0) == Qt.CheckState.Checked:
+                    collected.append(data)
+                return collected
+
+            # If node is a group container (no data)
+            for k in range(node.childCount()):
+                child = node.child(k)
+                child_data = child.data(0, Qt.ItemDataRole.UserRole)
+                if not child_data:
+                    # Recursive group (e.g. Appendix group)
+                    res = collect_from_node(child)
+                    collected.extend(res)
+                    continue
+
+                # It is a manuscript item
+                if child.checkState(0) == Qt.CheckState.Unchecked:
+                    continue
+
+                # If fully checked or partially checked
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    # Full manuscript selected
+                    collected.append(child_data)
+                elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
+                    # Some pages selected
+                    # Clone item
+                    import copy
+                    new_item = copy.copy(child_data) # Shallow copy enough? Pages list needs new ref.
+                    new_item['pages'] = []
+
+                    # Find checked pages
+                    for p_idx in range(child.childCount()):
+                        p_node = child.child(p_idx)
+                        if p_node.checkState(0) == Qt.CheckState.Checked:
+                            p_data = p_node.data(0, Qt.ItemDataRole.UserRole)
+                            new_item['pages'].append(p_data)
+
+                    if new_item['pages']:
+                            collected.append(new_item)
+            return collected
+
+        root = self.comp_tree.invisibleRootItem()
+
+        # If Flat Mode:
+        if self.chk_comp_flat.isChecked():
+            # Root 0 is "All Results"
+            if root.childCount() > 0:
+                sel_main = collect_from_node(root.child(0))
+            return sel_main, {}, [], {}, []
+
+        # Use translations or structure to identify categories
+        main_lbl = tr("Main Results")
+        appx_lbl = tr("Appendix")
+        filt_lbl = tr("Filtered")
+        known_lbl = tr("Known")
+
+        for i in range(root.childCount()):
+            node = root.child(i)
+            txt = node.text(0)
+
+            items = collect_from_node(node)
+            if not items: continue
+
+            if main_lbl in txt or "ראשי" in txt:
+                 sel_main.extend(items)
+            elif appx_lbl in txt or "נספח" in txt:
+                 # Custom traversal for Appendix to preserve grouping structure
+                 for k in range(node.childCount()):
+                     group_node = node.child(k)
+                     group_sig_full = group_node.text(2)
+                     group_sig = group_sig_full.rpartition(' (')[0] # Remove count
+
+                     group_items = collect_from_node(group_node)
+                     if group_items:
+                         sel_appx[group_sig] = group_items
+
+            elif filt_lbl in txt or "סונן" in txt:
+                 # Iterate children to separate Main/Appendix in filtered
+                 for k in range(node.childCount()):
+                     child = node.child(k)
+                     c_data = child.data(0, Qt.ItemDataRole.UserRole)
+                     if c_data:
+                         # Direct item -> Filtered Main
+                         if child.checkState(0) == Qt.CheckState.Checked:
+                             sel_filt.append(c_data)
+                         elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
+                             # Reuse logic from helper
+                             import copy
+                             new_item = copy.copy(c_data)
+                             new_item['pages'] = []
+                             for p_idx in range(child.childCount()):
+                                 p_node = child.child(p_idx)
+                                 if p_node.checkState(0) == Qt.CheckState.Checked:
+                                     new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
+                             if new_item['pages']: sel_filt.append(new_item)
+                     else:
+                         # Group node -> Filtered Appendix
+                         g_sig = child.text(2).rpartition(' (')[0]
+                         g_items = collect_from_node(child)
+                         if g_items:
+                             sel_filt_appx[g_sig] = g_items
+
+            elif known_lbl in txt or "ידועים" in txt:
+                 sel_known.extend(items)
+
+        return sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known
 
     def on_comp_tree_item_expanded(self, item):
         if item.childCount() > 0:
