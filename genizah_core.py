@@ -2911,32 +2911,61 @@ class SearchEngine:
                 })
         return full_content
         
-    def get_browse_page(self, sys_id, p_num=None, next_prev=0):
+    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
         if not os.path.exists(Config.BROWSE_MAP): return None
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        
         if sys_id not in browse_map: return None
         pages = browse_map[sys_id]
         if not pages: return None
         
-        # Robust casting to ensure we match the integer keys in browse_map
-        if p_num is not None:
-            try: p_num = int(p_num)
-            except: pass
+        target_idx = -1
 
-        target_idx = 0
-        if p_num is not None:
-            for i, p in enumerate(pages):
-                if p['p_num'] == p_num: target_idx = i; break
+        # PRIORITY 1: Use Absolute Index if provided (Fixes duplicate page loop)
+        if absolute_index is not None:
+            if 0 <= absolute_index < len(pages):
+                target_idx = absolute_index
+            else:
+                # If index is invalid, fallback to p_num logic? No, just fail or reset.
+                pass 
         
+        # PRIORITY 2: Search by p_num (Fallback / Initial Load)
+        if target_idx == -1 and p_num is not None:
+            # Robust casting
+            try: p_val = int(p_num)
+            except: p_val = -999
+            
+            for i, p in enumerate(pages):
+                if p['p_num'] == p_val: 
+                    target_idx = i; break
+            
+            # Smart Fallback: Find closest insertion point
+            if target_idx == -1:
+                for i, p in enumerate(pages):
+                    if p['p_num'] > p_val:
+                        target_idx = max(0, i - 1)
+                        break
+                if target_idx == -1: target_idx = len(pages) - 1
+
+        # PRIORITY 3: Default to start
+        if target_idx == -1: target_idx = 0
+        
+        # Calculate New Index
         new_idx = target_idx + next_prev
+        
         if new_idx < 0 or new_idx >= len(pages): return None
         
         target_page = pages[new_idx]
         text = self.get_full_text_by_id(target_page['uid'])
+        
         return {
-            'uid': target_page['uid'], 'p_num': target_page['p_num'],
-            'full_header': target_page['full_header'], 'text': text,
-            'total_pages': len(pages), 'current_idx': new_idx + 1
+            'uid': target_page['uid'], 
+            'p_num': target_page['p_num'],
+            'full_header': target_page['full_header'], 
+            'text': text,
+            'total_pages': len(pages), 
+            'current_idx': new_idx + 1, # Display is 1-based
+            'internal_index': new_idx   # 0-based for logic (NEW)
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):

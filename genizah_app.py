@@ -1184,6 +1184,7 @@ class ResultDialog(QDialog):
         self.current_fl_id = None
         self.current_page_text = None
         self.current_page_uid = None
+        self.current_internal_idx = None
         
         self.current_meta_request = 0
         self.extended_info_visible = False
@@ -1457,25 +1458,38 @@ class ResultDialog(QDialog):
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
+        self.cancel_image_thread()
         
-        # Ensure current_p_num is safely cast to int if it exists, to avoid type mismatch
-        current_p = None
-        if self.current_p_num is not None:
-            try: current_p = int(self.current_p_num)
-            except: current_p = 1
-
-        # 1. Load Text (Blocking - Fast)
+        # Determine strict navigation source
+        # If target (Spinbox jump) is set -> Use p_num logic (target)
+        # If offset (Next/Prev) is set -> Use internal_index logic (prevents loops)
+        
+        page_data = None
+        
         if target is not None:
-            # Target is usually from spinbox (int) but safeguard anyway
+            # Jump by number (user typed in box)
             try: p = int(target)
             except: p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
         else:
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=current_p, next_prev=offset)
+            # Relative Navigation (Next/Prev)
+            # Use internal index if we have it, otherwise rely on p_num
+            idx_arg = self.current_internal_idx 
+            p_arg = int(self.current_p_num) if self.current_p_num is not None else None
+            
+            page_data = self.searcher.get_browse_page(
+                self.current_sys_id, 
+                p_num=p_arg, 
+                next_prev=offset,
+                absolute_index=idx_arg # <--- THIS FIXES THE BUG
+            )
             
         if not page_data: return
 
+        # --- UPDATE STATE ---
         self.current_p_num = page_data['p_num']
+        self.current_internal_idx = page_data['internal_index'] # <--- SAVE IT
+        
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
@@ -1492,33 +1506,25 @@ class ResultDialog(QDialog):
 
         # 2. Sync Image (Non-Blocking)
         if self.btn_external_view.isChecked():
-            # Don't cancel image thread here, let widget handle it
             QTimer.singleShot(0, self.sync_external_view)
 
-        # --- Render Text with Highlights ---
+        # --- Render Text ---
         raw_text = page_data['text']
-        
-        # Try to re-apply highlighting if we have a regex pattern stored in data
         pattern_str = self.data.get('highlight_pattern')
         
         if pattern_str:
             try:
-                # Compile regex again
                 regex = re.compile(pattern_str, re.IGNORECASE)
-                # Replace matches with *match* notation so htmlify can color it
-                # We use a lambda to wrap the found group with stars
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
-            except:
-                pass # If regex fails, just show plain text
+            except: pass
         
         self.text_ms.setHtml(self._htmlify(raw_text))
 
-        # Handle Metadata & Image
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
         self.lbl_img_label.setText("")
-        # Reset External Viewer if we switched contexts
+        
         if self.ext_data and self.current_sys_id not in self.meta_mgr.nli_cache:
              self.ext_data = None
              self.ext_canvases = []
@@ -1537,8 +1543,6 @@ class ResultDialog(QDialog):
                 self.metadata_loaded.emit(request_id, meta or {})
             threading.Thread(target=worker, daemon=True).start()
 
-        # --- TRIGGER ENRICHED METADATA FETCH ---
-        # Only fetch if we haven't already fetched MARC/IIIF data for this ID
         if not cached_meta or 'marc' not in cached_meta:
             self.enrich_worker = EnrichMetadataThread(self.meta_mgr, self.current_sys_id)
             self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
@@ -1898,6 +1902,7 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.current_browse_sid = None
         self.current_browse_p = None
+        self.current_browse_internal_idx = None
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -4950,6 +4955,7 @@ class GenizahGUI(QMainWindow):
 
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
+        self.current_browse_internal_idx = None
         
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
@@ -4963,41 +4969,81 @@ class GenizahGUI(QMainWindow):
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
-        # Ensure p_num is int. If None (initial state), treat as 0 so 'next' (+1) goes to Page 1
-        current_p = 0
+        # 1. השתמש באינדקס המוחלט אם קיים (מונע לופים)
+        idx_arg = self.current_browse_internal_idx
+        
+        # גיבוי: אם אין אינדקס, נסה לפי מספר עמוד
+        p_arg = None
         if self.current_browse_p is not None:
-            try: current_p = int(self.current_browse_p)
-            except: current_p = 0
+            try: p_arg = int(self.current_browse_p)
+            except: p_arg = 0
 
-        # Load Page Data
-        # Note: If current_p is 0, it means "Before first page".
-        # If d=1 (Next), it fetches Index 0+1-1 = 0? No.
-        # Core logic: new_idx = target_idx + next_prev.
-        # If p_num is None, target_idx=0.
-        # So if we pass p_num=None, next_prev=1 -> new_idx=1 (Page 2).
-        # We want strict control.
-        # If we pass p_num=current_p (int), we find its index.
-
-        # If we are just starting (current_browse_p is None), we want to start from the beginning?
-        # Actually, browse_load sets current_browse_p if FL was found.
-        # If loaded by SID only, current_browse_p might be None.
-
-        # If current_browse_p is None, let's pass None to get_browse_page (defaults to index 0)
-        p_arg = current_p if self.current_browse_p is not None else None
-
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p_arg, next_prev=d)
+        # 2. קריאה למנוע (עם האינדקס!)
+        page_data = self.searcher.get_browse_page(
+            self.current_browse_sid, 
+            p_num=p_arg, 
+            next_prev=d,
+            absolute_index=idx_arg
+        )
 
         if page_data:
-            self.current_browse_p = page_data['p_num']
-            self.browse_load_page()
+            # 3. הצגת הדף ישירות בלי שאילתות נוספות
+            self.browse_render_page(page_data)
+        else:
+            QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
+    
+    def browse_render_page(self, pd):
+        # עדכון משתני מצב
+        self.current_browse_p = pd['p_num']
+        
+        # שמירת האינדקס המוחלט לפעם הבאה (קריטי!)
+        if 'internal_index' in pd:
+            self.current_browse_internal_idx = pd['internal_index']
+        else:
+            # חישוב משוער אם המנוע לא החזיר (לרוב יחזיר)
+            self.current_browse_internal_idx = pd.get('current_idx', 1) - 1
 
-            # --- Preload Logic (Next/Prev) ---
-            next_idx = page_data['current_idx'] + d
-            if 1 <= next_idx <= page_data['total_pages']:
-                # We don't have direct access to next page ID here easily without querying searcher again,
-                # but we can rely on standard cache pre-fetching if we had a mechanism.
-                # For now, just ensure current page is smooth.
-                pass
+        # הצגת הטקסט
+        browse_html_text = pd['text'].replace('\n', '<br>')
+        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
+        
+        # עדכון כותרות
+        full_header = pd.get('full_header', '')
+        _, _, shelf, title = self._get_meta_for_header(full_header)
+        info_text = f"<b>{shelf}</b><br>{title or ''}"
+        self.browse_info_lbl.setText(info_text)
+
+        # עדכון מונה עמודים וכפתורים
+        self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
+        self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
+        self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
+
+        # עדכון שדה ה-FL אם קיים
+        parsed = self.meta_mgr.parse_full_id_components(full_header)
+        if parsed.get('fl_id'):
+            self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
+        else:
+            self.browse_fl_input.setText("")
+            
+        # This tells the large image viewer on the right to jump to the correct index
+        if hasattr(self, 'browse_viewer') and self.browse_viewer.isVisible():
+            try: 
+                # p_num is 1-based, array index is 0-based
+                idx = int(self.current_browse_p) - 1
+            except: 
+                idx = 0
+            self.browse_viewer.set_page(idx)
+        # -------------------------------
+
+        # טעינת תמונה
+        if self.current_browse_sid in self.meta_mgr.nli_cache:
+            self.fetch_browse_thumbnail(self.current_browse_sid)
+        else:
+            self.browse_thumb.setText(tr("Loading Meta..."))
+            def worker():
+                self.meta_mgr.fetch_nli_data(self.current_browse_sid)
+                self.browse_thumb_resolved.emit(self.current_browse_sid, "") 
+            threading.Thread(target=worker, daemon=True).start()
         
     def browse_open_catalog(self):
         if self.current_browse_sid:
