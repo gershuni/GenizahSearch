@@ -1925,7 +1925,7 @@ class MetadataManager:
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
             for fl_id, label in sorted_map:
                 url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
-                images_nli.append({'label': label, 'url': url})
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
@@ -2933,10 +2933,12 @@ class SearchEngine:
         
         target_page = pages[new_idx]
         text = self.get_full_text_by_id(target_page['uid'])
+        parsed = self.meta_mgr.parse_full_id_components(target_page.get('full_header', ''))
         return {
             'uid': target_page['uid'], 'p_num': target_page['p_num'],
             'full_header': target_page['full_header'], 'text': text,
-            'total_pages': len(pages), 'current_idx': new_idx + 1
+            'total_pages': len(pages), 'current_idx': new_idx + 1,
+            'fl_id': parsed.get('fl_id')
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):

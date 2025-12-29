@@ -573,6 +573,29 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def set_page_by_fl(self, fl_digits):
+        """Switch to the image whose FL matches the provided digits."""
+        if not fl_digits:
+            return self.set_page(self.current_idx)
+
+        idx = self._find_index_by_fl(fl_digits)
+        if idx is None:
+            return self.set_page(self.current_idx)
+
+        return self.set_page(idx)
+
+    def _find_index_by_fl(self, fl_digits):
+        """Find image index matching the FL digits (string)."""
+        clean = re.sub(r"\D", "", str(fl_digits))
+        if not clean or not self.active_list:
+            return None
+
+        for i, img in enumerate(self.active_list):
+            img_fl = re.sub(r"\D", "", str(img.get('fl_id', '')))
+            if img_fl and img_fl == clean:
+                return i
+        return None
+
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
@@ -2480,10 +2503,14 @@ class GenizahGUI(QMainWindow):
         html = raw_text.replace("\n", "<br>")
         self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
 
-        # Sync Image Viewer
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
-        self.browse_viewer.set_page(idx)
+        # Sync Image Viewer (prefer FL ID when available)
+        fl_digits = re.sub(r"\D", "", str(page_data.get('fl_id') or ""))
+        if fl_digits:
+            self.browse_viewer.set_page_by_fl(fl_digits)
+        else:
+            try: idx = int(self.current_browse_p) - 1
+            except: idx = 0
+            self.browse_viewer.set_page(idx)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
