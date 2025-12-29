@@ -1803,7 +1803,8 @@ class MetadataManager:
             'date': '',
             'subjects': [],
             'physical_medium': '',
-            'online_link': None
+            'online_link': None,
+            'external_iiif_link': None
         }
 
         try:
@@ -1872,6 +1873,9 @@ class MetadataManager:
                         label = get_sub('z') or "Online Version"
                         if url:
                             result['online_link'] = {'url': url, 'label': label}
+                            # Detect CUDL for External Viewer
+                            if "cudl.lib.cam.ac.uk" in url:
+                                result['external_iiif_link'] = url
 
                     elif tag == '942': # Alt Shelfmark
                         val = get_sub('z')
@@ -1912,6 +1916,72 @@ class MetadataManager:
 
         self.nli_cache[system_id] = current_meta
         return current_meta
+
+    def fetch_external_iiif_data(self, view_url):
+        """
+        Generic handler to fetch external IIIF data.
+        Currently supports CUDL logic: /view/ -> /iiif/ manifest.
+        """
+        if not view_url: return {}
+
+        # CUDL Conversion Logic
+        # http://cudl.lib.cam.ac.uk/view/MS-TS-NS-00321-00008/1 -> https://cudl.lib.cam.ac.uk/iiif/MS-TS-NS-00321-00008
+        manifest_url = view_url
+        if "cudl.lib.cam.ac.uk/view/" in view_url:
+            base = view_url.replace("/view/", "/iiif/")
+            # Remove trailing page number (e.g. /1 or /10)
+            # Regex: ends with /digits
+            manifest_url = re.sub(r'/\d+$', '', base)
+
+        # Ensure HTTPS
+        if manifest_url.startswith("http://"):
+            manifest_url = manifest_url.replace("http://", "https://")
+
+        result = {
+            'attribution': 'External Library',
+            'metadata': {},
+            'canvases': []
+        }
+
+        try:
+            session = self._make_session()
+            resp = session.get(manifest_url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # Attribution
+                # IIIF 2.0 uses "attribution", 3.0 "requiredStatement"
+                attr = data.get('attribution')
+                if isinstance(attr, str):
+                    result['attribution'] = attr
+                elif isinstance(attr, list): # Multi-language
+                    result['attribution'] = str(attr[0])
+                elif not attr and data.get('label'):
+                    result['attribution'] = str(data.get('label'))
+
+                # Metadata (Abstract, Condition etc)
+                if 'metadata' in data:
+                    for item in data['metadata']:
+                        label = str(item.get('label', '')).lower()
+                        val = str(item.get('value', ''))
+                        if label in ['abstract', 'condition', 'provenance', 'physical description']:
+                            result['metadata'][label.title()] = val
+
+                # Canvases (Images)
+                # We need a flat list of Image URLs for the main resource
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            img_id = resource.get('@id')
+                            if img_id:
+                                result['canvases'].append(img_id)
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"External IIIF fetch failed for {view_url}: {e}")
+            return result
 
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"

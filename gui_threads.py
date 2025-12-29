@@ -287,3 +287,20 @@ class EnrichMetadataThread(QThread):
         except Exception:
             # If something unexpected happens, just emit empty to avoid hanging
             self.finished_signal.emit({})
+
+
+class ExternalResourceThread(QThread):
+    """Fetch external IIIF resources (e.g. Cambridge) in background."""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, meta_mgr, url):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.url = url
+
+    def run(self):
+        try:
+            data = self.meta_mgr.fetch_external_iiif_data(self.url)
+            self.finished_signal.emit(data)
+        except Exception:
+            self.finished_signal.emit({})

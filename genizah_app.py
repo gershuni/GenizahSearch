@@ -46,7 +46,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
@@ -935,6 +935,10 @@ class ResultDialog(QDialog):
         self.current_meta_request = 0
         self.extended_info_visible = False
 
+        # External Viewer State
+        self.ext_data = None
+        self.ext_canvases = []
+
         self.init_ui()
         self.metadata_loaded.connect(self.on_metadata_loaded)
         self.load_result_by_index(self.current_result_idx)
@@ -1000,9 +1004,16 @@ class ResultDialog(QDialog):
         self.btn_ext_info.toggled.connect(self.toggle_extended_info)
         self.btn_ext_info.setVisible(False)
 
+        self.btn_external_view = QPushButton(tr("Show External Viewer"))
+        self.btn_external_view.setCheckable(True)
+        self.btn_external_view.toggled.connect(self.toggle_external_viewer)
+        self.btn_external_view.setVisible(False)
+        self.btn_external_view.setStyleSheet("background-color: #2c3e50; color: white; font-weight: bold;")
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_ext_info)
+        action_row.addWidget(self.btn_external_view)
         action_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
@@ -1019,7 +1030,10 @@ class ResultDialog(QDialog):
         header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
         
-        # --- SPLIT VIEW (Manuscript | Source) ---
+        # --- SPLIT VIEW (Manuscript | Source | External) ---
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Inner Splitter for Text (Manuscript | Source)
         self.text_splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # 1. Manuscript View (Left)
@@ -1038,10 +1052,40 @@ class ResultDialog(QDialog):
 
         self.text_splitter.addWidget(ms_widget)
         self.text_splitter.addWidget(self.src_widget)
-        self.text_splitter.setStretchFactor(0, 2) # Manuscript takes more space by default
+        self.text_splitter.setStretchFactor(0, 2)
         self.text_splitter.setStretchFactor(1, 1)
         
-        main_layout.addWidget(self.text_splitter, 1)
+        self.main_splitter.addWidget(self.text_splitter)
+
+        # 3. External Viewer Pane (Initially Hidden)
+        self.external_pane = QWidget()
+        self.external_pane.setVisible(False)
+        ext_layout = QVBoxLayout(self.external_pane); ext_layout.setContentsMargins(0,0,0,0)
+
+        self.lbl_ext_attr = QLabel(tr("External Viewer"))
+        self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #ecf0f1;")
+        self.lbl_ext_attr.setWordWrap(True)
+
+        self.txt_ext_meta = QTextBrowser()
+        self.txt_ext_meta.setMaximumHeight(100)
+        self.txt_ext_meta.setStyleSheet("font-size: 11px;")
+
+        # Image Area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.lbl_ext_image = QLabel(tr("Loading External Image..."))
+        self.lbl_ext_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scroll.setWidget(self.lbl_ext_image)
+
+        ext_layout.addWidget(self.lbl_ext_attr)
+        ext_layout.addWidget(self.txt_ext_meta)
+        ext_layout.addWidget(scroll)
+
+        self.main_splitter.addWidget(self.external_pane)
+        self.main_splitter.setStretchFactor(0, 3)
+        self.main_splitter.setStretchFactor(1, 2)
+
+        main_layout.addWidget(self.main_splitter, 1)
         
         # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
@@ -1158,6 +1202,9 @@ class ResultDialog(QDialog):
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
+        if self.btn_external_view.isChecked():
+            self.sync_external_view()
+
         # --- Render Text with Highlights ---
         raw_text = page_data['text']
         
@@ -1181,13 +1228,12 @@ class ResultDialog(QDialog):
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
         self.lbl_img_label.setText("")
-        # Don't hide extended info here, let it persist if user opened it, but clear outdated data?
-        # Better to keep it closed by default on new result, but on page nav same result?
-        # This function loads a page for the SAME result context usually.
-        # But if switching results, load_result_by_index calls this.
-        # Let's reset visibility only if result changed. But here we are just paging.
-        # Actually, if we switch pages, the extended info (Biblio etc) remains the same for the manuscript.
-        # Only image label changes.
+        # Reset External Viewer if we switched contexts
+        if self.ext_data and self.current_sys_id not in self.meta_mgr.nli_cache:
+             self.ext_data = None
+             self.ext_canvases = []
+             self.btn_external_view.setVisible(False)
+             self.external_pane.setVisible(False)
 
         cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
         if cached_meta:
@@ -1226,6 +1272,11 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setVisible(checked)
         self.btn_ext_info.setText(tr("Hide Extended Info") if checked else tr("Show Extended Info"))
 
+    def toggle_external_viewer(self, checked):
+        self.external_pane.setVisible(checked)
+        if checked:
+            self.sync_external_view()
+
     def on_enriched_data_loaded(self, meta):
         if not meta: return
         if self.current_sys_id not in self.meta_mgr.nli_cache:
@@ -1240,8 +1291,15 @@ class ResultDialog(QDialog):
         else:
             self.lbl_img_label.setText("")
 
-        # 2. Build Extended Info HTML
+        # 2. Check for External Viewer Link
         marc = meta.get('marc', {})
+        ext_link = marc.get('external_iiif_link')
+        if ext_link:
+            self.ext_thread = ExternalResourceThread(self.meta_mgr, ext_link)
+            self.ext_thread.finished_signal.connect(self.on_external_data_loaded)
+            self.ext_thread.start()
+
+        # 3. Build Extended Info HTML
         if not marc and not meta.get('physical_desc'):
             self.btn_ext_info.setVisible(False)
             return
@@ -1299,6 +1357,64 @@ class ResultDialog(QDialog):
         if shelf and shelf != "Unknown":
             self.lbl_shelf.setText(shelf)
 
+    def on_external_data_loaded(self, data):
+        if not data: return
+        self.ext_data = data
+        self.ext_canvases = data.get('canvases', [])
+
+        self.btn_external_view.setVisible(True)
+        self.lbl_ext_attr.setText(data.get('attribution', 'External Viewer'))
+
+        # Populate mini metadata
+        meta_html = ""
+        for k, v in data.get('metadata', {}).items():
+            meta_html += f"<b>{k}:</b> {v}<br>"
+        self.txt_ext_meta.setHtml(meta_html)
+        self.txt_ext_meta.setVisible(bool(meta_html))
+
+        if self.btn_external_view.isChecked():
+            self.sync_external_view()
+
+    def sync_external_view(self):
+        if not self.ext_canvases: return
+
+        # Determine index (1-based page num -> 0-based index)
+        try:
+            idx = int(self.current_p_num) - 1
+        except:
+            idx = 0
+
+        # Bounds check
+        if idx < 0: idx = 0
+        if idx >= len(self.ext_canvases): idx = 0 # Default to first if out of bounds
+
+        image_id = self.ext_canvases[idx]
+        # Construct full size URL (IIIF convention)
+        # Usually ID + /full/max/0/default.jpg or similar
+        # CUDL: https://images.lib.cam.ac.uk/iiif/MS-TS-NS-00321-00008-000-00001.jp2/full/400,/0/default.jpg
+        # We start with a reasonable size for the side pane
+        img_url = f"{image_id}/full/600,/0/default.jpg"
+
+        self.lbl_ext_image.setText(tr("Loading..."))
+
+        if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
+            self.ext_img_thread.cancel()
+            self.ext_img_thread.wait()
+
+        self.ext_img_thread = ImageLoaderThread(img_url)
+        self.ext_img_thread.image_loaded.connect(self.on_ext_img_loaded)
+        self.ext_img_thread.load_failed.connect(lambda: self.lbl_ext_image.setText(tr("Image Load Failed")))
+        self.ext_img_thread.start()
+
+    def on_ext_img_loaded(self, image):
+        pix = QPixmap.fromImage(image)
+        # Use full size of label but keep aspect ratio
+        w = self.external_pane.width()
+        if w < 100: w = 400
+        scaled = pix.scaledToWidth(w - 20, Qt.TransformationMode.SmoothTransformation)
+        self.lbl_ext_image.setPixmap(scaled)
+        self.lbl_ext_image.setText("")
+
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
             return
@@ -1309,6 +1425,10 @@ class ResultDialog(QDialog):
         if img_thread and img_thread.isRunning():
             img_thread.cancel()
             img_thread.wait()
+
+        if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
+            self.ext_img_thread.cancel()
+            self.ext_img_thread.wait()
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
