@@ -2286,7 +2286,10 @@ class MetadataManager:
         """Normalize shelfmarks for tolerant comparisons."""
         if not shelfmark:
             return ""
-        return re.sub(r"[\\.\\s/]", "", shelfmark).casefold()
+        cleaned = re.sub(r"[\\.\\s/]", "", shelfmark).casefold()
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
 
     def _iter_shelfmark_sources(self):
         """Yield shelfmark candidates from CSV bank and cached metadata."""
