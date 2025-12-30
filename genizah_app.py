@@ -2165,8 +2165,8 @@ class GenizahGUI(QMainWindow):
 
     def set_results_loading(self, is_loading: bool):
         """Toggle the search results placeholder while components initialize."""
-        if hasattr(self, "results_stack") and hasattr(self, "results_placeholder") and hasattr(self, "results_table"):
-            target = self.results_placeholder if is_loading else self.results_table
+        if hasattr(self, "results_stack") and hasattr(self, "results_placeholder") and hasattr(self, "table_container"):
+            target = self.results_placeholder if is_loading else self.table_container
             self.results_stack.setCurrentWidget(target)
 
     def create_composition_tab(self):
@@ -4730,6 +4730,23 @@ class GenizahGUI(QMainWindow):
                 item.child(i).setCheckState(0, state)
 
         self._sync_parent_check_state(item)
+
+        # Sync "Select All" checkbox state
+        all_checked = True
+        root = self.comp_tree.invisibleRootItem()
+        # Optimize: if tree is empty, uncheck. If large, this loop is okay (usually < 500 nodes).
+        if root.childCount() == 0:
+            all_checked = False
+        else:
+            for i in range(root.childCount()):
+                if root.child(i).checkState(0) == Qt.CheckState.Unchecked:
+                    all_checked = False
+                    break
+
+        self.chk_comp_select_all.blockSignals(True)
+        self.chk_comp_select_all.setChecked(all_checked)
+        self.chk_comp_select_all.blockSignals(False)
+
         self.comp_tree_updating = False
         self._update_recursive_button_state()
         self._update_comp_export_label()
