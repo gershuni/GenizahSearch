@@ -26,6 +26,11 @@
         border-bottom: 1px solid #ddd;
         padding-bottom: 5px;
     }
+    h4 {
+        margin-top: 15px;
+        margin-bottom: 5px;
+        color: #2980b9;
+    }
     .subtitle {
         text-align: center;
         color: #7f8c8d;
@@ -175,7 +180,35 @@
     <ul>
         <li><b>Deep Scan:</b> A much deeper and thorough scan. Significantly slower, but recommended for finding rare phrases or ensuring nothing is missed.</li>
         <li><b>Fingerprint Algorithm:</b> In this mode, the engine uses a different method for identifying words based on rare letters, allowing greater flexibility in identifying corruptions.</li>
-        <li><b>Parameters:</b> This mode opens an additional settings panel allowing fine control over match threshold (Min Match %), result limits, and more.</li>
+    </ul>
+
+    <h3>Lab Mode Parameters</h3>
+    <p>When Lab Mode is active, a settings panel appears. The available settings depend on the active tab.</p>
+
+    <h4>Search Tab Parameters</h4>
+    <ul>
+        <li><b>Min Match %:</b> Minimum percentage of query terms required to consider a result relevant.</li>
+        <li><b>Max Results to Process:</b> Maximum number of raw candidates to fetch from the index before detailed scoring.</li>
+        <li><b>Deep Limit:</b> Maximum number of documents to scan in Deep Scan mode.</li>
+    </ul>
+
+    <h4>Composition Tab Parameters</h4>
+    <ul>
+        <li><b>Max Candidates per Chunk:</b> Maximum number of index hits to process per text chunk.</li>
+        <li><b>Min Chunk Score:</b> Minimum score required for a chunk to be considered a match.</li>
+        <li><b>Max Final Results:</b> Maximum number of results to display in the tree to prevent freezing (all results are still exported).</li>
+    </ul>
+
+    <h4>Advanced Scoring</h4>
+    <p>Accessible via the "Advanced Scoring..." button:</p>
+    <ul>
+        <li><b>Sequential Order Bonus:</b> Bonus points for finding words in the correct order.</li>
+        <li><b>Coverage Penalty Power:</b> Penalizes results that do not contain all search terms.</li>
+        <li><b>Stop-Word Suppression:</b> Lowers the score for very short or common words to reduce noise.</li>
+        <li><b>Long Word Bonus:</b> Gives higher weight to longer words.</li>
+        <li><b>Unique Match Base Score:</b> The base score for finding a unique word.</li>
+        <li><b>Distance Penalty:</b> Penalizes words found far apart from each other.</li>
+        <li><b>Repeated Word Factor:</b> Reduces score for words appearing more often in the text than in the query.</li>
     </ul>
     </div>
 
@@ -283,7 +316,35 @@
     <ul>
         <li><b>Deep Scan:</b> סריקה מעמיקה ויסודית יותר. איטית משמעותית, אך מומלצת לחיפוש ביטויים נדירים או כשרוצים לוודא שלא פיספסתם כלום.</li>
         <li><b>אלגוריתם טביעת אצבע:</b> המנוע במצב זה משתמש בשיטה שונה לזיהוי מילים, המבוססת על האותיות הנדירות במילה, מה שמאפשר גמישות רבה יותר בזיהוי שיבושים.</li>
-        <li><b>פרמטרים:</b> במצב זה נפתח פאנל הגדרות נוסף המאפשר שליטה עדינה על סף ההתאמה (Min Match %), כמות התוצאות לעיבוד, ועוד.</li>
+    </ul>
+
+    <h3>פרמטרים של מצב מעבדה</h3>
+    <p>כאשר מצב מעבדה פעיל, מופיע פאנל הגדרות. ההגדרות הזמינות משתנות בהתאם ללשונית הפעילה.</p>
+
+    <h4>פרמטרים ללשונית חיפוש</h4>
+    <ul>
+        <li><b>Min Match % (סף התאמה):</b> אחוז המילים המינימלי מהשאילתא שחייב להופיע כדי שהתוצאה תיחשב רלוונטית.</li>
+        <li><b>Max Results to Process (מגבלת עיבוד):</b> מספר המועמדים הגולמיים המקסימלי שיישלף מהאינדקס לפני שלב הניקוד המפורט.</li>
+        <li><b>Deep Limit (מגבלת עומק):</b> מספר המסמכים המקסימלי לסריקה במצב "Deep Scan".</li>
+    </ul>
+
+    <h4>פרמטרים ללשונית חיפוש חיבורים</h4>
+    <ul>
+        <li><b>Max Candidates per Chunk (מועמדים לגוש):</b> מספר התוצאות המקסימלי שיעובדו עבור כל מקטע טקסט.</li>
+        <li><b>Min Chunk Score (ניקוד מינימלי לגוש):</b> הניקוד המינימלי הנדרש כדי שמקטע ייחשב כ"נמצא".</li>
+        <li><b>Max Final Results (מקסימום תוצאות סופיות):</b> מספר התוצאות שיוצגו בעץ כדי למנוע קיפאון של הממשק (כל התוצאות עדיין נשמרות בייצוא).</li>
+    </ul>
+
+    <h4>ניקוד מתקדם (Advanced Scoring)</h4>
+    <p>זמין דרך כפתור "Advanced Scoring...":</p>
+    <ul>
+        <li><b>Sequential Order Bonus (בונוס סדר):</b> ניקוד נוסף על מציאת מילים בסדר הנכון.</li>
+        <li><b>Coverage Penalty Power (קנס כיסוי):</b> קנס על תוצאות שאינן מכילות את כל מילות החיפוש.</li>
+        <li><b>Stop-Word Suppression (דיכוי מילים נפוצות):</b> מפחית את הניקוד למילים קצרות או נפוצות מאוד כדי להפחית רעש.</li>
+        <li><b>Long Word Bonus (בונוס מילה ארוכה):</b> נותן משקל רב יותר למילים ארוכות.</li>
+        <li><b>Unique Match Base Score (ניקוד בסיס):</b> הניקוד הבסיסי למציאת מילה ייחודית.</li>
+        <li><b>Distance Penalty (קנס מרחק):</b> מפחית ניקוד למילים שנמצאו רחוק זו מזו.</li>
+        <li><b>Repeated Word Factor (גורם מילה חוזרת):</b> מפחית ניקוד למילים המופיעות בטקסט יותר פעמים מאשר בשאילתא.</li>
     </ul>
     </div>
 
