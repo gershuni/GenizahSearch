@@ -604,7 +604,7 @@ class ManuscriptViewerWidget(QWidget):
 
         self.combo_source = QComboBox()
         self.combo_source.addItem("NLI")
-        self.combo_source.addItem("External (Cambridge/Other)")
+        self.combo_source.addItem("External")
         self.combo_source.setVisible(False)
         self.combo_source.currentIndexChanged.connect(self._on_source_changed)
 
@@ -643,7 +643,7 @@ class ManuscriptViewerWidget(QWidget):
         btn_rot_reset.setFixedWidth(50)
         btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
 
-        self.btn_external = QPushButton(tr("External Site"))
+        self.btn_external = QPushButton(tr("External Website"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
 
@@ -672,7 +672,15 @@ class ManuscriptViewerWidget(QWidget):
         self.scroll_area = ZoomableScrollArea()
         layout.addWidget(self.scroll_area, 1)
 
+    def resolve_external_labels(self, meta):
+        source_type = meta.get('external_source')
+        if source_type == "cambridge":
+            return tr("Cambridge"), tr("Cambridge Website"), tr("Cambridge Viewer")
+        return tr("External"), tr("External Website"), tr("External Viewer")
+
     def load_images(self, meta, initial_idx=0):
+        source_label, site_label, viewer_label = self.resolve_external_labels(meta)
+
         # Attribution
         attr = meta.get('attribution')
         if attr:
@@ -690,7 +698,7 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.clear()
 
         if self.images_ext:
-            self.combo_source.addItem(f"External ({len(self.images_ext)})", "ext")
+            self.combo_source.addItem(f"{source_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
             self.active_list = self.images_ext
@@ -709,6 +717,7 @@ class ManuscriptViewerWidget(QWidget):
         # External Link
         marc = meta.get('marc', {})
         self.external_url = marc.get('external_iiif_link')
+        self.btn_external.setText(site_label)
         self.btn_external.setVisible(bool(self.external_url))
 
         self._populate_label_selector()
@@ -1466,17 +1475,10 @@ class ResultDialog(QDialog):
         btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
 
-        # Image Label Dropdown
-        self.combo_img_labels = QComboBox()
-        self.combo_img_labels.setFixedWidth(120)
-        self.combo_img_labels.setVisible(False)
-        self.combo_img_labels.currentIndexChanged.connect(self._on_img_label_selected)
-
         self.lbl_img_label = QLabel("")
         self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
 
         nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page);
-        nav_row.addWidget(self.combo_img_labels) # Added dropdown
         nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
@@ -1552,7 +1554,7 @@ class ResultDialog(QDialog):
         self.external_pane.setVisible(False)
         ext_layout = QVBoxLayout(self.external_pane); ext_layout.setContentsMargins(0,0,0,0)
 
-        self.lbl_ext_attr = QLabel(tr("External Viewer"))
+        self.lbl_ext_attr = QLabel(tr("Image Viewer"))
         self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #ecf0f1;")
         self.lbl_ext_attr.setWordWrap(True)
 
@@ -1795,61 +1797,15 @@ class ResultDialog(QDialog):
         if checked:
             QTimer.singleShot(0, self.sync_external_view)
 
-    def _on_img_label_selected(self):
-        # Handle jump from dropdown
-        fl_val = self.combo_img_labels.currentData()
-        if fl_val == -1: return
-
-        # We need to find the Page Number (p_num) that corresponds to this FL.
-        # This is a reverse lookup.
-        # Since we don't have the full map in memory easily, we can use the searcher helper.
-        # But that might be slow if we do it on UI thread.
-        # Let's fire a quick thread to find it? Or assume searcher is fast enough (it uses pickle map).
-
-        try:
-            page_data = self.searcher.get_browse_page_by_fl(str(fl_val), self.current_sys_id)
-            if page_data:
-                target_p = page_data['p_num']
-                self.load_page(target=target_p)
-        except Exception:
-            pass
-
     def on_enriched_data_loaded(self, meta):
         if not meta: return
         if self.current_sys_id not in self.meta_mgr.nli_cache: return
 
-        # 1. Update Image Labels & Dropdown
+        # 1. Update Image Labels
         fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
         canvas_map = meta.get('canvas_map', {})
         label = canvas_map.get(fl_digits)
         self.lbl_img_label.setText(f"({label})" if label else "")
-
-        # Populate combo box with sorted labels
-        self.combo_img_labels.blockSignals(True)
-        self.combo_img_labels.clear()
-
-        # Filter map to only show labels relevant to current manuscript context if possible,
-        # but here we likely get map for full manuscript.
-        # We need to map Label -> Page Number.
-        # NLI canvas map is FL -> Label.
-        # We need a way to jump to page P based on Label selection.
-        # Since we don't have direct P->FL mapping for all pages in RAM unless loaded,
-        # we might just list them.
-        # For NLI, P usually correlates with sequence index + 1.
-
-        has_labels = False
-        if canvas_map:
-            self.combo_img_labels.addItem(tr("Select Image"), -1)
-            # Sort by FL for approximate order
-            for fl, lbl in sorted(canvas_map.items()):
-                # We need to find which P corresponds to this FL.
-                # This is tricky without full manuscript map.
-                # However, SearchEngine.get_browse_page_by_fl can find P from FL.
-                self.combo_img_labels.addItem(lbl, fl)
-            has_labels = True
-
-        self.combo_img_labels.setVisible(has_labels)
-        self.combo_img_labels.blockSignals(False)
 
         # 2. Populate External / Image Viewer
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
@@ -1864,7 +1820,10 @@ class ResultDialog(QDialog):
             # Metadata for side pane
             ext_meta = meta.get('external_meta', {})
 
-            self.lbl_ext_attr.setVisible(False)
+            _, _, viewer_label = self.ms_viewer.resolve_external_labels(meta)
+            header_label = viewer_label if meta.get('external_source') else tr("Image Viewer")
+            self.lbl_ext_attr.setText(header_label)
+            self.lbl_ext_attr.setVisible(True)
 
             meta_html = ""
             for k, v in ext_meta.items():
@@ -2519,8 +2478,8 @@ class GenizahGUI(QMainWindow):
         header.sectionResized.connect(self._refresh_comp_tree_tooltips)
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
-        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
@@ -2541,6 +2500,12 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_header = CheckBoxHeader(self.comp_tree)
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
+        comp_header = self.comp_tree.header()
+        comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Stretch)
+        comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
+        comp_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        comp_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        comp_header.setStretchLastSection(True)
 
         rl.addWidget(self.comp_tree)
         

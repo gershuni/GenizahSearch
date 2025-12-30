@@ -1948,6 +1948,7 @@ class MetadataManager:
 
         # Check for External Link from MARC (e.g. CUDL)
         ext_link = marc_data.get('external_iiif_link')
+        ext_source = None
 
         # Lists for multiple sources
         images_nli = []
@@ -1955,12 +1956,20 @@ class MetadataManager:
 
         # 2a. Fetch External IIIF
         if ext_link:
+            if "cudl.lib.cam.ac.uk" in ext_link.lower():
+                ext_source = "cambridge"
+            else:
+                ext_source = "external"
+
             ext_data = self.fetch_external_iiif_data(ext_link)
             if ext_data.get('canvases'):
                 images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
                 external_meta = ext_data.get('metadata', {})
                 if not marc_attribution:
                     current_meta['attribution'] = ext_data.get('attribution')
+                current_meta['external_source'] = ext_source
+                current_meta['external_source_label'] = "Cambridge" if ext_source == "cambridge" else "External"
+                current_meta['external_site_label'] = "Cambridge Website" if ext_source == "cambridge" else "External Website"
 
         # 2b. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)

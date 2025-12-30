@@ -20,6 +20,13 @@ TRANSLATIONS = {
     "Loading...": "טוען...",
     "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
+    "External": "חיצוני",
+    "External Website": "אתר חיצוני",
+    "External Viewer": "מציג חיצוני",
+    "Cambridge": "קיימברידג'",
+    "Cambridge Website": "אתר קיימברידג'",
+    "Cambridge Viewer": "מציג קיימברידג'",
+    "Image Viewer": "מציג תמונות",
     
     # --- Connectivity / Status ---
     "Online": "מקוון",
