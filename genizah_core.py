@@ -2283,12 +2283,15 @@ class MetadataManager:
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks for tolerant comparisons."""
+        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
         if not shelfmark:
             return ""
-        cleaned = re.sub(r"[\\.\\s/]", "", shelfmark).casefold()
+        
+        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
+        
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
+            
         return cleaned
 
     def _iter_shelfmark_sources(self):

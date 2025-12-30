@@ -1800,12 +1800,6 @@ class ResultDialog(QDialog):
         fl_val = self.combo_img_labels.currentData()
         if fl_val == -1: return
 
-        # We need to find the Page Number (p_num) that corresponds to this FL.
-        # This is a reverse lookup.
-        # Since we don't have the full map in memory easily, we can use the searcher helper.
-        # But that might be slow if we do it on UI thread.
-        # Let's fire a quick thread to find it? Or assume searcher is fast enough (it uses pickle map).
-
         try:
             page_data = self.searcher.get_browse_page_by_fl(str(fl_val), self.current_sys_id)
             if page_data:
@@ -4133,14 +4127,16 @@ class GenizahGUI(QMainWindow):
         self.excluded_shelfmarks = shelves
         self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
 
-    def normalize_shelfmark(self, shelf: str):
-        if not shelf:
+    def _normalize_shelfmark(self, shelfmark: str) -> str:
+        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
+        if not shelfmark:
             return ""
-        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", shelf, flags=re.IGNORECASE)
-        cleaned = re.sub(r"[^\w]", "", without_prefix).lower()
-        # Treat optional "ms" prefix as non-significant for comparisons
+        
+        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
+        
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
+            
         return cleaned
 
     def _get_meta_for_header(self, raw_header):
