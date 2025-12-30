@@ -76,6 +76,8 @@ TRANSLATIONS = {
     "Loaded {} items.": "נטענו {} פריטים.",
     "Browse manuscript": "עיין בכתב היד",
     "Search for parallels": "חפש מקבילות",
+    "External Website": "אתר חיצוני",
+    "Cambridge Website": "אתר קיימברידג'",
     "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
     "Image": "תמונה",
     "Toggle Image Pane": "הצג/הסתר תמונה",
