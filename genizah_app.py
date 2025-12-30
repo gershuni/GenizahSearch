@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QIntValidator, QTransform
 
 from version import APP_VERSION
 
@@ -460,6 +460,7 @@ class ZoomableScrollArea(QScrollArea):
 
         self._pixmap = None
         self._zoom_factor = 1.0
+        self._rotation_angle = 0
         self._drag_start_pos = None
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -467,6 +468,7 @@ class ZoomableScrollArea(QScrollArea):
     def set_image(self, pixmap):
         self._pixmap = pixmap
         self._zoom_factor = 1.0 # Reset zoom on new image
+        self._rotation_angle = 0
         self._update_view()
 
     def _update_view(self):
@@ -474,11 +476,14 @@ class ZoomableScrollArea(QScrollArea):
             self.lbl_img.setText(tr("No Image"))
             return
 
-        scaled_w = int(self._pixmap.width() * self._zoom_factor)
-        scaled_h = int(self._pixmap.height() * self._zoom_factor)
+        transform = QTransform().rotate(self._rotation_angle)
+        rotated_pix = self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
+        scaled_w = int(rotated_pix.width() * self._zoom_factor)
+        scaled_h = int(rotated_pix.height() * self._zoom_factor)
 
         # Keep aspect ratio
-        scaled_pix = self._pixmap.scaled(
+        scaled_pix = rotated_pix.scaled(
             scaled_w, scaled_h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
@@ -527,6 +532,10 @@ class ZoomableScrollArea(QScrollArea):
         self._zoom_factor *= 0.8
         self._update_view()
 
+    def set_rotation(self, angle):
+        self._rotation_angle = angle % 360
+        self._update_view()
+
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
 
@@ -562,6 +571,26 @@ class ManuscriptViewerWidget(QWidget):
         btn_zoom_in.setFixedWidth(30)
         btn_zoom_in.clicked.connect(lambda: self.scroll_area.zoom_in())
 
+        rotate_90 = QPushButton("90°")
+        rotate_90.setFixedWidth(45)
+        rotate_90.clicked.connect(lambda: self.scroll_area.set_rotation(90))
+
+        rotate_180 = QPushButton("180°")
+        rotate_180.setFixedWidth(55)
+        rotate_180.clicked.connect(lambda: self.scroll_area.set_rotation(180))
+
+        rotate_270 = QPushButton("270°")
+        rotate_270.setFixedWidth(55)
+        rotate_270.clicked.connect(lambda: self.scroll_area.set_rotation(270))
+
+        self.input_rotation = QLineEdit()
+        self.input_rotation.setFixedWidth(70)
+        self.input_rotation.setPlaceholderText(tr("Angle"))
+        self.input_rotation.setValidator(QIntValidator(-360, 360, self))
+
+        btn_apply_rotation = QPushButton(tr("Rotate"))
+        btn_apply_rotation.clicked.connect(self.apply_custom_rotation)
+
         self.btn_external = QPushButton(tr("External Site"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
@@ -569,6 +598,11 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addWidget(self.combo_source)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
+        top_bar.addWidget(rotate_90)
+        top_bar.addWidget(rotate_180)
+        top_bar.addWidget(rotate_270)
+        top_bar.addWidget(self.input_rotation)
+        top_bar.addWidget(btn_apply_rotation)
         top_bar.addWidget(btn_zoom_out)
         top_bar.addWidget(btn_zoom_in)
 
@@ -692,7 +726,17 @@ class ManuscriptViewerWidget(QWidget):
 
     def open_external(self):
         if self.external_url:
-             QDesktopServices.openUrl(QUrl(self.external_url))
+            QDesktopServices.openUrl(QUrl(self.external_url))
+
+    def apply_custom_rotation(self):
+        text = self.input_rotation.text().strip()
+        if not text:
+            return
+        try:
+            angle = int(text)
+        except ValueError:
+            return
+        self.scroll_area.set_rotation(angle)
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
