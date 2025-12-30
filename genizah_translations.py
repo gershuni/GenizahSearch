@@ -55,6 +55,8 @@ TRANSLATIONS = {
     "System ID:": "מספר מערכת:",
     "FL": "מס' קובץ",
     "FL:": "מס' קובץ:",
+    "Shelfmark:": "מספר מדף:",
+    "Enter shelfmark...": "הכנס מספר מדף...",
     "Enter FL ID...": "הכנס מספר קובץ...",
     "Shelfmark": "מספר מדף",
     "Title": "כותרת",
@@ -162,6 +164,7 @@ TRANSLATIONS = {
 
     # --- Browse Tab ---
     "Enter System ID...": "הכנס מספר מערכת...",
+    "Enter shelfmark...": "הכנס מספר מדף...",
     "Go": "עבור",
     "Enter ID to browse.": "הכנס מספר לדפדוף.",
     "Ktiv": "כתיב",
@@ -176,6 +179,8 @@ TRANSLATIONS = {
     "Waiting...": "ממתין...",
     "Not found or end.": "לא נמצא או סוף הקובץ.",
     "FL not found.": "מספר קובץ לא נמצא.",
+    "Shelfmark not found.": "מספר המדף לא נמצא.",
+    "Multiple shelfmarks found. Select one:": "נמצאו מספר מספרי מדף. בחר אחד:",
     "Nav": "ניווט",
     "Loading full manuscript...": "טוען כתב יד מלא...",
     "Could not load full text.": "לא ניתן לטעון טקסט מלא.",
