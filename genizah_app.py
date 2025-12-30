@@ -733,7 +733,8 @@ class ManuscriptViewerWidget(QWidget):
 
             self.loader_thread = ImageLoaderThread(direct_url)
             self.loader_thread.image_loaded.connect(self.display_image)
-            self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("Image N/A")))
+            # Do not set text on failure for rapid navigation to avoid flashing "Image N/A"
+            # The thread handles cancellation internally
             self.loader_thread.start()
 
     def display_image(self, image):

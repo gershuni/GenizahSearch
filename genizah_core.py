@@ -1931,6 +1931,20 @@ class MetadataManager:
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
+        # Deduplicate images based on URL to prevent viewer issues
+        def dedup(img_list):
+            seen = set()
+            unique = []
+            for img in img_list:
+                u = img.get('url')
+                if u and u not in seen:
+                    seen.add(u)
+                    unique.append(img)
+            return unique
+
+        images_nli = dedup(images_nli)
+        images_ext = dedup(images_ext)
+
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
         current_meta['images_nli'] = images_nli
