@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame, QSlider, QStyleOptionButton)
+                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
@@ -456,20 +456,29 @@ class ZoomableScrollArea(QScrollArea):
         self.lbl_img = QLabel()
         self.lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_img.setScaledContents(False) # We manage scaling via Pixmap
+        self.lbl_img.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setWidget(self.lbl_img)
 
         self._pixmap = None
         self._zoom_factor = 1.0
         self._drag_start_pos = None
         self._rotation = 0
+        self._auto_fit_enabled = False
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def set_image(self, pixmap):
         self._pixmap = pixmap
-        self._zoom_factor = 1.0 # Reset zoom on new image
         self._rotation = 0
-        self._update_view()
+        self._auto_fit_enabled = bool(pixmap)
+        if not pixmap:
+            self._zoom_factor = 1.0
+            self._update_view()
+            return
+
+        if not self._apply_fit_to_viewport():
+            self._zoom_factor = 1.0
+            self._update_view()
 
     def set_rotation(self, angle: float):
         """Set absolute rotation (degrees clockwise) and update view."""
@@ -503,6 +512,7 @@ class ZoomableScrollArea(QScrollArea):
 
     def wheelEvent(self, event):
         # Zoom logic
+        self._auto_fit_enabled = False
         delta = event.angleDelta().y()
         if delta > 0:
             self._zoom_factor *= 1.1
@@ -535,12 +545,41 @@ class ZoomableScrollArea(QScrollArea):
         super().mouseMoveEvent(event)
 
     def zoom_in(self):
+        self._auto_fit_enabled = False
         self._zoom_factor *= 1.2
         self._update_view()
 
     def zoom_out(self):
+        self._auto_fit_enabled = False
         self._zoom_factor *= 0.8
         self._update_view()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._auto_fit_enabled:
+            self._apply_fit_to_viewport()
+
+    def _apply_fit_to_viewport(self):
+        fit_factor = self._compute_fit_factor()
+        if fit_factor is None:
+            return False
+        self._zoom_factor = fit_factor
+        self._update_view()
+        return True
+
+    def _compute_fit_factor(self):
+        if not self._pixmap or self._pixmap.isNull():
+            return None
+        viewport_size = self.viewport().size()
+        if viewport_size.width() <= 0 or viewport_size.height() <= 0:
+            return None
+
+        max_w = viewport_size.width() * 0.7
+        max_h = viewport_size.height() * 0.7
+        factor_w = max_w / self._pixmap.width()
+        factor_h = max_h / self._pixmap.height()
+        fit_factor = min(factor_w, factor_h)
+        return max(0.1, min(fit_factor, 5.0))
 
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
