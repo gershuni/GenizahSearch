@@ -2248,6 +2248,25 @@ class MetadataManager:
             'id': sys_id
         }
 
+# Utility: Normalize browse pages (dedupe by page number, preserve first occurrence)
+def normalize_pages_by_pnum(pages):
+    """Deduplicate a list of page dicts by p_num while preserving order, then sort."""
+    if not pages:
+        return []
+
+    seen = set()
+    deduped = []
+
+    for page in pages:
+        p_num = page.get('p_num')
+        if p_num in seen:
+            continue
+        seen.add(p_num)
+        deduped.append(page)
+
+    deduped.sort(key=lambda x: x.get('p_num', 0))
+    return deduped
+
 # ==============================================================================
 #  INDEXER
 # ==============================================================================
@@ -2331,7 +2350,9 @@ class Indexer:
                     total_docs += 1
 
         writer.commit()
-        for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
+        for sid in list(browse_map.keys()):
+            browse_map[sid] = normalize_pages_by_pnum(browse_map[sid])
+
         with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
         return total_docs
 
@@ -2894,7 +2915,7 @@ class SearchEngine:
         if not os.path.exists(Config.BROWSE_MAP): return []
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
         
-        pages_meta = browse_map.get(sys_id, [])
+        pages_meta = normalize_pages_by_pnum(browse_map.get(sys_id, []))
         if not pages_meta: return []
 
         full_content = []
@@ -2916,7 +2937,7 @@ class SearchEngine:
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
         
         if sys_id not in browse_map: return None
-        pages = browse_map[sys_id]
+        pages = normalize_pages_by_pnum(browse_map[sys_id])
         if not pages: return None
         
         target_idx = -1
@@ -2984,7 +3005,7 @@ class SearchEngine:
         for sid in sys_candidates:
             if sid not in browse_map:
                 continue
-            pages = browse_map[sid]
+            pages = normalize_pages_by_pnum(browse_map[sid])
             for idx, page in enumerate(pages):
                 parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
                 page_fl = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
