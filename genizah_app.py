@@ -539,7 +539,16 @@ class ZoomableScrollArea(QScrollArea):
     def mouseMoveEvent(self, event):
         if self._drag_start_pos:
             delta = event.pos() - self._drag_start_pos
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            # Adjust horizontal drag direction for RTL vs LTR layouts
+            rtl = False
+            app = QApplication.instance()
+            if app and app.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+                rtl = True
+            elif self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+                rtl = True
+
+            horiz_delta = -delta.x() if not rtl else delta.x()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + horiz_delta)
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             self._drag_start_pos = event.pos()
         super().mouseMoveEvent(event)
