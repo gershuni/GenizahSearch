@@ -595,10 +595,6 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(False)
         self.combo_source.currentIndexChanged.connect(self._on_source_changed)
 
-        self.combo_img_selector = QComboBox()
-        self.combo_img_selector.setVisible(False)
-        self.combo_img_selector.currentIndexChanged.connect(self._on_label_selected)
-
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setFixedWidth(30)
         btn_zoom_out.clicked.connect(lambda: self.scroll_area.zoom_out())
@@ -635,7 +631,6 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.clicked.connect(self.open_external)
 
         top_bar.addWidget(self.combo_source)
-        top_bar.addWidget(self.combo_img_selector)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
         top_bar.addWidget(btn_rot_left)
@@ -739,8 +734,6 @@ class ManuscriptViewerWidget(QWidget):
             self.btn_external.setText(btn_label)
         self.btn_external.setVisible(bool(self.external_url))
 
-        self._populate_label_selector()
-
         # Set Page
         self.set_page(initial_idx)
 
@@ -757,7 +750,6 @@ class ManuscriptViewerWidget(QWidget):
         if self.current_idx >= len(self.active_list):
             self.current_idx = 0
 
-        self._populate_label_selector()
         self.set_page(self.current_idx)
 
     def _resolve_url(self, base_url):
@@ -802,8 +794,6 @@ class ManuscriptViewerWidget(QWidget):
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
         self.loader_thread.start()
 
-        self._sync_label_selector()
-
         # Preload next image
         self._preload(index + 1)
 
@@ -811,20 +801,6 @@ class ManuscriptViewerWidget(QWidget):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
         self.slider_rotation.setValue(0)
-
-    def _populate_label_selector(self):
-        # Image selector disabled per requirements
-        self.combo_img_selector.blockSignals(True)
-        self.combo_img_selector.clear()
-        self.combo_img_selector.setVisible(False)
-        self.combo_img_selector.blockSignals(False)
-
-    def _sync_label_selector(self):
-        self.combo_img_selector.setVisible(False)
-
-    def _on_label_selected(self, combo_idx):
-        # Selector disabled
-        return
 
     def open_external(self):
         if self.external_url:
@@ -6025,38 +6001,6 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
-    def open_manuscript_viewer_by_id(self, sys_id, highlight_regex=None, target_page=0):
-        """
-        פותח את חלון הצפייה עבור מזהה ספציפי, ומנווט לעמוד המבוקש.
-        """
-        meta = self.meta_mgr.fetch_nli_data(sys_id)
-        
-        item_data = {
-            'display': {
-                'id': sys_id,
-                'shelfmark': meta.get('shelfmark', sys_id),
-                'title': meta.get('title', ''),
-                'source': 'Genizah Lab',
-                'img': meta.get('thumb_url', '')
-            },
-            'snippet': '',  
-            'full_text': '', 
-            'uid': sys_id,
-            'highlight_pattern': highlight_regex,
-            'raw_header': str(sys_id) 
-        }
-
-        try:
-            dlg = ResultDialog(self, [item_data], 0, self.meta_mgr, self.searcher)
-            
-            if target_page > 0:
-                dlg.load_page(target=target_page)
-
-            dlg.exec()
-        except Exception as e:
-            print(f"Error opening viewer: {e}")
-            QMessageBox.warning(self, "Error", f"Could not open viewer: {e}")
-            
     def navigate_manuscript(self, direction):
         """Move to prev/next manuscript based on FILE ORDER."""
         current = self.current_browse_sid
