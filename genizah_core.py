@@ -16,10 +16,52 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
 from typing import Mapping
+from functools import lru_cache
 import itertools
 import json
 
 from genizah_translations import TRANSLATIONS
+
+# --- Shmidman Rare-Letter Helpers ---
+HEBREW_FREQ = {
+    'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 
+    'ב': 9, 'ש': 10, 'נ': 11, 'ד': 12, 'כ': 13, 'ע': 14, 'ח': 15, 
+    'ק': 16, 'פ': 17, 'ס': 18, 'ג': 19, 'ט': 20, 'ז': 21, 'צ': 22,
+    # Final letters
+    'ך': 13, 'ם': 7, 'ן': 11, 'ף': 17, 'ץ': 22
+}
+
+def encode_word_shmidman(word: str) -> str:
+    """Encode a single word by selecting its two rarest Hebrew characters."""
+    letters = []
+    for idx, ch in enumerate(word):
+        if ch in HEBREW_FREQ:
+            letters.append((idx, ch, HEBREW_FREQ[ch]))
+
+    if not letters:
+        return ""
+
+    rarest = sorted(letters, key=lambda item: (-item[2], item[0]))[:3]
+    rarest_sorted = sorted(rarest, key=lambda item: item[0])
+    return "".join(ch for _, ch, _ in rarest_sorted)
+
+
+def text_to_fingerprint(text: str) -> str:
+    """Convert free text into a fingerprint representation."""
+    tokens = re.findall(Config.WORD_TOKEN_PATTERN, text or "")
+    encoded_tokens = []
+    for tok in tokens:
+        encoded = encode_word_shmidman(tok)
+        if encoded:
+            encoded_tokens.append(encoded)
+    return " ".join(encoded_tokens)
+
+
+def natural_sort_key(text):
+    """Sort strings containing numbers naturally (e.g. 'Item 2' < 'Item 10')."""
+    normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
+
 
 try:
     import google.generativeai as genai
@@ -32,6 +74,940 @@ try:
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
 
+# ==============================================================================
+#  LAB SETTINGS
+# ==============================================================================
+class LabSettings:
+    """Manages configuration for the Lab Mode, including scoring weights."""
+    def __init__(self):
+        self.custom_variants = {} 
+        self.candidate_limit = 5000
+        self.min_should_match = 75
+        self.gap_penalty = 2
+        
+        # Scoring Weights
+        self.length_bonus_factor = 1.5
+        self.common_penalty_factor = 0.1
+        self.unique_bonus_base = 100
+        self.density_penalty = 0.2
+        self.coverage_power = 2.0
+        self.order_bonus = 10.0
+        
+        # --- New Settings: Noise Suppression (Stop Words) ---
+        self.stop_word_score = 1.0       # Score for short words (<3 chars)
+        self.common_3char_score = 2.0    # Score for common 3-letter words
+        
+        # Composition Settings
+        self.comp_chunk_limit = 500
+        self.comp_min_score = 70
+        self.comp_max_final_results = 200
+        
+        # Deep Scan Settings
+        self.lab_scan_limit = 50000
+
+        # Display Limit
+        self.lab_display_limit = 500
+
+        self.load()
+
+    def load(self):
+        if os.path.exists(Config.LAB_CONFIG_FILE):
+            try:
+                with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.custom_variants = data.get('custom_variants', {})
+                    self.candidate_limit = data.get('candidate_limit', 2000)
+                    self.min_should_match = data.get('min_should_match', 60)
+                    self.gap_penalty = data.get('gap_penalty', 2)
+                    
+                    self.length_bonus_factor = data.get('length_bonus_factor', 1.5)
+                    self.common_penalty_factor = data.get('common_penalty_factor', 0.1)
+                    self.unique_bonus_base = data.get('unique_bonus_base', 100)
+                    self.density_penalty = data.get('density_penalty', 0.2)
+                    self.coverage_power = data.get('coverage_power', 2.0)
+                    self.order_bonus = data.get('order_bonus', 10.0)
+
+                    # Load noise settings
+                    self.stop_word_score = data.get('stop_word_score', 1.0)
+                    self.common_3char_score = data.get('common_3char_score', 2.0)
+
+                    self.comp_chunk_limit = data.get('comp_chunk_limit', 200)
+                    self.comp_min_score = data.get('comp_min_score', 70)
+                    self.comp_max_final_results = data.get('comp_max_final_results', 100)
+
+                    self.lab_scan_limit = data.get('lab_scan_limit', 50000)
+                    self.lab_display_limit = data.get('lab_display_limit', 500)
+            except Exception: pass
+
+    def save(self):
+        try:
+            os.makedirs(Config.LAB_DIR, exist_ok=True)
+            with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'custom_variants': self.custom_variants,
+                    'candidate_limit': self.candidate_limit,
+                    'min_should_match': self.min_should_match,
+                    'gap_penalty': self.gap_penalty,
+                    
+                    'length_bonus_factor': self.length_bonus_factor,
+                    'common_penalty_factor': self.common_penalty_factor,
+                    'unique_bonus_base': self.unique_bonus_base,
+                    'density_penalty': self.density_penalty,
+                    'coverage_power': self.coverage_power,
+                    'order_bonus': self.order_bonus,
+                    
+                    # Save noise settings
+                    'stop_word_score': self.stop_word_score,
+                    'common_3char_score': self.common_3char_score,
+
+                    'comp_chunk_limit': self.comp_chunk_limit,
+                    'comp_min_score': self.comp_min_score,
+                    'comp_max_final_results': self.comp_max_final_results,
+
+                    'lab_scan_limit': self.lab_scan_limit,
+                    'lab_display_limit': self.lab_display_limit
+                }, f, indent=4)
+        except Exception: pass
+
+# ==============================================================================
+#  LAB ENGINE 
+# ==============================================================================
+class LabEngine:
+    LAB_FINGERPRINT_FIELD = "fingerprint"
+    # NGRAM_SIZE kept for compatibility if other parts of code ref it
+    NGRAM_SIZE = 3 
+
+    def __init__(self, meta_mgr, variants_mgr):
+        self.meta_mgr = meta_mgr
+        self.var_mgr = variants_mgr
+        self.settings = LabSettings()
+        self.lab_index = None
+        self.lab_searcher = None
+        self.lab_index_needs_rebuild = False
+        self._reload_lab_index()
+
+    def _close_index(self):
+        self.lab_searcher = None
+        self.lab_index = None
+        import gc
+        gc.collect() 
+
+    def _ensure_lab_tokenizers(self, index):
+        """Register analyzers safely."""
+        try:
+            index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
+        except Exception:
+            pass
+        try:
+            index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
+        except Exception:
+            pass
+
+    def _reload_lab_index(self):
+        """Loads index with heavy debug logging."""
+        if os.path.exists(Config.LAB_INDEX_DIR):
+            try:
+                LAB_LOGGER.info("Reloading Lab Index...")
+                self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
+                self._ensure_lab_tokenizers(self.lab_index)
+                self.lab_searcher = self.lab_index.searcher()
+                
+                # Simplified robust check
+                self.lab_index_needs_rebuild = False
+                return True
+            except Exception as e:
+                LAB_LOGGER.error(f"Failed to load Lab Index: {e}")
+                self._close_index()
+        
+        self.lab_index_needs_rebuild = True
+        return False
+
+    @staticmethod
+    def lab_index_normalize(text):
+        return re.sub(r"[^\w\u0590-\u05FF\s\*\~]", "", text).replace('_', ' ').lower()
+
+    def rebuild_lab_index(self, progress_callback=None):
+        LAB_LOGGER.info(f"Starting REBUILD at: {Config.LAB_INDEX_DIR}")
+        self._close_index()
+        time.sleep(0.5)
+
+        if not os.path.exists(Config.FILE_V8):
+            raise FileNotFoundError("Input file not found")
+
+        if os.path.exists(Config.LAB_INDEX_DIR):
+            try:
+                shutil.rmtree(Config.LAB_INDEX_DIR, ignore_errors=True)
+            except Exception as e:
+                LAB_LOGGER.error(f"Delete failed: {e}")
+
+        os.makedirs(Config.LAB_INDEX_DIR, exist_ok=True)
+
+        builder = tantivy.SchemaBuilder()
+        builder.add_text_field("unique_id", stored=True)
+        builder.add_text_field("text_normalized", stored=True, tokenizer_name="simple")
+        builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace") # Legacy
+        
+        # The critical field
+        builder.add_text_field(self.LAB_FINGERPRINT_FIELD, stored=False, tokenizer_name="simple")
+        
+        builder.add_text_field("full_header", stored=True)
+        builder.add_text_field("shelfmark", stored=True)
+        builder.add_text_field("source", stored=True)
+        builder.add_text_field("content", stored=True, tokenizer_name="simple")
+
+        schema = builder.build()
+        index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
+        self._ensure_lab_tokenizers(index)
+        writer = index.writer(heap_size=50_000_000)
+
+        # --- Pre-calculation for progress percentage ---
+        def count_documents(fname, label):
+            if not os.path.exists(fname): return 0
+            count = 0
+            try:
+                with open(fname, 'r', encoding='utf-8-sig') as f:
+                    for line in f:
+                        if label == "V0.8" and line.startswith("==>"): count += 1
+                        elif label == "V0.7" and line.startswith("###"): count += 1
+            except Exception: pass
+            return count
+
+        estimated_total = count_documents(Config.FILE_V8, "V0.8") + count_documents(Config.FILE_V7, "V0.7")
+        LAB_LOGGER.info(f"Estimated total docs: {estimated_total}")
+
+        total_docs = 0
+        
+        def process_file(fpath, label):
+            nonlocal total_docs
+            if not os.path.exists(fpath): return
+            LAB_LOGGER.info(f"Indexing {label}...")
+            
+            with open(fpath, 'r', encoding='utf-8-sig') as f:
+                cid, chead, ctext = None, None, []
+                for line in f:
+                    line = line.strip()
+                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
+
+                    if is_sep:
+                        if cid and ctext:
+                            original = "\n".join(ctext)
+                            norm = self.lab_index_normalize(original)
+                            fp = text_to_fingerprint(original)
+                            sm = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
+
+                            writer.add_document(tantivy.Document(
+                                unique_id=str(cid),
+                                text_normalized=norm,
+                                fingerprint=fp,
+                                content=original,
+                                full_header=str(chead),
+                                shelfmark=str(sm),
+                                source=str(label)
+                            ))
+                            total_docs += 1
+                            if progress_callback and total_docs % 1000 == 0:
+                                progress_callback(total_docs, estimated_total)
+                        
+                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
+                        cid = self.meta_mgr.extract_unique_id(line)
+                        ctext = [] 
+                    else:
+                        ctext.append(line)
+                
+                # Last doc
+                if cid and ctext:
+                    original = "\n".join(ctext)
+                    fp = text_to_fingerprint(original)
+                    writer.add_document(tantivy.Document(
+                        unique_id=str(cid),
+                        text_normalized=self.lab_index_normalize(original),
+                        fingerprint=fp,
+                        content=original,
+                        full_header=str(chead),
+                        shelfmark=str("Unknown"),
+                        source=str(label)
+                    ))
+                    total_docs += 1
+
+        process_file(Config.FILE_V8, "V0.8")
+        process_file(Config.FILE_V7, "V0.7")
+
+        writer.commit()
+        LAB_LOGGER.info(f"Rebuild done. {total_docs} docs committed.")
+        self._reload_lab_index()
+        return total_docs
+
+    def _create_lab_query(self, query_str, slop=0):
+        """
+        Helper to construct the Tantivy query object based on settings.
+        """
+        tokens = query_str.split()
+        if not tokens:
+            return None
+
+        # If 100% match required, use Phrase Query
+        if self.settings.min_should_match >= 100:
+            final_query_str = f'{self.LAB_FINGERPRINT_FIELD}:"{query_str}"~{slop}'
+        else:
+            # OR query
+            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in tokens]
+            final_query_str = " OR ".join(clauses)
+
+        # Try parsing strategies
+        strategies = [
+            lambda: self.lab_index.parse_query(final_query_str),
+            lambda: self.lab_index.parse_query(final_query_str, [self.LAB_FINGERPRINT_FIELD]),
+            lambda: self.lab_index.parse_query(final_query_str, [self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)])
+        ]
+
+        for strategy in strategies:
+            try:
+                return strategy()
+            except Exception:
+                continue
+
+        LAB_LOGGER.error("All query strategies failed.")
+        return None
+
+    def _execute_batched_search(self, query_obj, progress_callback=None, limit_override=None):
+        """
+        Executes a Tantivy search in memory-safe batches.
+        Yields (score, doc_address) tuples.
+        """
+        if not query_obj or not self.lab_searcher:
+            return
+
+        BATCH_SIZE = 5000
+        MAX_SCAN_LIMIT = limit_override if limit_override else 50000
+
+        # Determine strict limit
+        limit = MAX_SCAN_LIMIT
+
+        # 1. Fetch all candidate pointers (lightweight tuples)
+        # Note: tantivy-py search() returns all hits at once, but they are just (score, addr).
+        # This is memory-safe even for 50k items. The heavy lifting (doc loading) happens in the loop.
+        try:
+            res = self.lab_searcher.search(query_obj, limit)
+        except Exception as e:
+            LAB_LOGGER.warning(f"Search execution failed: {e}")
+            return
+
+        hits = res.hits
+        total_hits = len(hits)
+
+        # 2. Iterate in batches to allow for progress updates / UI breathing
+        for i in range(0, total_hits, BATCH_SIZE):
+            batch = hits[i : i + BATCH_SIZE]
+
+            if progress_callback:
+                # Send numeric progress for ProgressBar (i, total)
+                try:
+                    progress_callback(i, total_hits)
+                except Exception:
+                    pass
+                # Send text status for Label
+                progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
+
+            for hit in batch:
+                yield hit
+
+    def _get_term_weight(self, fp):
+        """
+        Calculates importance using User Configurable Stop-Word scores.
+        """
+        raw_weight = 0
+        for char in fp:
+            raw_weight += HEBREW_FREQ.get(char, 0)
+        
+        # 1. Words too short (<3 chars)
+        if len(fp) < 3:
+            return self.settings.stop_word_score 
+        
+        # 2. Common 3-letter words (low weight)
+        if len(fp) == 3 and raw_weight < 18:
+            return self.settings.common_3char_score
+
+        # 3. Regular/Rare words
+        final_weight = raw_weight
+        
+        # Length bonus only for significant words
+        if len(fp) > 3:
+            final_weight *= self.settings.length_bonus_factor
+            
+        return final_weight
+
+    def _calculate_match_metrics(self, text, query_fingerprints_list, original_query_str):
+        """
+        Calculates score with STRICT FREQUENCY CAP & SEQUENTIAL ORDER.
+        1. Words appearing more times in text than in query yield ZERO score.
+        2. Sequence matches get huge bonuses.
+        """
+        if not text:
+            return 0, [], (0, 0)
+
+        # 1. Exact Match Check
+        def safe_norm(s): return re.sub(r"[^\w\u0590-\u05FF]", "", s).lower()
+        norm_text = safe_norm(text)
+        norm_query = safe_norm(original_query_str)
+        exact_bonus = 0
+        if norm_query and norm_query in norm_text:
+            exact_bonus = 1000000
+
+        # 2. Weights & Mapping
+        fp_to_query_indices = defaultdict(list)
+        term_weights = {}
+        
+        for idx, fp in enumerate(query_fingerprints_list):
+            fp_to_query_indices[fp].append(idx)
+            term_weights[fp] = self._get_term_weight(fp)
+
+        max_possible_unique_weight = sum(term_weights.values()) 
+        
+        # 3. Collect Matches
+        matches = []
+        q_fp_set = set(query_fingerprints_list)
+        
+        for m in re.finditer(r"[\w\u0590-\u05FF\']+", text):
+            word = m.group()
+            fp = encode_word_shmidman(word)
+            if fp in q_fp_set:
+                matches.append({
+                    'start': m.start(),
+                    'end': m.end(),
+                    'word': word,
+                    'fp': fp,
+                    'weight': term_weights[fp],
+                    'q_indices': fp_to_query_indices[fp]
+                })
+
+        if not matches:
+            return 0, [], (0, 0)
+
+        # 4. Find Best Cluster
+        max_score = 0
+        best_window = (0, 0)
+        total_matches = len(matches)
+        
+        unique_bonus = self.settings.unique_bonus_base
+        common_factor = self.settings.common_penalty_factor
+        density_pen = self.settings.density_penalty
+        order_bonus_factor = self.settings.order_bonus
+        
+        lookahead_limit = len(query_fingerprints_list) * 5
+        
+        for i in range(total_matches):
+            current_window_score = 0
+            
+            # Track quantities: how many times have we seen each word in the current window?
+            seen_counts = defaultdict(int)
+            
+            # Track order
+            last_valid_query_idx = -1
+            sequential_chain_length = 0
+            
+            # Initialize by start word
+            if matches[i]['q_indices']:
+                last_valid_query_idx = matches[i]['q_indices'][0]
+
+            for j in range(i, min(total_matches, i + lookahead_limit)):
+                m = matches[j]
+                
+                # Check physical distance
+                dist = m['end'] - matches[i]['start']
+                if dist > 450: break 
+                
+                fp = m['fp']
+                w = m['weight']
+                
+                # How many times does this word appear in the original query?
+                allowed_count = len(fp_to_query_indices[fp])
+                
+                # How many times have we seen it in this window so far?
+                seen_counts[fp] += 1
+                
+                # Calculate score for this specific word
+                word_score = 0
+                
+                if seen_counts[fp] <= allowed_count:
+                    # Valid occurrence (first or second allowed)
+                    # Full score
+                    word_score = (w * unique_bonus)
+                else:
+                    # Redundant occurrence (garbage). Word found enough times.
+                    # Drastically reduced score (or 0 if user set 0)
+                    word_score = (w * common_factor) 
+                
+                current_window_score += word_score
+
+                # --- Order Bonus Logic ---
+                found_sequence = False
+                best_q_idx_for_match = -1
+                
+                for q_idx in m['q_indices']:
+                    if q_idx > last_valid_query_idx:
+                        best_q_idx_for_match = q_idx
+                        found_sequence = True
+                        break 
+                
+                if found_sequence:
+                    sequential_chain_length += 1
+                    current_window_score += (w * order_bonus_factor * sequential_chain_length)
+                    last_valid_query_idx = best_q_idx_for_match
+                
+                # --- Density Penalty ---
+                penalty = dist * density_pen
+                final_window_score = current_window_score - penalty
+                
+                if final_window_score > max_score:
+                    max_score = final_window_score
+                    best_window = (i, j)
+
+        # 5. Coverage Calculation
+        start_idx, end_idx = best_window
+        window_matches = matches[start_idx : end_idx + 1]
+        
+        found_unique_fps = set(m['fp'] for m in window_matches)
+        found_unique_weight = sum(term_weights[fp] for fp in found_unique_fps)
+        
+        coverage_ratio = 0
+        if max_possible_unique_weight > 0:
+            coverage_ratio = found_unique_weight / max_possible_unique_weight
+        
+        final_score = (max_score * (coverage_ratio ** self.settings.coverage_power)) + exact_bonus
+
+        return final_score, matches, best_window    
+
+    def _generate_highlighted_snippet(self, text, matches, best_window):
+        """
+        Generates a snippet with asterisk markers (*text*) for highlighting.
+        """
+        if not text: return ""
+        if not matches: return text[:300]
+
+        start_m_idx, end_m_idx = best_window
+        
+        # Guard indices
+        start_m_idx = max(0, start_m_idx)
+        end_m_idx = min(len(matches) - 1, end_m_idx)
+
+        # 1. Determine snippet bounds (100 chars context)
+        padding = 100
+        snippet_start_char = max(0, matches[start_m_idx]['start'] - padding)
+        snippet_end_char = min(len(text), matches[end_m_idx]['end'] + padding)
+        
+        # Cosmetic: Don't cut in middle of word
+        if snippet_start_char > 0:
+            next_space = text.find(' ', snippet_start_char)
+            if next_space != -1 and next_space < matches[start_m_idx]['start']:
+                snippet_start_char = next_space + 1
+
+        # 2. Collect relevant matches
+        relevant_matches = matches[start_m_idx : end_m_idx + 1]
+        
+        # 3. Build text
+        out_parts = []
+        
+        if snippet_start_char > 0: out_parts.append("... ")
+        
+        current_idx = snippet_start_char
+        
+        for m in relevant_matches:
+            if m['start'] < snippet_start_char: continue
+            if m['end'] > snippet_end_char: break
+            
+            # Plain text
+            if m['start'] > current_idx:
+                plain = text[current_idx : m['start']]
+                out_parts.append(plain.replace('*', ''))
+            
+            # Highlighted word (Asterisks)
+            word = text[m['start'] : m['end']]
+            out_parts.append(f"*{word.replace('*', '')}*")
+            
+            current_idx = m['end']
+        
+        # Remainder
+        if current_idx < snippet_end_char:
+            out_parts.append(text[current_idx : snippet_end_char].replace('*', ''))
+            
+        if snippet_end_char < len(text): out_parts.append(" ...")
+        
+        final_text = "".join(out_parts)
+        # Flatten for table display
+        return final_text.replace("\n", " ").replace("\r", " ")
+
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
+        if not self.lab_searcher: return []
+
+        # 1. Prepare Fingerprints
+        fp_str = text_to_fingerprint(query_str)
+        if not fp_str: return []
+        
+        query_fp_list = fp_str.split()
+        
+        # 2. Fetch Candidates
+        slop = max(50, int(self.settings.gap_penalty) * 10) 
+
+        query_obj = self._create_lab_query(fp_str, slop)
+        if not query_obj: return []
+
+        results = []
+        min_match_pct = self.settings.min_should_match
+
+        # 3. Process
+        if deep_scan:
+            # Use Deep Scan batched iterator
+            def batch_cb(*args):
+                if progress_callback:
+                    try:
+                        progress_callback(*args)
+                    except Exception:
+                        pass
+
+            iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
+        else:
+            # Standard Fast Method
+            try:
+                # Limit 5000 for standard scan
+                res = self.lab_searcher.search(query_obj, 5000)
+                iterator = res.hits
+            except Exception:
+                iterator = []
+
+        for score, doc_addr in iterator:
+            try:
+                doc = self.lab_searcher.doc(doc_addr)
+                content = doc['content'][0]
+                uid = doc['unique_id'][0]
+
+                # --- Core: Calculate Score & Find Matches ---
+                custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str)
+                
+                if custom_score < 15: 
+                    continue
+                
+                # Filter by Percentage (Approximate)
+                if min_match_pct < 100:
+                    found_unique = set(m['fp'] for m in matches)
+                    needed_unique = set(query_fp_list)
+                    common = found_unique.intersection(needed_unique)
+                    if len(needed_unique) > 0 and (len(common) / len(needed_unique) * 100 < min_match_pct):
+                        continue
+
+                # --- Highlight Snippet ---
+                smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
+                html_snippet = smart_snippet # No HTML conversion needed, pure markers
+
+                # --- FIX FOR VIEWER HIGHLIGHTING ---
+                # We extract the ACTUAL corrupted words found in the match window
+                # and create a Regex pattern from them. The GUI uses this pattern to highlight.
+                start_idx, end_idx = best_window
+                relevant_matches = matches[start_idx : end_idx + 1]
+                
+                # Collect unique words found (e.g., "מאמתי", "קורין", "את", "שמע")
+                found_words = list(set(m['word'] for m in relevant_matches))
+                
+                # Sort by length descending (so "wordLong" matches before "word")
+                found_words.sort(key=len, reverse=True)
+                
+                # Create a regex OR pattern: (word1|word2|...)
+                # We use re.escape to handle any special chars in the text
+                highlight_regex_str = "|".join(re.escape(w) for w in found_words) if found_words else ""
+                
+                # Populate display metadata correctly
+                display_meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+
+                results.append({
+                    'sort_score': custom_score,
+                    'display': display_meta,
+                    'snippet': html_snippet,
+                    'full_text': content,
+                    'uid': uid,
+                    'raw_header': doc['full_header'][0],
+                    'raw_file_hl': smart_snippet,
+                    # This is the magic key for the Viewer:
+                    'highlight_pattern': highlight_regex_str 
+                })
+            except Exception as e:
+                LAB_LOGGER.error(f"Error processing doc: {e}")
+
+        # 4. Sort & Dedup (Logic Fixed: Prioritize V0.8 over V0.7)
+        v8_map = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
+        
+        final_list = []
+        
+        # Add all V0.8 results
+        final_list.extend(v8_map.values())
+        
+        # Add V0.7 results *only* if UID not in V0.8
+        for r in results:
+            if r['display']['source'] != "V0.8": # V0.7 or others
+                if r['uid'] not in v8_map:
+                    final_list.append(r)
+
+        # Finally, sort unified list by highest score
+        final_list.sort(key=lambda x: x['sort_score'], reverse=True)
+
+        return final_list
+
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
+        """
+        Scans a composition using Lab Mode.
+        UPGRADES:
+        1. Filters common phrases.
+        2. Boosts V0.8.
+        3. FIX: Separates excluded/known manuscripts.
+        4. Supports Filter Text and Batching.
+        """
+        if not full_text:
+            return {'main': [], 'filtered': [], 'known': []} # Added known
+
+        # Normalize exclusion list for fast lookup
+        excluded_set = set(str(x) for x in (excluded_ids or []))
+
+        # User settings
+        PER_CHUNK_LIMIT = self.settings.comp_chunk_limit
+        MIN_SCORE_THRESHOLD = self.settings.comp_min_score
+        MAX_FINAL = self.settings.comp_max_final_results
+        min_pct_ratio = self.settings.min_should_match / 100.0
+
+        # (Part 1: Tokenization)
+        tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
+        c_size = chunk_size if chunk_size else 15
+        step = max(1, int(c_size * 0.5)) 
+        
+        chunks_data = []
+        for i in range(0, max(1, len(tokens) - c_size + 1), step):
+            chunks_data.append((i, tokens[i : i + c_size]))
+        if len(tokens) < c_size: chunks_data = [(0, tokens)]
+
+        total_chunks = len(chunks_data)
+        results_map = {} 
+
+        # (Part 2: Scanning)
+        for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
+            if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
+            chunk_text = " ".join(chunk_tokens)
+            
+            if self._is_phrase_statistically_weak(chunk_text): continue
+
+            fp_str = text_to_fingerprint(chunk_text)
+            if not fp_str or len(chunk_tokens) < 4: continue
+            
+            fp_list = fp_str.split()
+            needed_unique_fps = set(fp_list) 
+
+            # Query with Boost
+            query_tokens = fp_str.split()
+            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in query_tokens]
+            core_query = " OR ".join(clauses)
+            final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
+            
+            q_obj = None
+            try:
+                q_obj = self.lab_index.parse_query(final_query_str)
+            except:
+                try:
+                    q_obj = self.lab_index.parse_query(core_query)
+                except: continue
+
+            if not q_obj: continue
+
+            iterator = []
+            if deep_scan:
+                batch_cb = None
+                if progress_callback:
+                    batch_cb = lambda *args: progress_callback(*args) if callable(progress_callback) else None
+                iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
+            else:
+                try:
+                    res = self.lab_searcher.search(q_obj, 5000)
+                    iterator = res.hits
+                except Exception:
+                    iterator = []
+
+            for score, doc_addr in iterator:
+                try:
+                    doc = self.lab_searcher.doc(doc_addr)
+                    content = doc['content'][0]
+                    uid = doc['unique_id'][0]
+
+                    # --- Filter Text Logic ---
+                    is_filtered_match = False
+                    if filter_text and filter_text in content:
+                        is_filtered_match = True
+
+                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text)
+                    
+                    found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
+                    common_fps = found_unique_fps.intersection(needed_unique_fps)
+                    if len(needed_unique_fps) > 0:
+                        if (len(common_fps) / len(needed_unique_fps)) < min_pct_ratio: continue
+                    
+                    if match_score < MIN_SCORE_THRESHOLD: continue
+
+                    if uid not in results_map:
+                        results_map[uid] = {
+                            'uid': uid, 'total_score': 0, 'hits_count': 0,
+                            'raw_header': doc['full_header'][0], 'source': doc['source'][0],
+                            'content': content, 'best_chunk_score': -1,
+                            'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
+                            'is_text_filtered': False
+                        }
+                    rec = results_map[uid]
+
+                    if is_filtered_match:
+                        rec['is_text_filtered'] = True
+
+                    rec['total_score'] += match_score
+                    rec['hits_count'] += 1
+                    token_end_idx = token_start_idx + len(chunk_tokens)
+                    rec['src_indices'].update(range(token_start_idx, token_end_idx))
+                    start_m, end_m = best_window
+                    if matches:
+                        rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
+                        for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
+                except: pass
+
+        # (Part 3: Result Processing)
+        raw_final_items = []
+        is_short_search = (total_chunks <= 3)
+
+        for uid, data in results_map.items():
+            if not is_short_search:
+                if data['hits_count'] < 2 and data['total_score'] < 1000: continue 
+            else:
+                if data['total_score'] < 250: continue
+
+            # Generate snippets
+            src_snippets = []
+            src_indices = sorted(list(data['src_indices']))
+            if src_indices:
+                clusters = []
+                curr_cluster = [src_indices[0]]
+                for idx in src_indices[1:]:
+                    if idx - curr_cluster[-1] < 60: curr_cluster.append(idx)
+                    else: clusters.append(curr_cluster); curr_cluster = [idx]
+                clusters.append(curr_cluster)
+                for cl in clusters:
+                    start_ctx = max(0, cl[0] - 50); end_ctx = min(len(tokens), cl[-1] + 51)
+                    cl_set = set(cl)
+                    words_out = [f"*{tokens[k]}*" if k in cl_set else tokens[k] for k in range(start_ctx, end_ctx)]
+                    src_snippets.append(f"... {' '.join(words_out)} ...")
+
+            ms_snips = []
+            spans = sorted(data['ms_matches'], key=lambda x: x[0])
+            merged = []
+            if spans:
+                curr_s, curr_e = spans[0]
+                for s, e in spans[1:]:
+                    if s <= curr_e + 20: curr_e = max(curr_e, e)
+                    else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
+                merged.append((curr_s, curr_e))
+            
+            content = data['content']
+            for s, e in merged:
+                start = max(0, s - 60); end = min(len(content), e + 60)
+                snip = content[start:end]
+                rs = max(0, s - start); re_ = min(len(snip), e - start)
+                if re_ > rs:
+                    ms_snips.append(snip[:rs] + f"*{snip[rs:re_]}*" + snip[re_:])
+
+            found_words = sorted(list(data['all_found_words']), key=len, reverse=True)[:50]
+            hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""
+
+            item = {
+                'score': data['total_score'],
+                'uid': uid,
+                'raw_header': data['raw_header'],
+                'src_lbl': data['source'],
+                'source_ctx': "\n\n".join(src_snippets),
+                'text': "\n...\n".join(ms_snips),        
+                'highlight_pattern': hl_pattern,
+                'full_text': data['content'],
+                'is_text_filtered': data.get('is_text_filtered', False)
+            }
+            raw_final_items.append(item)
+
+        # --- Sorting & Splitting Logic ---
+        raw_final_items.sort(key=lambda x: x['score'], reverse=True)
+        
+        main_list = []
+        known_list = []
+        filtered_list = []
+        
+        for item in raw_final_items:
+            # Check if manuscript is excluded
+            is_excluded = False
+            
+            # 1. Check by UID (e.g. IE...)
+            if str(item['uid']) in excluded_set:
+                is_excluded = True
+            
+            # 2. Check by System ID (99...) found in header
+            if not is_excluded:
+                m = re.search(r'(99\d+)', str(item['raw_header']))
+                if m and m.group(1) in excluded_set:
+                    is_excluded = True
+            
+            if is_excluded:
+                known_list.append(item)
+            elif item.get('is_text_filtered'):
+                filtered_list.append(item)
+            else:
+                main_list.append(item)
+
+        # Truncate limit only on main list
+        if len(main_list) > MAX_FINAL:
+            main_list = main_list[:MAX_FINAL]
+
+        # Split return so GUI builds tree correctly
+        return {'main': main_list, 'known': known_list, 'filtered': filtered_list}
+    
+    @lru_cache(maxsize=10000)
+    def _is_word_too_common(self, word, threshold=5000):
+        """
+        Check existing index stats to see if a word is essentially a stop-word.
+        Uses LRU Cache to avoid hitting the index repeatedly for 'אמר' or 'על'.
+        """
+        try:
+            # Tantivy allows checking document frequency for a term
+            # Note: Create a Term object for the specific field
+            # In some tantivy-py versions command is doc_freq
+            # We check how many documents contain the word
+            count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD), word)
+            return count > threshold
+        except Exception:
+            # If error/unsupported, assume word is not too common to avoid missing it
+            return False
+
+    def _is_phrase_statistically_weak(self, phrase_text):
+        """
+        Returns True if the phrase consists ONLY of extremely common words.
+        If it has at least one 'rare' anchor word, it returns False (keep it).
+        """
+        # Clean punctuation and split to words
+        words = re.findall(r"[\w\u0590-\u05FF]+", phrase_text)
+        if not words:
+            return True # Empty phrase is weak
+            
+        rare_anchors = 0
+        
+        for w in words:
+            # We use Shmidman encoding as stored in index,
+            # but could check raw word if stored,
+            # or its Fingerprint.
+            # Assuming Fingerprint check as it's our indexed field:
+            fp_word = encode_word_shmidman(w)
+            if not fp_word: continue
+            
+            # If word is *not* too common, anchor found!
+            if not self._is_word_too_common(fp_word):
+                rare_anchors += 1
+        
+        # If no rare word found, phrase is weak
+        return rare_anchors == 0
+    
 # ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
@@ -71,7 +1047,6 @@ class Config:
     # 2. External Files (Must be placed NEXT to the EXE by the user)
     FILE_V8 = os.path.join(BASE_DIR, "Transcriptions.txt")
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
-    INPUT_FILE = os.path.join(BASE_DIR, "input.txt")
 
     # 3. User Data Directory (Index, Caches) - Smart Logic
     _PORTABLE_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
@@ -97,10 +1072,6 @@ class Config:
         os.makedirs(INDEX_DIR, exist_ok=True)
 
     # 4. Output folders: try BASE_DIR first; fallback to INDEX_DIR
-    RESULTS_DIR = _pick_writable_dir(
-        os.path.join(BASE_DIR, "Results"),
-        os.path.join(INDEX_DIR, "Results"),
-    )
     REPORTS_DIR = _pick_writable_dir(
         os.path.join(BASE_DIR, "Reports"),
         os.path.join(INDEX_DIR, "Reports"),
@@ -114,15 +1085,19 @@ class Config:
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
-    FL_MAP = os.path.join(INDEX_DIR, "fl_lookup.pkl")
     LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
+
+    # Lab Mode Paths
+    LAB_DIR = os.path.join(INDEX_DIR, "lab")
+    LAB_INDEX_DIR = os.path.join(INDEX_DIR, "lab_index")
+    LAB_CONFIG_FILE = os.path.join(LAB_DIR, "lab_config.json")
+    LAB_LOG_FILE = os.path.join(LAB_DIR, "lab_genizah.log")
 
     # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
     LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")
     HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
 
     # Settings
-    TANTIVY_CLAUSE_LIMIT = 5000
     SEARCH_LIMIT = 5000
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
@@ -132,6 +1107,35 @@ class Config:
     def resource_path(relative_path: str) -> str:
         """Return absolute path to bundled resources."""
         return os.path.join(Config.INTERNAL_DIR, relative_path)
+
+
+def dedupe_browse_map(browse_map):
+    """
+    Remove duplicate page entries per system ID, keeping the first occurrence
+    of each page number.
+    """
+    cleaned = {}
+    changed = False
+
+    for sid, pages in browse_map.items():
+        seen_p_nums = set()
+        deduped_pages = []
+        for page in pages:
+            p_num = page.get('p_num')
+            if p_num is None:
+                deduped_pages.append(page)
+                continue
+
+            if p_num in seen_p_nums:
+                changed = True
+                continue
+
+            seen_p_nums.add(p_num)
+            deduped_pages.append(page)
+
+        cleaned[sid] = deduped_pages
+
+    return cleaned, changed
 
 # ==============================================================================
 #  LOGGING
@@ -168,10 +1172,44 @@ def get_logger(name=None):
 
 LOGGER = get_logger(__name__)
 
-SERVICE_ENDPOINTS = {
-    'network': 'https://www.google.com/generate_204',
-    'nli': 'https://iiif.nli.org.il/IIIFv21/',
-}
+
+def configure_lab_logger():
+    """Configure a separate logger for Lab Mode operations."""
+    lab_logger = logging.getLogger("GenizahLab")
+    if lab_logger.handlers:
+        # Check if it only has NullHandler (length 1 and is NullHandler)
+        # If so, we still want to add the real handlers.
+        # But for simplicity in this specific task context:
+        # The user instruction says: "If using a global logger, use NullHandler as default".
+        # When this runs, we want to ADD file/stream handlers.
+        # However, `logging.getLogger` returns the same instance.
+        # So we should just check if we have "real" handlers or just clear and re-add.
+        # Let's follow the standard pattern:
+        # If it has handlers other than NullHandler, return.
+        has_real = any(not isinstance(h, logging.NullHandler) for h in lab_logger.handlers)
+        if has_real:
+            return lab_logger
+
+    lab_logger.setLevel(logging.DEBUG)
+
+    # Ensure lab directory exists
+    os.makedirs(Config.LAB_DIR, exist_ok=True)
+
+    file_handler = RotatingFileHandler(Config.LAB_LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] - %(message)s"))
+    file_handler.setLevel(logging.DEBUG)
+    lab_logger.addHandler(file_handler)
+
+    # Optional: Log to console as well if debugging
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter("[LAB] %(levelname)s: %(message)s"))
+    console.setLevel(logging.INFO)
+    lab_logger.addHandler(console)
+
+    lab_logger.propagate = False
+    return lab_logger
+
+LAB_LOGGER = configure_lab_logger()
 
 AI_PROVIDER_ENDPOINTS = {
     "Google Gemini": "https://generativelanguage.googleapis.com",
@@ -214,33 +1252,6 @@ try:
     import tantivy
 except ImportError:
     raise ImportError(tr("Tantivy library missing. Please install it."))
-
-def check_external_services(extra_endpoints=None, timeout=3):
-    """Check whether core external services respond within a short timeout."""
-    endpoints = dict(SERVICE_ENDPOINTS)
-    if extra_endpoints:
-        endpoints.update(extra_endpoints)
-
-    results = {}
-    for name, url in endpoints.items():
-        detail = {"reachable": False, "status_code": None, "note": None}
-        try:
-            if name == "network":
-                resp = requests.get(url, timeout=timeout, allow_redirects=True, stream=True)
-            else:
-                resp = requests.head(url, timeout=timeout, allow_redirects=True)
-            detail["status_code"] = resp.status_code
-            detail["reachable"] = resp.status_code < 500
-            if resp.status_code in (401, 403):
-                detail["note"] = "reachable but unauthorized"
-            if name == "network":
-                resp.close()
-        except Exception as e:
-            LOGGER.warning("Health check failed for %s at %s: %s", name, url, e)
-            detail["note"] = str(e)
-            detail["reachable"] = False
-        results[name] = detail
-    return results
 
 # ==============================================================================
 #  AI MANAGER
@@ -606,13 +1617,11 @@ class MetadataManager:
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
         if sys_id is None:
             return "Unknown", ""
-        sys_id = "".join(ch for ch in str(sys_id) if ch.isdigit())
-        # Log only if normalization changed the identifier
-        raw = str(sys_id)
-        norm = "".join(ch for ch in raw if ch.isdigit())
-        if raw != norm:
-            LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw, norm)
-        sys_id = norm
+        raw_input = str(sys_id) if sys_id is not None else ""
+        sys_id = "".join(ch for ch in raw_input if ch.isdigit())
+        
+        if raw_input != sys_id and raw_input:
+             LOGGER.debug("Normalized sys_id: raw=%r -> %r", raw_input, sys_id)
 
         """Get shelfmark and title from ANY source (CSV > Cache > Bank)."""
         shelf = "Unknown"
@@ -677,11 +1686,27 @@ class MetadataManager:
             LOGGER.warning("Failed to build or save file map cache from %s: %s", Config.FILE_V7, e)
 
     def extract_unique_id(self, text):
+        """
+        Robust extraction of Unique ID.
+        Instead of expecting a fixed string 'IE_P_FL', we scan for components anywhere.
+        This fixes issues with file paths containing backslashes (e.g. Russia Library).
+        """
+        # First attempt: classic continuous structure
         match = re.search(r'(IE\d+_P\d+_FL\d+)', text)
-        if not match:
-            sys = re.search(r'(99\d+)', text)
-            return sys.group(1) if sys else "UNKNOWN"
-        return match.group(1)
+        if match:
+            return match.group(1)
+
+        # Second attempt: components assembly (robust to path breaks)
+        ie = re.search(r'(IE\d+)', text)
+        p = re.search(r'(P\d+)', text)
+        fl = re.search(r'(FL\d+)', text)
+
+        if ie and p and fl:
+            return f"{ie.group(1)}_{p.group(1)}_{fl.group(1)}"
+
+        # Default: System ID (only if all else fails)
+        sys = re.search(r'(99\d+)', text)
+        return sys.group(1) if sys else "UNKNOWN"
 
     def parse_header_smart(self, full_header):
         sys_match = re.search(r'(99\d{8,})', full_header)
@@ -696,20 +1721,346 @@ class MetadataManager:
         return sys_id, p_num
         
     def parse_full_id_components(self, full_header):
-        match = re.search(r'(99\d+)_?(IE\d+)?_?(P\d+)?_?(FL\d+)?', full_header)
+        """
+        Parse header into components regardless of order or separators.
+        Fixes display issues for V0.7 paths.
+        """
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
-        if match:
-            result['sys_id'] = match.group(1)
-            if match.group(2): result['ie_id'] = match.group(2)
-            if match.group(3): result['p_num'] = str(int(match.group(3)[1:])) 
-            if match.group(4): result['fl_id'] = match.group(4).replace("FL", "") 
+
+        # 1. System ID (99...)
+        sys_match = re.search(r'(99\d{8,})', full_header)
+        if sys_match:
+            result['sys_id'] = sys_match.group(1)
+
+        # 2. IE ID
+        ie_match = re.search(r'(IE\d+)', full_header)
+        if ie_match:
+            result['ie_id'] = ie_match.group(1)
+
+        # 3. Page Number (P...)
+        p_match = re.search(r'_?(P\d+)', full_header)
+        if p_match:
+            # Remove P to get clean number
+            raw_p = p_match.group(1) # P0001
+            result['p_num'] = str(int(raw_p[1:]))
+
+        # 4. FL ID
+        fl_match = re.search(r'(FL\d+)', full_header)
+        if fl_match:
+            result['fl_id'] = fl_match.group(1).replace("FL", "")
+
         return result
 
     def fetch_nli_data(self, system_id):
-        if system_id in self.nli_cache: return self.nli_cache[system_id]
+        # 1. Check existing cache
+        if system_id in self.nli_cache: 
+            return self.nli_cache[system_id]
+        
+        # 2. Check CSV Bank (local fetch)
+        if system_id in self.csv_bank:
+            row = self.csv_bank[system_id]
+            meta = {
+                'shelfmark': row['shelfmark'], 
+                'title': row['title'],
+                'desc': '', 
+                'fl_ids': [], 
+                'thumb_url': None, 
+                'thumb_checked': True # Mark as checked to prevent repeated image download attempts
+            }
+            self.nli_cache[system_id] = meta
+            return meta
+
+        # 3. Only if necessary (not in cache/CSV) - Network request
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
         return meta
+
+    def fetch_iiif_manifest(self, system_id):
+        """Fetch and parse IIIF manifest for physical description, attribution, and image labels."""
+        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
+        result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+        try:
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=10, verify=False)
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # 1. Physical Description
+                result['physical_desc'] = data.get('attribution', '')
+                attr_val = data.get('attribution')
+                if isinstance(attr_val, str):
+                    result['attribution'] = attr_val
+                elif isinstance(attr_val, list) and attr_val:
+                    result['attribution'] = str(attr_val[0])
+                elif data.get('label'):
+                    result['attribution'] = str(data.get('label'))
+
+                # 2. Canvas Map (FL -> Label)
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        label = canvas.get('label', '')
+                        # Extract FL ID from image service ID
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            service_id = service.get('@id', '')
+                            # Extract FL number (e.g. .../FL7734473/...)
+                            fl_match = re.search(r'FL(\d+)', service_id)
+                            if fl_match:
+                                fl_digits = fl_match.group(1)
+                                result['canvas_map'][fl_digits] = label
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"IIIF fetch failed for {system_id}: {e}")
+            return result
+
+    def fetch_marc_data(self, system_id):
+        """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
+        # Use the specific IIIF/MARC endpoint which is more reliable
+        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
+        result = {
+            'bibliography': [],
+            'notes': [],
+            'english_title': '',
+            'dimensions': '',
+            'people': [],
+            'current_owner': '',
+            'shelfmark_alt': '',
+            'date': '',
+            'subjects': [],
+            'physical_medium': '',
+            'attribution': '',
+            'online_link': None,
+            'external_iiif_link': None
+        }
+
+        try:
+            session = self._make_session()
+            resp = session.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                # Remove namespaces to simplify parsing
+                xml_content = re.sub(r'\sxmlns="[^"]+"', '', resp.text, count=1)
+                xml_content = re.sub(r'\sxmlns:marc="[^"]+"', '', xml_content, count=1)
+                xml_content = xml_content.replace('marc:', '') # Bruteforce namespace removal
+
+                root = ET.fromstring(xml_content)
+
+                for df in root.findall(".//datafield"):
+                    tag = df.get('tag')
+
+                    def get_sub(code):
+                        sf = df.find(f"subfield[@code='{code}']")
+                        return sf.text.strip() if sf is not None and sf.text else ""
+
+                    if tag == '581': # Bibliography
+                        val = get_sub('a')
+                        if val: result['bibliography'].append(val)
+
+                    elif tag == '500': # Notes
+                        val = get_sub('a')
+                        if val: result['notes'].append(val)
+
+                    elif tag == '246': # English Title
+                        val_a = get_sub('a')
+                        val_i = get_sub('i')
+                        if "English" in val_i:
+                            result['english_title'] = val_a
+
+                    elif tag == '260' or tag == '264': # Date
+                        val = get_sub('c')
+                        if val: result['date'] = val
+
+                    elif tag == '300': # Dimensions
+                        val_a = get_sub('a') # Extent (pages)
+                        val_c = get_sub('c') # Dimensions
+                        parts = [p for p in [val_a, val_c] if p]
+                        result['dimensions'] = " | ".join(parts)
+
+                    elif tag == '340': # Physical Medium / Condition
+                        val = get_sub('a')
+                        if val: result['physical_medium'] = val
+
+                    elif tag == '650': # Subjects
+                        val = get_sub('a')
+                        if val: result['subjects'].append(val)
+
+                    elif tag == '700': # People / Owners
+                        name = get_sub('a')
+                        role = get_sub('e')
+                        if name:
+                            full = f"{name} ({role})" if role else name
+                            result['people'].append(full)
+
+                    elif tag == '710': # Current Owner (Library Name)
+                        val = get_sub('a')
+                        if val: result['current_owner'] = val
+
+                    elif tag == '856': # Online Link
+                        url = get_sub('u')
+                        label = get_sub('z') or "Online Version"
+                        if url:
+                            result['online_link'] = {'url': url, 'label': label}
+                            # Detect CUDL for External Viewer
+                            if "cudl.lib.cam.ac.uk" in url:
+                                result['external_iiif_link'] = url
+
+                    elif tag == '942': # Alt Shelfmark
+                        val = get_sub('z')
+                        if val: result['shelfmark_alt'] = val
+
+                    elif tag == '597': # Image credit / attribution
+                        val = get_sub('a')
+                        if val: result['attribution'] = val
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
+            return result
+
+    def enrich_metadata(self, system_id):
+        """Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache."""
+        if not system_id: return {}
+
+        # Ensure basic meta exists
+        if system_id not in self.nli_cache:
+            self.fetch_nli_data(system_id)
+
+        current_meta = self.nli_cache.get(system_id, {})
+
+        # 1. Fetch MARC (Bibliographic Data)
+        marc_data = self.fetch_marc_data(system_id)
+        current_meta['marc'] = marc_data
+        marc_attribution = marc_data.get('attribution')
+
+        # 2. Determine Image Source (External CUDL vs Fallback NLI)
+        image_list = []
+        external_meta = {}
+
+        # Check for External Link from MARC (e.g. CUDL)
+        ext_link = marc_data.get('external_iiif_link')
+
+        # Lists for multiple sources
+        images_nli = []
+        images_ext = []
+
+        # 2a. Fetch External IIIF
+        if ext_link:
+            ext_data = self.fetch_external_iiif_data(ext_link)
+            if ext_data.get('canvases'):
+                images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
+                external_meta = ext_data.get('metadata', {})
+                if not marc_attribution:
+                    current_meta['attribution'] = ext_data.get('attribution')
+
+        # 2b. Always Fetch NLI IIIF (for fallback or toggle)
+        nli_iiif_data = self.fetch_iiif_manifest(system_id)
+        if nli_iiif_data.get('canvas_map'):
+            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+
+        if not current_meta.get('physical_desc'):
+            current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+
+        if marc_attribution:
+            current_meta['attribution'] = marc_attribution
+        elif not current_meta.get('attribution'):
+            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+
+        if nli_iiif_data.get('canvas_map'):
+            current_meta['canvas_map'] = nli_iiif_data['canvas_map']
+
+        # Prioritize External if available, but keep both sets
+        current_meta['images'] = images_ext if images_ext else images_nli
+        current_meta['images_nli'] = images_nli
+        current_meta['images_ext'] = images_ext
+        current_meta['external_meta'] = external_meta
+
+        # Update cache precedence (Enrichment overrides basic placeholders)
+        if marc_data.get('english_title') and not current_meta.get('title'):
+            current_meta['title'] = marc_data['english_title']
+
+        if marc_data.get('shelfmark_alt') and (not current_meta.get('shelfmark') or current_meta.get('shelfmark') == 'Unknown'):
+            current_meta['shelfmark'] = marc_data['shelfmark_alt']
+
+        self.nli_cache[system_id] = current_meta
+        return current_meta
+
+    def fetch_external_iiif_data(self, view_url):
+        """
+        Generic handler to fetch external IIIF data.
+        Currently supports CUDL logic: /view/ -> /iiif/ manifest.
+        Returns: {'attribution': str, 'metadata': dict, 'canvases': [{'label': str, 'url': str}]}
+        """
+        if not view_url: return {}
+
+        # CUDL Conversion Logic
+        manifest_url = view_url
+        if "cudl.lib.cam.ac.uk/view/" in view_url:
+            base = view_url.replace("/view/", "/iiif/")
+            manifest_url = re.sub(r'/\d+$', '', base)
+
+        if manifest_url.startswith("http://"):
+            manifest_url = manifest_url.replace("http://", "https://")
+
+        result = {
+            'attribution': 'External Library',
+            'metadata': {},
+            'canvases': []
+        }
+
+        try:
+            session = self._make_session()
+            resp = session.get(manifest_url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+
+                # Attribution
+                attr = data.get('attribution')
+                if isinstance(attr, str):
+                    result['attribution'] = attr
+                elif isinstance(attr, list) and attr:
+                    result['attribution'] = str(attr[0])
+                elif data.get('label'):
+                    result['attribution'] = str(data.get('label'))
+
+                # Metadata
+                if 'metadata' in data:
+                    for item in data['metadata']:
+                        label = str(item.get('label', '')).lower()
+                        val = str(item.get('value', ''))
+                        if label in ['abstract', 'condition', 'provenance', 'physical description']:
+                            result['metadata'][label.title()] = val
+
+                # Canvases (Images with Labels)
+                if 'sequences' in data and data['sequences']:
+                    for idx, canvas in enumerate(data['sequences'][0].get('canvases', [])):
+                        lbl = canvas.get('label', f"Img {idx + 1}")
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            # Try to get the service ID (base URL) for flexible resizing
+                            img_id = service.get('@id') if service else resource.get('@id')
+
+                            if img_id:
+                                result['canvases'].append({'label': lbl, 'url': img_id})
+
+            return result
+        except Exception as e:
+            LOGGER.warning(f"External IIIF fetch failed for {view_url}: {e}")
+            return result
 
     def _fetch_single_worker(self, system_id):
         url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
@@ -874,18 +2225,41 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return thumb_url
         
-    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None):
-        to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
-        if not to_fetch: return
+    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True):
+        """
+        Populate metadata cache. 
+        use_network=False -> Only loads from local CSV/Cache (Instant).
+        use_network=True  -> Fetches missing items from NLI.
+        """
+        # Step A: Fast fetch from CSV (no network)
+        for sid in system_ids:
+            if sid not in self.nli_cache and sid in self.csv_bank:
+                self.fetch_nli_data(sid) # This fetches from CSV automatically now
+        
+        # If only local work requested, stop here
+        if not use_network:
+            return
 
+        # Step B: Identify what is *really* missing
+        to_fetch = [sid for sid in system_ids if sid not in self.nli_cache]
+        
+        if not to_fetch:
+            if progress_callback:
+                for i, sid in enumerate(system_ids):
+                     progress_callback(i + 1, len(system_ids), sid)
+            return
+
+        # Step C: Network download (only if use_network=True)
         futures = {self.nli_executor.submit(self._fetch_single_worker, sid): sid for sid in to_fetch}
-        count = 0
+        current_progress = len(system_ids) - len(to_fetch)
+        
         for future in as_completed(futures):
             sid, meta = future.result()
             self.nli_cache[sid] = meta
-            count += 1
+            current_progress += 1
             if progress_callback:
-                progress_callback(count, len(to_fetch), sid)
+                progress_callback(current_progress, len(system_ids), sid)
+        
         self.save_caches()
 
     def search_by_meta(self, query, field):
@@ -906,6 +2280,82 @@ class MetadataManager:
                 results.add(sys_id)
 
         return list(results)
+
+    # ---------------- Shelfmark Resolution Helpers ----------------
+    def _normalize_shelfmark(self, shelfmark: str) -> str:
+        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
+        if not shelfmark:
+            return ""
+        
+        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
+        
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+            
+        return cleaned
+
+    def _iter_shelfmark_sources(self):
+        """Yield shelfmark candidates from CSV bank and cached metadata."""
+        # CSV bank
+        for sys_id, data in self.csv_bank.items():
+            shelf = data.get('shelfmark', '')
+            title = data.get('title', '')
+            if shelf:
+                yield sys_id, shelf, title
+        # NLI cache (may contain enriched shelfmarks)
+        for sys_id, data in self.nli_cache.items():
+            shelf = data.get('shelfmark', '')
+            alt = data.get('shelfmark_alt', '')
+            title = data.get('title', '')
+            for candidate in [shelf, alt]:
+                if candidate:
+                    yield sys_id, candidate, title
+
+    def resolve_system_by_shelfmark(self, query, limit=100):
+        """
+        Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
+        Returns a dict: {'sys_id': ..., 'options': [...], 'selected_shelfmark': ...}
+        """
+        result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
+
+        norm_query = self._normalize_shelfmark(query)
+        if not norm_query:
+            return result
+
+        exact_matches = []
+        partial_matches = []
+        seen = set()
+
+        def shelf_sort_key(entry):
+            shelf = entry.get('shelfmark', '')
+            title = entry.get('title', '')
+            sid_val = entry.get('sys_id', '')
+            return (natural_sort_key(shelf), natural_sort_key(title), natural_sort_key(sid_val))
+
+        for sys_id, shelf, title in self._iter_shelfmark_sources():
+            norm_shelf = self._normalize_shelfmark(shelf)
+            if not norm_shelf or (sys_id, norm_shelf) in seen:
+                continue
+            seen.add((sys_id, norm_shelf))
+
+            entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
+            if norm_shelf == norm_query:
+                exact_matches.append(entry)
+            elif norm_query in norm_shelf:
+                partial_matches.append(entry)
+
+        if len(exact_matches) == 1:
+            result['sys_id'] = exact_matches[0]['sys_id']
+            result['selected_shelfmark'] = exact_matches[0]['shelfmark']
+            return result
+
+        exact_matches.sort(key=shelf_sort_key)
+        partial_matches.sort(key=shelf_sort_key)
+
+        # Aggregate suggestions (exact first, then partial), capped at limit
+        suggestions = exact_matches + partial_matches
+        result['options'] = suggestions[:limit]
+        return result
 
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
@@ -1009,6 +2459,14 @@ class Indexer:
 
         writer.commit()
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
+
+        total_before = sum(len(v) for v in browse_map.values())
+        browse_map, deduped = dedupe_browse_map(browse_map)
+        total_after = sum(len(v) for v in browse_map.values())
+
+        if deduped:
+            LOGGER.info("Removed %d duplicate browse-map entries during indexing", total_before - total_after)
+
         with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
         return total_docs
 
@@ -1034,6 +2492,24 @@ class SearchEngine:
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
+
+    def _load_browse_map(self):
+        """Load the browse map, deduplicate it, and persist corrections if needed."""
+        if not os.path.exists(Config.BROWSE_MAP):
+            return {}
+
+        with open(Config.BROWSE_MAP, 'rb') as f:
+            raw_map = pickle.load(f)
+
+        cleaned_map, changed = dedupe_browse_map(raw_map)
+        if changed:
+            try:
+                with open(Config.BROWSE_MAP, 'wb') as f:
+                    pickle.dump(cleaned_map, f)
+            except Exception as e:
+                LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+
+        return cleaned_map
 
     def build_tantivy_query(self, terms, mode):
         if mode == 'Regex':
@@ -1136,25 +2612,18 @@ class SearchEngine:
         # Grab raw snippet
         snippet = text[start:end]
         
-        # If showing in table (HTML), verify valid HTML and remove newlines for compactness
+        # Sanitize snippet to prevent interference with markers (replace with space to keep indices)
+        snippet_safe = snippet.replace('*', ' ')
+
+        # Insert Asterisks for Unified Highlighting
+        hl_snippet = snippet_safe[:rel_s] + f"*{snippet_safe[rel_s:rel_e]}*" + snippet_safe[rel_e:]
+
         if not for_file:
-            # Clean newlines for table display so rows don't explode
-            snippet_clean = snippet.replace('\n', ' ')
-
-            # Since we removed newlines, indices might shift if newlines were before the match.
-            # However, simpler approach: Split snippet into pre-match, match, post-match based on INDICES.
-            # But 'replace' logic assumes we are working on the string WITH newlines removed.
-            # If we remove newlines first, we lose index fidelity if newlines were inside the snippet range.
-            # A safer way: Highlight FIRST, then clean newlines.
-
-            # 1. Highlight in raw text snippet
-            hl_snippet = snippet[:rel_s] + f"<b style='color:red;'>{snippet[rel_s:rel_e]}</b>" + snippet[rel_e:]
-
-            # 2. Now clean newlines
+            # For UI Table: Flatten newlines
             return hl_snippet.replace('\n', ' ')
         
-        # If for export file, keep newlines or mark them
-        return snippet[:rel_s] + f"*{snippet[rel_s:rel_e]}*" + snippet[rel_e:]
+        # For File/Export: Keep newlines
+        return hl_snippet
 
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""
@@ -1288,61 +2757,103 @@ class SearchEngine:
         return final
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None):
+        """
+        Scans composition chunks against the index.
+        Returns aggregated results with WIDE source context.
+        FIX: Common phrases (> max_freq) are now moved to 'filtered' instead of being discarded.
+        """
+        # 1. Tokenize original text
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
         if len(tokens) < chunk_size: return None
         chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
 
-        # We need two accumulators now
         doc_hits_main = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
         doc_hits_filtered = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
 
         total_chunks = len(chunks)
         
+        # 2. Scan chunks
         for i, chunk in enumerate(chunks):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
+            
+            # Build query
             t_query = self.build_tantivy_query(chunk, mode)
             regex = self.build_regex_pattern(chunk, mode, 0)
             if not regex: continue
 
-            # Check filter text (sampling)
-            is_filtered = False
+            # Check: Is phrase in "Filter Text"?
+            is_text_filtered = False
             if filter_text:
                 if regex.search(filter_text):
-                    is_filtered = True
+                    is_text_filtered = True
 
             try:
+                # Search index
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
-                if len(hits) > max_freq: continue 
+                
+                is_freq_filtered = len(hits) > max_freq 
+                
                 for score, doc_addr in hits:
                     doc = self.searcher.doc(doc_addr)
                     content = doc['content'][0]
+                    
+                    # Verify exact Regex match
                     if regex.search(content):
                         uid = doc['unique_id'][0]
-
-                        rec = doc_hits_filtered[uid] if is_filtered else doc_hits_main[uid]
+                        
+                        # Route to appropriate map
+                        if is_text_filtered or is_freq_filtered:
+                            rec = doc_hits_filtered[uid]
+                        else:
+                            rec = doc_hits_main[uid]
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
                         rec['matches'].append(regex.search(content).span())
+                        # Save indices of found words in *source* text
                         rec['src_indices'].update(range(i, i + chunk_size))
                         rec['patterns'].add(regex.pattern)
             except Exception as e:
-                LOGGER.warning("Failed composition chunk processing at token %s: %s", i, e)
+                LAB_LOGGER.warning(f"Failed composition chunk processing at token {i}: {e}")
 
+        # 3. Build results with Wide Context
         def build_items(hits_dict):
             final_items = []
+            
             for uid, data in hits_dict.items():
                 src_indices = sorted(list(data['src_indices']))
                 src_snippets = []
+                
                 if src_indices:
-                    for k, g in itertools.groupby(enumerate(src_indices), lambda ix: ix[0] - ix[1]):
-                        group = list(map(lambda ix: ix[1], g))
-                        s, e = group[0], group[-1]
-                        ctx_s = max(0, s - 15); ctx_e = min(len(tokens), e + 1 + 15)
-                        seq = " ".join(tokens[s:e+1])
-                        src_snippets.append(f"... {' '.join(tokens[ctx_s:s])} *{seq}* {' '.join(tokens[e+1:ctx_e])} ...")
+                    # A. Group nearby indices
+                    clusters = []
+                    if src_indices:
+                        curr_cluster = [src_indices[0]]
+                        for idx in src_indices[1:]:
+                            if idx - curr_cluster[-1] < 60: 
+                                curr_cluster.append(idx)
+                            else:
+                                clusters.append(curr_cluster)
+                                curr_cluster = [idx]
+                        clusters.append(curr_cluster)
+                    
+                    # B. Build text for each cluster
+                    for cl in clusters:
+                        start_ctx = max(0, cl[0] - 200)
+                        end_ctx = min(len(tokens), cl[-1] + 201)
+                        
+                        cl_set = set(cl)
+                        words_out = []
+                        for k in range(start_ctx, end_ctx):
+                            word = tokens[k]
+                            if k in cl_set:
+                                words_out.append(f"*{word}*") 
+                            else:
+                                words_out.append(word)
+                        
+                        src_snippets.append(f"... {' '.join(words_out)} ...")
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
@@ -1354,29 +2865,35 @@ class SearchEngine:
                     merged.append((curr_s, curr_e))
 
                 score = sum(e-s for s,e in merged)
+                
                 ms_snips = []
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    ms_snips.append(data['content'][start:s] + "*" + data['content'][s:e] + "*" + data['content'][e:end])
+                    fragment = data['content'][start:s] + \
+                               f"*{data['content'][s:e]}*" + \
+                               data['content'][e:end]
+                    ms_snips.append(fragment)
 
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
                 final_items.append({
-                    'score': score, 'uid': uid,
-                    'raw_header': data['head'], 'src_lbl': data['src'],
-                    'source_ctx': "\n".join(src_snippets),
+                    'score': score, 
+                    'uid': uid,
+                    'raw_header': data['head'], 
+                    'src_lbl': data['src'],
+                    'source_ctx': "\n\n".join(src_snippets),
                     'text': "\n...\n".join(ms_snips),
                     'highlight_pattern': combined_pattern
                 })
+                
             final_items.sort(key=lambda x: x['score'], reverse=True)
             return final_items
 
-        # Build both lists
         main_list = build_items(doc_hits_main)
-        filtered_list = build_items(doc_hits_filtered)
+        filtered_list = build_items(doc_hits_filtered) 
 
         return {'main': main_list, 'filtered': filtered_list}
-
+    
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items."""
         grouped = defaultdict(list)
@@ -1420,30 +2937,26 @@ class SearchEngine:
         return manuscripts
 
     def group_composition_results(self, items, threshold=5, progress_callback=None, status_callback=None, check_cancel=None):
+        # 1. Collect IDs for metadata
         ids = []
         for i in items:
             if check_cancel and check_cancel(): return None, None, None
-            # Check if it's a manuscript object with pre-parsed ID
             if i.get('type') == 'manuscript' and i.get('sys_id'):
                 ids.append(i['sys_id'])
             else:
-                ids.append(self.meta_mgr.parse_header_smart(i['raw_header'])[0])
+                parsed = self.meta_mgr.parse_header_smart(i['raw_header'])
+                if parsed and parsed[0]: ids.append(parsed[0])
 
         if status_callback:
             status_callback(tr("Fetching metadata..."))
 
-        def fetch_cb(c, t, s):
-            if progress_callback:
-                progress_callback(c, t)
-
-        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=fetch_cb)
+        # Load metadata (fast due to previous fix)
+        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=progress_callback)
 
         if status_callback:
             status_callback(tr("Grouping results..."))
-            # Reset progress for the grouping phase
-            if progress_callback:
-                progress_callback(0, len(items))
 
+        # 2. Prepare data for sorting
         IGNORE_PREFIXES = {'קטע', 'קטעי', 'גניזה', 'לא', 'מזוהה', 'חיבור', 'פילוסופיה', 'הלכה', 'שירה', 'פיוט', 'מסמך', 'מכתב', 'ספרות', 'סיפורת', 'יפה', 'דרשות', 'פרשנות', 'מקרא', 'בפילוסופיה', 'קטעים', 'וספרות', 'מוסר', 'הגות', 'וחכמת', 'הלשון', 'פירוש', 'תפסיר', 'שרח', 'על', 'ספר', 'כתאב', 'משנה', 'תלמוד'}
 
         def _get_clean_words(t):
@@ -1455,10 +2968,24 @@ class SearchEngine:
             words = _get_clean_words(title_str)
             while words and words[0] in IGNORE_PREFIXES: words.pop(0)
             if not words: return None
+            # Signature: First two significant words
             return f"{words[0]} {words[1]}" if len(words) >= 2 else words[0]
 
-        wrapped = []
-        for item in items:
+        # 3. New Grouping Algorithm (Dictionary Based - O(N))
+        # Instead of double loop, map all items by signature
+        
+        groups_map = defaultdict(list)
+        wrapped_items = []
+        total_items = len(items)
+
+        for idx, item in enumerate(items):
+            # Update GUI infrequently to prevent freezing
+            if progress_callback and idx % 100 == 0:
+                progress_callback(idx, total_items)
+            
+            if check_cancel and check_cancel(): return None, None, None
+
+            # Extract title
             if item.get('type') == 'manuscript' and item.get('sys_id'):
                 sid = item['sys_id']
             else:
@@ -1467,38 +2994,43 @@ class SearchEngine:
             meta = self.meta_mgr.nli_cache.get(sid, {})
             t = meta.get('title', '').strip()
             shelfmark = self.meta_mgr.get_shelfmark_from_header(item['raw_header']) or meta.get('shelfmark', 'Unknown')
-            wrapped.append({
-                'item': item, 'title': t, 'clean': " ".join(_get_clean_words(t)),
-                'grouped': False, 'shelfmark': shelfmark
-            })
+            
+            sig = _get_signature(t)
+            
+            w_item = {
+                'item': item, 
+                'title': t, 
+                'signature': sig,
+                'shelfmark': shelfmark,
+                'grouped': False
+            }
+            wrapped_items.append(w_item)
+            
+            if sig:
+                groups_map[sig].append(w_item)
 
-        wrapped.sort(key=lambda x: len(x['title']))
+        # 4. Filter groups by Threshold
         appendix = defaultdict(list)
         summary = defaultdict(list)
-        total = len(wrapped)
 
-        for i, root in enumerate(wrapped):
-            if check_cancel and check_cancel(): return None, None, None
-            if progress_callback and total:
-                progress_callback(i, total)
-            if root['grouped']: continue
-            sig = _get_signature(root['title'])
-            if not sig: continue
-            matches = [root]
-            for j, cand in enumerate(wrapped):
-                if i == j or cand['grouped']: continue
-                if sig in cand['clean']: matches.append(cand)
-            if len(matches) > threshold:
-                for m in matches:
-                    m['grouped'] = True
-                    appendix[sig].append(m['item'])
-                    summary[sig].append(m['shelfmark'])
+        for sig, group_items in groups_map.items():
+            if len(group_items) > threshold:
+                # Group large enough - move to appendix
+                for w in group_items:
+                    w['grouped'] = True
+                    appendix[sig].append(w['item'])
+                    summary[sig].append(w['shelfmark'])
+
+        # 5. Create Main List (ungrouped)
+        main_list = [w['item'] for w in wrapped_items if not w['grouped']]
         
-        if progress_callback and total:
-            progress_callback(total, total)
-
-        main_list = [w['item'] for w in wrapped if not w['grouped']]
+        # Sort by score descending
         main_list.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Final GUI update
+        if progress_callback:
+            progress_callback(total_items, total_items)
+
         return main_list, appendix, summary
 
     def get_full_text_by_id(self, uid):
@@ -1512,8 +3044,8 @@ class SearchEngine:
 
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
-        if not os.path.exists(Config.BROWSE_MAP): return []
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        browse_map = self._load_browse_map()
+        if not browse_map: return []
         
         pages_meta = browse_map.get(sys_id, [])
         if not pages_meta: return []
@@ -1532,32 +3064,66 @@ class SearchEngine:
                 })
         return full_content
         
-    def get_browse_page(self, sys_id, p_num=None, next_prev=0):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
+        browse_map = self._load_browse_map()
+        if not browse_map: return None
+
         if sys_id not in browse_map: return None
         pages = browse_map[sys_id]
         if not pages: return None
         
-        target_idx = 0
-        if p_num is not None:
-            for i, p in enumerate(pages):
-                if p['p_num'] == p_num: target_idx = i; break
+        target_idx = -1
+
+        # PRIORITY 1: Use Absolute Index if provided (Fixes duplicate page loop)
+        if absolute_index is not None:
+            if 0 <= absolute_index < len(pages):
+                target_idx = absolute_index
+            else:
+                # If index is invalid, fallback to p_num logic? No, just fail or reset.
+                pass 
         
+        # PRIORITY 2: Search by p_num (Fallback / Initial Load)
+        if target_idx == -1 and p_num is not None:
+            # Robust casting
+            try: p_val = int(p_num)
+            except: p_val = -999
+            
+            for i, p in enumerate(pages):
+                if p['p_num'] == p_val: 
+                    target_idx = i; break
+            
+            # Smart Fallback: Find closest insertion point
+            if target_idx == -1:
+                for i, p in enumerate(pages):
+                    if p['p_num'] > p_val:
+                        target_idx = max(0, i - 1)
+                        break
+                if target_idx == -1: target_idx = len(pages) - 1
+
+        # PRIORITY 3: Default to start
+        if target_idx == -1: target_idx = 0
+        
+        # Calculate New Index
         new_idx = target_idx + next_prev
+        
         if new_idx < 0 or new_idx >= len(pages): return None
         
         target_page = pages[new_idx]
         text = self.get_full_text_by_id(target_page['uid'])
+        
         return {
-            'uid': target_page['uid'], 'p_num': target_page['p_num'],
-            'full_header': target_page['full_header'], 'text': text,
-            'total_pages': len(pages), 'current_idx': new_idx + 1
+            'uid': target_page['uid'], 
+            'p_num': target_page['p_num'],
+            'full_header': target_page['full_header'], 
+            'text': text,
+            'total_pages': len(pages), 
+            'current_idx': new_idx + 1, # Display is 1-based
+            'internal_index': new_idx   # 0-based for logic (NEW)
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        browse_map = self._load_browse_map()
+        if not browse_map: return None
 
         if not fl_id:
             return None
@@ -1587,4 +3153,34 @@ class SearchEngine:
                         'sys_id': sid,
                         'fl_id': fl_digits
                     }
+        return None
+
+    def get_adjacent_sys_id_by_file_order(self, current_sys_id, offset):
+        """
+        Returns the next/prev system ID based on the order in Transcriptions.txt.
+        This relies on browse_map preserving insertion order.
+        """
+        # Load map if not already cached in memory for navigation
+        if not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids:
+            if not os.path.exists(Config.BROWSE_MAP):
+                return None
+            with open(Config.BROWSE_MAP, 'rb') as f:
+                b_map = pickle.load(f)
+                # list(dict.keys()) returns items in insertion order (File Order)
+                self._ordered_sys_ids = list(b_map.keys())
+
+        if not current_sys_id:
+            return self._ordered_sys_ids[0] if self._ordered_sys_ids else None
+
+        try:
+            # Find current index
+            curr_idx = self._ordered_sys_ids.index(current_sys_id)
+            new_idx = curr_idx + offset
+            
+            # Check bounds
+            if 0 <= new_idx < len(self._ordered_sys_ids):
+                return self._ordered_sys_ids[new_idx]
+        except ValueError:
+            pass # Current ID not found in list
+            
         return None

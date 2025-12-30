@@ -2,29 +2,7 @@
 
 # gui_threads.py
 from PyQt6.QtCore import QThread, pyqtSignal
-from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager, check_external_services
-
-class ConnectivityThread(QThread):
-    """Check connectivity in a separate thread and emit signal with result."""
-    finished_signal = pyqtSignal(dict)
-
-    def __init__(self, ai_mgr):
-        super().__init__()
-        self.ai_mgr = ai_mgr
-
-    def run(self):
-        try:
-            extra = {}
-            if self.ai_mgr:
-                ai_endpoint = self.ai_mgr.get_healthcheck_endpoint()
-                if ai_endpoint:
-                    extra['ai_provider'] = ai_endpoint
-
-            statuses = check_external_services(extra_endpoints=extra, timeout=3)
-            self.finished_signal.emit(statuses)
-        except Exception as e:
-            # Emit a minimal "failure" status so the UI can update
-            self.finished_signal.emit({"error": str(e)})
+from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
@@ -60,6 +38,43 @@ class SearchThread(QThread):
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
 
+class LabSearchThread(QThread):
+    """Execute a Lab Mode search query."""
+
+    results_signal = pyqtSignal(list)
+    progress_signal = pyqtSignal(int, int) # Not fully utilized yet but good for future
+    status_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000):
+        super().__init__()
+        self.lab_engine = lab_engine
+        self.query = query
+        self.gap = gap
+        self.mode = mode
+        self.deep_scan = deep_scan
+        self.scan_limit = scan_limit
+
+    def run(self):
+        try:
+            # Helper to handle different callback signatures
+            def cb(arg1, arg2=None):
+                if isinstance(arg1, str):
+                    self.status_signal.emit(arg1)
+                elif isinstance(arg1, int) and arg2 is not None:
+                    self.progress_signal.emit(arg1, arg2)
+
+            results = self.lab_engine.lab_search(
+                self.query,
+                mode=self.mode,
+                progress_callback=cb,
+                gap=self.gap,
+                deep_scan=self.deep_scan,
+                scan_limit=self.scan_limit
+            )
+            self.results_signal.emit(results)
+        except Exception as e: self.error_signal.emit(str(e))
+
 class CompositionThread(QThread):
     """Scan compositions in background to keep UI responsive."""
 
@@ -91,6 +106,50 @@ class CompositionThread(QThread):
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
 
+class LabCompositionThread(QThread):
+    """Execute Lab Composition Search (Broad-to-Narrow)."""
+
+    progress_signal = pyqtSignal(int, int)
+    status_signal = pyqtSignal(str)
+    scan_finished_signal = pyqtSignal(object) 
+    error_signal = pyqtSignal(str)
+
+    # --- הוספנו כאן את excluded_ids ואת filter_text ---
+    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
+        super().__init__()
+        self.lab_engine = lab_engine
+        self.text = text
+        self.chunk_size = chunk_size
+        self.mode = mode
+        self.excluded_ids = excluded_ids # שמירה
+        self.filter_text = filter_text
+        self.deep_scan = deep_scan
+        self.scan_limit = scan_limit
+
+    def run(self):
+        try:
+            self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
+
+            # Callback handler that supports both (int, int) and (str)
+            def cb(arg1, arg2=None):
+                if isinstance(arg1, str):
+                    self.status_signal.emit(arg1)
+                elif isinstance(arg1, int) and arg2 is not None:
+                    self.progress_signal.emit(arg1, arg2)
+            
+            # --- העברה למנוע ---
+            result = self.lab_engine.lab_composition_search(
+                self.text,
+                mode=self.mode,
+                progress_callback=cb,
+                chunk_size=self.chunk_size,
+                excluded_ids=self.excluded_ids,
+                filter_text=self.filter_text,
+                deep_scan=self.deep_scan,
+                scan_limit=self.scan_limit
+            )
+            self.scan_finished_signal.emit(result)
+        except Exception as e: self.error_signal.emit(str(e))
 
 class GroupingThread(QThread):
     """Group composition results while reporting progress to the UI."""
@@ -113,7 +172,8 @@ class GroupingThread(QThread):
             def check(): return self.isInterruptionRequested()
 
             # 1. Group Main Items
-            def cb1(curr, total): self.progress_signal.emit(curr, total)
+            # תיקון: הוספת *args כדי להתעלם מהפרמטר השלישי (sid) אם נשלח
+            def cb1(curr, total, *args): self.progress_signal.emit(curr, total)
             self.status_signal.emit("Grouping main results...")
 
             result_main = self.searcher.group_composition_results(
@@ -128,7 +188,8 @@ class GroupingThread(QThread):
             filt_res, filt_appx, filt_summ = [], {}, {}
             if self.filtered_items:
                 self.status_signal.emit("Grouping filtered results...")
-                def cb2(curr, total): self.progress_signal.emit(curr, total)
+                # תיקון: הוספת *args גם כאן
+                def cb2(curr, total, *args): self.progress_signal.emit(curr, total)
 
                 result_filt = self.searcher.group_composition_results(
                     self.filtered_items, self.threshold, progress_callback=cb2, check_cancel=check, status_callback=self.status_signal.emit
@@ -142,34 +203,40 @@ class GroupingThread(QThread):
         except Exception as e: self.error_signal.emit(str(e))
 
 class ShelfmarkLoaderThread(QThread):
-    """Preload metadata for shelfmarks without blocking the main thread."""
-
+    """
+    Background thread to load metadata.
+    OPTIMIZED: Delegates work to the efficient batch_fetch_shelfmarks manager method.
+    """
+    # Signal: current_count, total_count, current_sid
     progress_signal = pyqtSignal(int, int, str)
     finished_signal = pyqtSignal(bool)
     error_signal = pyqtSignal(str)
-    def __init__(self, meta_mgr, id_list):
+
+    def __init__(self, meta_mgr, sids):
         super().__init__()
         self.meta_mgr = meta_mgr
-        self.id_list = id_list
-        self._cancelled = False
-
-    def request_cancel(self):
-        self._cancelled = True
+        self.sids = sids
 
     def run(self):
         try:
-            to_fetch = [sid for sid in self.id_list if sid and sid not in self.meta_mgr.nli_cache]
-            total = len(to_fetch)
-            for idx, sid in enumerate(to_fetch, start=1):
-                if self._cancelled or self.isInterruptionRequested():
-                    self.finished_signal.emit(True)
-                    return
-                self.meta_mgr.fetch_nli_data(sid)
-                self.progress_signal.emit(idx, total, sid)
-            self.meta_mgr.save_caches()
-            self.finished_signal.emit(False)
+            total = len(self.sids)
+            if total == 0:
+                self.finished_signal.emit(True)
+                return
+
+            # הגדרת Callback שמקשר בין המנהל (Core) לבין ה-GUI (Signals)
+            def update_gui(curr, tot, sid):
+                self.progress_signal.emit(curr, tot, sid)
+
+            # שימוש בפונקציה היעילה החדשה שכתבנו ב-MetadataManager
+            # היא תטפל לבד בבדיקת CSV ובשימוש ב-20 ה-Threads לרשת
+            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui)
+            
+            self.finished_signal.emit(True)
         except Exception as e:
-            self.error_signal.emit(str(e))
+            # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
+            print(f"Error in background loader: {e}")
+            self.finished_signal.emit(False)
 
 class AIWorkerThread(QThread):
     """Send a prompt to the AI manager in the background."""
@@ -201,3 +268,39 @@ class StartupThread(QThread):
             self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer, ai_mgr)
         except Exception as e:
             self.error_signal.emit(str(e))
+
+
+class EnrichMetadataThread(QThread):
+    """Fetch extended metadata (IIIF/MARC) in the background."""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, meta_mgr, system_id):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.system_id = system_id
+
+    def run(self):
+        try:
+            # This method (in genizah_core.py) handles network errors gracefully
+            data = self.meta_mgr.enrich_metadata(self.system_id)
+            self.finished_signal.emit(data)
+        except Exception:
+            # If something unexpected happens, just emit empty to avoid hanging
+            self.finished_signal.emit({})
+
+
+class ExternalResourceThread(QThread):
+    """Fetch external IIIF resources (e.g. Cambridge) in background."""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, meta_mgr, url):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.url = url
+
+    def run(self):
+        try:
+            data = self.meta_mgr.fetch_external_iiif_data(self.url)
+            self.finished_signal.emit(data)
+        except Exception:
+            self.finished_signal.emit({})

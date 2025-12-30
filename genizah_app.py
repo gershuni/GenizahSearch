@@ -6,6 +6,7 @@ import os
 import re
 import time
 import threading
+import json
 import requests
 import urllib3
 import csv
@@ -18,18 +19,20 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
-                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
+                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame) 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
+                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog)
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
 from version import APP_VERSION
 
+from collections import defaultdict
+
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, check_external_services, get_logger
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -43,10 +46,295 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, GroupingThread, AIWorkerThread, StartupThread, ConnectivityThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
+
+class LabScoringDialog(QDialog):
+    """Configuration for Lab Mode Scoring (Advanced)."""
+    def __init__(self, parent, lab_engine):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Advanced Scoring"))
+        self.resize(500, 500)
+        self.lab_engine = lab_engine
+        self.settings = lab_engine.settings
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(tr("Adjust how the algorithm prioritizes results.")))
+        
+        grid = QGridLayout()
+        
+        # Order Bonus
+        self.spin_order_bonus = QDoubleSpinBox(); self.spin_order_bonus.setRange(0.0, 100.0); self.spin_order_bonus.setSingleStep(1.0); self.spin_order_bonus.setValue(getattr(self.settings, 'order_bonus', 10.0))
+        lbl_order = QLabel(tr("Sequential Order Bonus:")); lbl_order.setStyleSheet("color: #2980b9; font-weight: bold;")
+        grid.addWidget(lbl_order, 0, 0); grid.addWidget(self.spin_order_bonus, 0, 1)
+
+        # Coverage
+        self.spin_coverage_power = QDoubleSpinBox(); self.spin_coverage_power.setRange(1.0, 10.0); self.spin_coverage_power.setValue(self.settings.coverage_power)
+        grid.addWidget(QLabel(tr("Coverage Penalty Power:")), 1, 0); grid.addWidget(self.spin_coverage_power, 1, 1)
+
+        # Noise Suppression
+        lbl_noise = QLabel(tr("Stop-Word Suppression:")); lbl_noise.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        grid.addWidget(lbl_noise, 2, 0, 1, 2)
+
+        # Short Word Score
+        self.spin_stop_score = QDoubleSpinBox(); self.spin_stop_score.setRange(0.0, 50.0); self.spin_stop_score.setSingleStep(0.5); self.spin_stop_score.setValue(getattr(self.settings, 'stop_word_score', 1.0))
+        self.spin_stop_score.setToolTip(tr("Points given for very short words (<3 letters). Keep low to reduce noise."))
+        grid.addWidget(QLabel(tr("Score for Short Words (<3):")), 3, 0); grid.addWidget(self.spin_stop_score, 3, 1)
+
+        # Common 3-Char Score
+        self.spin_common3_score = QDoubleSpinBox(); self.spin_common3_score.setRange(0.0, 50.0); self.spin_common3_score.setSingleStep(0.5); self.spin_common3_score.setValue(getattr(self.settings, 'common_3char_score', 2.0))
+        self.spin_common3_score.setToolTip(tr("Points for common 3-letter words (e.g. 'ליה', 'הכי')."))
+        grid.addWidget(QLabel(tr("Score for Common 3-Letter:")), 4, 0); grid.addWidget(self.spin_common3_score, 4, 1)
+
+        # Other Weights
+        lbl_other = QLabel(tr("Standard Weights:")); lbl_other.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        grid.addWidget(lbl_other, 5, 0, 1, 2)
+
+        self.spin_len_bonus = QDoubleSpinBox(); self.spin_len_bonus.setRange(1.0, 10.0); self.spin_len_bonus.setValue(self.settings.length_bonus_factor)
+        grid.addWidget(QLabel(tr("Long Word Bonus:")), 6, 0); grid.addWidget(self.spin_len_bonus, 6, 1)
+
+        self.spin_unique_base = QSpinBox(); self.spin_unique_base.setRange(10, 1000); self.spin_unique_base.setValue(self.settings.unique_bonus_base)
+        grid.addWidget(QLabel(tr("Unique Match Base Score:")), 7, 0); grid.addWidget(self.spin_unique_base, 7, 1)
+
+        self.spin_density = QDoubleSpinBox(); self.spin_density.setRange(0.0, 5.0); self.spin_density.setValue(self.settings.density_penalty)
+        grid.addWidget(QLabel(tr("Distance Penalty:")), 8, 0); grid.addWidget(self.spin_density, 8, 1)
+
+        self.spin_common_factor = QDoubleSpinBox(); self.spin_common_factor.setRange(0.0, 1.0); self.spin_common_factor.setValue(self.settings.common_penalty_factor)
+        grid.addWidget(QLabel(tr("Repeated Word Factor:")), 9, 0); grid.addWidget(self.spin_common_factor, 9, 1)
+
+        # Display Limit
+        self.spin_display_limit = QSpinBox(); self.spin_display_limit.setRange(50, 1000); self.spin_display_limit.setValue(getattr(self.settings, 'lab_display_limit', 500))
+        self.spin_display_limit.setToolTip(tr("Lower values prevent the app from freezing. All results are still exported."))
+        grid.addWidget(QLabel(tr("Max Results to Display:")), 10, 0); grid.addWidget(self.spin_display_limit, 10, 1)
+
+        layout.addLayout(grid)
+        layout.addStretch()
+        
+        btn_box = QHBoxLayout()
+        self.btn_save = QPushButton(tr("Save & Close")); self.btn_save.clicked.connect(self.save_and_close)
+        self.btn_cancel = QPushButton(tr("Cancel")); self.btn_cancel.clicked.connect(self.reject)
+        btn_box.addStretch(); btn_box.addWidget(self.btn_cancel); btn_box.addWidget(self.btn_save)
+        layout.addLayout(btn_box)
+        self.setLayout(layout)
+
+    def save_and_close(self):
+        self.settings.coverage_power = self.spin_coverage_power.value()
+        self.settings.length_bonus_factor = self.spin_len_bonus.value()
+        self.settings.common_penalty_factor = self.spin_common_factor.value()
+        self.settings.density_penalty = self.spin_density.value()
+        self.settings.unique_bonus_base = self.spin_unique_base.value()
+        if hasattr(self.settings, 'order_bonus'): self.settings.order_bonus = self.spin_order_bonus.value()
+        if hasattr(self.settings, 'stop_word_score'):
+            self.settings.stop_word_score = self.spin_stop_score.value()
+            self.settings.common_3char_score = self.spin_common3_score.value()
+        
+        self.settings.lab_display_limit = self.spin_display_limit.value()
+        self.settings.save()
+        self.accept()
+
+class LabPanel(QFrame):
+    def __init__(self, parent, mode):
+        super().__init__(parent)
+        self.mode = mode
+        self.lab_engine = None
+        self.settings = None
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        # Removed hardcoded background color to support both light and dark themes
+        self.setStyleSheet("border-radius: 5px; margin-bottom: 5px;")
+
+        self.init_ui()
+        self.setVisible(False)
+
+    def set_engine(self, engine):
+        self.lab_engine = engine
+        self.settings = engine.settings
+        self.refresh_values()
+        self.enable_controls(True)
+        self._mark_rebuild_required()
+
+    def enable_controls(self, enabled):
+        self.setEnabled(enabled)
+
+    def init_ui(self):
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 5, 10, 5)
+
+        # Shared: Rebuild
+        self.btn_rebuild = QPushButton(tr("Rebuild Lab Index"))
+        self.btn_rebuild.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
+        self.btn_rebuild.clicked.connect(self.run_rebuild)
+        self.layout.addWidget(self.btn_rebuild)
+
+        self.lbl_idx_status = QLabel("")
+        self.layout.addWidget(self.lbl_idx_status)
+
+        # Spacer
+        self.layout.addSpacing(20)
+        self.layout.addWidget(QLabel("|"))
+        self.layout.addSpacing(20)
+
+        if self.mode == 'search':
+            # Min Match
+            self.layout.addWidget(QLabel(tr("Minimum Match %:")))
+            self.spin_min = QSpinBox()
+            self.spin_min.setToolTip(tr("Minimum percentage of query terms required to consider a result relevant."))
+            self.spin_min.setRange(10, 100)
+            self.spin_min.setSuffix("%")
+            self.spin_min.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_min)
+
+            # Candidate Limit
+            self.layout.addWidget(QLabel(tr("Max Results to Process:")))
+            self.spin_limit = QSpinBox()
+            self.spin_limit.setToolTip(tr("Maximum number of raw candidates to fetch from the index before detailed scoring."))
+            self.spin_limit.setRange(500, 1000000)
+            self.spin_limit.setSingleStep(500)
+            self.spin_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_limit)
+
+            # Deep Scan Limit
+            self.layout.addWidget(QLabel(tr("Deep Limit:")))
+            self.spin_scan_limit = QSpinBox()
+            self.spin_scan_limit.setToolTip(tr("Maximum number of documents to scan in Deep Scan mode."))
+            self.spin_scan_limit.setRange(10000, 1000000)
+            self.spin_scan_limit.setSingleStep(10000)
+            self.spin_scan_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_scan_limit)
+
+            self.layout.addStretch()
+
+            # Advanced Scoring
+            self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
+            self.btn_scoring.clicked.connect(self.open_scoring)
+            self.layout.addWidget(self.btn_scoring)
+
+        elif self.mode == 'comp':
+            # Chunk Limit
+            self.layout.addWidget(QLabel(tr("Max Candidates per Chunk:")))
+            self.spin_chunk_limit = QSpinBox()
+            self.spin_chunk_limit.setToolTip(tr("Maximum number of index hits to process per text chunk."))
+            self.spin_chunk_limit.setRange(50, 5000)
+            self.spin_chunk_limit.setSingleStep(50)
+            self.spin_chunk_limit.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_chunk_limit)
+
+            # Min Score
+            self.layout.addWidget(QLabel(tr("Min Chunk Score:")))
+            self.spin_min_score = QSpinBox()
+            self.spin_min_score.setToolTip(tr("Minimum score required for a chunk to be considered a match."))
+            self.spin_min_score.setRange(10, 500)
+            self.spin_min_score.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_min_score)
+
+            # Max Final
+            self.layout.addWidget(QLabel(tr("Max Final Results:")))
+            self.spin_max_final = QSpinBox()
+            self.spin_max_final.setToolTip(tr("Maximum number of results to display in the tree (prevents freezing). All results are exported."))
+            self.spin_max_final.setRange(10, 250)
+            self.spin_max_final.setValue(200)
+            self.spin_max_final.valueChanged.connect(self.on_change)
+            self.layout.addWidget(self.spin_max_final)
+
+            self.layout.addStretch()
+
+            # Advanced Scoring
+            self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
+            self.btn_scoring.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
+            self.btn_scoring.clicked.connect(self.open_scoring)
+            self.layout.addWidget(self.btn_scoring)
+
+    def refresh_values(self):
+        if not self.settings: return
+        self.blockSignals(True)
+        if self.mode == 'search':
+            self.spin_min.setValue(self.settings.min_should_match)
+            self.spin_limit.setValue(self.settings.candidate_limit)
+            if hasattr(self, 'spin_scan_limit'):
+                self.spin_scan_limit.setValue(getattr(self.settings, 'lab_scan_limit', 50000))
+        elif self.mode == 'comp':
+            self.spin_chunk_limit.setValue(self.settings.comp_chunk_limit)
+            self.spin_min_score.setValue(self.settings.comp_min_score)
+            self.spin_max_final.setValue(self.settings.comp_max_final_results)
+        self.blockSignals(False)
+
+    def on_change(self):
+        if not self.settings: return
+        if self.mode == 'search':
+            self.settings.min_should_match = self.spin_min.value()
+            self.settings.candidate_limit = self.spin_limit.value()
+            if hasattr(self, 'spin_scan_limit'):
+                self.settings.lab_scan_limit = self.spin_scan_limit.value()
+        elif self.mode == 'comp':
+            self.settings.comp_chunk_limit = self.spin_chunk_limit.value()
+            self.settings.comp_min_score = self.spin_min_score.value()
+            self.settings.comp_max_final_results = self.spin_max_final.value()
+        self.settings.save()
+
+    def open_scoring(self):
+         if not self.lab_engine: return
+         d = LabScoringDialog(self, self.lab_engine)
+         d.exec()
+
+    def _mark_rebuild_required(self):
+        if self.lab_engine.lab_index_needs_rebuild:
+            self.lbl_idx_status.setText(tr("Index missing or outdated."))
+            self.lbl_idx_status.setStyleSheet("color: #c0392b;")
+        else:
+            self.lbl_idx_status.setText(tr("Index is ready."))
+            self.lbl_idx_status.setStyleSheet("color: #27ae60;")
+
+    def run_rebuild(self):
+        self.btn_rebuild.setEnabled(False)
+        self.lbl_idx_status.setText(tr("Starting..."))
+        QApplication.processEvents()
+
+        class RebuildThread(QThread):
+            finished_sig = pyqtSignal(int)
+            progress_sig = pyqtSignal(int, int)
+            error_sig = pyqtSignal(str)
+
+            def __init__(self, engine):
+                super().__init__()
+                self.engine = engine
+            def run(self):
+                try:
+                    if not os.path.exists(Config.LAB_DIR):
+                        os.makedirs(Config.LAB_DIR)
+                    
+                    def cb(curr, total):
+                        self.progress_sig.emit(curr, total)
+
+                    count = self.engine.rebuild_lab_index(progress_callback=cb)
+                    self.finished_sig.emit(count)
+                except Exception as e:
+                    self.error_sig.emit(str(e))
+
+        self.worker = RebuildThread(self.lab_engine)
+        self.worker.progress_sig.connect(self.on_rebuild_progress)
+        self.worker.finished_sig.connect(self.on_rebuild_finished)
+        self.worker.error_sig.connect(self.on_rebuild_error)
+        self.worker.start()
+
+    def on_rebuild_progress(self, current, total):
+        self.lbl_idx_status.setText(tr("Processing docs: {}").format(current))
+
+    def on_rebuild_error(self, err):
+        self.btn_rebuild.setEnabled(True)
+        self.lbl_idx_status.setText(tr("Error"))
+        QMessageBox.critical(self, tr("Error"), str(err))
+
+    def on_rebuild_finished(self, count):
+        self.lbl_idx_status.setText(tr("Done. {} docs.").format(count))
+        self.lbl_idx_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self.btn_rebuild.setEnabled(True)
+        QMessageBox.information(self, tr("Success"), tr("Lab Index rebuilt successfully."))
+      
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _TLS_NOTICE_LOGGED = False
@@ -68,16 +356,484 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
     def __lt__(self, other):
         text1 = self.text()
         text2 = other.text()
+        return natural_sort_key(text1) < natural_sort_key(text2)
 
-        # Normalize: Remove 'Ms.'/'Ms' prefix (case insensitive) and lower case
-        # We strip leading whitespace, then optional 'ms', optional '.', then whitespace
-        norm1 = re.sub(r'^\s*ms\.?\s*', '', text1, flags=re.IGNORECASE)
-        norm2 = re.sub(r'^\s*ms\.?\s*', '', text2, flags=re.IGNORECASE)
+class CheckBoxHeader(QHeaderView):
+    """Custom HeaderView that draws a checkbox in the first section."""
+    toggled = pyqtSignal(bool)
 
-        def natural_keys(text):
-            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.isChecked = False
+        self.setSectionsClickable(True)
 
-        return natural_keys(norm1) < natural_keys(norm2)
+    def get_checkbox_rect(self, rect):
+        box_size = 20
+        padding = 4
+        y = rect.top() + (rect.height() - box_size) // 2
+
+        # In RTL, column 0 is typically visually on the right.
+        # But QHeaderView paints logical index 0 using the given rect.
+        # If the layout is RTL, we want the checkbox at the "start" of the section?
+        # Usually Checkbox [Text]. In RTL: [Text] Checkbox?
+        # Or standard convention: Checkbox is always at start of line?
+        # Let's align it to the "start" (Left in LTR, Right in RTL).
+
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            x = rect.right() - box_size - padding
+        else:
+            x = rect.left() + padding
+
+        return QRect(x, y, box_size, box_size)
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+
+        if logicalIndex == 0:
+            option = QStyleOptionButton()
+            option.rect = self.get_checkbox_rect(rect)
+            option.state = QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Active
+            if self.isChecked:
+                option.state |= QStyle.StateFlag.State_On
+            else:
+                option.state |= QStyle.StateFlag.State_Off
+
+            self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter)
+
+    def mousePressEvent(self, event):
+        if self.logicalIndexAt(event.pos()) == 0:
+            # Hit testing
+            # We need the visual rect of the section corresponding to logical index 0
+            # Since sections can be reordered, visualIndex(0) gives position.
+            # But header uses viewport coordinates.
+            # sectionViewportPosition(0) gives the start (left edge in LTR) of logical section 0.
+
+            # Simple approach: Iterate visible sections to find logical index 0?
+            # Or use built-in geometry.
+
+            # Since logicalIndexAt gave us 0, we know the click is in section 0.
+            # We just need the rect of that section to check if it's on the checkbox.
+
+            # Finding the rect of logical section 0:
+            # position = sectionViewportPosition(0)
+            # size = sectionSize(0)
+            # But we need to handle x/y and scrolling.
+            # sectionViewportPosition returns X relative to viewport.
+
+            sec_pos = self.sectionViewportPosition(0)
+            sec_width = self.sectionSize(0)
+            sec_rect = QRect(sec_pos, 0, sec_width, self.height())
+
+            chk_rect = self.get_checkbox_rect(sec_rect)
+
+            if chk_rect.contains(event.pos()):
+                self.isChecked = not self.isChecked
+                self.viewport().update()
+                self.toggled.emit(self.isChecked)
+                return # Consume event
+
+        super().mousePressEvent(event)
+
+    def setChecked(self, checked):
+        if self.isChecked != checked:
+            self.isChecked = checked
+            self.viewport().update()
+
+class ZoomableScrollArea(QScrollArea):
+    """A ScrollArea that supports hand-panning and wheel-zooming."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(False)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("background: #222; border: none;")
+
+        # Hide scrollbars but keep functionality
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.lbl_img = QLabel()
+        self.lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_img.setScaledContents(False) # We manage scaling via Pixmap
+        self.lbl_img.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.setWidget(self.lbl_img)
+
+        self._pixmap = None
+        self._zoom_factor = 1.0
+        self._drag_start_pos = None
+        self._rotation = 0
+        self._auto_fit_enabled = False
+
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def set_image(self, pixmap):
+        self._pixmap = pixmap
+        self._rotation = 0
+        self._auto_fit_enabled = bool(pixmap)
+        if not pixmap:
+            self._zoom_factor = 1.0
+            self._update_view()
+            return
+
+        if not self._apply_fit_to_viewport():
+            self._zoom_factor = 1.0
+            self._update_view()
+
+    def set_rotation(self, angle: float):
+        """Set absolute rotation (degrees clockwise) and update view."""
+        self._rotation = angle % 360 if angle is not None else 0
+        self._update_view()
+
+    def rotate_view(self, degrees):
+        """Add degrees to current rotation and update."""
+        self._rotation = (self._rotation + degrees) % 360
+        self._update_view()
+
+    def _update_view(self):
+        if not self._pixmap or self._pixmap.isNull():
+            self.lbl_img.setText(tr("No Image"))
+            return
+
+        transform = QTransform().rotate(self._rotation)
+        source_pix = self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
+        scaled_w = int(source_pix.width() * self._zoom_factor)
+        scaled_h = int(source_pix.height() * self._zoom_factor)
+
+        # Keep aspect ratio
+        scaled_pix = source_pix.scaled(
+            scaled_w, scaled_h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.lbl_img.setPixmap(scaled_pix)
+        self.lbl_img.resize(scaled_pix.size())
+
+    def wheelEvent(self, event):
+        # Zoom logic
+        self._auto_fit_enabled = False
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self._zoom_factor *= 1.1
+        else:
+            self._zoom_factor *= 0.9
+
+        # Clamp zoom
+        self._zoom_factor = max(0.1, min(self._zoom_factor, 5.0))
+        self._update_view()
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self._drag_start_pos = None
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start_pos:
+            delta = event.pos() - self._drag_start_pos
+            # Adjust horizontal drag direction for RTL vs LTR layouts
+            rtl = False
+            app = QApplication.instance()
+            if app and app.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+                rtl = True
+            elif self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+                rtl = True
+
+            horiz_delta = -delta.x() if not rtl else delta.x()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + horiz_delta)
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self._drag_start_pos = event.pos()
+        super().mouseMoveEvent(event)
+
+    def zoom_in(self):
+        self._auto_fit_enabled = False
+        self._zoom_factor *= 1.2
+        self._update_view()
+
+    def zoom_out(self):
+        self._auto_fit_enabled = False
+        self._zoom_factor *= 0.8
+        self._update_view()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._auto_fit_enabled:
+            self._apply_fit_to_viewport()
+
+    def _apply_fit_to_viewport(self):
+        fit_factor = self._compute_fit_factor()
+        if fit_factor is None:
+            return False
+        self._zoom_factor = fit_factor
+        self._update_view()
+        return True
+
+    def _compute_fit_factor(self):
+        if not self._pixmap or self._pixmap.isNull():
+            return None
+        viewport_size = self.viewport().size()
+        if viewport_size.width() <= 0 or viewport_size.height() <= 0:
+            return None
+
+        max_w = viewport_size.width() * 0.7
+        max_h = viewport_size.height() * 0.7
+        factor_w = max_w / self._pixmap.width()
+        factor_h = max_h / self._pixmap.height()
+        fit_factor = min(factor_w, factor_h)
+        return max(0.1, min(fit_factor, 5.0))
+
+class ManuscriptViewerWidget(QWidget):
+    """Reusable widget for displaying manuscript images with navigation."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.images_nli = []
+        self.images_ext = []
+        self.active_list = []
+        self.current_idx = 0
+        self.loader_thread = None
+        self.external_provider = None
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Top Bar (Source + Zoom)
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(5, 5, 5, 5)
+
+        self.combo_source = QComboBox()
+        self.combo_source.addItem("NLI")
+        self.combo_source.addItem("External (Cambridge/Other)")
+        self.combo_source.setVisible(False)
+        self.combo_source.currentIndexChanged.connect(self._on_source_changed)
+
+        self.combo_img_selector = QComboBox()
+        self.combo_img_selector.setVisible(False)
+        self.combo_img_selector.currentIndexChanged.connect(self._on_label_selected)
+
+        btn_zoom_out = QPushButton("-")
+        btn_zoom_out.setFixedWidth(30)
+        btn_zoom_out.clicked.connect(lambda: self.scroll_area.zoom_out())
+
+        btn_zoom_in = QPushButton("+")
+        btn_zoom_in.setFixedWidth(30)
+        btn_zoom_in.clicked.connect(lambda: self.scroll_area.zoom_in())
+
+        # Rotation controls
+        self.slider_rotation = QSlider(Qt.Orientation.Horizontal)
+        self.slider_rotation.setRange(0, 360)
+        self.slider_rotation.setValue(0)
+        self.slider_rotation.setFixedWidth(160)
+        self.slider_rotation.setToolTip(tr("Rotate image (0-360°)"))
+        self.slider_rotation.valueChanged.connect(lambda val: self.scroll_area.set_rotation(val))
+
+        btn_rot_left = QPushButton("↺")
+        btn_rot_left.setToolTip(tr("Rotate Left 90°"))
+        btn_rot_left.setFixedWidth(30)
+        btn_rot_left.clicked.connect(lambda: self.adjust_rotation(-90))
+
+        btn_rot_right = QPushButton("↻")
+        btn_rot_right.setToolTip(tr("Rotate Right 90°"))
+        btn_rot_right.setFixedWidth(30)
+        btn_rot_right.clicked.connect(lambda: self.adjust_rotation(90))
+
+        btn_rot_reset = QPushButton(tr("Reset"))
+        btn_rot_reset.setToolTip(tr("Reset rotation"))
+        btn_rot_reset.setFixedWidth(50)
+        btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
+
+        self.btn_external = QPushButton(tr("External Website"))
+        self.btn_external.setVisible(False)
+        self.btn_external.clicked.connect(self.open_external)
+
+        top_bar.addWidget(self.combo_source)
+        top_bar.addWidget(self.combo_img_selector)
+        top_bar.addStretch()
+        top_bar.addWidget(self.btn_external)
+        top_bar.addWidget(btn_rot_left)
+        top_bar.addWidget(self.slider_rotation)
+        top_bar.addWidget(btn_rot_right)
+        top_bar.addWidget(btn_rot_reset)
+        top_bar.addSpacing(10)
+        top_bar.addWidget(btn_zoom_out)
+        top_bar.addWidget(btn_zoom_in)
+
+        layout.addLayout(top_bar)
+
+        # Attribution
+        self.lbl_attribution = QLabel("")
+        self.lbl_attribution.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_attribution.setStyleSheet("font-size: 10px; color: #7f8c8d; background: transparent; margin: 0px;")
+        self.lbl_attribution.setVisible(False)
+        layout.addWidget(self.lbl_attribution)
+
+        # Image Area
+        self.scroll_area = ZoomableScrollArea()
+        layout.addWidget(self.scroll_area, 1)
+
+    def _detect_external_provider(self, meta):
+        marc = meta.get('marc', {}) if meta else {}
+        url = (marc.get('external_iiif_link') or "").lower()
+        if "cudl.lib.cam.ac.uk" in url:
+            return "cambridge"
+
+        for img in meta.get('images_ext', []) or []:
+            if "cudl.lib.cam.ac.uk" in (img.get('url', '').lower()):
+                return "cambridge"
+
+        return None
+
+    def load_images(self, meta, initial_idx=0):
+        self.external_provider = self._detect_external_provider(meta)
+
+        # Attribution
+        attr = meta.get('attribution')
+        if attr:
+            self.lbl_attribution.setText(attr)
+            self.lbl_attribution.setVisible(True)
+        else:
+            self.lbl_attribution.setVisible(False)
+
+        # meta contains 'images_nli' and 'images_ext'
+        self.images_nli = meta.get('images_nli', [])
+        self.images_ext = meta.get('images_ext', [])
+
+        # Determine default source
+        self.combo_source.blockSignals(True)
+        self.combo_source.clear()
+
+        if self.images_ext:
+            ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
+            self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
+            if self.images_nli:
+                self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+            self.active_list = self.images_ext
+            self.current_source = "ext"
+        elif self.images_nli:
+            self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+            self.active_list = self.images_nli
+            self.current_source = "nli"
+        else:
+            self.active_list = []
+            self.current_source = None
+
+        self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
+        self.combo_source.blockSignals(False)
+
+        # External Link
+        marc = meta.get('marc', {})
+        self.external_url = marc.get('external_iiif_link')
+        if self.external_url:
+            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+            self.btn_external.setText(btn_label)
+        self.btn_external.setVisible(bool(self.external_url))
+
+        self._populate_label_selector()
+
+        # Set Page
+        self.set_page(initial_idx)
+
+    def _on_source_changed(self):
+        data = self.combo_source.currentData()
+        if data == "nli":
+            self.active_list = self.images_nli
+            self.current_source = "nli"
+        else:
+            self.active_list = self.images_ext
+            self.current_source = "ext"
+
+        # Try to keep index within bounds
+        if self.current_idx >= len(self.active_list):
+            self.current_idx = 0
+
+        self._populate_label_selector()
+        self.set_page(self.current_idx)
+
+    def _resolve_url(self, base_url):
+        if not base_url: return None
+        if base_url.endswith('.jpg'): return base_url
+        return f"{base_url}/full/600,/0/default.jpg"
+
+    def _preload(self, index):
+        if index < 0 or index >= len(self.active_list): return
+        url = self.active_list[index]['url']
+        final = self._resolve_url(url)
+
+        # Spawn thread without connecting signals (just for cache)
+        # Store ref to prevent GC
+        self.preload_worker = ImageLoaderThread(final)
+        self.preload_worker.start()
+
+    def set_page(self, index):
+        if not self.active_list:
+            self.scroll_area.set_image(None)
+            self.scroll_area.lbl_img.setText(tr("No images available"))
+            return
+
+        # Bounds check
+        if index < 0: index = 0
+        if index >= len(self.active_list): index = len(self.active_list) - 1
+
+        self.current_idx = index
+        img_data = self.active_list[index]
+        base_url = img_data['url']
+
+        self.scroll_area.lbl_img.setText(tr("Loading..."))
+
+        if self.loader_thread and self.loader_thread.isRunning():
+            self.loader_thread.cancel()
+            self.loader_thread.wait()
+
+        final_url = self._resolve_url(base_url)
+
+        self.loader_thread = ImageLoaderThread(final_url)
+        self.loader_thread.image_loaded.connect(self.display_image)
+        self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
+        self.loader_thread.start()
+
+        self._sync_label_selector()
+
+        # Preload next image
+        self._preload(index + 1)
+
+    def display_image(self, image):
+        pix = QPixmap.fromImage(image)
+        self.scroll_area.set_image(pix)
+        self.slider_rotation.setValue(0)
+
+    def _populate_label_selector(self):
+        # Image selector disabled per requirements
+        self.combo_img_selector.blockSignals(True)
+        self.combo_img_selector.clear()
+        self.combo_img_selector.setVisible(False)
+        self.combo_img_selector.blockSignals(False)
+
+    def _sync_label_selector(self):
+        self.combo_img_selector.setVisible(False)
+
+    def _on_label_selected(self, combo_idx):
+        # Selector disabled
+        return
+
+    def open_external(self):
+        if self.external_url:
+            QDesktopServices.openUrl(QUrl(self.external_url))
+
+    def adjust_rotation(self, delta):
+        """Adjust rotation via slider to keep controls in sync."""
+        new_val = (self.slider_rotation.value() + delta) % 360
+        self.slider_rotation.setValue(int(new_val))
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
@@ -652,8 +1408,14 @@ class ResultDialog(QDialog):
         self.current_fl_id = None
         self.current_page_text = None
         self.current_page_uid = None
+        self.current_internal_idx = None
         
         self.current_meta_request = 0
+        self.extended_info_visible = False
+
+        # External Viewer State
+        self.ext_data = None
+        self.ext_canvases = []
 
         self.init_ui()
         self.metadata_loaded.connect(self.on_metadata_loaded)
@@ -703,18 +1465,54 @@ class ResultDialog(QDialog):
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
         btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
-        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page); nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addStretch()
+
+        # Image Label Dropdown
+        self.combo_img_labels = QComboBox()
+        self.combo_img_labels.setFixedWidth(120)
+        self.combo_img_labels.setVisible(False)
+        self.combo_img_labels.currentIndexChanged.connect(self._on_img_label_selected)
+
+        self.lbl_img_label = QLabel("")
+        self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
+
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page);
+        nav_row.addWidget(self.combo_img_labels) # Added dropdown
+        nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
-        self.btn_view_transcription = QPushButton(tr("View full transcription"))
+        self.btn_view_transcription = QPushButton(tr("Browse manuscript")) # Renamed
         self.btn_view_transcription.clicked.connect(self.open_full_transcription)
         self.btn_search_parallels = QPushButton(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
+
+        self.btn_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_ext_info.setCheckable(True)
+        self.btn_ext_info.toggled.connect(self.toggle_extended_info)
+        self.btn_ext_info.setVisible(False)
+
+        # Toggle Image Button
+        self.btn_toggle_image = QPushButton(tr("Image"))
+        self.btn_toggle_image.setCheckable(True)
+        self.btn_toggle_image.setChecked(True) # Default open
+        self.btn_toggle_image.clicked.connect(self.toggle_external_viewer)
+        self.btn_toggle_image.setVisible(False) # Hidden until images avail
+
+        # Deprecated: btn_external_view replaced/merged logic
+        self.btn_external_view = self.btn_toggle_image
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
+        action_row.addWidget(self.btn_ext_info)
+        action_row.addWidget(self.btn_toggle_image)
         action_row.addStretch()
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row)
+        self.txt_extended_info = QTextBrowser()
+        self.txt_extended_info.setVisible(False)
+        self.txt_extended_info.setMaximumHeight(200)
+        # Use standard palette (transparent background allowed) to support dark mode
+        self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
+
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addWidget(self.txt_extended_info)
         
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
@@ -722,7 +1520,10 @@ class ResultDialog(QDialog):
         header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
         
-        # --- SPLIT VIEW (Manuscript | Source) ---
+        # --- SPLIT VIEW (Manuscript | Source | External) ---
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Inner Splitter for Text (Manuscript | Source)
         self.text_splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # 1. Manuscript View (Left)
@@ -741,10 +1542,36 @@ class ResultDialog(QDialog):
 
         self.text_splitter.addWidget(ms_widget)
         self.text_splitter.addWidget(self.src_widget)
-        self.text_splitter.setStretchFactor(0, 2) # Manuscript takes more space by default
+        self.text_splitter.setStretchFactor(0, 2)
         self.text_splitter.setStretchFactor(1, 1)
         
-        main_layout.addWidget(self.text_splitter, 1)
+        self.main_splitter.addWidget(self.text_splitter)
+
+        # 3. External Viewer Pane (Initially Hidden)
+        self.external_pane = QWidget()
+        self.external_pane.setVisible(False)
+        ext_layout = QVBoxLayout(self.external_pane); ext_layout.setContentsMargins(0,0,0,0)
+
+        self.lbl_ext_attr = QLabel(tr("External Viewer"))
+        self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #ecf0f1;")
+        self.lbl_ext_attr.setWordWrap(True)
+
+        self.txt_ext_meta = QTextBrowser()
+        self.txt_ext_meta.setMaximumHeight(100)
+        self.txt_ext_meta.setStyleSheet("font-size: 11px;")
+
+        # New: Reusable Viewer Widget
+        self.ms_viewer = ManuscriptViewerWidget()
+
+        ext_layout.addWidget(self.lbl_ext_attr)
+        ext_layout.addWidget(self.txt_ext_meta)
+        ext_layout.addWidget(self.ms_viewer, 1)
+
+        self.main_splitter.addWidget(self.external_pane)
+        self.main_splitter.setStretchFactor(0, 3)
+        self.main_splitter.setStretchFactor(1, 7)
+
+        main_layout.addWidget(self.main_splitter, 1)
         
         # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
@@ -770,10 +1597,18 @@ class ResultDialog(QDialog):
     def search_for_parallels(self):
         parent = self.parent()
         if parent and hasattr(parent, "send_result_to_composition"):
+            # Trim title to first 6 words and append ... if longer
+            full_title = self.lbl_title.text() or ""
+            words = full_title.split()
+            if len(words) > 6:
+                short_title = " ".join(words[:6]) + "..."
+            else:
+                short_title = full_title
+
             parent.send_result_to_composition(
                 self.data,
                 source_text=self.current_page_text,
-                title=self.lbl_title.text(),
+                title=short_title,
             )
             self.close()
 
@@ -826,19 +1661,59 @@ class ResultDialog(QDialog):
         # Load Page & Metadata
         self.load_page(target=p)
 
+        # Preload next result
+        self._preload_next_result(idx + 1)
+
+    def _preload_next_result(self, next_idx):
+        if next_idx >= len(self.all_results): return
+        res = self.all_results[next_idx]
+
+        # Extract SID logic from load_result
+        meta = res.get('display', {})
+        parsed = self.meta_mgr.parse_full_id_components(res.get('raw_header', ''))
+        sid = parsed['sys_id'] or meta.get('id')
+
+        if not sid: return
+
+        # Trigger Enrich Fetch (caches metadata)
+        # We don't connect signals, just run it
+        self.preload_meta_worker = EnrichMetadataThread(self.meta_mgr, sid)
+        self.preload_meta_worker.start()
+
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
         
+        # Determine strict navigation source
+        # If target (Spinbox jump) is set -> Use p_num logic (target)
+        # If offset (Next/Prev) is set -> Use internal_index logic (prevents loops)
+        
+        page_data = None
+        
         if target is not None:
-            p = target
+            # Jump by number (user typed in box)
+            try: p = int(target)
+            except: p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
         else:
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=self.current_p_num, next_prev=offset)
+            # Relative Navigation (Next/Prev)
+            # Use internal index if we have it, otherwise rely on p_num
+            idx_arg = self.current_internal_idx 
+            p_arg = int(self.current_p_num) if self.current_p_num is not None else None
+            
+            page_data = self.searcher.get_browse_page(
+                self.current_sys_id, 
+                p_num=p_arg, 
+                next_prev=offset,
+                absolute_index=idx_arg # <--- THIS FIXES THE BUG
+            )
             
         if not page_data: return
 
+        # --- UPDATE STATE ---
         self.current_p_num = page_data['p_num']
+        self.current_internal_idx = page_data['internal_index'] # <--- SAVE IT
+        
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
         self.current_full_header = page_data.get('full_header', '')
@@ -853,29 +1728,33 @@ class ResultDialog(QDialog):
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
-        # --- Render Text with Highlights ---
+        # 2. Sync Image (Non-Blocking)
+        if self.btn_external_view.isChecked():
+            QTimer.singleShot(0, self.sync_external_view)
+
+        # --- Render Text ---
         raw_text = page_data['text']
-        
-        # Try to re-apply highlighting if we have a regex pattern stored in data
         pattern_str = self.data.get('highlight_pattern')
         
         if pattern_str:
             try:
-                # Compile regex again
                 regex = re.compile(pattern_str, re.IGNORECASE)
-                # Replace matches with *match* notation so htmlify can color it
-                # We use a lambda to wrap the found group with stars
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
-            except:
-                pass # If regex fails, just show plain text
+            except: pass
         
         self.text_ms.setHtml(self._htmlify(raw_text))
 
-        # Handle Metadata & Image
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
+        self.lbl_img_label.setText("")
         
+        if self.ext_data and self.current_sys_id not in self.meta_mgr.nli_cache:
+             self.ext_data = None
+             self.ext_canvases = []
+             self.btn_external_view.setVisible(False)
+             self.external_pane.setVisible(False)
+
         cached_meta = self.meta_mgr.nli_cache.get(self.current_sys_id)
         if cached_meta:
             self.apply_metadata(cached_meta)
@@ -888,6 +1767,13 @@ class ResultDialog(QDialog):
                 self.metadata_loaded.emit(request_id, meta or {})
             threading.Thread(target=worker, daemon=True).start()
 
+        if not cached_meta or 'marc' not in cached_meta:
+            self.enrich_worker = EnrichMetadataThread(self.meta_mgr, self.current_sys_id)
+            self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
+            self.enrich_worker.start()
+        else:
+            self.on_enriched_data_loaded(cached_meta)
+
     def apply_metadata(self, meta):
         # 1. Update Text Labels
         shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
@@ -899,6 +1785,148 @@ class ResultDialog(QDialog):
         # (This meta object now contains 'thumb_url' from the XML 907 $d field)
         self.fetch_image(self.current_sys_id, meta)
 
+    def toggle_extended_info(self, checked):
+        self.extended_info_visible = checked
+        self.txt_extended_info.setVisible(checked)
+        self.btn_ext_info.setText(tr("Hide Extended Info") if checked else tr("Show Extended Info"))
+
+    def toggle_external_viewer(self, checked):
+        self.external_pane.setVisible(checked)
+        if checked:
+            QTimer.singleShot(0, self.sync_external_view)
+
+    def _on_img_label_selected(self):
+        # Handle jump from dropdown
+        fl_val = self.combo_img_labels.currentData()
+        if fl_val == -1: return
+
+        try:
+            page_data = self.searcher.get_browse_page_by_fl(str(fl_val), self.current_sys_id)
+            if page_data:
+                target_p = page_data['p_num']
+                self.load_page(target=target_p)
+        except Exception:
+            pass
+
+    def on_enriched_data_loaded(self, meta):
+        if not meta: return
+        if self.current_sys_id not in self.meta_mgr.nli_cache: return
+
+        # 1. Update Image Labels & Dropdown
+        fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
+        canvas_map = meta.get('canvas_map', {})
+        label = canvas_map.get(fl_digits)
+        self.lbl_img_label.setText(f"({label})" if label else "")
+
+        # Populate combo box with sorted labels
+        self.combo_img_labels.blockSignals(True)
+        self.combo_img_labels.clear()
+
+        # Filter map to only show labels relevant to current manuscript context if possible,
+        # but here we likely get map for full manuscript.
+        # We need to map Label -> Page Number.
+        # NLI canvas map is FL -> Label.
+        # We need a way to jump to page P based on Label selection.
+        # Since we don't have direct P->FL mapping for all pages in RAM unless loaded,
+        # we might just list them.
+        # For NLI, P usually correlates with sequence index + 1.
+
+        has_labels = False
+        if canvas_map:
+            self.combo_img_labels.addItem(tr("Select Image"), -1)
+            # Sort by FL for approximate order
+            for fl, lbl in sorted(canvas_map.items()):
+                # We need to find which P corresponds to this FL.
+                # This is tricky without full manuscript map.
+                # However, SearchEngine.get_browse_page_by_fl can find P from FL.
+                self.combo_img_labels.addItem(lbl, fl)
+            has_labels = True
+
+        self.combo_img_labels.setVisible(has_labels)
+        self.combo_img_labels.blockSignals(False)
+
+        # 2. Populate External / Image Viewer
+        has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
+
+        self.btn_toggle_image.setVisible(has_images)
+
+        if has_images:
+            # Show viewer by default
+            self.external_pane.setVisible(True)
+            self.btn_toggle_image.setChecked(True)
+
+            # Metadata for side pane
+            ext_meta = meta.get('external_meta', {})
+
+            self.lbl_ext_attr.setVisible(False)
+
+            meta_html = ""
+            for k, v in ext_meta.items():
+                meta_html += f"<b>{k}:</b> {v}<br>"
+            self.txt_ext_meta.setHtml(meta_html)
+            self.txt_ext_meta.setVisible(bool(meta_html))
+
+            # Load images into widget
+            try: initial_idx = int(self.current_p_num) - 1
+            except: initial_idx = 0
+
+            self.ms_viewer.load_images(meta, initial_idx)
+        else:
+            self.external_pane.setVisible(False)
+            self.btn_toggle_image.setChecked(False)
+
+        # 3. Build Extended Info HTML (Text)
+        marc = meta.get('marc', {})
+        if not marc and not meta.get('physical_desc'):
+            self.btn_ext_info.setVisible(False)
+            return
+
+        # ... (rest of extended info logic) ...
+        html = "<div style='font-family:Arial;'>"
+        date_val = marc.get('date');
+        if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys: html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        eng_title = marc.get('english_title')
+        if eng_title: html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+
+        subjects = marc.get('subjects', [])
+        if subjects: html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+
+        notes = marc.get('notes', [])
+        if notes:
+            html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for n in notes: html += f"<li>{n}</li>"
+            html += "</ul></p>"
+
+        people = marc.get('people', [])
+        if people: html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+
+        bib = marc.get('bibliography', [])
+        if bib:
+            html += f"<p><b>{tr('Bibliography')}:</b><ul>"
+            for b in bib: html += f"<li>{b}</li>"
+            html += "</ul></p>"
+
+        html += "</div>"
+        self.txt_extended_info.setHtml(html)
+        self.btn_ext_info.setVisible(True)
+
+        self.lbl_title.setText(meta.get('title', ''))
+        shelf = meta.get('shelfmark')
+        if shelf and shelf != "Unknown":
+            library = marc.get('current_owner')
+            if library: shelf = f"{library} | {shelf}"
+            self.lbl_shelf.setText(shelf)
+
+    def sync_external_view(self):
+        # Determine index
+        try: idx = int(self.current_p_num) - 1
+        except: idx = 0
+        self.ms_viewer.set_page(idx)
+
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
             return
@@ -909,6 +1937,10 @@ class ResultDialog(QDialog):
         if img_thread and img_thread.isRunning():
             img_thread.cancel()
             img_thread.wait()
+
+        if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
+            self.ext_img_thread.cancel()
+            self.ext_img_thread.wait()
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
@@ -1055,6 +2087,7 @@ class GenizahGUI(QMainWindow):
         self.searcher = None
         self.indexer = None
         self.ai_mgr = None
+        self.lab_engine = None
 
         self.last_results = []
         self.last_search_query = ""
@@ -1085,8 +2118,10 @@ class GenizahGUI(QMainWindow):
         self.group_thread = None
         self.is_searching = False
         self.is_comp_running = False
+        self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
+        self.current_browse_internal_idx = None
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -1095,14 +2130,11 @@ class GenizahGUI(QMainWindow):
         self.browse_img_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
-        self._connectivity_thread = None
-        self._connectivity_start_time = 0
-        self._last_connectivity_state = None
-        self._last_connectivity_ui_state = {"status": "degraded", "details": [tr("Checking connectivity...")]}
+        self.comp_thread = None 
+        self.comp_worker = None
 
 
         self.init_ui()
-        self.init_connectivity_monitor()
 
         # Step 2: Start heavy initialization in background
         self.status_label.setText(tr("Initializing components... Please wait."))
@@ -1118,87 +2150,6 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
 
-    def init_connectivity_monitor(self):
-        self.connectivity_timer = QTimer(self)
-        self.connectivity_timer.setInterval(60_000)
-        self.connectivity_timer.timeout.connect(self.refresh_connectivity_status)
-        self.refresh_connectivity_status()
-        self.connectivity_timer.start()
-
-    def refresh_connectivity_status(self):
-        # Manage the worker thread
-        if self._connectivity_thread and self._connectivity_thread.isRunning():
-            # If stuck for > 30 seconds, kill and restart
-            if time.time() - self._connectivity_start_time > 30:
-                logger.warning("Connectivity thread stuck (>30s). Terminating.")
-                self._connectivity_thread.terminate()
-                self._connectivity_thread.wait()
-            else:
-                # Still running normally, skip this check cycle
-                return
-
-        self._connectivity_start_time = time.time()
-        self._connectivity_thread = ConnectivityThread(self.ai_mgr)
-        self._connectivity_thread.finished_signal.connect(self._on_connectivity_finished)
-        self._connectivity_thread.start()
-
-    def _on_connectivity_finished(self, statuses):
-        if "error" in statuses:
-            logger.error("Connectivity check error: %s", statuses["error"])
-            state = {"status": "degraded", "details": [tr("Check failed")]}
-        else:
-            logger.debug("Connectivity raw statuses: %r", statuses)
-            state = self._summarize_connectivity(statuses)
-
-        self._last_connectivity_ui_state = state
-        state_key = (state['status'], tuple(state['details']))
-
-        if state_key != self._last_connectivity_state:
-            self._last_connectivity_state = state_key
-            readable_details = "; ".join(state['details']) if state['details'] else "All services healthy"
-            logger.info("Connectivity state changed to %s (%s)", state['status'], readable_details)
-
-        self._update_connectivity_ui(state)
-
-    def _summarize_connectivity(self, statuses):
-        def is_reachable(obj, default=False):
-            if isinstance(obj, dict):
-                return bool(obj.get("reachable", default))
-            return bool(obj) if obj is not None else default
-
-        offline = not is_reachable(statuses.get("network"), default=False)
-
-        degraded = []
-        if not is_reachable(statuses.get("nli"), default=True):
-            degraded.append(tr("NLI service unavailable"))
-        if "ai_provider" in statuses and not is_reachable(statuses.get("ai_provider"), default=True):
-            degraded.append(tr("AI provider unavailable"))
-
-        if offline:
-            return {"status": "offline", "details": [tr("No internet connection")] + degraded}
-        if degraded:
-            return {"status": "degraded", "details": degraded}
-        return {"status": "online", "details": []}
-
-
- 
-    def _update_connectivity_ui(self, state):
-        status = state['status']
-        if status == "offline":
-            text = tr("Offline")
-            color = "#c0392b"
-        elif status == "degraded":
-            text = tr("Degraded")
-            color = "#f39c12"
-        else:
-            text = tr("Online")
-            color = "#27ae60"
-
-        tooltip = "\n".join(state['details']) if state['details'] else tr("All external services responding.")
-        self.connectivity_label.setText(text)
-        self.connectivity_label.setStyleSheet(f"padding:6px; border-radius:6px; color: white; background-color: {color};")
-        self.connectivity_label.setToolTip(tooltip)
-
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
         try:
             self.meta_mgr = meta_mgr
@@ -1206,6 +2157,20 @@ class GenizahGUI(QMainWindow):
             self.searcher = searcher
             self.indexer = indexer
             self.ai_mgr = ai_mgr
+
+            # Init Lab Engine (lightweight init)
+            self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
+
+            # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
+            if hasattr(self, 'lab_panel_search'):
+                self.lab_panel_search.set_engine(self.lab_engine)
+            else:
+                logger.warning("lab_panel_search not found during startup finish")
+
+            if hasattr(self, 'lab_panel_comp'):
+                self.lab_panel_comp.set_engine(self.lab_engine)
+            else:
+                logger.warning("lab_panel_comp not found during startup finish")
 
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
@@ -1215,7 +2180,6 @@ class GenizahGUI(QMainWindow):
                 self.combo_provider.setCurrentText(self.ai_mgr.provider)
                 self.txt_model.setText(self.ai_mgr.model_name)
                 self.txt_api_key.setText(self.ai_mgr.api_key)
-                self.refresh_connectivity_status()
 
             # Enable UI interactions
             self.btn_search.setEnabled(True)
@@ -1272,10 +2236,34 @@ class GenizahGUI(QMainWindow):
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
-        top = QHBoxLayout()
+
+        # Top Container with Multi-Row Layout
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Row 1: Query & Search Buttons
+        row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.returnPressed.connect(self.toggle_search)
         
+        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
+        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
+        self.btn_search.setEnabled(False)
+
+        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
+        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
+        self.btn_ai.clicked.connect(self.open_ai)
+        self.btn_ai.setEnabled(False)
+
+        row1.addWidget(QLabel(tr("Query:")))
+        row1.addWidget(self.query_input)
+        row1.addWidget(self.btn_search)
+        row1.addWidget(self.btn_ai)
+
+        # Row 2: Search Parameters & Lab Mode
+        row2 = QHBoxLayout()
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([tr("Exact"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex"), tr("Title"), tr("Shelfmark")])
         # Tooltips
@@ -1291,14 +2279,16 @@ class GenizahGUI(QMainWindow):
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
         
-        self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
-        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
-        self.btn_search.setEnabled(False)
-        
-        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
-        self.btn_ai.clicked.connect(self.open_ai)
-        self.btn_ai.setEnabled(False)
+        self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
+        self.btn_lab_mode_toggle.setCheckable(True)
+        self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
+        self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
+
+        # Deep Scan Checkbox
+        self.chk_lab_deep = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
+        self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
         # Help Button
         btn_help = QPushButton("?")
@@ -1306,46 +2296,70 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
 
-        top.addWidget(QLabel(tr("Query:"))); top.addWidget(self.query_input, 2)
-        top.addWidget(QLabel(tr("Mode:"))); top.addWidget(self.mode_combo)
-        top.addWidget(QLabel(tr("Gap:"))); top.addWidget(self.gap_input)
-        top.addWidget(self.btn_search); top.addWidget(self.btn_ai); top.addWidget(btn_help)
-        layout.addLayout(top)
+        row2.addWidget(QLabel(tr("Mode:")))
+        row2.addWidget(self.mode_combo)
+        row2.addWidget(QLabel(tr("Gap:")))
+        row2.addWidget(self.gap_input)
+        row2.addWidget(self.btn_lab_mode_toggle)
+        row2.addWidget(self.chk_lab_deep)
+        row2.addStretch()
+        row2.addWidget(btn_help)
+
+        top_layout.addLayout(row1)
+        top_layout.addLayout(row2)
+        layout.addWidget(top_container)
+
+        self.lab_panel_search = LabPanel(self, 'search')
+        layout.addWidget(self.lab_panel_search)
         
         self.search_progress = QProgressBar(); self.search_progress.setVisible(False)
         layout.addWidget(self.search_progress)
         
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels([tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
-        self.results_table.setColumnWidth(0, 135) 
-        self.results_table.setColumnWidth(1, 175)
-        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        # Results Table Setup
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(7)
+        self.results_table.setHorizontalHeaderLabels(["", tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+
+        # Custom Header
+        self.chk_search_header = CheckBoxHeader(self.results_table)
+        self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
+        self.results_table.setHorizontalHeader(self.chk_search_header)
+
+        self.results_table.setColumnWidth(0, 30) # Checkbox column
+        self.results_table.setColumnWidth(1, 135)
+        self.results_table.setColumnWidth(2, 175)
+        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        # Ensure column 0 is not sortable to avoid confusion with check action
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
+        self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         
         self.results_placeholder = QLabel(tr("Please wait while components load..."))
         self.results_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_placeholder.setWordWrap(True)
         self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b;")
 
+        # Container for table
+        self.table_container = QWidget()
+        table_layout = QVBoxLayout(self.table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
+        table_layout.addWidget(self.results_table)
+
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
-        self.results_stack.addWidget(self.results_table)
+        self.results_stack.addWidget(self.table_container)
 
         results_container = QWidget()
         results_container.setLayout(self.results_stack)
         layout.addWidget(results_container)
 
         bot = QHBoxLayout()
-        self.connectivity_label = QLabel(tr("Checking connectivity..."))
-        self.connectivity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.connectivity_label.setMinimumWidth(150)
-        self.connectivity_label.setStyleSheet("padding:6px; border-radius:6px; color: white; background-color: #f39c12;")
-        QTimer.singleShot(0, lambda: self._update_connectivity_ui(getattr(self, "_last_connectivity_ui_state", {"status": "online", "details": []})))
 
         self.status_label = QLabel(tr("Ready."))
-        lbl_export = QLabel(tr("Export Results") + ":")
+        self.lbl_search_export = QLabel(tr("Export Results") + ":")
         
         # Separate export buttons
         self.btn_exp_xlsx = QPushButton("XLSX")
@@ -1364,26 +2378,12 @@ class GenizahGUI(QMainWindow):
         self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt]
         for b in self.export_buttons: b.setEnabled(False)
 
-        self.btn_reload_meta = QPushButton()
-        self.btn_reload_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
-        self.btn_reload_meta.setToolTip("Reload shelfmark/title metadata")
-        self.btn_reload_meta.clicked.connect(self.reload_metadata)
-
-        self.btn_stop_meta = QPushButton()
-        self.btn_stop_meta.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserStop))
-        self.btn_stop_meta.setToolTip("Stop metadata loading")
-        self.btn_stop_meta.clicked.connect(self.stop_metadata_loading)
-        self.btn_stop_meta.setEnabled(False)
-
         # Add controls to status row
-        bot.addWidget(self.connectivity_label)
         bot.addWidget(self.status_label, 1)
-        bot.addWidget(self.btn_reload_meta)
-        bot.addWidget(self.btn_stop_meta)
 
         # Append export controls to the right
         bot.addWidget(QLabel("|"))
-        bot.addWidget(lbl_export)
+        bot.addWidget(self.lbl_search_export)
         bot.addWidget(self.btn_exp_xlsx)
         bot.addWidget(self.btn_exp_csv)
         bot.addWidget(self.btn_exp_txt)
@@ -1394,8 +2394,8 @@ class GenizahGUI(QMainWindow):
 
     def set_results_loading(self, is_loading: bool):
         """Toggle the search results placeholder while components initialize."""
-        if hasattr(self, "results_stack") and hasattr(self, "results_placeholder") and hasattr(self, "results_table"):
-            target = self.results_placeholder if is_loading else self.results_table
+        if hasattr(self, "results_stack") and hasattr(self, "results_placeholder") and hasattr(self, "table_container"):
+            target = self.results_placeholder if is_loading else self.table_container
             self.results_stack.setCurrentWidget(target)
 
     def create_composition_tab(self):
@@ -1406,6 +2406,10 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
+        # Load Button moved to top row
+        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        top_row.addWidget(btn_load)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -1418,18 +2422,21 @@ class GenizahGUI(QMainWindow):
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
 
+        # Single Row for Controls
         cr = QHBoxLayout()
-        btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
 
-        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
-        btn_exclude.clicked.connect(self.open_exclude_dialog)
-
-        btn_filter_text = QPushButton(tr("Filter Text"))
-        btn_filter_text.clicked.connect(self.open_filter_dialog)
-
+        # 1. Exclude & Filter
+        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
+        self.lbl_comp_status = QLabel("")
 
+        cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
+        cr.addWidget(self.lbl_exclude_status)
+        cr.addWidget(self.lbl_comp_status)
+
+        # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         
@@ -1446,24 +2453,43 @@ class GenizahGUI(QMainWindow):
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
-        self.chk_comp_flat = QCheckBox(tr("Sort by System ID/Shelfmark only"))
+        # Shortened Text
+        self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
+        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
 
-        self.btn_comp_run = QPushButton(tr("Analyze Composition")); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        # 3. Lab & Action
+        self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
+        self.btn_lab_mode_toggle_comp.setCheckable(True)
+        self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
+        self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
+
+        self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
+        self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
+        self.chk_lab_deep_comp.setEnabled(False)
+        self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
+
+        # Shortened Text
+        self.btn_comp_run = QPushButton(tr("Analyze")); self.btn_comp_run.clicked.connect(self.toggle_composition)
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
         self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
 
-        cr.addWidget(btn_load); cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
-        cr.addWidget(self.lbl_exclude_status)
-        cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
-        cr.addWidget(self.btn_comp_run); cr.addWidget(self.btn_comp_recursive)
+        cr.addWidget(self.btn_lab_mode_toggle_comp)
+        cr.addWidget(self.chk_lab_deep_comp)
+        cr.addWidget(self.btn_comp_run)
+        cr.addWidget(self.btn_comp_recursive)
+
         in_l.addLayout(cr)
+
+        self.lab_panel_comp = LabPanel(self, 'comp')
+        in_l.addWidget(self.lab_panel_comp)
+
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
@@ -1489,7 +2515,7 @@ class GenizahGUI(QMainWindow):
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
         header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
@@ -1501,12 +2527,28 @@ class GenizahGUI(QMainWindow):
         context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
+        header.setStretchLastSection(True)
 
-        self.comp_tree.itemDoubleClicked.connect(self.show_comp_detail)
+        self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
+        self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
+        self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
+
+        # Use CheckBoxHeader for tree
+        self.chk_comp_header = CheckBoxHeader(self.comp_tree)
+        self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
+        self.comp_tree.setHeader(self.chk_comp_header)
+        comp_header = self.comp_tree.header()
+        comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
+        comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
+        comp_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
+        comp_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
+        comp_header.setStretchLastSection(True)
+
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
-        exp_layout.addWidget(QLabel(tr("Save Report")))
+        self.lbl_comp_export = QLabel(tr("Save Report"))
+        exp_layout.addWidget(self.lbl_comp_export)
         
         self.btn_comp_xlsx = QPushButton("XLSX")
         self.btn_comp_xlsx.clicked.connect(lambda: self.export_comp_report('xlsx'))
@@ -1533,96 +2575,195 @@ class GenizahGUI(QMainWindow):
         return panel
 
     def create_browse_tab(self):
-        panel = QWidget(); layout = QVBoxLayout()
+        panel = QWidget(); layout = QVBoxLayout(panel)
         
-        # --- Top Area ---
-        top_container = QWidget(); top_container.setFixedHeight(120)
-        top_layout = QHBoxLayout(top_container); top_layout.setContentsMargins(0, 0, 0, 0)
+        # --- Top Area: Metadata (Gray Bar) ---
+        top_container = QFrame();
+        top_container.setFrameShape(QFrame.Shape.StyledPanel)
         
-        # Left Side
-        left_col = QVBoxLayout(); left_col.setSpacing(5); left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Row 1: Search Inputs
+        row1 = QHBoxLayout()
+        self.btn_prev_ms = QPushButton("◀")
+        self.btn_prev_ms.setToolTip(tr("Previous Manuscript (File Order)"))
+        self.btn_prev_ms.setFixedWidth(25)
+        self.btn_prev_ms.clicked.connect(lambda: self.navigate_manuscript(-1))
+
+        self.btn_next_ms = QPushButton("▶")
+        self.btn_next_ms.setToolTip(tr("Next Manuscript (File Order)"))
+        self.btn_next_ms.setFixedWidth(25)
+        self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
         
-        # Row 1: Search
-        search_row = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
+        self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
         self.browse_fl_input.setFixedWidth(140)
-        self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50); self.btn_browse_go.clicked.connect(self.browse_load)
+
+        self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50)
+        self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
+        
         self.browse_sys_input.returnPressed.connect(self.browse_load)
+        self.browse_shelf_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
-        search_row.addWidget(QLabel(tr("System ID:"))); search_row.addWidget(self.browse_sys_input)
-        search_row.addWidget(QLabel(tr("FL:"))); search_row.addWidget(self.browse_fl_input)
-        search_row.addWidget(self.btn_browse_go)
+        self.browse_sys_input.textEdited.connect(lambda _t: self._set_last_browse_field("sys"))
+        self.browse_shelf_input.textEdited.connect(lambda _t: self._set_last_browse_field("shelf"))
+        self.browse_fl_input.textEdited.connect(lambda _t: self._set_last_browse_field("fl"))
         
-        # Row 2: Metadata
-        self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
-        self.browse_info_lbl.setStyleSheet("font-size: 13px;") 
-        self.browse_info_lbl.setWordWrap(True)
-        self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.btn_b_catalog = QPushButton(tr("Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
+        self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
         
-        # Row 3: Buttons (Catalog | Continuous | Save)
-        btn_row = QHBoxLayout()
+        self.btn_b_save = QPushButton(tr("Save")); self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
+        self.btn_b_save.clicked.connect(self.browse_save_full); self.btn_b_save.setEnabled(False)
         
-        self.btn_b_catalog = QPushButton(tr("Ktiv"))
-        self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
-        self.btn_b_catalog.clicked.connect(self.browse_open_catalog)
-        self.btn_b_catalog.setEnabled(False)
-        
+        # View All Button
         self.btn_b_all = QPushButton(tr("View All"))
-        self.btn_b_all.setToolTip(tr("Show full text continuously (Infinite Scroll)"))
-        self.btn_b_all.clicked.connect(self.browse_load_all)
+        self.btn_b_all.setCheckable(True)
+        self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
         self.btn_b_all.setEnabled(False)
-        self.btn_b_all.setStyleSheet("font-weight: bold; color: #2980b9;")
+        
+        row1.addWidget(self.btn_prev_ms)    
+        row1.addWidget(QLabel(tr("System ID:")))        
+        row1.addWidget(self.browse_sys_input)    
+        row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
+        row1.addWidget(self.btn_next_ms)
+        row1.addSpacing(10)
+        row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
+        row1.addWidget(self.btn_browse_go)
+        row1.addSpacing(20)
+        row1.addWidget(self.btn_b_all)
+        row1.addWidget(self.btn_b_catalog)
+        row1.addWidget(self.btn_b_save)
+        row1.addStretch()
 
-        self.btn_b_save = QPushButton(tr("Save"))
-        self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
-        self.btn_b_save.clicked.connect(self.browse_save_full)
-        self.btn_b_save.setEnabled(False)
-
-        btn_row.addWidget(self.btn_b_catalog)
-        btn_row.addWidget(self.btn_b_all)
-        btn_row.addWidget(self.btn_b_save)
-        btn_row.addStretch()
-
+        # Help
         btn_browse_help = QPushButton("?")
         btn_browse_help.setFixedWidth(30)
         btn_browse_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_browse_help.clicked.connect(lambda: self.open_help_center(anchor="browse"))
-        btn_row.addWidget(btn_browse_help)
+        row1.addWidget(btn_browse_help)
 
-        left_col.addLayout(search_row)
-        left_col.addWidget(self.browse_info_lbl)
-        left_col.addLayout(btn_row)
-        
-        # Right Side: Thumbnail
-        self.browse_thumb = QLabel(tr("No Preview"))
-        self.browse_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.browse_thumb.setFixedSize(110, 110)
-        self.browse_thumb.setStyleSheet("border: 1px solid #bdc3c7; background: #ecf0f1; font-size: 9px;")
-        self.browse_thumb.setScaledContents(True)
+        top_layout.addLayout(row1)
 
-        top_layout.addLayout(left_col, 1)
-        top_layout.addWidget(self.browse_thumb)
+        # Row 2: Metadata Display (Compact)
+        self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
+        self.browse_info_lbl.setWordWrap(True)
+        self.browse_info_lbl.setStyleSheet("font-size: 12px; color: #2c3e50;")
+        self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        top_layout.addWidget(self.browse_info_lbl)
+
         layout.addWidget(top_container)
-        
-        self.browse_title_lbl = QLabel(); self.browse_title_lbl.setVisible(False)
 
-        # Main Text Browser
-        self.browse_text = QTextBrowser(); self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.browse_text.setFont(QFont("SBL Hebrew", 16))
-        layout.addWidget(self.browse_text)
-        
-        # Navigation Footer
-        nav = QHBoxLayout()
-        self.btn_b_prev = QPushButton(tr("<< Prev")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
-        self.btn_b_next = QPushButton(tr("Next >>")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
-        self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
+        # --- Main Splitter (Left: Text, Right: Images) ---
+        self.browse_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Text Browser
+        text_widget = QWidget(); text_layout = QVBoxLayout(text_widget); text_layout.setContentsMargins(0,0,0,0)
+
+        # Navigation Bar (Above Text)
+        nav_bar = QHBoxLayout()
+        self.btn_b_prev = QPushButton(tr("<< Prev Page")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
+        self.btn_b_next = QPushButton(tr("Next Page >>")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
         self.lbl_page_count = QLabel("0/0")
-        nav.addWidget(self.btn_b_prev); nav.addStretch(); nav.addWidget(self.lbl_page_count); nav.addStretch(); nav.addWidget(self.btn_b_next)
-        layout.addLayout(nav); panel.setLayout(layout)
+
+        self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
+
+        nav_bar.addWidget(self.btn_b_prev); nav_bar.addStretch(); nav_bar.addWidget(self.lbl_page_count); nav_bar.addStretch(); nav_bar.addWidget(self.btn_b_next)
+        text_layout.addLayout(nav_bar)
+
+        self.browse_text = QTextBrowser()
+        self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.browse_text.setFont(QFont("SBL Hebrew", 16))
+        text_layout.addWidget(self.browse_text)
+        
+        # Right: Image Viewer
+        self.browse_viewer = ManuscriptViewerWidget()
+
+        self.browse_splitter.addWidget(text_widget)
+        self.browse_splitter.addWidget(self.browse_viewer)
+        self.browse_splitter.setStretchFactor(0, 1)
+        self.browse_splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(self.browse_splitter, 1)
+
+        # Dummy placeholders
+        self.browse_thumb = QLabel()
+        self.btn_b_ext = QPushButton()
+        self.browse_side_panel = QTextBrowser()
+
         return panel
-    
+
+    def on_browse_enriched_loaded(self, meta):
+        if not meta: return
+        if self.current_browse_sid not in self.meta_mgr.nli_cache: return
+
+        # 1. Update Info Label (Top Bar)
+        marc = meta.get('marc', {})
+        shelf = meta.get('shelfmark')
+        title = meta.get('title')
+        if shelf and shelf != "Unknown":
+            library = marc.get('current_owner')
+            if library: shelf = f"{library} | {shelf}"
+
+        label_text = f"<b>{shelf or ''}</b>"
+        if title: label_text += f" | {title}"
+        if meta.get('physical_desc'): label_text += f" | {meta['physical_desc']}"
+        self.browse_info_lbl.setText(label_text)
+
+        # 2. Populate Image Viewer (using new logic)
+        try: idx = int(self.current_browse_p) - 1
+        except: idx = 0
+        self.browse_viewer.load_images(meta, idx)
+
+        # 3. Enable buttons
+        self.btn_b_catalog.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
+        self.btn_b_all.setEnabled(True)
+
+        # 4. Trigger Page Load to show text (IMPORTANT)
+        self.browse_load_page()
+
+    def toggle_browse_view_all(self, checked):
+        if checked:
+            self.browse_viewer.setVisible(False)
+            self.browse_load_all()
+        else:
+            self.browse_viewer.setVisible(True)
+            self.browse_load_page()
+
+    def _set_last_browse_field(self, field):
+        self.last_browse_field = field
+
+    def browse_load_page(self):
+        """Load single page text and sync viewer."""
+        if not self.current_browse_sid: return
+
+        p = self.current_browse_p or 1
+        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p)
+
+        if not page_data:
+            self.browse_text.setText(tr("Page not found."))
+            return
+
+        self.current_browse_p = page_data['p_num']
+
+        # Update Nav
+        self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
+        self.btn_b_next.setEnabled(page_data['current_idx'] < page_data['total_pages'])
+        self.lbl_page_count.setText(f"{page_data['current_idx']} / {page_data['total_pages']}")
+
+        # Update Text
+        raw_text = page_data['text']
+        html = raw_text.replace("\n", "<br>")
+        self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
+
+        # Sync Image Viewer
+        try: idx = int(self.current_browse_p) - 1
+        except: idx = 0
+        self.browse_viewer.set_page(idx)
+
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
         if not self.current_browse_sid: return
@@ -1635,6 +2776,10 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
+        # Get enriched map if available
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        canvas_map = meta.get('canvas_map', {})
+
         html_content = []
         for p in pages:
             # Anchor for scrolling
@@ -1643,10 +2788,17 @@ class GenizahGUI(QMainWindow):
             # Visual Separator
             img_lbl = tr("Image")
             fl_id = p.get('fl_id')
+
+            # Resolve Label
+            fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+            label = canvas_map.get(fl_digits, "")
+
             fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+            label_suffix = f" - {label}" if label else ""
+
             separator = f"""
             <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}{fl_suffix}</b>
+                <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
             </div>
             """
             
@@ -1711,6 +2863,9 @@ class GenizahGUI(QMainWindow):
                 f.write(f"--- Page {p['p_num']} ---\n")
                 f.write(p['text'])
                 f.write("\n\n")
+            lab_config = self._get_lab_config_block()
+            if lab_config:
+                f.write(lab_config)
         
         QMessageBox.information(self, tr("Saved"), tr("Manuscript saved to:\n{}").format(path))
     
@@ -1909,22 +3064,41 @@ class GenizahGUI(QMainWindow):
 
     def _default_report_path(self, hint, fallback):
         filename = self._sanitize_filename(hint, fallback)
-        os.makedirs(Config.REPORTS_DIR, exist_ok=True)
-        return os.path.join(Config.REPORTS_DIR, f"{filename}.txt")
+
+        # Lab Mode: save to Lab Dir
+        base_dir = Config.REPORTS_DIR
+        if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked():
+            base_dir = os.path.join(Config.BASE_DIR, "Reports")
+
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, f"{filename}.txt")
 
     def _get_credit_header(self):
-        
         english_text = (
             "Generated by Genizah Search Pro\n"
             "Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)\n"
             "Dataset available at: https://doi.org/10.5281/zenodo.17734473\n"
-            "================================================================================\n\n"
+            "================================================================================\n"
         )
 
+        final_text = english_text
         if CURRENT_LANG == 'he':
-            return tr("REPORT_CREDIT_TXT")
+            final_text = tr("REPORT_CREDIT_TXT")
             
-        return english_text
+        return final_text + "\n"
+
+    def _get_lab_config_block(self):
+        if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
+            settings_dump = json.dumps({
+                'custom_variants': self.lab_engine.settings.custom_variants,
+                'candidate_limit': self.lab_engine.settings.candidate_limit,
+                'min_should_match': self.lab_engine.settings.min_should_match,
+                'gap_penalty': self.lab_engine.settings.gap_penalty,
+                'ignore_matres': self.lab_engine.settings.ignore_matres,
+                'phonetic_expansion': self.lab_engine.settings.phonetic_expansion,
+            }, indent=2, ensure_ascii=False)
+            return f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
+        return ""
     
     # --- LOGIC ---
     def open_ai(self):
@@ -1933,6 +3107,63 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
+
+    def update_lab_ui_state(self, checked):
+        """Disable standard controls when Lab Mode is active."""
+        # Search Tab
+        if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
+        if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
+        if hasattr(self, 'btn_ai'): self.btn_ai.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep'): self.chk_lab_deep.setEnabled(checked)
+
+        # Composition Tab
+        if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
+        if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
+        if hasattr(self, 'chk_lab_deep_comp'): self.chk_lab_deep_comp.setEnabled(checked)
+
+    def on_deep_scan_toggled_search(self, checked):
+        if hasattr(self, 'chk_lab_deep_comp'):
+            self.chk_lab_deep_comp.blockSignals(True)
+            self.chk_lab_deep_comp.setChecked(checked)
+            self.chk_lab_deep_comp.blockSignals(False)
+
+    def on_deep_scan_toggled_comp(self, checked):
+        if hasattr(self, 'chk_lab_deep'):
+            self.chk_lab_deep.blockSignals(True)
+            self.chk_lab_deep.setChecked(checked)
+            self.chk_lab_deep.blockSignals(False)
+
+    def on_lab_mode_toggled_search(self, checked):
+        # Show/Hide Panel
+        if hasattr(self, 'lab_panel_search'):
+            self.lab_panel_search.setVisible(checked)
+
+        # Sync Comp Button
+        if hasattr(self, 'btn_lab_mode_toggle_comp'):
+            self.btn_lab_mode_toggle_comp.blockSignals(True)
+            self.btn_lab_mode_toggle_comp.setChecked(checked)
+            self.btn_lab_mode_toggle_comp.blockSignals(False)
+            # Ensure comp panel visibility matches too
+            if hasattr(self, 'lab_panel_comp'):
+                self.lab_panel_comp.setVisible(checked)
+
+        self.update_lab_ui_state(checked)
+
+    def on_lab_mode_toggled_comp(self, checked):
+        # Show/Hide Panel
+        if hasattr(self, 'lab_panel_comp'):
+            self.lab_panel_comp.setVisible(checked)
+
+        # Sync Search Button
+        if hasattr(self, 'btn_lab_mode_toggle'):
+            self.btn_lab_mode_toggle.blockSignals(True)
+            self.btn_lab_mode_toggle.setChecked(checked)
+            self.btn_lab_mode_toggle.blockSignals(False)
+            # Ensure search panel visibility matches too
+            if hasattr(self, 'lab_panel_search'):
+                self.lab_panel_search.setVisible(checked)
+
+        self.update_lab_ui_state(checked)
 
     def toggle_search(self):
         if not self.searcher: return
@@ -1965,9 +3196,25 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
 
-        self.search_thread = SearchThread(self.searcher, query, mode, gap)
+        if self.btn_lab_mode_toggle.isChecked():
+            if not self.lab_engine:
+                QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
+                self.reset_ui()
+                return
+
+            deep = self.chk_lab_deep.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
+        else:
+            self.search_thread = SearchThread(self.searcher, query, mode, gap)
+
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
+
+        if hasattr(self.search_thread, 'status_signal'):
+             self.search_thread.status_signal.connect(self.status_label.setText)
+
         self.search_thread.error_signal.connect(self.on_error)
         self.search_thread.start()
 
@@ -1981,8 +3228,22 @@ class GenizahGUI(QMainWindow):
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
 
+    def render_asterisks_to_html(self, text):
+        if not text: return ""
+        # Escape HTML chars
+        t = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Convert *word* to highlighted span
+        t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
+        return f"<div dir='rtl'>{t}</div>"
+
     def on_search_finished(self, results):
         self.reset_ui()
+        # Reset Select All Checkbox
+        self.chk_search_header.blockSignals(True)
+        self.chk_search_header.setChecked(False)
+        self.chk_search_header.blockSignals(False)
+        self.lbl_search_export.setText(tr("Export Results") + ":")
+
         if not results:
             self.status_label.setText(tr("No results found."))
             self.last_results = []
@@ -1991,14 +3252,28 @@ class GenizahGUI(QMainWindow):
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
-            self.btn_stop_meta.setEnabled(False)
             return
 
-        self.status_label.setText(tr("Found {}. Loading metadata...").format(len(results)))
         self.last_results = results 
+
+        # Display Limit Logic (Lab Mode)
+        display_limit = len(results)
+        if self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
+            display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500)
+
+        visible_count = min(len(results), display_limit)
+
+        if visible_count < len(results):
+            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(visible_count, len(results)))
+            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
+        else:
+            self.status_label.setText(tr("Found {} results. Loading metadata...").format(len(results)))
+            self.status_label.setStyleSheet("color: black;")
+
         for b in self.export_buttons: b.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
-        self.results_table.setRowCount(len(results))
+        self.results_table.setRowCount(visible_count)
+
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -2009,45 +3284,56 @@ class GenizahGUI(QMainWindow):
             meta = res['display']
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta.get('id')
-            # Col 0: System ID (Store full result data here for retrieval after sort)
-            item_sid = QTableWidgetItem(sid)
-            item_sid.setData(Qt.ItemDataRole.UserRole, res)
-            self.results_table.setItem(i, 0, item_sid)
 
+            # Metadata Collection (Always collect all IDs for export readiness)
             # Pull immediate metadata from CSV/cache
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
-
-            # Fallback decision: only queue background fetch if CSV/cache didn't provide useful data
             needs_fetch = (shelf == "Unknown" and (not title))
+            if needs_fetch: ids.append(sid)
 
-            if needs_fetch:
-                ids.append(sid)  
-                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
-                item_title = QTableWidgetItem(tr("Loading..."))
-            else:
-                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
+            # Table Population (Respect Display Limit)
+            if i < visible_count:
+                # Col 0: Checkbox
+                item_chk = QTableWidgetItem()
+                item_chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                item_chk.setCheckState(Qt.CheckState.Unchecked)
+                # Store full result data here for retrieval after sort
+                item_chk.setData(Qt.ItemDataRole.UserRole, res)
+                self.results_table.setItem(i, 0, item_chk)
 
-            # Col 1: Shelfmark
-            self.results_table.setItem(i, 1, item_shelf)
-            self.shelfmark_items_by_sid[sid] = item_shelf
+                # Col 1: System ID
+                item_sid = QTableWidgetItem(sid)
+                item_sid.setData(Qt.ItemDataRole.UserRole, res)
+                self.results_table.setItem(i, 1, item_sid)
 
-            # Col 2: Title
-            self.results_table.setItem(i, 2, item_title)
-            self.title_items_by_sid[sid] = item_title
+                if needs_fetch:
+                    item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+                    item_title = QTableWidgetItem(tr("Loading..."))
+                else:
+                    item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
+                    item_title = QTableWidgetItem(title if title else "")
 
+                # Col 2: Shelfmark
+                self.results_table.setItem(i, 2, item_shelf)
+                self.shelfmark_items_by_sid[sid] = item_shelf
 
-            # Col 3: Snippet (Widget)
-            lbl = QLabel(f"<div dir='rtl'>{res['snippet']}</div>"); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.results_table.setCellWidget(i, 3, lbl)
+                # Col 3: Title
+                self.results_table.setItem(i, 3, item_title)
+                self.title_items_by_sid[sid] = item_title
 
-            # Col 4: Img
-            self.results_table.setItem(i, 4, QTableWidgetItem(meta['img']))
+                # Col 4: Snippet (Widget)
+                # Render asterisks to HTML for display
+                html_snippet = self.render_asterisks_to_html(res['snippet'])
+                lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                self.results_table.setCellWidget(i, 4, lbl)
 
-            # Col 5: Source
-            self.results_table.setItem(i, 5, QTableWidgetItem(meta['source']))
+                # Col 5: Img
+                self.results_table.setItem(i, 5, QTableWidgetItem(meta['img']))
 
-            self.result_row_by_sys_id[sid] = i
+                # Col 6: Source
+                self.results_table.setItem(i, 6, QTableWidgetItem(meta['source']))
+
+                self.result_row_by_sys_id[sid] = i
 
         self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
@@ -2086,14 +3372,12 @@ class GenizahGUI(QMainWindow):
 
         if self.meta_to_fetch_count == 0:
             self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
-            self.btn_stop_meta.setEnabled(False)
             return
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
         self.meta_loader.progress_signal.connect(self.on_meta_progress)
         self.meta_loader.finished_signal.connect(self.on_meta_finished)
         self.meta_loader.error_signal.connect(lambda err: QMessageBox.critical(self, tr("Metadata Error"), err))
-        self.btn_stop_meta.setEnabled(True)
         self.status_label.setText(self._format_metadata_status())
         self.meta_loader.start()
 
@@ -2147,20 +3431,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected))
         else:
             self.status_label.setText(tr("Loaded {} items.").format(total_expected))
-        self.btn_stop_meta.setEnabled(False)
         self.meta_loader = None
-
-    def reload_metadata(self):
-        if not self.last_results:
-            return
-        ids = [res['display'].get('id', '') for res in self.last_results]
-        self.start_metadata_loading(ids)
-
-    def stop_metadata_loading(self):
-        if self.meta_loader and self.meta_loader.isRunning():
-            self.meta_loader.request_cancel()
-            self.status_label.setText(tr("Stopping metadata load..."))
-            self.btn_stop_meta.setEnabled(False)
 
     def _format_metadata_status(self):
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
@@ -2178,7 +3449,8 @@ class GenizahGUI(QMainWindow):
         sorted_results = []
         rows = self.results_table.rowCount()
         for i in range(rows):
-            item = self.results_table.item(i, 0)
+            # Use column 1 for data retrieval (System ID column)
+            item = self.results_table.item(i, 1)
             if item:
                 res = item.data(Qt.ItemDataRole.UserRole)
                 if res:
@@ -2189,6 +3461,62 @@ class GenizahGUI(QMainWindow):
             sorted_results = self.last_results
 
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+
+    def on_search_select_all_toggled(self, checked):
+        """Handle Select All checkbox toggle."""
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        self.results_table.blockSignals(True)
+        for i in range(self.results_table.rowCount()):
+            item = self.results_table.item(i, 0)
+            if item:
+                item.setCheckState(state)
+        self.results_table.blockSignals(False)
+        self._update_search_export_label()
+
+    def on_search_result_item_changed(self, item):
+        """Handle individual checkbox changes in search results."""
+        if item.column() != 0:
+            return
+
+        # Check if all items are checked to sync "Select All"
+        all_checked = True
+        has_selection = False
+
+        # Avoid full iteration if possible, but we need to check "Select All" status
+        rows = self.results_table.rowCount()
+        # To optimize, we just iterate. Rows are usually < 500.
+        for i in range(rows):
+            it = self.results_table.item(i, 0)
+            if it:
+                if it.checkState() == Qt.CheckState.Unchecked:
+                    all_checked = False
+                else:
+                    has_selection = True
+
+        # If no items, all_checked is trivially true but we don't want to check the box
+        if rows == 0:
+            all_checked = False
+
+        self.chk_search_header.blockSignals(True)
+        self.chk_search_header.setChecked(all_checked)
+        self.chk_search_header.blockSignals(False)
+
+        self._update_search_export_label(has_selection)
+
+    def _update_search_export_label(self, has_selection=None):
+        if has_selection is None:
+            # Check if any selected
+            has_selection = False
+            for i in range(self.results_table.rowCount()):
+                it = self.results_table.item(i, 0)
+                if it and it.checkState() == Qt.CheckState.Checked:
+                    has_selection = True
+                    break
+
+        if has_selection:
+            self.lbl_search_export.setText(tr("Export selected results") + ":")
+        else:
+            self.lbl_search_export.setText(tr("Export Results") + ":")
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
         sid = None
@@ -2226,29 +3554,55 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area.setPlainText(source_text)
         if title:
             self.comp_title_input.setText(title)
-        sys_id = res['display'].get('id')
+            
+        sys_id = None
+        raw_header = res.get('raw_header') or res.get('full_header', '')
+        
+        # 1. Try to parse strictly 99... from header
+        if raw_header and self.meta_mgr:
+            parsed_sid, _ = self.meta_mgr.parse_header_smart(raw_header)
+            sys_id = parsed_sid
+            
+        # 2. Fallback to existing display ID if parsing failed
+        if not sys_id:
+            sys_id = res['display'].get('id')
+        # ------------------------------------------------------
+
         if sys_id:
             entries = list(self.excluded_raw_entries)
+            # Add only if not already present
             if sys_id not in entries:
                 entries.append(sys_id)
                 self.set_excluded_entries("\n".join(entries))
+                
         self.tabs.setCurrentWidget(self.composition_tab)
         self.comp_text_area.setFocus()
+
+    def _sanitize_for_excel(self, text):
+        """Cleans text to prevent Excel XML corruption."""
+        if text is None: return ""
+        t = str(text)
+        # Remove illegal characters
+        t = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', t)
+
+        # Handle malicious formulas
+        t = t.strip()
+        if t.startswith(('=', '+', '-', '@')):
+            t = "'" + t
+
+        # Excel cell limit
+        if len(t) > 32700:
+            t = t[:32700] + "..."
+        return t
 
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
         fmt: 'xlsx', 'csv', or 'txt'
         """
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')):
-                return "'" + t
-            return t
-
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
-        
+
         filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
         selected_filter = filters.get(fmt, "All Files (*.*)")
 
@@ -2258,16 +3612,54 @@ class GenizahGUI(QMainWindow):
         # Prepare tabular data
         headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
         data_rows = []
-        for r in self.last_results:
+
+        # Collect results to export (Selected or All)
+        results_to_export = []
+
+        # Check if any are selected in the table
+        has_selection = False
+        selected_rows_data = []
+
+        # Iterate table to respect user selection and visual order
+        rows = self.results_table.rowCount()
+        for i in range(rows):
+            chk_item = self.results_table.item(i, 0)
+            if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
+                has_selection = True
+                res = chk_item.data(Qt.ItemDataRole.UserRole)
+                if res:
+                    selected_rows_data.append(res)
+
+        if has_selection:
+            results_to_export = selected_rows_data
+        else:
+            # Fallback to last_results (original order) if nothing selected
+            results_to_export = self.last_results
+
+        for r in results_to_export:
             d = r['display']
+            sid = d.get('id', '')
+
+            # Fetch fresh metadata (Important for Lab Mode)
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                shelf = d.get('shelfmark', '')
+            if not title:
+                title = d.get('title', '')
+
             # Use raw_file_hl so highlight markers remain intact
+            # Clean snippet: remove newlines (input is now clean text with asterisks)
+            raw_hl = r.get('raw_file_hl', '')
+            snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
+            snippet = re.sub(r'\s+', ' ', snippet)
+
             data_rows.append([
-                d.get('id', ''),
-                d.get('shelfmark', ''),
-                d.get('title', ''),
+                sid,
+                shelf,
+                title,
                 str(d.get('img', '')),
                 d.get('source', ''),
-                r.get('raw_file_hl', '').strip()
+                snippet
             ])
 
         credit_text = self._get_credit_header()
@@ -2282,21 +3674,23 @@ class GenizahGUI(QMainWindow):
 
                 # Fonts used for rich text snippets
                 font_red = InlineFont(color='FF0000', b=True)
-                font_normal = InlineFont(color='000000')
+                font_normal = InlineFont(color='000000', b=False)
 
                 # Helper to write rich text cells
                 def write_rich_cell(row, col, text):
-                    # No markers: write as-is with formula guard
-                    if '*' not in text:
-                        ws.cell(row=row, column=col, value=clean_for_excel(text))
+                    safe_text = self._sanitize_for_excel(text)
+
+                    if '*' not in safe_text:
+                        ws.cell(row=row, column=col, value=safe_text)
                         return
 
                     # Split by asterisk markers
-                    parts = text.split('*')
+                    parts = safe_text.split('*')
                     rich_string = CellRichText()
 
                     for i, part in enumerate(parts):
-                        if not part: continue
+                        if not part:
+                            continue
                         # Odd indices represent highlighted text
                         if i % 2 == 1:
                             rich_string.append(TextBlock(font_red, part))
@@ -2310,7 +3704,7 @@ class GenizahGUI(QMainWindow):
                 current_row = 1
                 for line in credit_text.split('\n'):
                     if not line.strip(): continue
-                    cell = ws.cell(row=current_row, column=1, value=clean_for_excel(line))
+                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
                     cell.font = Font(bold=True, color="555555")
                     current_row += 1
                 current_row += 1
@@ -2331,9 +3725,9 @@ class GenizahGUI(QMainWindow):
                         if col_idx == 6:
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
-                            # Strip HTML tags in other columns
-                            clean_val = re.sub(r'<[^>]+>', '', val_str)
-                            ws.cell(row=current_row, column=col_idx, value=clean_for_excel(clean_val))
+                            # Strip markers/HTML in other columns
+                            clean_val = val_str.replace('*', '')
+                            ws.cell(row=current_row, column=col_idx, value=self._sanitize_for_excel(clean_val))
 
                     current_row += 1
 
@@ -2358,8 +3752,8 @@ class GenizahGUI(QMainWindow):
                     writer.writerow([])
                     writer.writerow(headers)
                     for row in data_rows:
-                        # Strip HTML but keep highlight markers
-                        clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
+                        # Strip highlight markers for CSV
+                        clean_row = [str(val).replace('*', '') for val in row]
                         writer.writerow(clean_row)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
@@ -2370,12 +3764,346 @@ class GenizahGUI(QMainWindow):
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
-                    for r in self.last_results:
-                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{r.get('raw_file_hl','')}\n\n")
+                    for r in results_to_export:
+                        # Clean snippet: remove newlines for single-line export
+                        snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
 
+    def export_comp_report(self, fmt='xlsx'):
+        # 1. איסוף נתונים (לוגיקה יציבה)
+
+        # Check for Selection
+        has_selection = bool(self._collect_checked_comp_page_uids())
+
+        if has_selection:
+            # Reconstruct lists from tree selection
+            c_main, c_appx, c_filt, c_filt_appx, c_known = self._collect_checked_comp_items_struct()
+        else:
+            # Use all data
+            c_main = self.comp_main
+            c_appx = self.comp_appendix
+            c_filt = self.comp_filtered_main
+            c_filt_appx = self.comp_filtered_appendix
+            c_known = self.comp_known
+
+        all_filtered = c_filt[:]
+        for v in c_filt_appx.values():
+            all_filtered.extend(v)
+
+        if not (c_main or c_appx or c_known or all_filtered):
+            QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
+            return
+
+        # 2. טעינת מטא-דאטה
+        all_ids = []
+        def collect_ids(item_list):
+            for item in item_list:
+                if item.get('type') == 'manuscript' and item.get('sys_id'):
+                    all_ids.append(item['sys_id'])
+                else:
+                    sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+                    if sid: all_ids.append(sid)
+
+        collect_ids(c_main)
+        for group_items in c_appx.values(): collect_ids(group_items)
+        collect_ids(c_known)
+        collect_ids(all_filtered)
+
+        unique_ids = list(set(all_ids))
+        if unique_ids:
+            missing = [uid for uid in unique_ids if uid not in self.meta_mgr.nli_cache]
+            if missing:
+                self._fetch_metadata_with_dialog(missing, title=tr("Fetching metadata before export..."))
+
+        # 3. שמירה
+        comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
+        base_path = self._default_report_path(comp_title, tr("Composition_Report"))
+        default_path = os.path.splitext(base_path)[0] + f".{fmt}"
+        
+        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
+        selected_filter = filters.get(fmt, "All Files (*.*)")
+
+        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
+        if not path: return
+
+        credit_text = self._get_credit_header()
+
+        # רג'קס לזיהוי תווים שהורסים קבצי XML/Excel
+        # הורחב לכלול גם תווים בעייתיים נוספים ב-XML (כמו 0x1-0x8, 0xB-0xC, 0xE-0x1F, וגם 0x7F)
+        # למרות שאלו חוקיים ב-Python, אקסל נכשל עליהם ב-XML.
+        illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
+
+        def sanitize_for_excel(text):
+            """Cleans text to prevent Excel XML corruption."""
+            if text is None: return ""
+            t = str(text)
+            
+            # 1. הסרת תווים בלתי חוקיים (כמו Null bytes)
+            t = illegal_chars_re.sub('', t)
+            
+            # 2. טיפול בנוסחאות זדוניות
+            t = t.strip()
+            if t.startswith(('=', '+', '-', '@')): 
+                t = "'" + t
+            
+            # Excel cell limit
+            if len(t) > 32700:
+                t = t[:32700] + "..."
+            
+            return t
+
+        def _clean_and_marker(text):
+            """Prepares HTML for export: converts spans to *, removes other tags."""
+            t = str(text or "")
+            # 1. Convert Spans to Markers (Handle content inside)
+            t = re.sub(r"<span[^>]*>(.*?)</span>", r"*\1*", t, flags=re.DOTALL)
+
+            # 2. Remove newlines and BR
+            t = t.replace("<br>", " ").replace("<br/>", " ").replace("\n", " ").replace("\r", " ")
+
+            # 3. Remove any remaining HTML tags (div, etc)
+            t = re.sub(r'<[^>]+>', '', t)
+
+            # 4. Collapse multiple spaces
+            t = re.sub(r'\s+', ' ', t)
+
+            # 5. Merge adjacent asterisks
+            t = re.sub(r'\*(\s+)\*', r'\1', t)
+
+            return t.strip()
+
+        # ==========================================
+        #  XLSX & CSV Logic
+        # ==========================================
+        if fmt in ['xlsx', 'csv']:
+            table_rows = []
+            
+            def add_rows(items, category, group_name=""):
+                for ms_item in items:
+                    if ms_item.get('type') == 'manuscript':
+                        sid = ms_item['sys_id']
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                             shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                        
+                        ms_score = ms_item.get('score', 0)
+
+                        for page in ms_item.get('pages', []):
+                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+                             
+                             table_rows.append([
+                                category,
+                                group_name,
+                                sid or "",
+                                shelf or "",
+                                title or "",
+                                str(p_num or ""),
+                                f"{ms_score} (P:{page.get('score',0)})", 
+                                src_clean,
+                                ms_clean
+                             ])
+                    else:
+                        # Fallback
+                        sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                        src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
+                        ms_clean = _clean_and_marker(ms_item.get('text', ''))
+                        
+                        table_rows.append([
+                            category,
+                            group_name,
+                            sid or "",
+                            shelf or "",
+                            title or "",
+                            str(p_num or ""),
+                            str(ms_item.get('score', 0)),
+                            src_clean,
+                            ms_clean
+                        ])
+
+            if self.chk_comp_flat.isChecked():
+                all_items = self._collect_comp_items(
+                    c_main, c_appx,
+                    c_filt, c_filt_appx,
+                    c_known
+                )
+                flat_items = self._sort_comp_items(all_items)
+                add_rows(flat_items, tr("All Results"))
+            else:
+                add_rows(c_main, "Main Manuscripts")
+                for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    add_rows(items, "Appendix", sig)
+                add_rows(c_filt, "Filtered Main")
+                for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    add_rows(items, "Filtered Appendix", sig)
+                add_rows(c_known, "Known Manuscripts")
+
+            # --- XLSX ---
+            if fmt == 'xlsx':
+                try:
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = "Composition Report"
+                    ws.sheet_view.rightToLeft = True
+
+                    font_red = InlineFont(color='FF0000', b=True)
+                    font_normal = InlineFont(color='000000', b=False)
+
+                    def write_rich_cell(row, col, text):
+                        # הגנה ראשונית: ניקוי תווים אסורים מהטקסט הגולמי
+                        safe_text = sanitize_for_excel(text)
+                        
+                        if '*' not in safe_text:
+                            ws.cell(row=row, column=col, value=safe_text)
+                            return
+                        
+                        parts = safe_text.split('*')
+                        rich_string = CellRichText()
+                        
+                        for i, part in enumerate(parts):
+                            if not part:
+                                continue
+                            if i % 2 == 1:
+                                rich_string.append(TextBlock(font_red, part))
+                            else:
+                                rich_string.append(TextBlock(font_normal, part))
+                                
+                        ws.cell(row=row, column=col, value=rich_string)
+
+                    curr_row = 1
+                    for line in credit_text.split('\n'):
+                        clean_line = line.strip()
+                        if not clean_line or "====" in clean_line: continue
+                        
+                        c = ws.cell(row=curr_row, column=1, value=sanitize_for_excel(line))
+                        c.font = Font(bold=True, color="555555")
+                        curr_row += 1
+                    curr_row += 1
+
+                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    for idx, h in enumerate(headers, 1):
+                        c = ws.cell(row=curr_row, column=idx, value=h)
+                        c.font = Font(bold=True, color="FFFFFF")
+                        c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                    curr_row += 1
+
+                    for row_data in table_rows:
+                        for idx, val in enumerate(row_data, 1):
+                            val_str = str(val)
+                            # Apply rich text to Source Context (8) and Manuscript Text (9)
+                            if idx in (8, 9):
+                                write_rich_cell(curr_row, idx, val_str)
+                            else: 
+                                ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
+                        curr_row += 1
+
+                    # רוחב עמודות
+                    dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
+                    for col, width in dims.items():
+                        ws.column_dimensions[col].width = width
+
+                    wb.save(path)
+                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                except Exception as e:
+                    QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
+
+            # --- CSV ---
+            elif fmt == 'csv':
+                try:
+                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                        f.write(credit_text)
+                        writer = csv.writer(f)
+                        writer.writerow([])
+                        writer.writerow(headers)
+                        for row in table_rows:
+                            clean_row = [str(val).replace('*', '') for val in row]
+                            writer.writerow(clean_row)
+                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                except Exception as e:
+                    QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
+
+        # --- TXT ---
+        else:
+            try:
+                sep = "=" * 80
+                appendix_count = sum(len(v) for v in c_appx.values())
+                filtered_total = len(c_filt) + sum(len(v) for v in c_filt_appx.values())
+                known_count = len(c_known)
+                total_count = len(c_main) + appendix_count + known_count + filtered_total
+
+                def _fmt_ms_entry(ms_item):
+                    if ms_item.get('type') == 'manuscript':
+                        sid = ms_item['sys_id']
+                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        if not shelf or shelf == "Unknown":
+                            shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                        ms_block = [sep, f"MANUSCRIPT: {shelf} | {title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
+
+                        for page in ms_item.get('pages', []):
+                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+                             ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
+                             ms_block.append(tr("Source Context") + ":\n" + src_clean)
+                             ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
+                        return ms_block
+                    else:
+                        return self._fmt_item_legacy(ms_item)
+
+                summary_lines = [
+                    sep, tr("COMPOSITION REPORT SUMMARY"), sep,
+                    f"Title: {comp_title}",
+                    f"{tr('Total Manuscripts Found')}: {total_count}"
+                ]
+                detail_lines = [sep, tr("ALL RESULTS"), sep]
+
+                if self.chk_comp_flat.isChecked():
+                    flat_items = self._sort_comp_items(
+                        self._collect_comp_items(c_main, c_appx, c_filt, c_filt_appx, c_known)
+                    )
+                    for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
+                else:
+                    summary_lines.extend([
+                        f"{tr('Main Manuscripts')}: {len(c_main)}",
+                        f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                        f"{tr('Known/Excluded Manuscripts')}: {known_count}"
+                    ])
+                    detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
+                    for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_appx:
+                        detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
+                        for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_filt:
+                        detail_lines.extend([sep, tr("FILTERED / LOW SCORE"), sep])
+                        for item in c_filt: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_filt_appx:
+                        detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
+                        for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
+                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_known:
+                        detail_lines.extend([sep, tr("KNOWN / EXCLUDED MANUSCRIPTS"), sep])
+                        for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
+
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(credit_text)
+                    all_lines = summary_lines + detail_lines
+                    f.write("\n".join(all_lines).strip() + "\n")
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
+                
     # Composition & Browse
     def open_filter_dialog(self):
         dlg = FilterTextDialog(self, current_text=self.filter_text_content)
@@ -2412,14 +4140,16 @@ class GenizahGUI(QMainWindow):
         self.excluded_shelfmarks = shelves
         self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
 
-    def normalize_shelfmark(self, shelf: str):
-        if not shelf:
+    def _normalize_shelfmark(self, shelfmark: str) -> str:
+        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
+        if not shelfmark:
             return ""
-        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", shelf, flags=re.IGNORECASE)
-        cleaned = re.sub(r"[^\w]", "", without_prefix).lower()
-        # Treat optional "ms" prefix as non-significant for comparisons
+        
+        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
+        
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
+            
         return cleaned
 
     def _get_meta_for_header(self, raw_header):
@@ -2507,26 +4237,109 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(False)
 
     def run_composition(self, custom_text=None):
+        """
+        Main entry point for Composition Search.
+        FINAL VERIFIED VERSION.
+        """
         txt = (custom_text if custom_text is not None else self.comp_text_area.toPlainText()).strip()
-        if not txt: return
-        self.is_comp_running = True; self.btn_comp_run.setText(tr("Stop")); self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
-        self.btn_comp_recursive.setEnabled(False)
-        self.comp_progress.setVisible(True); self.comp_progress.setRange(0, 0); self.comp_progress.setValue(0); self.comp_tree.clear()
+        if not txt:
+            QMessageBox.warning(self, tr("Error"), tr("Please enter text to search."))
+            return
+
+        self.is_comp_running = True
+        self.btn_comp_run.setText(tr("Stop"))
+        self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
+        
+        if hasattr(self, 'btn_comp_recursive'):
+            self.btn_comp_recursive.setEnabled(False)
+            
+        self.comp_progress.setVisible(True)
+        self.comp_progress.setRange(0, 0)
+        self.comp_progress.setValue(0)
+        self.comp_tree.clear()
         self.comp_progress.setFormat(tr("Scanning chunks..."))
+        
+        # איפוס נתונים
         self.comp_raw_items = []
         self.comp_filtered = []
         self.comp_known = []
+        
         for b in self.comp_export_buttons: b.setEnabled(False)
-        mode = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'][self.comp_mode_combo.currentIndex()]
 
-        self.comp_thread = CompositionThread(
-            self.searcher, txt, self.spin_chunk.value(), self.spin_freq.value(), mode,
-            filter_text=self.filter_text_content, threshold=self.spin_filter.value()
-        )
+        chunk_size = self.spin_chunk.value()
+        
+        # מיפוי מצב חיפוש
+        available_modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy']
+        idx = self.comp_mode_combo.currentIndex()
+        if 0 <= idx < len(available_modes):
+            mode = available_modes[idx]
+        else:
+            mode = 'variants'
+
+        excluded_ids = self.excluded_raw_entries
+
+        # 1. נתיב מעבדה (LAB MODE)
+        if self.btn_lab_mode_toggle_comp.isChecked():
+            if not self.lab_engine:
+                QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
+                self.reset_comp_ui()
+                return
+
+            # Robustness: Pass resolved System IDs if available, to catch items excluded by shelfmark
+            # where the user didn't explicitly type the ID.
+            final_excluded_ids = excluded_ids
+            if self.excluded_sys_ids:
+                final_excluded_ids = list(self.excluded_sys_ids)
+
+            deep = self.chk_lab_deep_comp.isChecked()
+            limit = self.lab_engine.settings.lab_scan_limit
+
+            self.comp_thread = LabCompositionThread(
+                self.lab_engine, 
+                txt, 
+                mode, 
+                chunk_size=chunk_size,
+                excluded_ids=final_excluded_ids,
+                filter_text=self.filter_text_content,
+                deep_scan=deep,
+                scan_limit=limit
+            )
+            self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+
+        # 2. נתיב רגיל (STANDARD MODE)
+        else:
+            if not self.searcher:
+                QMessageBox.warning(self, tr("Error"), tr("Search engine not loaded."))
+                self.reset_comp_ui()
+                return
+
+            # --- התיקון הקריטי כאן: הסרת progress_callback ---
+            self.comp_thread = CompositionThread(
+                self.searcher, 
+                txt, 
+                chunk=chunk_size,
+                freq=self.spin_freq.value(),
+                mode=mode,
+                filter_text=self.filter_text_content,
+                threshold=self.spin_filter.value()
+            )
+            # -----------------------------------------------
+            
+            # בדיקת תאימות לאחור לסיגנל
+            if hasattr(self.comp_thread, 'scan_finished_signal'):
+                 self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+            else:
+                 # fallback למקרה שמישהו שינה שמות בקבצים אחרים
+                 self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
+
+        # 3. חיבורים משותפים והתנעה
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
-        self.comp_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
-        self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
-        self.comp_thread.error_signal.connect(lambda e: QMessageBox.critical(self, tr("Error"), e))
+        
+        if hasattr(self.comp_thread, 'status_signal'):
+             self.comp_thread.status_signal.connect(self.on_comp_status_update)
+             
+        self.comp_thread.error_signal.connect(self.on_comp_error)
+        
         self.comp_thread.start()
 
     def on_comp_display_mode_changed(self, _checked):
@@ -2582,6 +4395,11 @@ class GenizahGUI(QMainWindow):
         combined_text = base_text + "\n\n" + "\n\n".join(extra_texts)
         self.run_composition(custom_text=combined_text)
 
+    def on_comp_status_update(self, status):
+        self.comp_progress.setFormat(status)
+        if status.startswith("Scanning batch") or status.startswith("Scanning items"):
+            self.comp_progress.setRange(0, 0)
+
     def on_comp_progress(self, curr, total):
         if total:
             self.comp_progress.setRange(0, total)
@@ -2589,25 +4407,37 @@ class GenizahGUI(QMainWindow):
             self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(curr)
 
+    def on_comp_error(self, err):
+        """Handle errors during composition search."""
+        self.reset_comp_ui()
+        QMessageBox.critical(self, tr("Error"), str(err))
+        
     def on_comp_scan_finished(self, result_obj):
         self.is_comp_running = False
         self.reset_comp_ui()
 
+        # 1. קליטת תוצאות (כולל known ממצב מעבדה)
+        known_raw = []
         if isinstance(result_obj, dict):
             items = result_obj.get('main', [])
             filtered_items = result_obj.get('filtered', [])
+            known_raw = result_obj.get('known', []) # קליטת המוחרגים מהמעבדה
         else:
             items = result_obj or []
             filtered_items = []
 
-        # Immediate Grouping by Manuscript
+        # 2. קיבוץ לדפים לכתבי יד
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
+        known_manuscripts = self.searcher.group_pages_by_manuscript(known_raw)
 
         self.comp_raw_items = manuscripts
         self.comp_raw_filtered = filtered_manuscripts
+        
+        # שמירת המוחרגים שהגיעו מהמעבדה
+        self.comp_known = known_manuscripts 
 
-        if not manuscripts and not filtered_manuscripts:
+        if not manuscripts and not filtered_manuscripts and not known_manuscripts:
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             self.pending_recursive_search = False
             return
@@ -2620,9 +4450,11 @@ class GenizahGUI(QMainWindow):
             self.comp_grouped_filtered_main = filtered_manuscripts
             self.comp_grouped_filtered_appendix = {}
             self.comp_grouped_filtered_summary = {}
+            # כאן אנו מעבירים ריק ל-display, אבל self.comp_known כבר מעודכן ויטופל ב-display
             self.display_comp_results(manuscripts, {}, {}, filtered_manuscripts, {}, {})
             return
 
+        # שליחה לקיבוץ (עבור חיפוש רגיל או מעבדה היררכי)
         self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
@@ -2659,13 +4491,36 @@ class GenizahGUI(QMainWindow):
 
     def on_comp_finished(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.comp_has_grouped_results = True
-        self.comp_grouped_main = main_res or []
-        self.comp_grouped_appendix = main_appx or {}
-        self.comp_grouped_summary = main_summ or {}
+        
+        # --- התיקון: החלת סינון ידני (Exclusions) ---
+        # פונקציה זו לוקחת את התוצאות הראשיות והנספח, ומעבירה כתבי יד מוחרגים לרשימה נפרדת
+        final_main, final_appx, manual_known = self._apply_manual_exclusions(main_res, main_appx)
+        
+        # עדכון הרשימות הסופיות
+        self.comp_grouped_main = final_main or []
+        self.comp_grouped_appendix = final_appx or {}
+        self.comp_grouped_summary = main_summ or {} # הסיכום נשאר (אופציונלי לעדכן גם אותו)
+        
+        # הוספת המוחרגים החדשים לרשימת ה-Known הקיימת (למשל ממעבדה)
+        if manual_known:
+            if not self.comp_known:
+                self.comp_known = []
+            self.comp_known.extend(manual_known)
+            
+        # ---------------------------------------------
+
         self.comp_grouped_filtered_main = filt_res or []
         self.comp_grouped_filtered_appendix = filt_appx or {}
         self.comp_grouped_filtered_summary = filt_summ or {}
-        self.display_comp_results(main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ)
+        
+        self.display_comp_results(
+            self.comp_grouped_main, 
+            self.comp_grouped_appendix, 
+            self.comp_grouped_summary, 
+            filt_res, 
+            filt_appx, 
+            filt_summ
+        )
 
     def _collect_comp_items(self, main_res, main_appx, filt_res, filt_appx, known):
         all_items = []
@@ -2723,10 +4578,6 @@ class GenizahGUI(QMainWindow):
             sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
         return sid or "", shelf or "", title or ""
 
-    def _natural_sort_key(self, text):
-        normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
-        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
-
     def _comp_sort_key(self, item, mode=None):
         sort_mode = mode or self._current_comp_sort_mode()
         if sort_mode == "score":
@@ -2739,8 +4590,8 @@ class GenizahGUI(QMainWindow):
         if sort_mode == "system_id":
             return sid.casefold()
 
-        shelf_key = self._natural_sort_key(shelf or sid)
-        sid_key = self._natural_sort_key(sid)
+        shelf_key = natural_sort_key(shelf or sid)
+        sid_key = natural_sort_key(sid)
         return (shelf_key, sid_key)
 
     def _sort_comp_items(self, items, mode=None):
@@ -2818,7 +4669,17 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_context, QLabel(""))
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
-    def _set_comp_node_previews(self, node, source_text, ms_text):
+    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None):
+        if highlight_pattern and source_text:
+            try:
+                # Apply highlighting to Source Text if pattern exists
+                regex = re.compile(highlight_pattern, re.IGNORECASE)
+                # Only apply if not already highlighted (simple check)
+                if '*' not in source_text:
+                    source_text = regex.sub(r'*\g<0>*', source_text)
+            except Exception:
+                pass
+
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
         
@@ -2834,206 +4695,299 @@ class GenizahGUI(QMainWindow):
         self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        # 1. איפוס וניקוי
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
 
-        # Ensure thread is finished before releasing the object to prevent QThread Destroyed error
-        if self.group_thread:
+        # Reset Select All Checkbox
+        self.chk_comp_header.blockSignals(True)
+        self.chk_comp_header.setChecked(False)
+        self.chk_comp_header.blockSignals(False)
+        self._update_comp_export_label()
+
+        if getattr(self, 'group_thread', None):
             self.group_thread.wait()
         self.group_thread = None
 
+        # שמירת נתונים גולמיים
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
 
-        # 1. Apply Exclusions to Main
+        # 2. החלת החרגות (Exclusions)
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
-
-        # 2. Apply Exclusions to Filtered (treating it as its own result set)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
+        
+        # איחוד הידועים
+        if not hasattr(self, 'comp_known'): self.comp_known = []
+        # Fix: Extend existing known list instead of overwriting it,
+        # to preserve items excluded by LabEngine (which are already in self.comp_known)
+        self.comp_known.extend(known_main + known_filt)
 
-        known = known_main + known_filt
-
+        # === התיקון הקריטי למיון ===
+        # עדכון משתני ה-Legacy כדי ש-_has_comp_results() יחזיר True והמיון יעבוד
         self.comp_main = clean_main
         self.comp_appendix = clean_appx
         self.comp_summary = main_summ
-
         self.comp_filtered_main = clean_filt
         self.comp_filtered_appendix = clean_filt_appx
         self.comp_filtered_summary = filt_summ
+        
+        # עדכון המשתנים החדשים (לייצוא ושימוש פנימי)
+        self.comp_grouped_main = clean_main
+        self.comp_grouped_appendix = clean_appx
+        self.comp_grouped_summary = main_summ
+        self.comp_grouped_filtered_main = clean_filt
+        self.comp_grouped_filtered_appendix = clean_filt_appx
+        self.comp_grouped_filtered_summary = filt_summ
 
-        self.comp_known = known
+        # Display Limit Logic
+        # Note: The engine now truncates 'clean_main' to MAX_FINAL, so we display all available items.
+        full_main_count = len(clean_main)
+        visible_main = clean_main
 
-        # Ensure metadata is loaded
-        all_ids = []
-        def collect_ids(item_list):
-            for item in item_list:
-                # If item is manuscript, we have direct sys_id
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
-                    all_ids.append(item['sys_id'])
-                else:
-                    sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                    if sid: all_ids.append(sid)
+        msg_color = "black"
+        if len(visible_main) < full_main_count:
+            status_msg = tr("Showing top {} of {} results. (Export for full list)").format(len(visible_main), full_main_count)
+            msg_color = "#e67e22" # Orange
+        else:
+            status_msg = tr("Found {} results.").format(full_main_count)
 
-        collect_ids(clean_main)
-        for group_items in clean_appx.values():
-            collect_ids(group_items)
+        if hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(status_msg)
+            self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
 
-        collect_ids(clean_filt)
-        for group_items in clean_filt_appx.values():
-            collect_ids(group_items)
+        # איסוף IDs לטעינת מטא-דאטה
+        ids_to_fetch = set()
+        def _collect_id(item):
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+            if sid and sid not in self.meta_mgr.nli_cache:
+                 ids_to_fetch.add(sid)
 
-        collect_ids(known)
-
-        if all_ids:
-            self._fetch_metadata_with_dialog(list(set(all_ids)), title="Loading shelfmarks for report...")
-
-        self.comp_tree_updating = True
+        # 3. הכנת העץ
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
-        
+
+        # --- שחזור פונקציית התצוגה היציבה (כדי שיראה יפה כמו ב-STABLE) ---
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
 
         def add_manuscript_node(parent, ms_item):
-            # Parse meta using the representative header OR just use sys_id
             if ms_item.get('type') == 'manuscript':
                 sid = ms_item['sys_id']
-
-                # Use unified metadata retrieval (CSV > Cache)
                 shelf, t = self.meta_mgr.get_meta_for_id(sid)
-
-                # Fallback to header parsing if still unknown
                 if not shelf or shelf == "Unknown":
                     header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
                     if header_shelf: shelf = header_shelf
 
-                # Manuscript Node
                 ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(ms_item.get('score', 0)))
+                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
                 self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
                 self._set_comp_tree_text(ms_node, 2, t or "")
                 self._set_comp_tree_text(ms_node, 3, sid)
                 make_checkable(ms_node)
-
-                # Store full MS item in UserRole
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
                 pages = ms_item.get('pages', [])
-
-                # Case A: Single Page -> Display inline
+                # Case A: עמוד בודד
                 if len(pages) == 1:
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-
-                    # Update Shelfmark to include Image info
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
-
-                # Case B: Multiple Pages -> Add children
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                # Case B: מרובה עמודים
                 else:
-                    # Update parent with first page image info and snippet
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-
                         page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(p_item.get('score', '')))
+                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
                         self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
-                        self._set_comp_tree_text(page_node, 2, "") # No Title needed for page
-                        self._set_comp_tree_text(page_node, 3, "") # No SysID needed for page
+                        self._set_comp_tree_text(page_node, 2, "")
+                        self._set_comp_tree_text(page_node, 3, "")
                         make_checkable(page_node)
-
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''))
-
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
             else:
-                # Fallback for raw items (should not happen with new logic, but safe to keep)
+                # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                 node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(node, 0, str(ms_item.get('score', '')))
+                self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
                 self._set_comp_tree_text(node, 1, shelf)
                 self._set_comp_tree_text(node, 2, title)
                 self._set_comp_tree_text(node, 3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''))
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
+            
+            _collect_id(ms_item)
 
-        # ----------------------------------------
+        # --- לוגיקת תצוגה ---
 
+        # א. מצב שטוח (Flat)
         if self.chk_comp_flat.isChecked():
-            all_items = self._collect_comp_items(clean_main, clean_appx, clean_filt, clean_filt_appx, known)
-            sorted_items = self._sort_comp_items(all_items)
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_items))])
+            all_flat = self._collect_comp_items(
+                clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
+            )
+            # מיון ידני באמצעות הלוגיקה שלך
+            sorted_flat = self._sort_comp_items(all_flat)
+            visible_flat = sorted_flat
+            
+            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
             make_checkable(root)
-            for item in sorted_items:
+            
+            for item in visible_flat:
                 add_manuscript_node(root, item)
+
+        # ב. מצב היררכי (Grouped)
         else:
-            # 1. Main Results
-            root = QTreeWidgetItem(self.comp_tree, [tr("Main ({})").format(len(clean_main))]); root.setExpanded(True)
-            make_checkable(root)
-            for item in self._sort_comp_items(clean_main):
-                add_manuscript_node(root, item)
+            # 1. Main Results (Sliced)
+            sorted_main = self._sort_comp_items(clean_main)
+            visible_sorted_main = sorted_main
 
-            # 2. Appendix Results
+            if visible_sorted_main:
+                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
+                root_main.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_MAIN")
+                root_main.setExpanded(True)
+                make_checkable(root_main)
+                for item in visible_sorted_main:
+                    add_manuscript_node(root_main, item)
+
+            # 2. Appendix
             if clean_appx:
-                root_a = QTreeWidgetItem(self.comp_tree, [tr("Appendix ({})").format(len(clean_appx))])
-                make_checkable(root_a)
-                for g, items in sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    gn = QTreeWidgetItem(root_a, [f"{g} ({len(items)})"])
-                    make_checkable(gn)
+                total_appx = sum(len(v) for v in clean_appx.values())
+                root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
+                root_appx.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_APPX")
+                root_appx.setExpanded(False)
+                make_checkable(root_appx)
+                
+                # מיון הקבוצות לפי גודל, ואז מיון פנימי לפי העמודה הנבחרת
+                sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
+                for sig, items in sorted_groups:
+                    group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
+                    make_checkable(group_node)
+                    
                     for item in self._sort_comp_items(items):
-                        add_manuscript_node(gn, item)
+                        add_manuscript_node(group_node, item)
 
-            # 3. Filtered by Text (New Category with Sub-Grouping)
-            total_filtered = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
-            if total_filtered > 0:
-                root_f = QTreeWidgetItem(self.comp_tree, [tr("Filtered by Text ({})").format(total_filtered)])
-                make_checkable(root_f)
+            # 3. Filtered / Low Score
+            total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
+            if total_filt > 0:
+                root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered / Low Score ({})").format(total_filt)])
+                root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
+                root_filt.setForeground(0, Qt.GlobalColor.gray)
+                make_checkable(root_filt)
+                
+                # Filtered Main
+                for item in self._sort_comp_items(clean_filt):
+                    add_manuscript_node(root_filt, item)
+                
+                # Filtered Appendix
+                for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
+                    make_checkable(g_node)
+                    for item in self._sort_comp_items(items):
+                        add_manuscript_node(g_node, item)
 
-                # 3a. Filtered Main
-                if clean_filt:
-                    f_main_node = QTreeWidgetItem(root_f, [tr("Filtered Main ({})").format(len(clean_filt))])
-                    f_main_node.setExpanded(True)
-                    make_checkable(f_main_node)
-                    for item in self._sort_comp_items(clean_filt):
-                        add_manuscript_node(f_main_node, item)
-
-                # 3b. Filtered Appendix
-                if clean_filt_appx:
-                    f_appx_node = QTreeWidgetItem(root_f, [tr("Filtered Appendix ({})").format(sum(len(v) for v in clean_filt_appx.values()))])
-                    make_checkable(f_appx_node)
-                    for g, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                        gn = QTreeWidgetItem(f_appx_node, [f"{g} ({len(items)})"])
-                        make_checkable(gn)
-                        for item in self._sort_comp_items(items):
-                            add_manuscript_node(gn, item)
-
-            # 4. Known / Excluded Results
-            if known:
-                root_k = QTreeWidgetItem(self.comp_tree, [tr("Known Manuscripts ({})").format(len(known))])
-                make_checkable(root_k)
-                for item in self._sort_comp_items(known):
-                    add_manuscript_node(root_k, item)
+            # 4. Known / Excluded
+            if self.comp_known:
+                root_known = QTreeWidgetItem(self.comp_tree, [tr("Known / Excluded ({})").format(len(self.comp_known))])
+                root_known.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_KNOWN")
+                root_known.setForeground(0, Qt.GlobalColor.darkGray)
+                make_checkable(root_known)
+                
+                for item in self._sort_comp_items(self.comp_known):
+                    add_manuscript_node(root_known, item)
 
         self.comp_tree.setUpdatesEnabled(True)
-        self.comp_tree_updating = False
         self._update_recursive_button_state()
-        if self.pending_recursive_search:
-            self.pending_recursive_search = False
-            self.run_recursive_composition()
+        
+        # טעינת מטא-דאטה חסרה
+        if ids_to_fetch:
+            self.start_metadata_loading(list(ids_to_fetch))
+    
+    def _add_single_node_to_tree(self, parent, ms_item):
+        """Dedicated helper to add one row to the tree."""
+        sid = ms_item.get('sys_id')
+        if not sid:
+            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
+        
+        # ניסיון שליפה מהיר מהזיכרון
+        shelf, t = self.meta_mgr.get_meta_for_id(sid)
+        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+        
+        node = QTreeWidgetItem(parent)
+        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # עיגול הציון
+        self._set_comp_tree_text(node, 1, display_shelf)
+        self._set_comp_tree_text(node, 2, t or "")
+        self._set_comp_tree_text(node, 3, sid)
+        
+        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
+        pages = ms_item.get('pages', [])
+        
+        if len(pages) == 1:
+            p_item = pages[0]
+            p_num = "Img"
+            if 'raw_header' in p_item:
+                _, p_num_extracted, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                if p_num_extracted: p_num = p_num_extracted
+            
+            self._set_comp_tree_text(node, 1, f"{display_shelf} (Img {p_num})")
+            self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+        
+        elif len(pages) > 1:
+             self._set_comp_tree_text(node, 1, f"{display_shelf} ({len(pages)} matches)")
+             
+             if pages:
+                 first_p = pages[0]
+                 self._set_comp_node_previews(node, first_p.get('source_ctx', ''), first_p.get('text', ''), first_p.get('highlight_pattern'))
+             # ---------------------------------------------------------
+
+             for p_item in pages:
+                child = QTreeWidgetItem(node)
+                self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
+                
+                p_num_child = "?"
+                if 'raw_header' in p_item:
+                    _, p_val, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                    if p_val: p_num_child = p_val
+                
+                child.setText(1, f"Img {p_num_child}") 
+
+                child.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+    
+    def _trigger_lazy_metadata_fetch(self):
+        """Starts background fetching for items that are currently displayed but missing data."""
+        # אוסף את כל ה-IDs מהעץ שעדיין אין להם מדף
+        missing_ids = set()
+        # סורק רק את ה-Batch הנוכחי או את הכל - לביצועים, עדיף להסתמך על הרשימה המקורית
+        for item in self.batch_items:
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header'))
+            
+            if sid and sid not in self.meta_mgr.nli_cache:
+                 missing_ids.add(sid)
+        
+        if missing_ids:
+            # מפעיל את ה-Thread הקיים שלך לעדכון ברקע
+            self.start_metadata_loading(list(missing_ids))
+    
     def on_comp_tree_item_changed(self, item, column):
         if self.comp_tree_updating or column != 0:
             return
@@ -3045,8 +4999,177 @@ class GenizahGUI(QMainWindow):
                 item.child(i).setCheckState(0, state)
 
         self._sync_parent_check_state(item)
+
+        # Sync "Select All" checkbox state
+        all_checked = True
+        root = self.comp_tree.invisibleRootItem()
+        # Optimize: if tree is empty, uncheck. If large, this loop is okay (usually < 500 nodes).
+        if root.childCount() == 0:
+            all_checked = False
+        else:
+            for i in range(root.childCount()):
+                if root.child(i).checkState(0) == Qt.CheckState.Unchecked:
+                    all_checked = False
+                    break
+
+        self.chk_comp_header.blockSignals(True)
+        self.chk_comp_header.setChecked(all_checked)
+        self.chk_comp_header.blockSignals(False)
+
         self.comp_tree_updating = False
         self._update_recursive_button_state()
+        self._update_comp_export_label()
+
+    def on_comp_header_toggled(self, checked):
+        """Toggle all root items in the composition tree."""
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+
+        self.comp_tree.blockSignals(True)
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            item.setCheckState(0, state)
+            # Recursively set children?
+            # on_comp_tree_item_changed handles recursion but we blocked signals.
+            # So we must do it manually or unblock and set one by one?
+            # Setting recursively manually is faster.
+            self._set_check_state_recursive(item, state)
+        self.comp_tree.blockSignals(False)
+
+        self._update_comp_export_label()
+        self._update_recursive_button_state()
+
+    def _set_check_state_recursive(self, item, state):
+        for i in range(item.childCount()):
+            child = item.child(i)
+            child.setCheckState(0, state)
+            self._set_check_state_recursive(child, state)
+
+    def _update_comp_export_label(self):
+        has_selection = bool(self._collect_checked_comp_page_uids())
+        if has_selection:
+            self.lbl_comp_export.setText(tr("Export selected results"))
+        else:
+            self.lbl_comp_export.setText(tr("Save Report"))
+
+    def _collect_checked_comp_items_struct(self):
+        """
+        Collect checked items maintaining the structure (Main, Appendix, etc.)
+        Returns: (main, appendix, filtered_main, filtered_appendix, known)
+        Only items that are CHECKED (or have checked descendants) are returned.
+        """
+        sel_main = []
+        sel_appx = {}
+        sel_filt = []
+        sel_filt_appx = {}
+        sel_known = []
+
+        # Helper to collect checked children from a node
+        def collect_from_node(node):
+            collected = []
+            # If node is a leaf (Manuscript or Page)
+            data = node.data(0, Qt.ItemDataRole.UserRole)
+            if data:
+                if node.checkState(0) == Qt.CheckState.Checked:
+                    collected.append(data)
+                return collected
+
+            # If node is a group container (no data)
+            for k in range(node.childCount()):
+                child = node.child(k)
+                child_data = child.data(0, Qt.ItemDataRole.UserRole)
+                if not child_data:
+                    # Recursive group (e.g. Appendix group)
+                    res = collect_from_node(child)
+                    collected.extend(res)
+                    continue
+
+                # It is a manuscript item
+                if child.checkState(0) == Qt.CheckState.Unchecked:
+                    continue
+
+                # If fully checked or partially checked
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    # Full manuscript selected
+                    collected.append(child_data)
+                elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
+                    # Some pages selected
+                    # Clone item
+                    import copy
+                    new_item = copy.copy(child_data) # Shallow copy enough? Pages list needs new ref.
+                    new_item['pages'] = []
+
+                    # Find checked pages
+                    for p_idx in range(child.childCount()):
+                        p_node = child.child(p_idx)
+                        if p_node.checkState(0) == Qt.CheckState.Checked:
+                            p_data = p_node.data(0, Qt.ItemDataRole.UserRole)
+                            new_item['pages'].append(p_data)
+
+                    if new_item['pages']:
+                            collected.append(new_item)
+            return collected
+
+        root = self.comp_tree.invisibleRootItem()
+
+        # If Flat Mode:
+        if self.chk_comp_flat.isChecked():
+            # Root 0 is "All Results"
+            if root.childCount() > 0:
+                sel_main = collect_from_node(root.child(0))
+            return sel_main, {}, [], {}, []
+
+        # Use node data (UserRole+100) to identify categories
+        for i in range(root.childCount()):
+            node = root.child(i)
+            node_type = node.data(0, Qt.ItemDataRole.UserRole + 100)
+
+            items = collect_from_node(node)
+            if not items: continue
+
+            if node_type == "ROOT_MAIN":
+                 sel_main.extend(items)
+            elif node_type == "ROOT_APPX":
+                 # Custom traversal for Appendix to preserve grouping structure
+                 for k in range(node.childCount()):
+                     group_node = node.child(k)
+                     group_sig_full = group_node.text(2)
+                     group_sig = group_sig_full.rpartition(' (')[0] # Remove count
+
+                     group_items = collect_from_node(group_node)
+                     if group_items:
+                         sel_appx[group_sig] = group_items
+
+            elif node_type == "ROOT_FILT":
+                 # Iterate children to separate Main/Appendix in filtered
+                 for k in range(node.childCount()):
+                     child = node.child(k)
+                     c_data = child.data(0, Qt.ItemDataRole.UserRole)
+                     if c_data:
+                         # Direct item -> Filtered Main
+                         if child.checkState(0) == Qt.CheckState.Checked:
+                             sel_filt.append(c_data)
+                         elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
+                             # Reuse logic from helper
+                             import copy
+                             new_item = copy.copy(c_data)
+                             new_item['pages'] = []
+                             for p_idx in range(child.childCount()):
+                                 p_node = child.child(p_idx)
+                                 if p_node.checkState(0) == Qt.CheckState.Checked:
+                                     new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
+                             if new_item['pages']: sel_filt.append(new_item)
+                     else:
+                         # Group node -> Filtered Appendix
+                         g_sig = child.text(2).rpartition(' (')[0]
+                         g_items = collect_from_node(child)
+                         if g_items:
+                             sel_filt_appx[g_sig] = g_items
+
+            elif node_type == "ROOT_KNOWN":
+                 sel_known.extend(items)
+
+        return sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known
 
     def on_comp_tree_item_expanded(self, item):
         if item.childCount() > 0:
@@ -3271,339 +5394,24 @@ class GenizahGUI(QMainWindow):
                 else:
                     update_node(child)
 
-    def export_comp_report(self, fmt='xlsx'):
-        # 1. Collect composition results
-        all_filtered = self.comp_filtered_main[:]
-        for v in self.comp_filtered_appendix.values():
-            all_filtered.extend(v)
-
-        if not (self.comp_main or self.comp_appendix or self.comp_known or all_filtered):
-            QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
-            return
-
-        # 2. Load any missing metadata
-        all_ids = []
-        def collect_ids(item_list):
-            for item in item_list:
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
-                    all_ids.append(item['sys_id'])
-                else:
-                    sid, _ = self.meta_mgr.parse_header_smart(item['raw_header'])
-                    if sid: all_ids.append(sid)
-
-        collect_ids(self.comp_main)
-        for group_items in self.comp_appendix.values(): collect_ids(group_items)
-        collect_ids(self.comp_known)
-        collect_ids(all_filtered)
-
-        cancelled = self._fetch_metadata_with_dialog(list(set(all_ids)), title=tr("Fetching metadata before export..."))
-        if cancelled: return
-
-        # 3. Choose export path
-        comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
-        base_path = self._default_report_path(comp_title, tr("Composition_Report"))
-        default_path = os.path.splitext(base_path)[0] + f".{fmt}"
-        
-        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
-        selected_filter = filters.get(fmt, "All Files (*.*)")
-
-        path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
-        if not path: return
-
-        credit_text = self._get_credit_header()
-
-        def clean_for_excel(text):
-            t = str(text).strip()
-            if t.startswith(('=', '+', '-', '@')): return "'" + t
-            return t
-
-        # ==========================================
-        #  XLSX & CSV Logic
-        # ==========================================
-        if fmt in ['xlsx', 'csv']:
-            table_rows = []
-            def add_rows(items, category, group_name=""):
-                # We iterate MANUSCRIPTS here, but the rows should be PAGES
-                for ms_item in items:
-                    # Resolve MS Metadata
-                    if ms_item.get('type') == 'manuscript':
-                        sid = ms_item['sys_id']
-
-                        # Use unified retrieval
-                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                        if not shelf or shelf == "Unknown":
-                             shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-
-                        ms_score = ms_item.get('score', 0)
-
-                        # Iterate Pages
-                        for page in ms_item.get('pages', []):
-                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             table_rows.append([
-                                category,
-                                group_name,
-                                sid or "",
-                                shelf or "",
-                                title or "",
-                                str(p_num or ""),
-                                f"{ms_score} (P:{page.get('score',0)})", # Show MS Score (Page Score)
-                                (page.get('source_ctx', '') or '').strip(),
-                                (page.get('text', '') or '').strip()
-                             ])
-                    else:
-                        # Fallback for pages
-                        sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-                        table_rows.append([
-                            category,
-                            group_name,
-                            sid or "",
-                            shelf or "",
-                            title or "",
-                            str(p_num or ""),
-                            str(ms_item.get('score', 0)),
-                            (ms_item.get('source_ctx', '') or '').strip(),
-                            (ms_item.get('text', '') or '').strip()
-                        ])
-
-            if self.chk_comp_flat.isChecked():
-                flat_items = self._sort_comp_items(
-                    self._collect_comp_items(
-                        self.comp_main,
-                        self.comp_appendix,
-                        self.comp_filtered_main,
-                        self.comp_filtered_appendix,
-                        self.comp_known,
-                    )
-                )
-                add_rows(flat_items, tr("All Results"))
-            else:
-                add_rows(self.comp_main, "Main Manuscripts")
-                for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Appendix", sig)
-                add_rows(self.comp_filtered_main, "Filtered Main")
-                for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Filtered Appendix", sig)
-                add_rows(self.comp_known, "Known Manuscripts")
-
-            # --- XLSX (Rich Text) ---
-            if fmt == 'xlsx':
-                try:
-                    wb = openpyxl.Workbook()
-                    ws = wb.active
-                    ws.title = "Composition Report"
-                    ws.sheet_view.rightToLeft = True
-
-                    # Fonts for highlighted snippets
-                    font_red = InlineFont(color='FF0000', b=True)
-                    font_normal = InlineFont(color='000000')
-
-                    def write_rich_cell(row, col, text):
-                        if '*' not in text:
-                            ws.cell(row=row, column=col, value=clean_for_excel(text))
-                            return
-                        parts = text.split('*')
-                        rich_string = CellRichText()
-                        for i, part in enumerate(parts):
-                            if not part: continue
-                            if i % 2 == 1:
-                                rich_string.append(TextBlock(font_red, part))
-                            else:
-                                rich_string.append(TextBlock(font_normal, part))
-                        ws.cell(row=row, column=col, value=rich_string)
-
-                    # Credit block
-                    curr_row = 1
-                    for line in credit_text.split('\n'):
-                        if not line.strip(): continue
-                        c = ws.cell(row=curr_row, column=1, value=clean_for_excel(line))
-                        c.font = Font(bold=True, color="555555")
-                        curr_row += 1
-                    curr_row += 1
-
-                    # Table headers
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score (MS/Page)", "Source Context", "Manuscript Text"]
-                    for idx, h in enumerate(headers, 1):
-                        c = ws.cell(row=curr_row, column=idx, value=h)
-                        c.font = Font(bold=True, color="FFFFFF")
-                        c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-                    curr_row += 1
-
-                    # Data rows
-                    for row_data in table_rows:
-                        for idx, val in enumerate(row_data, 1):
-                            val_str = str(val)
-
-                            # Columns 8 and 9 hold highlighted text
-                            if idx in [8, 9]:
-                                write_rich_cell(curr_row, idx, val_str)
-                            else:
-                                clean_val = re.sub(r'<[^>]+>', '', val_str)
-                                safe_val = clean_for_excel(clean_val)
-                                ws.cell(row=curr_row, column=idx, value=safe_val)
-                        curr_row += 1
-
-                    # Column sizing
-                    ws.column_dimensions['A'].width = 20
-                    ws.column_dimensions['D'].width = 20
-                    ws.column_dimensions['E'].width = 30
-                    ws.column_dimensions['H'].width = 50
-                    ws.column_dimensions['I'].width = 60
-
-                    wb.save(path)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-                except Exception as e:
-                    QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
-
-            # --- CSV ---
-            elif fmt == 'csv':
-                try:
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
-                    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
-                        f.write(credit_text)
-                        writer = csv.writer(f)
-                        writer.writerow([])
-                        writer.writerow(headers)
-                        for row in table_rows:
-                            clean_row = [re.sub(r'<[^>]+>', '', str(val)) for val in row]
-                            writer.writerow(clean_row)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-                except Exception as e:
-                    QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
-
-        # --- TXT ---
-        else:
-            try:
-                sep = "=" * 80
-
-                # Count Manuscripts
-                appendix_count = sum(len(v) for v in self.comp_appendix.values())
-                filtered_total = len(self.comp_filtered_main) + sum(len(v) for v in self.comp_filtered_appendix.values())
-                known_count = len(self.comp_known)
-                total_count = len(self.comp_main) + appendix_count + known_count + filtered_total
-
-                def _fmt_ms_entry(ms_item):
-                    # MS Header
-                    if ms_item.get('type') == 'manuscript':
-                        sid = ms_item['sys_id']
-
-                        shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                        if not shelf or shelf == "Unknown":
-                            shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-
-                        ms_block = [sep, f"MANUSCRIPT: {shelf} | {title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
-
-                        # Iterate Pages
-                        for page in ms_item.get('pages', []):
-                             _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             ms_block.append(f"\n--- Page {p_num} (Score: {page.get('score',0)}) ---")
-                             ms_block.append(tr("Source Context") + ":\n" + (page.get('source_ctx', '') or "").strip())
-                             ms_block.append(tr("Manuscript") + ":\n" + (page.get('text', '') or "").strip())
-
-                        return ms_block
-                    else:
-                        return self._fmt_item_legacy(ms_item) # Fallback
-
-                def _append_group_summ(target, appx_data, summary_data, label):
-                    target.extend([sep, label, sep])
-                    if appx_data:
-                        for sig, items in sorted(appx_data.items(), key=lambda x: len(x[1]), reverse=True):
-                            # items are now Manuscripts
-                            # We can list shelfmarks
-                            shelfmarks = []
-                            for ms in items:
-                                if ms.get('type') == 'manuscript':
-                                    s, _ = self.meta_mgr.get_meta_for_id(ms['sys_id'])
-                                    shelfmarks.append(s if s and s != "Unknown" else ms['sys_id'])
-                                else:
-                                    shelfmarks.append("Unknown")
-
-                            target.append(f"{sig} ({len(items)}): {', '.join(shelfmarks)}")
-                    else:
-                        target.append(tr("No items."))
-
-                if self.chk_comp_flat.isChecked():
-                    summary_lines = [
-                        sep, tr("COMPOSITION REPORT SUMMARY"), sep,
-                        f"Title: {comp_title}",
-                        f"{tr('Total Manuscripts Found')}: {total_count}"
-                    ]
-
-                    detail_lines = [sep, tr("ALL RESULTS"), sep]
-                    flat_items = self._sort_comp_items(
-                        self._collect_comp_items(
-                            self.comp_main,
-                            self.comp_appendix,
-                            self.comp_filtered_main,
-                            self.comp_filtered_appendix,
-                            self.comp_known,
-                        )
-                    )
-                    for item in flat_items:
-                        detail_lines.extend(_fmt_ms_entry(item))
-                else:
-                    summary_lines = [
-                        sep, tr("COMPOSITION REPORT SUMMARY"), sep,
-                        f"Title: {comp_title}",
-                        f"{tr('Total Manuscripts Found')}: {total_count}",
-                        f"{tr('Main Manuscripts')}: {len(self.comp_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(self.comp_appendix)}",
-                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                        f"{tr('Known/Excluded Manuscripts')}: {known_count}"
-                    ]
-                    _append_group_summ(summary_lines, self.comp_appendix, self.comp_summary, tr("MAIN APPENDIX SUMMARY"))
-                    
-                    summary_lines.extend([sep, tr("KNOWN MANUSCRIPTS SUMMARY"), sep])
-                    if self.comp_known:
-                        for item in self.comp_known:
-                            if item.get('type') == 'manuscript':
-                                s, _ = self.meta_mgr.get_meta_for_id(item['sys_id'])
-                                summary_lines.append(f"- {s or 'Unknown'}")
-                            else:
-                                summary_lines.append("- Unknown")
-                    else:
-                        summary_lines.append(tr("No known manuscripts were excluded."))
-
-                    detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in self.comp_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if self.comp_filtered_main:
-                        detail_lines.extend([sep, tr("FILTERED BY TEXT") + " (Main)", sep])
-                        for item in self.comp_filtered_main: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if self.comp_known:
-                        detail_lines.extend([sep, tr("KNOWN MANUSCRIPTS"), sep])
-                        for item in self.comp_known: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if self.comp_appendix:
-                        detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(self.comp_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
-
-                    if self.comp_filtered_appendix:
-                        detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
-                        for sig, items in sorted(self.comp_filtered_appendix.items(), key=lambda x: len(x[1]), reverse=True):
-                            detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
-
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(credit_text)
-                    all_lines = summary_lines + detail_lines
-                    f.write("\n".join(all_lines).strip() + "\n")
-                
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
-
-            except Exception as e:
-                QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
-
     def _fmt_item_legacy(self, item):
         # Fallback for old page style if needed
         sid, p_num, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+
+        def clean(t):
+            t = str(t or "")
+            t = re.sub(r'<span[^>]*>', '*', t).replace('</span>', '*')
+            t = t.replace("<br>", " ").replace("\n", " ").replace("\r", "")
+            t = re.sub(r'<[^>]+>', '', t)
+            t = re.sub(r'\s+', ' ', t)
+            t = re.sub(r'\*(\s+)\*', r'\1', t)
+            return t.strip()
+
         return [
             "=" * 80,
             f"{shelf or sid} | {title or 'Untitled'} | Img: {p_num} | Version: {item.get('src_lbl','')} | ID: {item.get('uid', sid)} (Score: {item.get('score', 0)})",
-            tr("Source Context") + ":", (item.get('source_ctx', '') or "").strip(), "",
-            tr("Manuscript") + ":", (item.get('text', '') or "").strip(), ""
+            tr("Source Context") + ":", clean(item.get('source_ctx', '')), "",
+            tr("Manuscript") + ":", clean(item.get('text', '')), ""
         ]
 
     def _format_comp_entry(self, item):
@@ -3689,57 +5497,194 @@ class GenizahGUI(QMainWindow):
     def browse_load(self):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
+        shelf_query = self.browse_shelf_input.text().strip()
         fl_id = self.browse_fl_input.text().strip()
-        if not sid and not fl_id: return
+        if not sid and not fl_id and not shelf_query: return
+
+        # Reset UI
+        self.browse_text.setText(tr("Loading metadata..."))
+        self.browse_viewer.load_images({}) # Clear viewer
 
         page_data = None
-        if fl_id:
-            page_data = self.searcher.get_browse_page_by_fl(fl_id, sid or None)
-            if not page_data and not sid:
-                QMessageBox.warning(self, tr("Error"), tr("FL not found."))
+
+        # Determine priority based on last edited field (default: shelfmark > system ID > FL)
+        priority = []
+        if self.last_browse_field == "fl" and fl_id:
+            priority.append("fl")
+        elif self.last_browse_field == "shelf" and shelf_query:
+            priority.append("shelf")
+        elif self.last_browse_field == "sys" and sid:
+            priority.append("sys")
+
+        if shelf_query and "shelf" not in priority:
+            priority.append("shelf")
+        if sid and "sys" not in priority:
+            priority.append("sys")
+        if fl_id and "fl" not in priority:
+            priority.append("fl")
+
+        def format_option(opt, idx):
+            base = opt['shelfmark']
+            title = (opt.get('title') or "").strip()
+            if title:
+                base = f"{base} | {title}"
+            label = f"{idx + 1}. {base}"
+            if len(label) > 60:
+                label = label[:57] + "..."
+            return label
+
+        for field in priority:
+            if field == "fl":
+                if not fl_id:
+                    continue
+                pd = self.searcher.get_browse_page_by_fl(fl_id, sid or None)
+                if pd:
+                    page_data = pd
+                    sid = pd.get('sys_id', sid)
+                    self.browse_sys_input.setText(sid or "")
+                    self.browse_fl_input.setText(pd.get('fl_id', fl_id))
+                    break
+                # If no other identifiers exist, stop and warn
+                if not sid and not shelf_query:
+                    QMessageBox.warning(self, tr("Error"), tr("FL not found."))
+                    return
+                continue
+
+            if field == "shelf":
+                if not shelf_query:
+                    continue
+                shelf_res = self.meta_mgr.resolve_system_by_shelfmark(shelf_query)
+                if shelf_res['sys_id']:
+                    sid = shelf_res['sys_id']
+                    if shelf_res['selected_shelfmark']:
+                        self.browse_shelf_input.setText(shelf_res['selected_shelfmark'])
+                    self.browse_sys_input.setText(sid or "")
+                    break
+                elif shelf_res['options']:
+                    options = shelf_res['options']
+                    if len(options) == 1:
+                        opt = options[0]
+                        sid = opt['sys_id']
+                        self.browse_shelf_input.setText(opt['shelfmark'])
+                        self.browse_sys_input.setText(sid or "")
+                        break
+                    display_options = [format_option(opt, idx) for idx, opt in enumerate(options)]
+                    choice, ok = QInputDialog.getItem(
+                        self, tr("Shelfmark"), tr("Multiple shelfmarks found. Select one:"), display_options, 0, False
+                    )
+                    if not ok:
+                        return
+                    if choice in display_options:
+                        idx = display_options.index(choice)
+                        opt = options[idx]
+                        sid = opt['sys_id']
+                        self.browse_shelf_input.setText(opt['shelfmark'])
+                        self.browse_sys_input.setText(sid or "")
+                        break
+                # Shelfmark was the chosen path; stop if not resolved
+                QMessageBox.warning(self, tr("Error"), tr("Shelfmark not found."))
                 return
-            if page_data:
-                sid = page_data.get('sys_id', sid)
-                self.browse_sys_input.setText(sid or "")
-                self.browse_fl_input.setText(page_data.get('fl_id', fl_id))
+
+            if field == "sys":
+                if sid:
+                    break
 
         if not sid:
-            QMessageBox.warning(self, tr("Error"), tr("FL not found."))
+            msg = tr("FL not found.")
+            if shelf_query:
+                msg = tr("Shelfmark not found.")
+            QMessageBox.warning(self, tr("Error"), msg)
             return
 
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
-        self.btn_b_catalog.setEnabled(True)
-        self.btn_b_all.setEnabled(True)   # Enable
-        self.btn_b_save.setEnabled(True)  # Enable
-        self.browse_update_view(0)
+        self.current_browse_internal_idx = None
+        
+        # Disable controls until loaded
+        self.btn_b_catalog.setEnabled(False)
+        self.btn_b_save.setEnabled(False)
 
-    def browse_navigate(self, d): self.browse_update_view(d)
+        # Trigger Unified Enrichment (Meta + Images)
+        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+        self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+        self.enrich_browse_worker.start()
 
-    def browse_update_view(self, d):
-        pd = self.searcher.get_browse_page(self.current_browse_sid, self.current_browse_p, d)
-        if not pd: QMessageBox.warning(self, tr("Nav"), tr("Not found or end.")); return
+    def browse_navigate(self, d):
+        if not self.current_browse_sid: return
 
+        # 1. השתמש באינדקס המוחלט אם קיים (מונע לופים)
+        idx_arg = self.current_browse_internal_idx
+        
+        # גיבוי: אם אין אינדקס, נסה לפי מספר עמוד
+        p_arg = None
+        if self.current_browse_p is not None:
+            try: p_arg = int(self.current_browse_p)
+            except: p_arg = 0
+
+        # 2. קריאה למנוע (עם האינדקס!)
+        page_data = self.searcher.get_browse_page(
+            self.current_browse_sid, 
+            p_num=p_arg, 
+            next_prev=d,
+            absolute_index=idx_arg
+        )
+
+        if page_data:
+            # 3. הצגת הדף ישירות בלי שאילתות נוספות
+            self.browse_render_page(page_data)
+        else:
+            QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
+    
+    def browse_render_page(self, pd):
+        # עדכון משתני מצב
         self.current_browse_p = pd['p_num']
-        # Preprocess the text outside the f-string to avoid backslash parsing issues
+        
+        # שמירת האינדקס המוחלט לפעם הבאה (קריטי!)
+        if 'internal_index' in pd:
+            self.current_browse_internal_idx = pd['internal_index']
+        else:
+            # חישוב משוער אם המנוע לא החזיר (לרוב יחזיר)
+            self.current_browse_internal_idx = pd.get('current_idx', 1) - 1
+
+        # הצגת הטקסט
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
+        # עדכון כותרות
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
-
-        # --- UPDATE: Combined Label Text ---
         info_text = f"<b>{shelf}</b><br>{title or ''}"
         self.browse_info_lbl.setText(info_text)
-        # -----------------------------------
+        if shelf:
+            self.browse_shelf_input.setText(shelf)
 
+        # עדכון מונה עמודים וכפתורים
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
-        self.btn_b_prev.setEnabled(pd['current_idx']>1); self.btn_b_next.setEnabled(pd['current_idx']<pd['total_pages'])
+        self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
+        self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
 
+        # עדכון שדה ה-FL אם קיים
+        parsed = self.meta_mgr.parse_full_id_components(full_header)
+        if parsed.get('fl_id'):
+            self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
+        else:
+            self.browse_fl_input.setText("")
+            
+        # This tells the large image viewer on the right to jump to the correct index
+        if hasattr(self, 'browse_viewer') and self.browse_viewer.isVisible():
+            try: 
+                # p_num is 1-based, array index is 0-based
+                idx = int(self.current_browse_p) - 1
+            except: 
+                idx = 0
+            self.browse_viewer.set_page(idx)
+        # -------------------------------
+
+        # טעינת תמונה
         if self.current_browse_sid in self.meta_mgr.nli_cache:
             self.fetch_browse_thumbnail(self.current_browse_sid)
         else:
-            self.browse_thumb.setText("Loading Meta...")
+            self.browse_thumb.setText(tr("Loading Meta..."))
             def worker():
                 self.meta_mgr.fetch_nli_data(self.current_browse_sid)
                 self.browse_thumb_resolved.emit(self.current_browse_sid, "") 
@@ -3900,7 +5845,239 @@ class GenizahGUI(QMainWindow):
                     self.group_thread.wait()
         finally:
             super().closeEvent(event)
+    
+    def _add_single_comp_node(self, parent, ms_item):
+        """Adds a node to the composition tree with parent/child logic."""
+        sid = ms_item.get('sys_id')
+        if not sid:
+            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
+        
+        shelf, t = self.meta_mgr.get_meta_for_id(sid)
+        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+        
+        pages = ms_item.get('pages', [])
+        best_snippet = ""
+        best_ctx = ""
+        if pages:
+            best_snippet = pages[0].get('text', '') 
+            best_ctx = pages[0].get('source_ctx', '')
 
+        # יצירת ה-Node של ההורה
+        node = QTreeWidgetItem(parent)
+        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
+        self._set_comp_tree_text(node, 1, display_shelf)
+        self._set_comp_tree_text(node, 2, t or "")
+        self._set_comp_tree_text(node, 3, sid)
+        
+        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+        # שמירת הסניפט המקורי כדי לשחזר בסגירה
+        node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
+
+        # הצגת הסניפט בהורה
+        pattern = pages[0].get('highlight_pattern') if pages else None
+        self._set_comp_node_previews(node, best_ctx, best_snippet, pattern)
+
+        if len(pages) > 1:
+            node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+            for p_item in pages:
+                p_num_str = "Page Match"
+                raw_h = p_item.get('raw_header', '')
+                match = re.search(r'(?i)Img\s*(\d+)', raw_h)
+                if match:
+                    p_num_str = f"Image {match.group(1)}"
+                else:
+                    _, p_num_ex, _, _ = self._get_meta_for_header(raw_h)
+                    if p_num_ex: p_num_str = f"Image {p_num_ex}"
+                
+                child = QTreeWidgetItem(node)
+                self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
+                child.setText(1, p_num_str)
+                child.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+        
+        elif len(pages) == 1:
+            p_item = pages[0]
+            p_suffix = ""
+            match = re.search(r'(?i)Img\s*(\d+)', p_item.get('raw_header', ''))
+            if match: p_suffix = f" (Img {match.group(1)})"
+            node.setText(1, f"{display_shelf}{p_suffix}")
+
+    def _on_comp_item_expanded(self, item):
+        if item.childCount() > 0:
+            self.comp_tree.setItemWidget(item, self.comp_col_context, None) 
+            self.comp_tree.setItemWidget(item, self.comp_col_ms_context, None) 
+
+    def _on_comp_item_collapsed(self, item):
+        if item.childCount() > 0:
+            stored_data = item.data(1, Qt.ItemDataRole.UserRole)
+            if stored_data:
+                ctx, snippet = stored_data
+
+                # Try to retrieve highlight pattern from the main item data (Role 0)
+                item_data = item.data(0, Qt.ItemDataRole.UserRole)
+                pattern = None
+                if item_data:
+                    if item_data.get('type') == 'manuscript':
+                        pages = item_data.get('pages', [])
+                        if pages:
+                            pattern = pages[0].get('highlight_pattern')
+                    else:
+                        pattern = item_data.get('highlight_pattern')
+
+                self._set_comp_node_previews(item, ctx, snippet, pattern)
+
+    def on_comp_item_double_clicked(self, item, column):
+        """
+        Smart navigation that restores full context (Next/Prev, Source Text).
+        It rebuilds the full list of results from the tree but jumps to the specific clicked item.
+        """
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data: return # התעלמות מכותרות ראשיות (כמו "Main")
+
+        # 1. בניית רשימה שטוחה של כל התוצאות (עבור כפתורי Next/Prev)
+        flat_list = []
+        target_index = -1
+        
+        # אנו צריכים לזהות את הפריט שעליו לחצנו בתוך הרשימה השטוחה
+        # נשווה לפי כתובת האובייקט (item) או לפי מזהה ייחודי
+        clicked_node = item
+        
+        # אם לחצנו על "הורה" (כתב יד) - המטרה היא הילד הראשון שלו (העמוד הכי טוב)
+        if data.get('type') == 'manuscript' and item.childCount() > 0:
+            clicked_node = item.child(0)
+
+        # פונקציית עזר שאוספת את הנתונים בצורה מסודרת
+        def collect_node_data(node):
+            node_data = node.data(0, Qt.ItemDataRole.UserRole)
+            if not node_data: return
+
+            # אם זה הורה שמכיל עמודים, לא מוסיפים אותו אלא את הילדים שלו
+            # (אלא אם כן הוא הורה ללא ילדים גרפיים, כלומר עמוד בודד)
+            if node_data.get('type') == 'manuscript' and node.childCount() > 0:
+                for i in range(node.childCount()):
+                    collect_node_data(node.child(i))
+                return
+
+            # חילוץ מטא-דאטה מלא
+            raw_h = node_data.get('raw_header', '')
+            sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+            
+            # וידוא שיש לנו Highlight Pattern (חשוב להדגשה האדומה!)
+            hl_pattern = node_data.get('highlight_pattern')
+            
+            # בניית האובייקט ל-Viewer
+            # חשוב: מעבירים את ה-source_ctx וה-text המקוריים מהעץ!
+            ready_item = {
+                'uid': node_data.get('uid', sid),
+                'raw_header': raw_h,
+                'text': node_data.get('text', ''), # הסניפט עם ההדגשה
+                'full_text': None, # ייטען ב-Dialog
+                'source_ctx': node_data.get('source_ctx', ''), # הטקסט המקביל (חשוב!)
+                'highlight_pattern': hl_pattern,
+                'display': {
+                    'id': sid,
+                    'shelfmark': shelf,
+                    'title': title,
+                    'img': p_num,
+                    'source': node_data.get('src_lbl', 'Genizah Lab')
+                }
+            }
+            
+            flat_list.append(ready_item)
+            
+            # בדיקה האם זה הפריט שלחצנו עליו
+            if node is clicked_node:
+                nonlocal target_index
+                target_index = len(flat_list) - 1
+
+        # סריקת העץ (Main -> Appendix -> Filtered -> Known)
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            category = root.child(i)
+            # אם הקטגוריה עצמה מכילה דפים (במצב שטוח)
+            if category.data(0, Qt.ItemDataRole.UserRole):
+                 collect_node_data(category)
+            
+            # סריקת הילדים של הקטגוריה
+            for j in range(category.childCount()):
+                sub = category.child(j)
+                # אם זה קבוצה (כמו בנספח) או סתם פריט
+                collect_node_data(sub)
+
+        if not flat_list: return
+        
+        # אם לא מצאנו (נדיר), נפתח את הראשון
+        if target_index == -1: target_index = 0
+
+        # 3. פתיחת הדיאלוג עם הרשימה המלאה והאינדקס הנכון
+        # זה משחזר את הניווט (Result X of Y) ואת ההקשר
+        try:
+            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
+
+    def open_manuscript_viewer_by_id(self, sys_id, highlight_regex=None, target_page=0):
+        """
+        פותח את חלון הצפייה עבור מזהה ספציפי, ומנווט לעמוד המבוקש.
+        """
+        # 1. שליפת המטא-דאטה
+        meta = self.meta_mgr.fetch_nli_data(sys_id)
+        
+        # 2. בניית אובייקט נתונים לדיאלוג
+        item_data = {
+            'display': {
+                'id': sys_id,
+                'shelfmark': meta.get('shelfmark', sys_id),
+                'title': meta.get('title', ''),
+                'source': 'Genizah Lab',
+                'img': meta.get('thumb_url', '')
+            },
+            'snippet': '',  
+            'full_text': '', 
+            'uid': sys_id,
+            'highlight_pattern': highlight_regex,
+            'raw_header': str(sys_id) 
+        }
+
+        # 3. יצירת הדיאלוג
+        try:
+            dlg = ResultDialog(self, [item_data], 0, self.meta_mgr, self.searcher)
+            
+            # 4. ניווט לתמונה הספציפית (אם התבקש)
+            if target_page > 0:
+                dlg.load_page(target=target_page)
+
+            dlg.exec()
+        except Exception as e:
+            # הגנה מפני קריסות עתידיות בחלון הצפייה
+            print(f"Error opening viewer: {e}")
+            QMessageBox.warning(self, "Error", f"Could not open viewer: {e}")
+            
+    def navigate_manuscript(self, direction):
+        """Move to prev/next manuscript based on FILE ORDER."""
+        # אם אין כתב יד טעון, נתחיל מהראשון
+        current = self.current_browse_sid
+        
+        # קריאה לפונקציה החדשה ב-SearchEngine
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        
+        if new_sid:
+            self.browse_sys_input.setText(new_sid)
+            
+            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+            if shelf and shelf != "Unknown":
+                self.browse_shelf_input.setText(shelf)
+
+            # נותן עדיפות ל-System ID וטוען
+            self._set_last_browse_field("sys")
+            self.browse_load()
+        else:
+            QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+    
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
