@@ -2580,14 +2580,22 @@ class GenizahGUI(QMainWindow):
         # --- Top Area: Metadata (Gray Bar) ---
         top_container = QFrame();
         top_container.setFrameShape(QFrame.Shape.StyledPanel)
-        # Removed hardcoded background color for dark mode compatibility
-        # top_container.setStyleSheet("background-color: #ecf0f1; border-radius: 5px;")
         
         top_layout = QVBoxLayout(top_container)
         top_layout.setContentsMargins(10, 5, 10, 5)
 
         # Row 1: Search Inputs
         row1 = QHBoxLayout()
+        self.btn_prev_ms = QPushButton("◀")
+        self.btn_prev_ms.setToolTip(tr("Previous Manuscript (File Order)"))
+        self.btn_prev_ms.setFixedWidth(25)
+        self.btn_prev_ms.clicked.connect(lambda: self.navigate_manuscript(-1))
+
+        self.btn_next_ms = QPushButton("▶")
+        self.btn_next_ms.setToolTip(tr("Next Manuscript (File Order)"))
+        self.btn_next_ms.setFixedWidth(25)
+        self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
+        
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
@@ -2596,6 +2604,7 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50)
         self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
+        
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         self.browse_shelf_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
@@ -2614,9 +2623,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_all.setCheckable(True)
         self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
         self.btn_b_all.setEnabled(False)
-
-        row1.addWidget(QLabel(tr("System ID:"))); row1.addWidget(self.browse_sys_input)
+        
+        row1.addWidget(self.btn_prev_ms)    
+        row1.addWidget(QLabel(tr("System ID:")))        
+        row1.addWidget(self.browse_sys_input)    
         row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
+        row1.addWidget(self.btn_next_ms)
+        row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
         row1.addSpacing(20)
@@ -6043,6 +6056,27 @@ class GenizahGUI(QMainWindow):
             # הגנה מפני קריסות עתידיות בחלון הצפייה
             print(f"Error opening viewer: {e}")
             QMessageBox.warning(self, "Error", f"Could not open viewer: {e}")
+            
+    def navigate_manuscript(self, direction):
+        """Move to prev/next manuscript based on FILE ORDER."""
+        # אם אין כתב יד טעון, נתחיל מהראשון
+        current = self.current_browse_sid
+        
+        # קריאה לפונקציה החדשה ב-SearchEngine
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        
+        if new_sid:
+            self.browse_sys_input.setText(new_sid)
+            
+            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+            if shelf and shelf != "Unknown":
+                self.browse_shelf_input.setText(shelf)
+
+            # נותן עדיפות ל-System ID וטוען
+            self._set_last_browse_field("sys")
+            self.browse_load()
+        else:
+            QMessageBox.information(self, tr("Nav"), tr("End of file list."))
     
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """

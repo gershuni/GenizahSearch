@@ -3154,3 +3154,33 @@ class SearchEngine:
                         'fl_id': fl_digits
                     }
         return None
+
+    def get_adjacent_sys_id_by_file_order(self, current_sys_id, offset):
+        """
+        Returns the next/prev system ID based on the order in Transcriptions.txt.
+        This relies on browse_map preserving insertion order.
+        """
+        # Load map if not already cached in memory for navigation
+        if not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids:
+            if not os.path.exists(Config.BROWSE_MAP):
+                return None
+            with open(Config.BROWSE_MAP, 'rb') as f:
+                b_map = pickle.load(f)
+                # list(dict.keys()) returns items in insertion order (File Order)
+                self._ordered_sys_ids = list(b_map.keys())
+
+        if not current_sys_id:
+            return self._ordered_sys_ids[0] if self._ordered_sys_ids else None
+
+        try:
+            # Find current index
+            curr_idx = self._ordered_sys_ids.index(current_sys_id)
+            new_idx = curr_idx + offset
+            
+            # Check bounds
+            if 0 <= new_idx < len(self._ordered_sys_ids):
+                return self._ordered_sys_ids[new_idx]
+        except ValueError:
+            pass # Current ID not found in list
+            
+        return None
