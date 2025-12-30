@@ -554,6 +554,10 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(False)
         self.combo_source.currentIndexChanged.connect(self._on_source_changed)
 
+        self.combo_img_selector = QComboBox()
+        self.combo_img_selector.setVisible(False)
+        self.combo_img_selector.currentIndexChanged.connect(self._on_label_selected)
+
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setFixedWidth(30)
         btn_zoom_out.clicked.connect(lambda: self.scroll_area.zoom_out())
@@ -567,6 +571,7 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.clicked.connect(self.open_external)
 
         top_bar.addWidget(self.combo_source)
+        top_bar.addWidget(self.combo_img_selector)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
         top_bar.addWidget(btn_zoom_out)
@@ -624,6 +629,8 @@ class ManuscriptViewerWidget(QWidget):
         self.external_url = marc.get('external_iiif_link')
         self.btn_external.setVisible(bool(self.external_url))
 
+        self._populate_label_selector()
+
         # Set Page
         self.set_page(initial_idx)
 
@@ -639,6 +646,8 @@ class ManuscriptViewerWidget(QWidget):
         # Try to keep index within bounds
         if self.current_idx >= len(self.active_list):
             self.current_idx = 0
+
+        self._populate_label_selector()
         self.set_page(self.current_idx)
 
     def _resolve_url(self, base_url):
@@ -683,12 +692,56 @@ class ManuscriptViewerWidget(QWidget):
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
         self.loader_thread.start()
 
+        self._sync_label_selector()
+
         # Preload next image
         self._preload(index + 1)
 
     def display_image(self, image):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
+
+    def _populate_label_selector(self):
+        self.combo_img_selector.blockSignals(True)
+        self.combo_img_selector.clear()
+
+        if not self.active_list:
+            self.combo_img_selector.setVisible(False)
+            self.combo_img_selector.blockSignals(False)
+            return
+
+        for idx, img in enumerate(self.active_list):
+            lbl = img.get('label') or tr("Image") + f" {idx + 1}"
+            fl_hint = img.get('fl_id') or img.get('fl')
+            if fl_hint:
+                lbl = f"{lbl} (FL{fl_hint})"
+            self.combo_img_selector.addItem(lbl, idx)
+
+        self.combo_img_selector.setVisible(len(self.active_list) > 1)
+        self.combo_img_selector.blockSignals(False)
+
+        self._sync_label_selector()
+
+    def _sync_label_selector(self):
+        if not self.active_list:
+            self.combo_img_selector.setVisible(False)
+            return
+
+        if self.current_idx >= len(self.active_list):
+            return
+
+        self.combo_img_selector.blockSignals(True)
+        self.combo_img_selector.setCurrentIndex(self.current_idx)
+        self.combo_img_selector.blockSignals(False)
+
+    def _on_label_selected(self, combo_idx):
+        target_idx = self.combo_img_selector.currentData()
+        if target_idx is None:
+            return
+        try:
+            self.set_page(int(target_idx))
+        except Exception:
+            pass
 
     def open_external(self):
         if self.external_url:
