@@ -2596,12 +2596,15 @@ class GenizahGUI(QMainWindow):
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
         self.browse_fl_input.setFixedWidth(140)
+        self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
+        self.browse_shelf_input.setFixedWidth(200)
 
         self.btn_browse_go = QPushButton(tr("Go")); self.btn_browse_go.setFixedWidth(50)
         self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
+        self.browse_shelf_input.returnPressed.connect(self.browse_load)
         
         self.btn_b_catalog = QPushButton(tr("Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
@@ -2617,6 +2620,7 @@ class GenizahGUI(QMainWindow):
 
         row1.addWidget(QLabel(tr("System ID:"))); row1.addWidget(self.browse_sys_input)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
+        row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
         row1.addWidget(self.btn_browse_go)
         row1.addSpacing(20)
         row1.addWidget(self.btn_b_all)
@@ -3013,7 +3017,7 @@ class GenizahGUI(QMainWindow):
 
     def get_browse_help_text(self):
         if CURRENT_LANG == 'he': return tr("BROWSE_HELP_HTML")
-        return """<h3>Browse Manuscripts</h3><ul><li><b>System ID:</b> Enter an ID to load a manuscript.</li><li><b>View All:</b> Switch to continuous view of the full text.</li><li><b>Save:</b> Export the manuscript text to a file.</li></ul>"""
+        return """<h3>Browse Manuscripts</h3><ul><li><b>System ID:</b> Enter an ID to load a manuscript.</li><li><b>Shelfmark:</b> You can load by shelfmark even if it includes dots/slashes/spaces. If the match is ambiguous, the closest options (up to 10) will be suggested.</li><li><b>View All:</b> Switch to continuous view of the full text.</li><li><b>Save:</b> Export the manuscript text to a file.</li></ul>"""
 
     def get_settings_help_text(self):
         if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
@@ -5479,11 +5483,33 @@ class GenizahGUI(QMainWindow):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
         fl_id = self.browse_fl_input.text().strip()
-        if not sid and not fl_id: return
+        shelf_query = self.browse_shelf_input.text().strip()
+        if not sid and not fl_id and not shelf_query: return
 
         # Reset UI
         self.browse_text.setText(tr("Loading metadata..."))
         self.browse_viewer.load_images({}) # Clear viewer
+
+        # Attempt shelfmark resolution first (ignores punctuation)
+        if shelf_query and not sid and self.meta_mgr:
+            matches = self.meta_mgr.find_shelfmark_matches(shelf_query, limit=10)
+            if len(matches) == 1:
+                sid = matches[0]['sys_id']
+                self.browse_sys_input.setText(sid or "")
+                # Show canonical shelfmark formatting if available
+                if matches[0]['shelfmark']:
+                    self.browse_shelf_input.setText(matches[0]['shelfmark'])
+            elif len(matches) == 0:
+                QMessageBox.warning(self, tr("Error"), tr("Shelfmark not found."))
+                return
+            else:
+                opts = "\n".join([f"- {m['shelfmark']} ({tr('System ID')}: {m['sys_id']})" for m in matches])
+                QMessageBox.information(
+                    self,
+                    tr("Multiple shelfmarks found"),
+                    tr("Multiple shelfmarks matched your input:\n{}\n\n(Showing up to 10 closest options.)").format(opts)
+                )
+                return
 
         page_data = None
         if fl_id:

@@ -56,6 +56,8 @@ TRANSLATIONS = {
     "FL": "מס' קובץ",
     "FL:": "מס' קובץ:",
     "Enter FL ID...": "הכנס מספר קובץ...",
+    "Enter shelfmark...": "הכנס מספר מדף...",
+    "Shelfmark:": "מספר מדף:",
     "Shelfmark": "מספר מדף",
     "Title": "כותרת",
     "Snippet": "קטע",
@@ -170,6 +172,9 @@ TRANSLATIONS = {
     "Show full text continuously (Infinite Scroll)": "הצג טקסט מלא ברצף (גלילה אינסופית)",
     "Save": "שמור",
     "Save full manuscript to file": "שמור כתב יד מלא לקובץ",
+    "Shelfmark not found.": "מספר המדף לא נמצא.",
+    "Multiple shelfmarks found": "נמצאו מספר מספרי מדף",
+    "Multiple shelfmarks matched your input:\n{}\n\n(Showing up to 10 closest options.)": "מספר המדף שהוקלד אינו חד משמעי. האפשרויות הקרובות (עד עשר):\n{}",
     "No Preview": "אין תצוגה",
     "Loading Meta...": "טוען מידע...",
     "No Image": "אין תמונה",
@@ -367,6 +372,7 @@ TRANSLATIONS = {
     "BROWSE_HELP_HTML": """<div dir='rtl'><h3>עיון בכתב יד</h3>
     <ul>
     <li><b>מספר מערכת:</b> הזן מזהה מערכת כדי לטעון כתב יד.</li>
+    <li><b>מספר מדף:</b> ניתן להזין מספר מדף גם אם כולל נקודות/לוכסנים או רווחים. אם אין התאמה חד משמעית, יוצגו האפשרויות הקרובות (עד 10).</li>
     <li><b>תצוגה:</b> דפדוף עמוד-עמוד או צפייה רציפה בכל הטקסט.</li>
     <li><b>שמור:</b> ייצוא כתב היד לקובץ טקסט.</li>
     </ul></div>""",

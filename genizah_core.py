@@ -1538,6 +1538,7 @@ class MetadataManager:
         self.meta_map = {}
         self.nli_cache = {}
         self.csv_bank = {}
+        self._shelfmark_index = None
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
 
@@ -1610,8 +1611,93 @@ class MetadataManager:
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
+            self._invalidate_shelfmark_index()
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
+
+    def _invalidate_shelfmark_index(self):
+        """Reset cached shelfmark index after metadata changes."""
+        self._shelfmark_index = None
+
+    def normalize_shelfmark(self, shelf):
+        """
+        Normalize shelfmark strings by removing Ms. prefixes, dots, slashes, and spaces.
+        Lowercases for consistent matching.
+        """
+        if not shelf:
+            return ""
+        shelf = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", str(shelf), flags=re.IGNORECASE)
+        shelf = re.sub(r"[./\\\s]", "", shelf)
+        shelf = re.sub(r"[^\w]", "", shelf)
+        return shelf.lower()
+
+    def _ensure_shelfmark_index(self):
+        """Build a normalized shelfmark -> {(sys_id, display_shelfmark)} index."""
+        if self._shelfmark_index is not None:
+            return self._shelfmark_index
+
+        index = defaultdict(set)
+
+        def add_entry(sys_id, shelf):
+            norm = self.normalize_shelfmark(shelf)
+            if norm:
+                index[norm].add((sys_id, shelf))
+
+        for sys_id, data in self.csv_bank.items():
+            add_entry(sys_id, data.get('shelfmark'))
+
+        for sys_id, data in self.nli_cache.items():
+            add_entry(sys_id, data.get('shelfmark'))
+            add_entry(sys_id, data.get('shelfmark_alt'))
+
+        self._shelfmark_index = index
+        return index
+
+    def find_shelfmark_matches(self, query, limit=10):
+        """
+        Find system IDs whose shelfmarks match the query, ignoring dots, slashes, and spaces.
+        Returns exact matches first, followed by partial matches, capped at `limit`.
+        """
+        norm_query = self.normalize_shelfmark(query)
+        if not norm_query:
+            return []
+
+        index = self._ensure_shelfmark_index()
+        candidates = []
+
+        for norm_value, pairs in index.items():
+            match_rank = None
+            if norm_value == norm_query:
+                match_rank = 0  # Exact match
+            elif norm_query in norm_value:
+                match_rank = 1  # Partial match
+
+            if match_rank is None:
+                continue
+
+            for sys_id, shelf in pairs:
+                candidates.append({
+                    'sys_id': sys_id,
+                    'shelfmark': shelf,
+                    'exact': match_rank == 0
+                })
+
+        # Sort exact matches first, then natural shelfmark ordering
+        candidates.sort(key=lambda c: (0 if c['exact'] else 1, natural_sort_key(str(c['shelfmark'] or "")), c['sys_id']))
+
+        # Deduplicate by (sys_id, shelfmark) and trim
+        final = []
+        seen = set()
+        for c in candidates:
+            key = (c['sys_id'], c['shelfmark'])
+            if key in seen:
+                continue
+            seen.add(key)
+            final.append(c)
+            if len(final) >= limit:
+                break
+
+        return final
 
     def get_meta_for_id(self, sys_id):
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
@@ -1768,11 +1854,13 @@ class MetadataManager:
                 'thumb_checked': True # Mark as checked to prevent repeated image download attempts
             }
             self.nli_cache[system_id] = meta
+            self._invalidate_shelfmark_index()
             return meta
 
         # 3. Only if necessary (not in cache/CSV) - Network request
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
+        self._invalidate_shelfmark_index()
         return meta
 
     def fetch_iiif_manifest(self, system_id):
@@ -1995,6 +2083,7 @@ class MetadataManager:
             current_meta['shelfmark'] = marc_data['shelfmark_alt']
 
         self.nli_cache[system_id] = current_meta
+        self._invalidate_shelfmark_index()
         return current_meta
 
     def fetch_external_iiif_data(self, view_url):
