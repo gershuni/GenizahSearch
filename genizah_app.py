@@ -367,6 +367,25 @@ class CheckBoxHeader(QHeaderView):
         self.isChecked = False
         self.setSectionsClickable(True)
 
+    def get_checkbox_rect(self, rect):
+        box_size = 20
+        padding = 4
+        y = rect.top() + (rect.height() - box_size) // 2
+
+        # In RTL, column 0 is typically visually on the right.
+        # But QHeaderView paints logical index 0 using the given rect.
+        # If the layout is RTL, we want the checkbox at the "start" of the section?
+        # Usually Checkbox [Text]. In RTL: [Text] Checkbox?
+        # Or standard convention: Checkbox is always at start of line?
+        # Let's align it to the "start" (Left in LTR, Right in RTL).
+
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            x = rect.right() - box_size - padding
+        else:
+            x = rect.left() + padding
+
+        return QRect(x, y, box_size, box_size)
+
     def paintSection(self, painter, rect, logicalIndex):
         painter.save()
         super().paintSection(painter, rect, logicalIndex)
@@ -374,11 +393,7 @@ class CheckBoxHeader(QHeaderView):
 
         if logicalIndex == 0:
             option = QStyleOptionButton()
-            box_size = 20 # Standard-ish
-            x = rect.left() + (rect.width() - box_size) // 2
-            y = rect.top() + (rect.height() - box_size) // 2
-
-            option.rect = QRect(x, y, box_size, box_size)
+            option.rect = self.get_checkbox_rect(rect)
             option.state = QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Active
             if self.isChecked:
                 option.state |= QStyle.StateFlag.State_On
@@ -389,11 +404,37 @@ class CheckBoxHeader(QHeaderView):
 
     def mousePressEvent(self, event):
         if self.logicalIndexAt(event.pos()) == 0:
-            self.isChecked = not self.isChecked
-            self.viewport().update()
-            self.toggled.emit(self.isChecked)
-        else:
-            super().mousePressEvent(event)
+            # Hit testing
+            # We need the visual rect of the section corresponding to logical index 0
+            # Since sections can be reordered, visualIndex(0) gives position.
+            # But header uses viewport coordinates.
+            # sectionViewportPosition(0) gives the start (left edge in LTR) of logical section 0.
+
+            # Simple approach: Iterate visible sections to find logical index 0?
+            # Or use built-in geometry.
+
+            # Since logicalIndexAt gave us 0, we know the click is in section 0.
+            # We just need the rect of that section to check if it's on the checkbox.
+
+            # Finding the rect of logical section 0:
+            # position = sectionViewportPosition(0)
+            # size = sectionSize(0)
+            # But we need to handle x/y and scrolling.
+            # sectionViewportPosition returns X relative to viewport.
+
+            sec_pos = self.sectionViewportPosition(0)
+            sec_width = self.sectionSize(0)
+            sec_rect = QRect(sec_pos, 0, sec_width, self.height())
+
+            chk_rect = self.get_checkbox_rect(sec_rect)
+
+            if chk_rect.contains(event.pos()):
+                self.isChecked = not self.isChecked
+                self.viewport().update()
+                self.toggled.emit(self.isChecked)
+                return # Consume event
+
+        super().mousePressEvent(event)
 
     def setChecked(self, checked):
         if self.isChecked != checked:
@@ -2350,10 +2391,11 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
-        self.chk_comp_select_all = QCheckBox(tr("Select All"))
-        self.chk_comp_select_all.clicked.connect(self.on_comp_select_all_clicked)
+        # Use CheckBoxHeader for tree
+        self.chk_comp_header = CheckBoxHeader(self.comp_tree.header())
+        self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
+        self.comp_tree.setHeader(self.chk_comp_header)
 
-        rl.addWidget(self.chk_comp_select_all)
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
@@ -4489,9 +4531,9 @@ class GenizahGUI(QMainWindow):
         for b in self.comp_export_buttons: b.setEnabled(True)
 
         # Reset Select All Checkbox
-        self.chk_comp_select_all.blockSignals(True)
-        self.chk_comp_select_all.setChecked(False)
-        self.chk_comp_select_all.blockSignals(False)
+        self.chk_comp_header.blockSignals(True)
+        self.chk_comp_header.setChecked(False)
+        self.chk_comp_header.blockSignals(False)
         self._update_comp_export_label()
 
         if getattr(self, 'group_thread', None):
@@ -4798,17 +4840,16 @@ class GenizahGUI(QMainWindow):
                     all_checked = False
                     break
 
-        self.chk_comp_select_all.blockSignals(True)
-        self.chk_comp_select_all.setChecked(all_checked)
-        self.chk_comp_select_all.blockSignals(False)
+        self.chk_comp_header.blockSignals(True)
+        self.chk_comp_header.setChecked(all_checked)
+        self.chk_comp_header.blockSignals(False)
 
         self.comp_tree_updating = False
         self._update_recursive_button_state()
         self._update_comp_export_label()
 
-    def on_comp_select_all_clicked(self):
+    def on_comp_header_toggled(self, checked):
         """Toggle all root items in the composition tree."""
-        checked = self.chk_comp_select_all.isChecked()
         state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
 
         self.comp_tree.blockSignals(True)
