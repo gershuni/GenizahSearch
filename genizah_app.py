@@ -5510,8 +5510,16 @@ class GenizahGUI(QMainWindow):
                 if shelf_res['selected_shelfmark']:
                     self.browse_shelf_input.setText(shelf_res['selected_shelfmark'])
             elif shelf_res['options']:
+                def _format_shelf_option(opt, max_len=60):
+                    base = opt['shelfmark']
+                    if opt.get('title'):
+                        base = f"{base} | {opt['title']}"
+                    if len(base) > max_len:
+                        base = base[: max_len - 3] + "..."
+                    return base
+
                 display_options = [
-                    f"{opt['shelfmark']} | {opt.get('title', '')} (ID: {opt['sys_id']})".strip()
+                    _format_shelf_option(opt)
                     for opt in shelf_res['options']
                 ]
                 choice, ok = QInputDialog.getItem(
@@ -5519,14 +5527,17 @@ class GenizahGUI(QMainWindow):
                 )
                 if not ok:
                     return
-                for opt in shelf_res['options']:
-                    candidate = f"{opt['shelfmark']} | {opt.get('title', '')} (ID: {opt['sys_id']})".strip()
-                    if candidate == choice:
-                        sid = opt['sys_id']
-                        self.browse_shelf_input.setText(opt['shelfmark'])
-                        break
+                if choice:
+                    for idx, opt in enumerate(shelf_res['options']):
+                        if display_options[idx] == choice:
+                            sid = opt['sys_id']
+                            self.browse_shelf_input.setText(opt['shelfmark'])
+                            break
             else:
                 QMessageBox.warning(self, tr("Error"), tr("Shelfmark not found.")); return
+
+        if sid:
+            self.browse_sys_input.setText(sid)
 
         if not sid:
             msg = tr("FL not found.")

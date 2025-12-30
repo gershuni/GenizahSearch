@@ -2286,7 +2286,7 @@ class MetadataManager:
         """Normalize shelfmarks for tolerant comparisons."""
         if not shelfmark:
             return ""
-        return re.sub(r"[\\.\\s/]", "", shelfmark).lower()
+        return re.sub(r"[\\.\\s/]", "", shelfmark).casefold()
 
     def _iter_shelfmark_sources(self):
         """Yield shelfmark candidates from CSV bank and cached metadata."""
@@ -2305,7 +2305,7 @@ class MetadataManager:
                 if candidate:
                     yield sys_id, candidate, title
 
-    def resolve_system_by_shelfmark(self, query, limit=10):
+    def resolve_system_by_shelfmark(self, query, limit=100):
         """
         Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
         Returns a dict: {'sys_id': ..., 'options': [...], 'selected_shelfmark': ...}
@@ -2337,8 +2337,10 @@ class MetadataManager:
             result['selected_shelfmark'] = exact_matches[0]['shelfmark']
             return result
 
-        # Aggregate suggestions (exact first, then partial), capped at limit
-        suggestions = exact_matches + partial_matches
+        # Aggregate suggestions (exact first, then partial), sorted naturally and capped at limit
+        exact_sorted = sorted(exact_matches, key=lambda e: natural_sort_key(e['shelfmark']))
+        partial_sorted = sorted(partial_matches, key=lambda e: natural_sort_key(e['shelfmark']))
+        suggestions = exact_sorted + partial_sorted
         result['options'] = suggestions[:limit]
         return result
 
