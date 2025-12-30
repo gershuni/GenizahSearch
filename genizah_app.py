@@ -2196,7 +2196,7 @@ class GenizahGUI(QMainWindow):
     def toggle_language(self):
         new_lang = 'en' if CURRENT_LANG == 'he' else 'he'
         save_language(new_lang)
-        QMessageBox.information(self, tr("Restart Required"), tr("Please restart the application for the language change to take effect."))
+        QMessageBox.information(self, tr("נדרש אתחול מחדש"), tr("אנא הפעילו מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף."))
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
@@ -2245,7 +2245,7 @@ class GenizahGUI(QMainWindow):
         
         self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle.setCheckable(True)
-        self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
+        self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring. WARNING: Can freeze the program. Use with caution."))
         self.btn_lab_mode_toggle.toggled.connect(self.on_lab_mode_toggled_search)
 
         # Deep Scan Checkbox
@@ -2439,7 +2439,7 @@ class GenizahGUI(QMainWindow):
         # 3. Lab & Action
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle_comp.setCheckable(True)
-        self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring"))
+        self.btn_lab_mode_toggle_comp.setToolTip(tr("Experimental search mode using advanced proximity scoring. WARNING: Can freeze the program. Use with caution."))
         self.btn_lab_mode_toggle_comp.toggled.connect(self.on_lab_mode_toggled_comp)
 
         self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
@@ -4012,7 +4012,7 @@ class GenizahGUI(QMainWindow):
                 add_rows(c_filt, "Filtered Main")
                 for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, "Filtered Appendix", sig)
-                add_rows(c_known, "Known Manuscripts")
+                add_rows(c_known, "Excluded Manuscripts")
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -4143,7 +4143,7 @@ class GenizahGUI(QMainWindow):
                         f"{tr('Main Manuscripts')}: {len(c_main)}",
                         f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
                         f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                        f"{tr('Known/Excluded Manuscripts')}: {known_count}"
+                        f"{tr('Excluded Manuscripts')}: {known_count}"
                     ])
                     detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
                     for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
@@ -4153,7 +4153,7 @@ class GenizahGUI(QMainWindow):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
                     if c_filt:
-                        detail_lines.extend([sep, tr("FILTERED / LOW SCORE"), sep])
+                        detail_lines.extend([sep, tr("FILTERED"), sep])
                         for item in c_filt: detail_lines.extend(_fmt_ms_entry(item))
                     if c_filt_appx:
                         detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
@@ -4161,7 +4161,7 @@ class GenizahGUI(QMainWindow):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
                     if c_known:
-                        detail_lines.extend([sep, tr("KNOWN / EXCLUDED MANUSCRIPTS"), sep])
+                        detail_lines.extend([sep, tr("EXCLUDED MANUSCRIPTS"), sep])
                         for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
@@ -4915,10 +4915,10 @@ class GenizahGUI(QMainWindow):
                     for item in self._sort_comp_items(items):
                         add_manuscript_node(group_node, item)
 
-            # 3. Filtered / Low Score
+            # 3. Filtered 
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
             if total_filt > 0:
-                root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered / Low Score ({})").format(total_filt)])
+                root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
                 root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
                 root_filt.setForeground(0, Qt.GlobalColor.gray)
                 make_checkable(root_filt)
@@ -4934,9 +4934,9 @@ class GenizahGUI(QMainWindow):
                     for item in self._sort_comp_items(items):
                         add_manuscript_node(g_node, item)
 
-            # 4. Known / Excluded
+            # 4. Excluded
             if self.comp_known:
-                root_known = QTreeWidgetItem(self.comp_tree, [tr("Known / Excluded ({})").format(len(self.comp_known))])
+                root_known = QTreeWidgetItem(self.comp_tree, [tr("Excluded ({})").format(len(self.comp_known))])
                 root_known.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_KNOWN")
                 root_known.setForeground(0, Qt.GlobalColor.darkGray)
                 make_checkable(root_known)
