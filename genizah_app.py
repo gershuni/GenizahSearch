@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog)
+                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog, QToolButton)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
@@ -2316,8 +2316,18 @@ class GenizahGUI(QMainWindow):
         layout.addWidget(self.search_progress)
         
         # Results Table Setup
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(7)
-        self.results_table.setHorizontalHeaderLabels(["", tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(9)
+        self.results_table.setHorizontalHeaderLabels([
+            "",
+            "",
+            "",
+            tr("System ID"),
+            tr("Shelfmark"),
+            tr("Title"),
+            tr("Snippet"),
+            tr("Img"),
+            tr("Src"),
+        ])
 
         # Custom Header
         self.chk_search_header = CheckBoxHeader(self.results_table)
@@ -2325,11 +2335,15 @@ class GenizahGUI(QMainWindow):
         self.results_table.setHorizontalHeader(self.chk_search_header)
 
         self.results_table.setColumnWidth(0, 30) # Checkbox column
-        self.results_table.setColumnWidth(1, 135)
-        self.results_table.setColumnWidth(2, 175)
-        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.results_table.setColumnWidth(1, 35)
+        self.results_table.setColumnWidth(2, 35)
+        self.results_table.setColumnWidth(3, 135)
+        self.results_table.setColumnWidth(4, 175)
+        self.results_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
@@ -3301,10 +3315,32 @@ class GenizahGUI(QMainWindow):
                 item_chk.setData(Qt.ItemDataRole.UserRole, res)
                 self.results_table.setItem(i, 0, item_chk)
 
-                # Col 1: System ID
+                # Col 1: View Result (Eye Icon)
+                btn_view = QToolButton()
+                btn_view.setText("👁")
+                btn_view.setToolTip(tr("Open result window"))
+                btn_view.setAutoRaise(True)
+                btn_view.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_view.clicked.connect(lambda _, r=res: self.open_result_dialog_for_res(r))
+                self.results_table.setCellWidget(i, 1, btn_view)
+
+                # Col 2: Browse Manuscript (Book Icon)
+                btn_browse = QToolButton()
+                btn_browse.setText("📖")
+                btn_browse.setToolTip(tr("Browse manuscript"))
+                btn_browse.setAutoRaise(True)
+                btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_browse.clicked.connect(lambda _, r=res: self.open_result_in_browse_from_res(r))
+                self.results_table.setCellWidget(i, 2, btn_browse)
+
+                # Provide placeholder items for sorting compatibility
+                self.results_table.setItem(i, 1, QTableWidgetItem(""))
+                self.results_table.setItem(i, 2, QTableWidgetItem(""))
+
+                # Col 3: System ID
                 item_sid = QTableWidgetItem(sid)
                 item_sid.setData(Qt.ItemDataRole.UserRole, res)
-                self.results_table.setItem(i, 1, item_sid)
+                self.results_table.setItem(i, 3, item_sid)
 
                 if needs_fetch:
                     item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
@@ -3313,25 +3349,25 @@ class GenizahGUI(QMainWindow):
                     item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
                     item_title = QTableWidgetItem(title if title else "")
 
-                # Col 2: Shelfmark
-                self.results_table.setItem(i, 2, item_shelf)
+                # Col 4: Shelfmark
+                self.results_table.setItem(i, 4, item_shelf)
                 self.shelfmark_items_by_sid[sid] = item_shelf
 
-                # Col 3: Title
-                self.results_table.setItem(i, 3, item_title)
+                # Col 5: Title
+                self.results_table.setItem(i, 5, item_title)
                 self.title_items_by_sid[sid] = item_title
 
-                # Col 4: Snippet (Widget)
+                # Col 6: Snippet (Widget)
                 # Render asterisks to HTML for display
                 html_snippet = self.render_asterisks_to_html(res['snippet'])
                 lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                self.results_table.setCellWidget(i, 4, lbl)
+                self.results_table.setCellWidget(i, 6, lbl)
 
-                # Col 5: Img
-                self.results_table.setItem(i, 5, QTableWidgetItem(meta['img']))
+                # Col 7: Img
+                self.results_table.setItem(i, 7, QTableWidgetItem(meta['img']))
 
-                # Col 6: Source
-                self.results_table.setItem(i, 6, QTableWidgetItem(meta['source']))
+                # Col 8: Source
+                self.results_table.setItem(i, 8, QTableWidgetItem(meta['source']))
 
                 self.result_row_by_sys_id[sid] = i
 
@@ -3441,24 +3477,67 @@ class GenizahGUI(QMainWindow):
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
-    def show_full_text(self):
-        row = self.results_table.currentRow()
-        if row < 0: return
-
-        # Reconstruct list of results in current visual order
+    def _collect_results_in_view_order(self):
+        """Reconstruct list of results respecting current sort order."""
         sorted_results = []
         rows = self.results_table.rowCount()
         for i in range(rows):
-            # Use column 1 for data retrieval (System ID column)
-            item = self.results_table.item(i, 1)
+            item = self.results_table.item(i, 0)  # Checkbox column stores the full result
             if item:
                 res = item.data(Qt.ItemDataRole.UserRole)
                 if res:
                     sorted_results.append(res)
+        return sorted_results
 
-        # If something went wrong, fall back to last_results but that might be disordered relative to view
+    def open_result_dialog_for_res(self, res):
+        """Open ResultDialog focusing on a specific result, respecting current sort order."""
+        sorted_results = self._collect_results_in_view_order() or self.last_results
         if not sorted_results:
-            sorted_results = self.last_results
+            return
+
+        target_idx = 0
+        try:
+            target_idx = sorted_results.index(res)
+        except ValueError:
+            sid = res.get("display", {}).get("id")
+            for idx, r in enumerate(sorted_results):
+                if r.get("display", {}).get("id") == sid:
+                    target_idx = idx
+                    break
+
+        ResultDialog(self, sorted_results, target_idx, self.meta_mgr, self.searcher).exec()
+
+    def open_result_in_browse_from_res(self, res):
+        """Send the given result to the browse tab using current metadata."""
+        display = res.get("display", {}) if isinstance(res, dict) else {}
+        sid = display.get("id", "")
+        shelf, title = self.meta_mgr.get_meta_for_id(sid) if sid else ("", "")
+
+        if not shelf or shelf == "Unknown":
+            shelf = display.get("shelfmark", "")
+        if not title:
+            title = display.get("title", "")
+
+        fl_id = display.get("img") if display.get("img") else None
+
+        self.open_result_in_browse(
+            res,
+            shelfmark=shelf or None,
+            title=title or None,
+            fl_id=fl_id,
+        )
+
+    def show_full_text(self, index=None):
+        row = index.row() if hasattr(index, "row") else self.results_table.currentRow()
+        if row < 0:
+            return
+
+        sorted_results = self._collect_results_in_view_order() or self.last_results
+        if not sorted_results:
+            return
+
+        if row >= len(sorted_results):
+            row = max(0, len(sorted_results) - 1)
 
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
