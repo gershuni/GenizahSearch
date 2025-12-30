@@ -2392,7 +2392,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
         # Use CheckBoxHeader for tree
-        self.chk_comp_header = CheckBoxHeader(self.comp_tree.header())
+        self.chk_comp_header = CheckBoxHeader(self.comp_tree)
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
 
