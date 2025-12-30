@@ -1285,10 +1285,6 @@ class AIManager:
             except Exception as e:
                 LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
 
-    def get_healthcheck_endpoint(self):
-        """Return the connectivity probe endpoint for the configured provider."""
-        return AI_PROVIDER_ENDPOINTS.get(self.provider)
-
     def save_config(self, provider, model_name, key):
         self.provider = provider
         self.model_name = model_name
