@@ -445,7 +445,7 @@ class ZoomableScrollArea(QScrollArea):
     """A ScrollArea that supports hand-panning and wheel-zooming."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWidgetResizable(True)
+        self.setWidgetResizable(False)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: #222; border: none;")
 
