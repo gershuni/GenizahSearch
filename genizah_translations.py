@@ -16,10 +16,13 @@ TRANSLATIONS = {
     "Error": "שגיאה",
     "Warning": "אזהרה",
     "Information": "מידע",
+    "Info": "מידע",
     "Ready.": "מוכן.",
     "Loading...": "טוען...",
     "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
+    "Unknown Shelfmark": "מספר מדף לא ידוע",
+    "Untitled": "ללא כותרת",
     
     # --- Connectivity / Status ---
     "Online": "מקוון",
@@ -162,6 +165,7 @@ TRANSLATIONS = {
 
     # --- Browse Tab ---
     "Enter System ID...": "הכנס מספר מערכת...",
+    "Enter shelfmark...": "הכנס מספר מדף...",
     "Go": "עבור",
     "Enter ID to browse.": "הכנס מספר לדפדוף.",
     "Ktiv": "כתיב",
@@ -176,6 +180,8 @@ TRANSLATIONS = {
     "Waiting...": "ממתין...",
     "Not found or end.": "לא נמצא או סוף הקובץ.",
     "FL not found.": "מספר קובץ לא נמצא.",
+    "FL not found. Opening the manuscript by shelfmark/system ID.": "מספר קובץ לא נמצא. פותח את כתב היד לפי מספר מדף/מערכת.",
+    "Shelfmark or ID not found.": "מספר מדף או מערכת לא נמצאו.",
     "Nav": "ניווט",
     "Loading full manuscript...": "טוען כתב יד מלא...",
     "Could not load full text.": "לא ניתן לטעון טקסט מלא.",
@@ -187,6 +193,11 @@ TRANSLATIONS = {
     "Next >>": "הבא <<",
     "Page / Image": "עמוד / תמונה", 
     "Image": "תמונה",
+    "Shelfmark:": "מספר מדף:",
+    "Select shelfmark": "בחר מספר מדף",
+    "Multiple matches found. Please choose a manuscript to open:": "נמצאו מספר התאמות. בחר כתב יד לפתיחה:",
+    "No shelfmark matches found. Try a different format.": "לא נמצאו התאמות במספרי המדף. נסה פורמט אחר.",
+    "No single match. Close options:": "אין התאמה חד משמעית. אפשרויות קרובות:",
 
     # --- Settings Tab ---
     "Data & Index": "נתונים ואינדקס",

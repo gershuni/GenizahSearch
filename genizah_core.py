@@ -1540,6 +1540,7 @@ class MetadataManager:
         self.csv_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
+        self._shelf_index = None
 
         # Ensure index dir exists for caches
         if not os.path.exists(Config.INDEX_DIR):
@@ -1567,6 +1568,7 @@ class MetadataManager:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
             except Exception as e:
                 LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
+        # Shelf index will be lazily built when needed
 
     def _load_heavy_caches_bg(self):
         self._load_csv_bank()
@@ -1612,6 +1614,93 @@ class MetadataManager:
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
+    # --- Shelfmark helpers ---
+    def _invalidate_shelf_index(self):
+        self._shelf_index = None
+
+    def normalize_shelfmark(self, shelf):
+        """
+        Normalize shelfmarks by removing Ms. prefixes, spaces, dots, and slashes.
+        This enables matching across common formatting variants.
+        """
+        if not shelf:
+            return ""
+        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", str(shelf), flags=re.IGNORECASE)
+        cleaned = re.sub(r"[\\s./]+", "", without_prefix).lower()
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
+
+    def _ensure_shelf_index(self):
+        if self._shelf_index is not None:
+            return
+
+        # Ensure CSV is loaded for comprehensive coverage
+        if not self.csv_bank:
+            self._load_csv_bank()
+
+        self._shelf_index = {}
+
+        def add_entry(shelf, sys_id, title=""):
+            norm = self.normalize_shelfmark(shelf)
+            if not norm or not sys_id:
+                return
+            entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title or ''}
+            if norm not in self._shelf_index:
+                self._shelf_index[norm] = []
+            if entry not in self._shelf_index[norm]:
+                self._shelf_index[norm].append(entry)
+
+        for sys_id, data in self.csv_bank.items():
+            add_entry(data.get('shelfmark'), sys_id, data.get('title', ''))
+
+        for sys_id, data in self.nli_cache.items():
+            add_entry(data.get('shelfmark'), sys_id, data.get('title', ''))
+            if data.get('shelfmark_alt'):
+                add_entry(data.get('shelfmark_alt'), sys_id, data.get('title', ''))
+
+    def find_shelfmark_matches(self, query, max_results=10):
+        """
+        Return possible system IDs for a shelfmark query.
+        Matching ignores dots/slashes/spaces and supports partial matches.
+        """
+        if not query:
+            return []
+        self._ensure_shelf_index()
+
+        normalized_query = self.normalize_shelfmark(query)
+        if not normalized_query:
+            return []
+
+        matches = []
+        seen = set()
+
+        def add_from_norm(norm, match_type):
+            if norm not in self._shelf_index:
+                return
+            for entry in self._shelf_index[norm]:
+                key = (entry['sys_id'], entry['shelfmark'])
+                if key in seen or len(matches) >= max_results:
+                    continue
+                seen.add(key)
+                matches.append({**entry, 'match_type': match_type, 'normalized': norm})
+
+        # Exact normalized match first
+        add_from_norm(normalized_query, 'exact')
+
+        # Partial matches where the query is contained within the normalized shelfmark (or vice versa)
+        if len(matches) < max_results:
+            for norm_key in self._shelf_index.keys():
+                if norm_key == normalized_query:
+                    continue
+                if (normalized_query in norm_key) or (norm_key in normalized_query):
+                    add_from_norm(norm_key, 'partial')
+                    if len(matches) >= max_results:
+                        break
+
+        # Sort: exact first, then shorter distance from query length
+        matches.sort(key=lambda m: (0 if m['match_type'] == 'exact' else 1, abs(len(m['normalized']) - len(normalized_query)), m['shelfmark']))
+        return matches[:max_results]
 
     def get_meta_for_id(self, sys_id):
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
@@ -1768,11 +1857,13 @@ class MetadataManager:
                 'thumb_checked': True # Mark as checked to prevent repeated image download attempts
             }
             self.nli_cache[system_id] = meta
+            self._invalidate_shelf_index()
             return meta
 
         # 3. Only if necessary (not in cache/CSV) - Network request
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
+        self._invalidate_shelf_index()
         return meta
 
     def fetch_iiif_manifest(self, system_id):
@@ -2256,6 +2347,7 @@ class MetadataManager:
         for future in as_completed(futures):
             sid, meta = future.result()
             self.nli_cache[sid] = meta
+            self._invalidate_shelf_index()
             current_progress += 1
             if progress_callback:
                 progress_callback(current_progress, len(system_ids), sid)

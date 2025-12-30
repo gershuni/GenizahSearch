@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy)
+                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
@@ -2594,6 +2594,8 @@ class GenizahGUI(QMainWindow):
         # Row 1: Search Inputs
         row1 = QHBoxLayout()
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
+        self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
+        self.browse_shelf_input.setFixedWidth(220)
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
         self.browse_fl_input.setFixedWidth(140)
 
@@ -2601,6 +2603,7 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_go.clicked.connect(self.browse_load)
         self.btn_browse_go.setEnabled(False)
         self.browse_sys_input.returnPressed.connect(self.browse_load)
+        self.browse_shelf_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
         
         self.btn_b_catalog = QPushButton(tr("Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
@@ -2616,6 +2619,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_all.setEnabled(False)
 
         row1.addWidget(QLabel(tr("System ID:"))); row1.addWidget(self.browse_sys_input)
+        row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
         row1.addSpacing(20)
@@ -3521,6 +3525,9 @@ class GenizahGUI(QMainWindow):
             if title:
                 info_text += f"<br>{title}"
             self.browse_info_lbl.setText(info_text)
+            self.browse_shelf_input.setText(shelfmark)
+        else:
+            self.browse_shelf_input.setText("")
         if fl_id:
             self.browse_fl_input.setText(fl_id)
         else:
@@ -5475,11 +5482,58 @@ class GenizahGUI(QMainWindow):
 
         return sys_id, page, shelf_lbl, title_lbl
 
+    def _choose_shelfmark_match(self, matches):
+        display_items = []
+        for m in matches:
+            shelf = m.get('shelfmark') or tr("Unknown Shelfmark")
+            title = m.get('title') or tr("Untitled")
+            display_items.append(f"{shelf} — {title} (ID: {m.get('sys_id', '')})")
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            tr("Select shelfmark"),
+            tr("Multiple matches found. Please choose a manuscript to open:"),
+            display_items,
+            0,
+            False
+        )
+        if ok and choice in display_items:
+            idx = display_items.index(choice)
+            return matches[idx]
+        return None
+
+    def _resolve_browse_shelfmark(self, shelf_text):
+        matches = self.meta_mgr.find_shelfmark_matches(shelf_text, max_results=10)
+        if not matches:
+            QMessageBox.warning(self, tr("Shelfmark"), tr("No shelfmark matches found. Try a different format."))
+            return None
+
+        unique_sys_ids = {m['sys_id'] for m in matches}
+        if len(unique_sys_ids) == 1:
+            return matches[0]
+
+        chosen = self._choose_shelfmark_match(matches)
+        if not chosen:
+            # Offer the suggestions as information
+            suggestions = "\n".join([m.get('shelfmark') or tr("Unknown Shelfmark") for m in matches])
+            QMessageBox.information(self, tr("Shelfmark"), tr("No single match. Close options:") + f"\n{suggestions}")
+        return chosen
+
     def browse_load(self):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
+        shelf_text = self.browse_shelf_input.text().strip()
         fl_id = self.browse_fl_input.text().strip()
-        if not sid and not fl_id: return
+        if not sid and not fl_id and not shelf_text: return
+
+        shelf_match = None
+        if shelf_text:
+            shelf_match = self._resolve_browse_shelfmark(shelf_text)
+            if not shelf_match:
+                return
+            sid = shelf_match.get('sys_id', sid)
+            self.browse_sys_input.setText(sid or "")
+            self.browse_shelf_input.setText(shelf_match.get('shelfmark', shelf_text))
 
         # Reset UI
         self.browse_text.setText(tr("Loading metadata..."))
@@ -5491,13 +5545,15 @@ class GenizahGUI(QMainWindow):
             if not page_data and not sid:
                 QMessageBox.warning(self, tr("Error"), tr("FL not found."))
                 return
+            elif not page_data and sid:
+                QMessageBox.information(self, tr("Info"), tr("FL not found. Opening the manuscript by shelfmark/system ID."))
             if page_data:
                 sid = page_data.get('sys_id', sid)
                 self.browse_sys_input.setText(sid or "")
                 self.browse_fl_input.setText(page_data.get('fl_id', fl_id))
 
         if not sid:
-            QMessageBox.warning(self, tr("Error"), tr("FL not found."))
+            QMessageBox.warning(self, tr("Error"), tr("Shelfmark or ID not found."))
             return
 
         self.current_browse_sid = sid
