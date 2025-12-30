@@ -1782,15 +1782,18 @@ class MetadataManager:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
         }
 
-        result = {'physical_desc': '', 'canvas_map': {}}
+        result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
             session = self._make_session()
             resp = session.get(url, headers=headers, timeout=10, verify=False)
             if resp.status_code == 200:
                 data = resp.json()
 
-                # 1. Physical Description
-                result['physical_desc'] = data.get('attribution', '')
+                # 1. Physical Description / Attribution
+                # Preserve the original attribution string so the UI can credit the source.
+                attribution_val = data.get('attribution', '')
+                result['attribution'] = attribution_val
+                result['physical_desc'] = attribution_val
 
                 # 2. Canvas Map (FL -> Label)
                 if 'sequences' in data and data['sequences']:
@@ -1955,9 +1958,13 @@ class MetadataManager:
             for fl_id, label in sorted_map:
                 url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
                 images_nli.append({'label': label, 'url': url})
+            current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+
+        if not current_meta.get('attribution'):
+            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli

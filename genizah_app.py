@@ -574,6 +574,24 @@ class ManuscriptViewerWidget(QWidget):
 
         layout.addLayout(top_bar)
 
+        # Image label navigation (nickname)
+        label_bar = QHBoxLayout()
+        label_bar.setContentsMargins(8, 0, 8, 0)
+        self.lbl_page_label = QLabel("")
+        self.lbl_page_label.setStyleSheet("color: #2980b9; font-weight: bold;")
+
+        self.combo_page_labels = QComboBox()
+        self.combo_page_labels.setVisible(False)
+        self.combo_page_labels.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.combo_page_labels.currentIndexChanged.connect(self._on_label_changed)
+        self.combo_page_labels.setMinimumWidth(150)
+
+        label_bar.addWidget(QLabel(tr("Image nickname:")))
+        label_bar.addWidget(self.combo_page_labels, 1)
+        label_bar.addWidget(self.lbl_page_label)
+        label_bar.addStretch()
+        layout.addLayout(label_bar)
+
         # Attribution
         self.lbl_attribution = QLabel("")
         self.lbl_attribution.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -626,6 +644,7 @@ class ManuscriptViewerWidget(QWidget):
 
         # Set Page
         self.set_page(initial_idx)
+        self._populate_label_nav()
 
     def _on_source_changed(self):
         data = self.combo_source.currentData()
@@ -640,11 +659,34 @@ class ManuscriptViewerWidget(QWidget):
         if self.current_idx >= len(self.active_list):
             self.current_idx = 0
         self.set_page(self.current_idx)
+        self._populate_label_nav()
 
     def _resolve_url(self, base_url):
         if not base_url: return None
         if base_url.endswith('.jpg'): return base_url
         return f"{base_url}/full/600,/0/default.jpg"
+
+    def _populate_label_nav(self):
+        """Populate nickname dropdown without breaking existing nav flow."""
+        self.combo_page_labels.blockSignals(True)
+        self.combo_page_labels.clear()
+
+        if not self.active_list:
+            self.combo_page_labels.setVisible(False)
+            self.lbl_page_label.setText("")
+            self.combo_page_labels.blockSignals(False)
+            return
+
+        for idx, item in enumerate(self.active_list):
+            lbl = item.get('label') or f"{tr('Image')} {idx + 1}"
+            self.combo_page_labels.addItem(lbl, idx)
+
+        self.combo_page_labels.setVisible(len(self.active_list) > 0)
+        # Sync selection to current index
+        if 0 <= self.current_idx < self.combo_page_labels.count():
+            self.combo_page_labels.setCurrentIndex(self.current_idx)
+        self.combo_page_labels.blockSignals(False)
+        self._update_label_display()
 
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
@@ -670,6 +712,15 @@ class ManuscriptViewerWidget(QWidget):
         img_data = self.active_list[index]
         base_url = img_data['url']
 
+        # Update label display (nickname)
+        self.current_label = img_data.get('label', '')
+        self._update_label_display()
+        if self.combo_page_labels.isVisible():
+            self.combo_page_labels.blockSignals(True)
+            if index < self.combo_page_labels.count():
+                self.combo_page_labels.setCurrentIndex(index)
+            self.combo_page_labels.blockSignals(False)
+
         self.scroll_area.lbl_img.setText(tr("Loading..."))
 
         if self.loader_thread and self.loader_thread.isRunning():
@@ -689,6 +740,18 @@ class ManuscriptViewerWidget(QWidget):
     def display_image(self, image):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
+
+    def _update_label_display(self):
+        if getattr(self, 'current_label', ''):
+            self.lbl_page_label.setText(f"({self.current_label})")
+        else:
+            self.lbl_page_label.setText("")
+
+    def _on_label_changed(self, idx):
+        if idx < 0: return
+        # Jump to the selected image index without disrupting existing navigation
+        if idx != self.current_idx:
+            self.set_page(idx)
 
     def open_external(self):
         if self.external_url:
