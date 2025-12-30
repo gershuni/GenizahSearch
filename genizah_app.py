@@ -3498,6 +3498,36 @@ class GenizahGUI(QMainWindow):
             sorted_results = self.last_results
         return sorted_results
 
+    def _extract_fl_id(self, res):
+        if not isinstance(res, dict):
+            return None
+        display = res.get('display', {}) or {}
+        raw_header = res.get('raw_header') or res.get('full_header', '')
+        fl_id = None
+
+        if raw_header and self.meta_mgr:
+            parsed = self.meta_mgr.parse_full_id_components(raw_header)
+            fl_id = parsed.get('fl_id') or fl_id
+
+        if not fl_id:
+            fl_id = display.get('fl_id')
+
+        if not fl_id:
+            img_field = display.get('img')
+            if img_field:
+                m = re.search(r'FL\\s*-?(\\d+)', str(img_field))
+                if m:
+                    fl_id = m.group(1)
+
+        if not fl_id:
+            uid_field = res.get('uid')
+            if uid_field:
+                m = re.search(r'FL\\s*-?(\\d+)', str(uid_field))
+                if m:
+                    fl_id = m.group(1)
+
+        return fl_id
+
     def show_full_text(self):
         row = self.results_table.currentRow()
         if row < 0: return
@@ -3538,7 +3568,8 @@ class GenizahGUI(QMainWindow):
             shelf = display.get('shelfmark', '')
         if not title:
             title = display.get('title', '')
-        self.open_result_in_browse(res, shelfmark=shelf, title=title)
+        fl_id = self._extract_fl_id(res)
+        self.open_result_in_browse(res, shelfmark=shelf, title=title, fl_id=fl_id)
 
     def on_search_select_all_toggled(self, checked):
         """Handle Select All checkbox toggle."""
@@ -3611,13 +3642,17 @@ class GenizahGUI(QMainWindow):
         if not sid:
             QMessageBox.warning(self, tr("Error"), tr("No System ID found for this result."))
             return
+
+        derived_fl_id = fl_id or self._extract_fl_id(res)
         if shelfmark:
             info_text = f"<b>{shelfmark}</b>"
             if title:
                 info_text += f"<br>{title}"
             self.browse_info_lbl.setText(info_text)
-        if fl_id:
-            self.browse_fl_input.setText(fl_id)
+        if derived_fl_id:
+            fl_digits = re.sub(r"\\D", "", str(derived_fl_id))
+            self.browse_fl_input.setText(f"FL{fl_digits}" if fl_digits else str(derived_fl_id))
+            self._set_last_browse_field("fl")
         else:
             self.browse_fl_input.setText("")
         self.browse_sys_input.setText(sid)
