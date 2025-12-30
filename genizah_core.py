@@ -2900,15 +2900,29 @@ class SearchEngine:
         return None
 
     def get_full_manuscript(self, sys_id):
-        """Fetch ALL pages for a system ID, sorted by page number."""
+        """Fetch ALL pages for a system ID, sorted by page number, with deduplication."""
         if not os.path.exists(Config.BROWSE_MAP): return []
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
         
         pages_meta = browse_map.get(sys_id, [])
         if not pages_meta: return []
 
-        full_content = []
+        # --- DEDUPLICATION LOGIC ---
+        # Prioritize V0.8. We map p_num -> page_data.
+        # Since the list is appended chronologically during indexing, keeping the first
+        # occurrence usually preserves the main version, or we just ensure uniqueness.
+        unique_pages = {}
         for p in pages_meta:
+            p_num = p['p_num']
+            if p_num not in unique_pages:
+                unique_pages[p_num] = p
+
+        # Sort by page number
+        sorted_meta = sorted(unique_pages.values(), key=lambda x: x['p_num'])
+        # ---------------------------
+
+        full_content = []
+        for p in sorted_meta:
             text = self.get_full_text_by_id(p['uid'])
             if text:
                 parsed = self.meta_mgr.parse_full_id_components(p.get('full_header', ''))

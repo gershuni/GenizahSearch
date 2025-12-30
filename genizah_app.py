@@ -586,17 +586,22 @@ class ManuscriptViewerWidget(QWidget):
         layout.addWidget(self.scroll_area, 1)
 
     def load_images(self, meta, initial_idx=0):
-        # Attribution
+        # Attribution update
         attr = meta.get('attribution')
         if attr:
             self.lbl_attribution.setText(attr)
             self.lbl_attribution.setVisible(True)
-        else:
-            self.lbl_attribution.setVisible(False)
 
-        # meta contains 'images_nli' and 'images_ext'
-        self.images_nli = meta.get('images_nli', [])
-        self.images_ext = meta.get('images_ext', [])
+        new_nli = meta.get('images_nli', [])
+        new_ext = meta.get('images_ext', [])
+
+        # Optimization: Don't reload if lists are identical
+        # This prevents flickering when metadata refreshes in background
+        if self.images_nli == new_nli and self.images_ext == new_ext:
+            return
+
+        self.images_nli = new_nli
+        self.images_ext = new_ext
 
         # Determine default source
         self.combo_source.blockSignals(True)
@@ -624,7 +629,7 @@ class ManuscriptViewerWidget(QWidget):
         self.external_url = marc.get('external_iiif_link')
         self.btn_external.setVisible(bool(self.external_url))
 
-        # Set Page
+        # Only reset page if we actually reloaded lists
         self.set_page(initial_idx)
 
     def _on_source_changed(self):
@@ -689,13 +694,10 @@ class ManuscriptViewerWidget(QWidget):
     def set_image_by_fl_id(self, fl_id):
         """
         Deterministic image loading using FL_ID.
-        1. Searches for FL_ID in the active image list (manifest).
-        2. If not found or list empty, uses direct fallback URL.
         """
-        if not fl_id:
-            return
+        if not fl_id: return
 
-        # Normalize FL ID to just digits for comparison
+        # Normalize FL ID to just digits
         target_digits = re.sub(r"\D", "", str(fl_id))
         if not target_digits: return
 
@@ -705,19 +707,24 @@ class ManuscriptViewerWidget(QWidget):
         if self.active_list:
             for i, item in enumerate(self.active_list):
                 # Check URL for FL ID (NLI IIIF convention)
-                # item['url'] usually looks like: .../IIIFv21/FL7734473
-                if f"FL{target_digits}" in item['url']:
+                if f"FL{target_digits}" in item.get('url', ''):
                     found_index = i
                     break
 
         if found_index != -1:
-            # Found in manifest - load by index (preserves sequence context)
-            self.set_page(found_index)
+            # Found in manifest - load by index to keep context (Next/Prev buttons working)
+            if self.current_idx != found_index:
+                self.set_page(found_index)
         else:
             # 2. Fallback: Direct Load
             # This handles cases where manifest is missing or page is not in manifest
             direct_url = f"https://iiif.nli.org.il/IIIFv21/FL{target_digits}/full/1000,/0/default.jpg"
 
+            # Avoid reloading if we are already showing this URL (Prevents flickering loops)
+            if getattr(self, 'current_direct_url', None) == direct_url:
+                return
+
+            self.current_direct_url = direct_url
             self.scroll_area.lbl_img.setText(tr("Loading Direct..."))
 
             if self.loader_thread and self.loader_thread.isRunning():
@@ -726,7 +733,7 @@ class ManuscriptViewerWidget(QWidget):
 
             self.loader_thread = ImageLoaderThread(direct_url)
             self.loader_thread.image_loaded.connect(self.display_image)
-            self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
+            self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("Image N/A")))
             self.loader_thread.start()
 
     def display_image(self, image):
