@@ -19,6 +19,7 @@ from typing import Mapping
 from functools import lru_cache
 import itertools
 import json
+import difflib
 
 from genizah_translations import TRANSLATIONS
 
@@ -1540,6 +1541,8 @@ class MetadataManager:
         self.csv_bank = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
+        self._shelf_lookup_entries = None
+        self._shelf_lookup_by_norm = None
 
         # Ensure index dir exists for caches
         if not os.path.exists(Config.INDEX_DIR):
@@ -1610,6 +1613,7 @@ class MetadataManager:
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
+            self._reset_shelf_lookup_cache()
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 
@@ -1648,6 +1652,91 @@ class MetadataManager:
                 title = cached_title
 
         return shelf, title
+
+    @staticmethod
+    def normalize_shelfmark(shelf: str) -> str:
+        """Normalize shelfmarks by removing punctuation, slashes, dots, and the Ms. prefix."""
+        if not shelf:
+            return ""
+        without_prefix = re.sub(r"^\s*m[\.\s]*s[\.\s]*\.?\s*", "", shelf, flags=re.IGNORECASE)
+        cleaned = re.sub(r"[^\w]", "", without_prefix).lower()
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
+
+    def _reset_shelf_lookup_cache(self):
+        self._shelf_lookup_entries = None
+        self._shelf_lookup_by_norm = None
+
+    def _add_shelf_lookup_entry(self, sys_id, shelfmark, title=""):
+        norm = self.normalize_shelfmark(shelfmark)
+        if not norm:
+            return
+        if self._shelf_lookup_entries is None or self._shelf_lookup_by_norm is None:
+            self._shelf_lookup_entries = []
+            self._shelf_lookup_by_norm = defaultdict(list)
+        entry = {
+            'sys_id': sys_id,
+            'shelfmark': shelfmark,
+            'title': title or "",
+            'norm': norm
+        }
+        self._shelf_lookup_entries.append(entry)
+        self._shelf_lookup_by_norm[norm].append(entry)
+
+    def _ensure_shelf_lookup(self):
+        if self._shelf_lookup_entries is not None and self._shelf_lookup_by_norm is not None:
+            return
+
+        # Build from all known sources (CSV + cached NLI metadata)
+        self._shelf_lookup_entries = []
+        self._shelf_lookup_by_norm = defaultdict(list)
+
+        if not self.csv_bank and os.path.exists(Config.LIBRARIES_CSV):
+            self._load_csv_bank()
+
+        for sys_id, meta in self.csv_bank.items():
+            self._add_shelf_lookup_entry(sys_id, meta.get('shelfmark'), meta.get('title'))
+        for sys_id, meta in self.nli_cache.items():
+            self._add_shelf_lookup_entry(sys_id, meta.get('shelfmark'), meta.get('title'))
+
+    def find_shelfmark_candidates(self, shelf_query: str, limit: int = 10):
+        """Return exact and close shelfmark matches (normalized, partial, or fuzzy)."""
+        norm_query = self.normalize_shelfmark(shelf_query)
+        if not norm_query:
+            return [], []
+
+        self._ensure_shelf_lookup()
+
+        exact_matches = list(self._shelf_lookup_by_norm.get(norm_query, []))
+        suggestions = []
+        seen = {(e['sys_id'], e['norm']) for e in exact_matches}
+
+        # Partial/substring matches
+        for entry in self._shelf_lookup_entries:
+            if norm_query in entry['norm']:
+                key = (entry['sys_id'], entry['norm'])
+                if key not in seen:
+                    suggestions.append(entry)
+                    seen.add(key)
+                    if len(suggestions) >= limit:
+                        break
+
+        # Fuzzy close matches if we still have room
+        if len(suggestions) < limit:
+            close_norms = difflib.get_close_matches(norm_query, self._shelf_lookup_by_norm.keys(), n=limit, cutoff=0.6)
+            for norm in close_norms:
+                for entry in self._shelf_lookup_by_norm.get(norm, []):
+                    key = (entry['sys_id'], entry['norm'])
+                    if key not in seen:
+                        suggestions.append(entry)
+                        seen.add(key)
+                        if len(suggestions) >= limit:
+                            break
+                if len(suggestions) >= limit:
+                    break
+
+        return exact_matches, suggestions[:limit]
 
     def get_shelfmark_from_header(self, full_header):
         parsed = self.parse_full_id_components(full_header)
@@ -1768,11 +1857,13 @@ class MetadataManager:
                 'thumb_checked': True # Mark as checked to prevent repeated image download attempts
             }
             self.nli_cache[system_id] = meta
+            self._add_shelf_lookup_entry(system_id, meta.get('shelfmark'), meta.get('title'))
             return meta
 
         # 3. Only if necessary (not in cache/CSV) - Network request
         _, meta = self._fetch_single_worker(system_id)
         self.nli_cache[system_id] = meta
+        self._add_shelf_lookup_entry(system_id, meta.get('shelfmark'), meta.get('title'))
         return meta
 
     def fetch_iiif_manifest(self, system_id):

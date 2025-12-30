@@ -20,6 +20,7 @@ TRANSLATIONS = {
     "Loading...": "טוען...",
     "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
+    "Unknown": "לא ידוע",
     
     # --- Connectivity / Status ---
     "Online": "מקוון",
@@ -56,6 +57,8 @@ TRANSLATIONS = {
     "FL": "מס' קובץ",
     "FL:": "מס' קובץ:",
     "Enter FL ID...": "הכנס מספר קובץ...",
+    "Shelfmark:": "מספר מדף:",
+    "Enter shelfmark...": "הכנס מספר מדף...",
     "Shelfmark": "מספר מדף",
     "Title": "כותרת",
     "Snippet": "קטע",
@@ -84,6 +87,10 @@ TRANSLATIONS = {
     "Select Image": "בחר תמונה",
     "Image": "תמונה",
     "Toggle Image Pane": "הצג/הסתר תמונה",
+    "Select Shelfmark": "בחר מספר מדף",
+    "Multiple manuscripts match \"{}\". Please choose:": "נמצאו מספר כתבי יד מתאימים ל\"{}\". בחר מתוך הרשימה:",
+    "Shelfmark not found.": "מספר מדף לא נמצא.",
+    "Shelfmark selection cancelled.": "בחירת מספר המדף בוטלה.",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
