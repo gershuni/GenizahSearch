@@ -2598,12 +2598,12 @@ class GenizahGUI(QMainWindow):
 
         # Row 1: Search Inputs
         row1 = QHBoxLayout()
-        self.btn_prev_ms = QPushButton("◀")
+        self.btn_prev_ms = QPushButton(tr("◀"))
         self.btn_prev_ms.setToolTip(tr("Previous Manuscript (File Order)"))
         self.btn_prev_ms.setFixedWidth(25)
         self.btn_prev_ms.clicked.connect(lambda: self.navigate_manuscript(-1))
 
-        self.btn_next_ms = QPushButton("▶")
+        self.btn_next_ms = QPushButton(tr("▶"))
         self.btn_next_ms.setToolTip(tr("Next Manuscript (File Order)"))
         self.btn_next_ms.setFixedWidth(25)
         self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
