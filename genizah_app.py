@@ -486,11 +486,25 @@ class ZoomableScrollArea(QScrollArea):
             self.lbl_img.setText(tr("No Image"))
             return
 
+        viewport_size = self.viewport().size()
+        max_w = viewport_size.width() * 0.7
+        max_h = viewport_size.height() * 0.7
+
         transform = QTransform().rotate(self._rotation)
         source_pix = self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
 
-        scaled_w = int(source_pix.width() * self._zoom_factor)
-        scaled_h = int(source_pix.height() * self._zoom_factor)
+        source_w = source_pix.width()
+        source_h = source_pix.height()
+
+        effective_zoom = self._zoom_factor
+        if max_w > 0 and max_h > 0 and source_w > 0 and source_h > 0:
+            bound_scale = min(max_w / source_w, max_h / source_h)
+            if bound_scale < effective_zoom:
+                effective_zoom = bound_scale
+                self._zoom_factor = effective_zoom
+
+        scaled_w = int(source_w * effective_zoom)
+        scaled_h = int(source_h * effective_zoom)
 
         # Keep aspect ratio
         scaled_pix = source_pix.scaled(
