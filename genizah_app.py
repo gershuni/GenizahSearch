@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
 from version import APP_VERSION
 
@@ -458,15 +458,37 @@ class ZoomableScrollArea(QScrollArea):
         self.lbl_img.setScaledContents(False) # We manage scaling via Pixmap
         self.setWidget(self.lbl_img)
 
+        self._base_pixmap = None
         self._pixmap = None
         self._zoom_factor = 1.0
         self._drag_start_pos = None
+        self._rotation_degrees = 0
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def set_image(self, pixmap):
-        self._pixmap = pixmap
+        self._base_pixmap = pixmap
+        self._rotation_degrees = 0
         self._zoom_factor = 1.0 # Reset zoom on new image
+        self._apply_transform()
+
+    def set_rotation(self, degrees):
+        self._rotation_degrees = degrees % 360
+        self._apply_transform()
+
+    def _apply_transform(self):
+        if not self._base_pixmap or self._base_pixmap.isNull():
+            self._pixmap = None
+            self.lbl_img.setText(tr("No Image"))
+            return
+
+        if self._rotation_degrees == 0:
+            self._pixmap = self._base_pixmap
+        else:
+            transform = QTransform()
+            transform.rotate(self._rotation_degrees)
+            self._pixmap = self._base_pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
         self._update_view()
 
     def _update_view(self):
@@ -537,6 +559,7 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.spin_rotation = None
         self.init_ui()
 
     def init_ui(self):
@@ -562,6 +585,31 @@ class ManuscriptViewerWidget(QWidget):
         btn_zoom_in.setFixedWidth(30)
         btn_zoom_in.clicked.connect(lambda: self.scroll_area.zoom_in())
 
+        rotation_label = QLabel(tr("Rotate:"))
+        rotation_label.setStyleSheet("color: #7f8c8d;")
+
+        btn_rot_90 = QPushButton("90°")
+        btn_rot_90.setFixedWidth(45)
+        btn_rot_90.clicked.connect(lambda: self.apply_rotation(90))
+
+        btn_rot_180 = QPushButton("180°")
+        btn_rot_180.setFixedWidth(55)
+        btn_rot_180.clicked.connect(lambda: self.apply_rotation(180))
+
+        btn_rot_270 = QPushButton("270°")
+        btn_rot_270.setFixedWidth(55)
+        btn_rot_270.clicked.connect(lambda: self.apply_rotation(270))
+
+        self.spin_rotation = QSpinBox()
+        self.spin_rotation.setRange(0, 359)
+        self.spin_rotation.setFixedWidth(70)
+        self.spin_rotation.setSuffix("°")
+        self.spin_rotation.setValue(0)
+
+        btn_apply_rotation = QPushButton(tr("Apply"))
+        btn_apply_rotation.setFixedWidth(60)
+        btn_apply_rotation.clicked.connect(self.apply_custom_rotation)
+
         self.btn_external = QPushButton(tr("External Site"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
@@ -569,6 +617,13 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addWidget(self.combo_source)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
+        top_bar.addSpacing(10)
+        top_bar.addWidget(rotation_label)
+        top_bar.addWidget(btn_rot_90)
+        top_bar.addWidget(btn_rot_180)
+        top_bar.addWidget(btn_rot_270)
+        top_bar.addWidget(self.spin_rotation)
+        top_bar.addWidget(btn_apply_rotation)
         top_bar.addWidget(btn_zoom_out)
         top_bar.addWidget(btn_zoom_in)
 
@@ -671,6 +726,8 @@ class ManuscriptViewerWidget(QWidget):
         base_url = img_data['url']
 
         self.scroll_area.lbl_img.setText(tr("Loading..."))
+        if self.spin_rotation:
+            self.spin_rotation.setValue(0)
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
@@ -693,6 +750,16 @@ class ManuscriptViewerWidget(QWidget):
     def open_external(self):
         if self.external_url:
              QDesktopServices.openUrl(QUrl(self.external_url))
+
+    def apply_rotation(self, degrees):
+        if self.spin_rotation:
+            self.spin_rotation.setValue(degrees % 360)
+        self.scroll_area.set_rotation(degrees)
+
+    def apply_custom_rotation(self):
+        if not self.spin_rotation:
+            return
+        self.scroll_area.set_rotation(self.spin_rotation.value())
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
