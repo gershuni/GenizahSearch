@@ -2136,10 +2136,19 @@ class GenizahGUI(QMainWindow):
         # Results Table Setup
         self.results_table = QTableWidget(); self.results_table.setColumnCount(7)
         self.results_table.setHorizontalHeaderLabels(["", tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+
+        # Custom Header
+        self.chk_search_header = CheckBoxHeader(self.results_table)
+        self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
+        self.results_table.setHorizontalHeader(self.chk_search_header)
+
         self.results_table.setColumnWidth(0, 30) # Checkbox column
         self.results_table.setColumnWidth(1, 135)
         self.results_table.setColumnWidth(2, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        # Ensure column 0 is not sortable to avoid confusion with check action
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
         self.results_table.doubleClicked.connect(self.show_full_text)
@@ -2154,13 +2163,6 @@ class GenizahGUI(QMainWindow):
         self.table_container = QWidget()
         table_layout = QVBoxLayout(self.table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Custom Header
-        self.chk_search_header = CheckBoxHeader(self.results_table)
-        self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
-        self.results_table.setHorizontalHeader(self.chk_search_header)
-        # Ensure column 0 is not sortable to avoid confusion with check action
-        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
 
         table_layout.addWidget(self.results_table)
 
@@ -3283,9 +3285,9 @@ class GenizahGUI(QMainWindow):
         if rows == 0:
             all_checked = False
 
-        self.chk_search_select_all.blockSignals(True)
-        self.chk_search_select_all.setChecked(all_checked)
-        self.chk_search_select_all.blockSignals(False)
+        self.chk_search_header.blockSignals(True)
+        self.chk_search_header.setChecked(all_checked)
+        self.chk_search_header.blockSignals(False)
 
         self._update_search_export_label(has_selection)
 
@@ -4486,6 +4488,12 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
 
+        # Reset Select All Checkbox
+        self.chk_comp_select_all.blockSignals(True)
+        self.chk_comp_select_all.setChecked(False)
+        self.chk_comp_select_all.blockSignals(False)
+        self._update_comp_export_label()
+
         if getattr(self, 'group_thread', None):
             self.group_thread.wait()
         self.group_thread = None
@@ -4636,6 +4644,7 @@ class GenizahGUI(QMainWindow):
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
+                root_main.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_MAIN")
                 root_main.setExpanded(True)
                 make_checkable(root_main)
                 for item in visible_sorted_main:
@@ -4645,6 +4654,7 @@ class GenizahGUI(QMainWindow):
             if clean_appx:
                 total_appx = sum(len(v) for v in clean_appx.values())
                 root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
+                root_appx.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_APPX")
                 root_appx.setExpanded(False)
                 make_checkable(root_appx)
                 
@@ -4661,6 +4671,7 @@ class GenizahGUI(QMainWindow):
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
             if total_filt > 0:
                 root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered / Low Score ({})").format(total_filt)])
+                root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
                 root_filt.setForeground(0, Qt.GlobalColor.gray)
                 make_checkable(root_filt)
                 
@@ -4678,6 +4689,7 @@ class GenizahGUI(QMainWindow):
             # 4. Known / Excluded
             if self.comp_known:
                 root_known = QTreeWidgetItem(self.comp_tree, [tr("Known / Excluded ({})").format(len(self.comp_known))])
+                root_known.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_KNOWN")
                 root_known.setForeground(0, Qt.GlobalColor.darkGray)
                 make_checkable(root_known)
                 
@@ -4894,22 +4906,17 @@ class GenizahGUI(QMainWindow):
                 sel_main = collect_from_node(root.child(0))
             return sel_main, {}, [], {}, []
 
-        # Use translations or structure to identify categories
-        main_lbl = tr("Main Results")
-        appx_lbl = tr("Appendix")
-        filt_lbl = tr("Filtered")
-        known_lbl = tr("Known")
-
+        # Use node data (UserRole+100) to identify categories
         for i in range(root.childCount()):
             node = root.child(i)
-            txt = node.text(0)
+            node_type = node.data(0, Qt.ItemDataRole.UserRole + 100)
 
             items = collect_from_node(node)
             if not items: continue
 
-            if main_lbl in txt or "ראשי" in txt:
+            if node_type == "ROOT_MAIN":
                  sel_main.extend(items)
-            elif appx_lbl in txt or "נספח" in txt:
+            elif node_type == "ROOT_APPX":
                  # Custom traversal for Appendix to preserve grouping structure
                  for k in range(node.childCount()):
                      group_node = node.child(k)
@@ -4920,7 +4927,7 @@ class GenizahGUI(QMainWindow):
                      if group_items:
                          sel_appx[group_sig] = group_items
 
-            elif filt_lbl in txt or "סונן" in txt:
+            elif node_type == "ROOT_FILT":
                  # Iterate children to separate Main/Appendix in filtered
                  for k in range(node.childCount()):
                      child = node.child(k)
@@ -4946,7 +4953,7 @@ class GenizahGUI(QMainWindow):
                          if g_items:
                              sel_filt_appx[g_sig] = g_items
 
-            elif known_lbl in txt or "ידועים" in txt:
+            elif node_type == "ROOT_KNOWN":
                  sel_known.extend(items)
 
         return sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known
