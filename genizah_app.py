@@ -5120,7 +5120,7 @@ class GenizahGUI(QMainWindow):
                     # Some pages selected
                     # Clone item
                     import copy
-                    new_item = copy.copy(child_data) .
+                    new_item = copy.copy(child_data)
                     new_item['pages'] = []
 
                     # Find checked pages
