@@ -2913,27 +2913,27 @@ class SearchEngine:
             LOGGER.warning("Failed to retrieve full text for uid %s: %s", uid, e)
         return None
 
-    def get_full_manuscript(self, sys_id):
-        """Fetch ALL pages for a system ID, sorted by page number, with deduplication."""
+    def _get_unique_pages(self, sys_id):
+        """Load and deduplicate pages for a given system ID."""
         if not os.path.exists(Config.BROWSE_MAP): return []
         with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
         
-        pages_meta = browse_map.get(sys_id, [])
-        if not pages_meta: return []
+        pages = browse_map.get(sys_id, [])
+        if not pages: return []
 
-        # --- DEDUPLICATION LOGIC ---
-        # Prioritize V0.8. We map p_num -> page_data.
-        # Since the list is appended chronologically during indexing, keeping the first
-        # occurrence usually preserves the main version, or we just ensure uniqueness.
-        unique_pages = {}
-        for p in pages_meta:
-            p_num = p['p_num']
-            if p_num not in unique_pages:
-                unique_pages[p_num] = p
+        unique = {}
+        for p in pages:
+            pn = p.get('p_num')
+            # Deduplicate by p_num (keep first occurrence)
+            if pn is not None and pn not in unique:
+                unique[pn] = p
 
-        # Sort by page number
-        sorted_meta = sorted(unique_pages.values(), key=lambda x: x['p_num'])
-        # ---------------------------
+        return sorted(unique.values(), key=lambda x: x['p_num'])
+
+    def get_full_manuscript(self, sys_id):
+        """Fetch ALL pages for a system ID, sorted by page number, with deduplication."""
+        sorted_meta = self._get_unique_pages(sys_id)
+        if not sorted_meta: return []
 
         full_content = []
         for p in sorted_meta:
@@ -2950,25 +2950,13 @@ class SearchEngine:
         return full_content
         
     def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
-        
-        if sys_id not in browse_map: return None
-        pages = browse_map[sys_id]
+        pages = self._get_unique_pages(sys_id)
         if not pages: return None
         
         target_idx = -1
 
-        # PRIORITY 1: Use Absolute Index if provided (Fixes duplicate page loop)
-        if absolute_index is not None:
-            if 0 <= absolute_index < len(pages):
-                target_idx = absolute_index
-            else:
-                # If index is invalid, fallback to p_num logic? No, just fail or reset.
-                pass 
-        
-        # PRIORITY 2: Search by p_num (Fallback / Initial Load)
-        if target_idx == -1 and p_num is not None:
+        # PRIORITY 1: Search by p_num (Most robust after deduplication)
+        if p_num is not None:
             # Robust casting
             try: p_val = int(p_num)
             except: p_val = -999
@@ -2977,13 +2965,18 @@ class SearchEngine:
                 if p['p_num'] == p_val: 
                     target_idx = i; break
             
-            # Smart Fallback: Find closest insertion point
-            if target_idx == -1:
+            # Smart Fallback: Find closest insertion point if exact page missing
+            if target_idx == -1 and absolute_index is None:
                 for i, p in enumerate(pages):
                     if p['p_num'] > p_val:
                         target_idx = max(0, i - 1)
                         break
                 if target_idx == -1: target_idx = len(pages) - 1
+
+        # PRIORITY 2: Fallback to Absolute Index if valid for NEW list
+        if target_idx == -1 and absolute_index is not None:
+            if 0 <= absolute_index < len(pages):
+                target_idx = absolute_index
 
         # PRIORITY 3: Default to start
         if target_idx == -1: target_idx = 0
@@ -3007,23 +3000,14 @@ class SearchEngine:
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
-
-        if not fl_id:
-            return None
+        if not fl_id: return None
 
         fl_digits = re.sub(r"\D", "", str(fl_id))
-        if not fl_digits:
-            return None
+        if not fl_digits: return None
 
-        sys_candidates = [sys_id] if sys_id else list(browse_map.keys())
-
-        for sid in sys_candidates:
-            if sid not in browse_map:
-                continue
-            pages = browse_map[sid]
-            for idx, page in enumerate(pages):
+        # Helper to check a list of pages
+        def find_in_pages(pages_list, sid):
+            for idx, page in enumerate(pages_list):
                 parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
                 page_fl = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
                 if page_fl and page_fl == fl_digits:
@@ -3033,9 +3017,34 @@ class SearchEngine:
                         'p_num': page['p_num'],
                         'full_header': page['full_header'],
                         'text': text,
-                        'total_pages': len(pages),
+                        'total_pages': len(pages_list),
                         'current_idx': idx + 1,
                         'sys_id': sid,
-                        'fl_id': fl_digits
+                        'fl_id': fl_digits,
+                        'internal_index': idx
                     }
+            return None
+
+        # Optimization: If sys_id provided, only check that ms (deduplicated)
+        if sys_id:
+            pages = self._get_unique_pages(sys_id)
+            return find_in_pages(pages, sys_id)
+
+        # Global search: Need to load raw map to find the SysID first
+        if not os.path.exists(Config.BROWSE_MAP): return None
+        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+
+        for sid, raw_pages in browse_map.items():
+            # Quick scan raw pages first to avoid deduplicating everything
+            found = False
+            for p in raw_pages:
+                if f"FL{fl_digits}" in p.get('full_header', ''):
+                    found = True; break
+
+            if found:
+                # Once found, deduplicate THIS manuscript to get correct indices
+                clean_pages = self._get_unique_pages(sid)
+                res = find_in_pages(clean_pages, sid)
+                if res: return res
+
         return None
