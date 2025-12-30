@@ -1954,10 +1954,15 @@ class MetadataManager:
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
             for fl_id, label in sorted_map:
                 url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
-                images_nli.append({'label': label, 'url': url})
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+
+        # Persist canvas map and attribution (credit) from IIIF
+        current_meta['canvas_map'] = nli_iiif_data.get('canvas_map', {})
+        if not current_meta.get('attribution'):
+            current_meta['attribution'] = nli_iiif_data.get('physical_desc')
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli

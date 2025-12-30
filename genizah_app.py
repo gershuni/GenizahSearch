@@ -554,6 +554,11 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(False)
         self.combo_source.currentIndexChanged.connect(self._on_source_changed)
 
+        self.combo_label_nav = QComboBox()
+        self.combo_label_nav.setVisible(False)
+        self.combo_label_nav.setMinimumWidth(180)
+        self.combo_label_nav.currentIndexChanged.connect(self._on_label_nav_changed)
+
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setFixedWidth(30)
         btn_zoom_out.clicked.connect(lambda: self.scroll_area.zoom_out())
@@ -567,6 +572,7 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.clicked.connect(self.open_external)
 
         top_bar.addWidget(self.combo_source)
+        top_bar.addWidget(self.combo_label_nav)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
         top_bar.addWidget(btn_zoom_out)
@@ -587,7 +593,7 @@ class ManuscriptViewerWidget(QWidget):
 
     def load_images(self, meta, initial_idx=0):
         # Attribution
-        attr = meta.get('attribution')
+        attr = meta.get('attribution') or meta.get('physical_desc')
         if attr:
             self.lbl_attribution.setText(attr)
             self.lbl_attribution.setVisible(True)
@@ -619,6 +625,8 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
         self.combo_source.blockSignals(False)
 
+        self._populate_label_nav()
+
         # External Link
         marc = meta.get('marc', {})
         self.external_url = marc.get('external_iiif_link')
@@ -639,6 +647,7 @@ class ManuscriptViewerWidget(QWidget):
         # Try to keep index within bounds
         if self.current_idx >= len(self.active_list):
             self.current_idx = 0
+        self._populate_label_nav()
         self.set_page(self.current_idx)
 
     def _resolve_url(self, base_url):
@@ -667,6 +676,7 @@ class ManuscriptViewerWidget(QWidget):
         if index >= len(self.active_list): index = len(self.active_list) - 1
 
         self.current_idx = index
+        self._sync_label_nav()
         img_data = self.active_list[index]
         base_url = img_data['url']
 
@@ -689,6 +699,52 @@ class ManuscriptViewerWidget(QWidget):
     def display_image(self, image):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
+
+    def _populate_label_nav(self):
+        self.combo_label_nav.blockSignals(True)
+        self.combo_label_nav.clear()
+
+        entries = []
+        for idx, img in enumerate(self.active_list):
+            lbl = img.get('label')
+            if not lbl:
+                continue
+            fl_val = img.get('fl_id') or img.get('fl')
+            suffix = f" (FL {fl_val})" if fl_val else ""
+            entries.append((idx, f"{lbl}{suffix}"))
+
+        if entries:
+            for idx, text in entries:
+                self.combo_label_nav.addItem(text, idx)
+            self.combo_label_nav.setVisible(True)
+            self._sync_label_nav()
+        else:
+            self.combo_label_nav.setVisible(False)
+
+        self.combo_label_nav.blockSignals(False)
+
+    def _sync_label_nav(self):
+        if not self.combo_label_nav.isVisible():
+            return
+
+        self.combo_label_nav.blockSignals(True)
+        target = self.combo_label_nav.findData(self.current_idx)
+        if target != -1:
+            self.combo_label_nav.setCurrentIndex(target)
+        else:
+            self.combo_label_nav.setCurrentIndex(-1)
+        self.combo_label_nav.blockSignals(False)
+
+    def _on_label_nav_changed(self):
+        idx = self.combo_label_nav.currentData()
+        if idx is None:
+            return
+        try:
+            target_idx = int(idx)
+        except (TypeError, ValueError):
+            return
+        if target_idx != self.current_idx:
+            self.set_page(target_idx)
 
     def open_external(self):
         if self.external_url:
