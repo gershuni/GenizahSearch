@@ -23,9 +23,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
+                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem)
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor
 
 from version import APP_VERSION
 
@@ -418,154 +418,132 @@ class CheckBoxHeader(QHeaderView):
             self.isChecked = checked
             self.viewport().update()
 
-class ZoomableScrollArea(QScrollArea):
-    """A ScrollArea that supports hand-panning and wheel-zooming."""
+class ZoomableScrollArea(QGraphicsView):
+    """A GraphicsView that supports hand-panning and wheel-zooming."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWidgetResizable(False)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setStyleSheet("background: #222; border: none;")
 
         # Hide scrollbars but keep functionality
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.lbl_img = QLabel()
-        self.lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_img.setScaledContents(False) 
-        self.lbl_img.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.setWidget(self.lbl_img)
+        self._pixmap_item = QGraphicsPixmapItem()
+        self._pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.scene.addItem(self._pixmap_item)
+
+        self._msg_item = QGraphicsSimpleTextItem()
+        self._msg_item.setBrush(QColor("white"))
+        font = QFont("Arial", 16)
+        self._msg_item.setFont(font)
+        self.scene.addItem(self._msg_item)
 
         self._pixmap = None
-        self._zoom_factor = 1.0
-        self._drag_start_pos = None
         self._rotation = 0
         self._auto_fit_enabled = False
-
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def set_image(self, pixmap):
         self._pixmap = pixmap
         self._rotation = 0
         self._auto_fit_enabled = bool(pixmap)
-        if not pixmap:
-            self._zoom_factor = 1.0
-            self._update_view()
+
+        if not pixmap or pixmap.isNull():
+            self._pixmap_item.setVisible(False)
+            self.set_status_message(tr("No Image"))
             return
 
+        self._msg_item.setVisible(False)
+        self._pixmap_item.setPixmap(pixmap)
+        self._pixmap_item.setVisible(True)
+
+        # Reset transform
+        self.resetTransform()
+
+        # Center item transform origin
+        rect = QRectF(pixmap.rect())
+        # Let scene grow automatically to fit rotated items
+        self.scene.setSceneRect(QRectF())
+        self._pixmap_item.setPos(0, 0)
+        self._pixmap_item.setTransformOriginPoint(rect.center())
+
         if not self._apply_fit_to_viewport():
-            self._zoom_factor = 1.0
-            self._update_view()
+             self.centerOn(self._pixmap_item)
+
+    def set_status_message(self, text):
+        self._pixmap_item.setVisible(False)
+        self._msg_item.setText(text)
+        self._msg_item.setVisible(True)
+        self._update_text_pos()
+
+    def _update_text_pos(self):
+        if not self._msg_item.isVisible(): return
+
+        # Simple center in view
+        # We need to map viewport center to scene
+        center = self.mapToScene(self.viewport().rect().center())
+        brect = self._msg_item.boundingRect()
+        self._msg_item.setPos(center.x() - brect.width()/2, center.y() - brect.height()/2)
 
     def set_rotation(self, angle: float):
         """Set absolute rotation (degrees clockwise) and update view."""
         self._rotation = angle % 360 if angle is not None else 0
-        self._update_view()
+        self._pixmap_item.setRotation(self._rotation)
 
     def rotate_view(self, degrees):
         """Add degrees to current rotation and update."""
         self._rotation = (self._rotation + degrees) % 360
-        self._update_view()
-
-    def _update_view(self):
-        if not self._pixmap or self._pixmap.isNull():
-            self.lbl_img.setText(tr("No Image"))
-            return
-
-        transform = QTransform().rotate(self._rotation)
-        source_pix = self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
-
-        scaled_w = int(source_pix.width() * self._zoom_factor)
-        scaled_h = int(source_pix.height() * self._zoom_factor)
-
-        # Keep aspect ratio
-        scaled_pix = source_pix.scaled(
-            scaled_w, scaled_h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.lbl_img.setPixmap(scaled_pix)
-        self.lbl_img.resize(scaled_pix.size())
+        self._pixmap_item.setRotation(self._rotation)
 
     def wheelEvent(self, event):
-        # Zoom logic
         self._auto_fit_enabled = False
         delta = event.angleDelta().y()
-        if delta > 0:
-            self._zoom_factor *= 1.1
-        else:
-            self._zoom_factor *= 0.9
-
-        # Clamp zoom
-        self._zoom_factor = max(0.1, min(self._zoom_factor, 5.0))
-        self._update_view()
+        factor = 1.1 if delta > 0 else 0.9
+        self._apply_zoom(factor)
         event.accept()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self._drag_start_pos = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setCursor(Qt.CursorShape.OpenHandCursor)
-            self._drag_start_pos = None
-        super().mouseReleaseEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._drag_start_pos:
-            delta = event.pos() - self._drag_start_pos
-            # Adjust horizontal drag direction for RTL vs LTR layouts
-            rtl = False
-            app = QApplication.instance()
-            if app and app.layoutDirection() == Qt.LayoutDirection.RightToLeft:
-                rtl = True
-            elif self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
-                rtl = True
-
-            horiz_delta = -delta.x() if not rtl else delta.x()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + horiz_delta)
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-            self._drag_start_pos = event.pos()
-        super().mouseMoveEvent(event)
 
     def zoom_in(self):
         self._auto_fit_enabled = False
-        self._zoom_factor *= 1.2
-        self._update_view()
+        self._apply_zoom(1.2)
 
     def zoom_out(self):
         self._auto_fit_enabled = False
-        self._zoom_factor *= 0.8
-        self._update_view()
+        self._apply_zoom(0.8)
+
+    def _apply_zoom(self, factor):
+        current_scale = self.transform().m11()
+        new_scale = current_scale * factor
+
+        # Clamp zoom level (0.1 to 5.0)
+        if new_scale < 0.1:
+            factor = 0.1 / current_scale
+        elif new_scale > 5.0:
+            factor = 5.0 / current_scale
+
+        self.scale(factor, factor)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._auto_fit_enabled:
             self._apply_fit_to_viewport()
+        else:
+            self._update_text_pos()
 
     def _apply_fit_to_viewport(self):
-        fit_factor = self._compute_fit_factor()
-        if fit_factor is None:
-            return False
-        self._zoom_factor = fit_factor
-        self._update_view()
-        return True
-
-    def _compute_fit_factor(self):
         if not self._pixmap or self._pixmap.isNull():
-            return None
-        viewport_size = self.viewport().size()
-        if viewport_size.width() <= 0 or viewport_size.height() <= 0:
-            return None
+            return False
 
-        max_w = viewport_size.width() * 0.7
-        max_h = viewport_size.height() * 0.7
-        factor_w = max_w / self._pixmap.width()
-        factor_h = max_h / self._pixmap.height()
-        fit_factor = min(factor_w, factor_h)
-        return max(0.1, min(fit_factor, 5.0))
+        self.fitInView(self._pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+        # Scale down a bit to have margins
+        self.scale(0.95, 0.95)
+        return True
 
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
@@ -770,7 +748,7 @@ class ManuscriptViewerWidget(QWidget):
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
-            self.scroll_area.lbl_img.setText(tr("No images available"))
+            self.scroll_area.set_status_message(tr("No images available"))
             return
 
         # Bounds check
@@ -781,7 +759,7 @@ class ManuscriptViewerWidget(QWidget):
         img_data = self.active_list[index]
         base_url = img_data['url']
 
-        self.scroll_area.lbl_img.setText(tr("Loading..."))
+        self.scroll_area.set_status_message(tr("Loading..."))
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
@@ -791,7 +769,7 @@ class ManuscriptViewerWidget(QWidget):
 
         self.loader_thread = ImageLoaderThread(final_url)
         self.loader_thread.image_loaded.connect(self.display_image)
-        self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
+        self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
         self.loader_thread.start()
 
         # Preload next image
