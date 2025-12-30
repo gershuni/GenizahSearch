@@ -591,6 +591,7 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.external_provider = None
         self.init_ui()
 
     def init_ui(self):
@@ -643,7 +644,7 @@ class ManuscriptViewerWidget(QWidget):
         btn_rot_reset.setFixedWidth(50)
         btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
 
-        self.btn_external = QPushButton(tr("External Site"))
+        self.btn_external = QPushButton(tr("External Website"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
 
@@ -672,7 +673,21 @@ class ManuscriptViewerWidget(QWidget):
         self.scroll_area = ZoomableScrollArea()
         layout.addWidget(self.scroll_area, 1)
 
+    def _detect_external_provider(self, meta):
+        marc = meta.get('marc', {}) if meta else {}
+        url = (marc.get('external_iiif_link') or "").lower()
+        if "cudl.lib.cam.ac.uk" in url:
+            return "cambridge"
+
+        for img in meta.get('images_ext', []) or []:
+            if "cudl.lib.cam.ac.uk" in (img.get('url', '').lower()):
+                return "cambridge"
+
+        return None
+
     def load_images(self, meta, initial_idx=0):
+        self.external_provider = self._detect_external_provider(meta)
+
         # Attribution
         attr = meta.get('attribution')
         if attr:
@@ -690,7 +705,8 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.clear()
 
         if self.images_ext:
-            self.combo_source.addItem(f"External ({len(self.images_ext)})", "ext")
+            ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
+            self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
             self.active_list = self.images_ext
@@ -709,6 +725,9 @@ class ManuscriptViewerWidget(QWidget):
         # External Link
         marc = meta.get('marc', {})
         self.external_url = marc.get('external_iiif_link')
+        if self.external_url:
+            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+            self.btn_external.setText(btn_label)
         self.btn_external.setVisible(bool(self.external_url))
 
         self._populate_label_selector()
@@ -785,50 +804,22 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_rotation.setValue(0)
 
     def _populate_label_selector(self):
+        # Image selector disabled per requirements
         self.combo_img_selector.blockSignals(True)
         self.combo_img_selector.clear()
-
-        if not self.active_list:
-            self.combo_img_selector.setVisible(False)
-            self.combo_img_selector.blockSignals(False)
-            return
-
-        for idx, img in enumerate(self.active_list):
-            lbl = img.get('label') or tr("Image") + f" {idx + 1}"
-            fl_hint = img.get('fl_id') or img.get('fl')
-            if fl_hint:
-                lbl = f"{lbl} (FL{fl_hint})"
-            self.combo_img_selector.addItem(lbl, idx)
-
-        self.combo_img_selector.setVisible(len(self.active_list) > 1)
+        self.combo_img_selector.setVisible(False)
         self.combo_img_selector.blockSignals(False)
-
-        self._sync_label_selector()
 
     def _sync_label_selector(self):
-        if not self.active_list:
-            self.combo_img_selector.setVisible(False)
-            return
-
-        if self.current_idx >= len(self.active_list):
-            return
-
-        self.combo_img_selector.blockSignals(True)
-        self.combo_img_selector.setCurrentIndex(self.current_idx)
-        self.combo_img_selector.blockSignals(False)
+        self.combo_img_selector.setVisible(False)
 
     def _on_label_selected(self, combo_idx):
-        target_idx = self.combo_img_selector.currentData()
-        if target_idx is None:
-            return
-        try:
-            self.set_page(int(target_idx))
-        except Exception:
-            pass
+        # Selector disabled
+        return
 
     def open_external(self):
         if self.external_url:
-             QDesktopServices.openUrl(QUrl(self.external_url))
+            QDesktopServices.openUrl(QUrl(self.external_url))
 
     def adjust_rotation(self, delta):
         """Adjust rotation via slider to keep controls in sync."""
@@ -2520,7 +2511,7 @@ class GenizahGUI(QMainWindow):
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
         header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
 
@@ -2532,6 +2523,7 @@ class GenizahGUI(QMainWindow):
         context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
+        header.setStretchLastSection(True)
 
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
@@ -2541,6 +2533,12 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_header = CheckBoxHeader(self.comp_tree)
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
+        comp_header = self.comp_tree.header()
+        comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
+        comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
+        comp_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
+        comp_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
+        comp_header.setStretchLastSection(True)
 
         rl.addWidget(self.comp_tree)
         
