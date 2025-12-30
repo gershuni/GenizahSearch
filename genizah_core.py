@@ -1108,6 +1108,35 @@ class Config:
         """Return absolute path to bundled resources."""
         return os.path.join(Config.INTERNAL_DIR, relative_path)
 
+
+def dedupe_browse_map(browse_map):
+    """
+    Remove duplicate page entries per system ID, keeping the first occurrence
+    of each page number.
+    """
+    cleaned = {}
+    changed = False
+
+    for sid, pages in browse_map.items():
+        seen_p_nums = set()
+        deduped_pages = []
+        for page in pages:
+            p_num = page.get('p_num')
+            if p_num is None:
+                deduped_pages.append(page)
+                continue
+
+            if p_num in seen_p_nums:
+                changed = True
+                continue
+
+            seen_p_nums.add(p_num)
+            deduped_pages.append(page)
+
+        cleaned[sid] = deduped_pages
+
+    return cleaned, changed
+
 # ==============================================================================
 #  LOGGING
 # ==============================================================================
@@ -2332,6 +2361,14 @@ class Indexer:
 
         writer.commit()
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
+
+        total_before = sum(len(v) for v in browse_map.values())
+        browse_map, deduped = dedupe_browse_map(browse_map)
+        total_after = sum(len(v) for v in browse_map.values())
+
+        if deduped:
+            LOGGER.info("Removed %d duplicate browse-map entries during indexing", total_before - total_after)
+
         with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
         return total_docs
 
@@ -2357,6 +2394,24 @@ class SearchEngine:
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
+
+    def _load_browse_map(self):
+        """Load the browse map, deduplicate it, and persist corrections if needed."""
+        if not os.path.exists(Config.BROWSE_MAP):
+            return {}
+
+        with open(Config.BROWSE_MAP, 'rb') as f:
+            raw_map = pickle.load(f)
+
+        cleaned_map, changed = dedupe_browse_map(raw_map)
+        if changed:
+            try:
+                with open(Config.BROWSE_MAP, 'wb') as f:
+                    pickle.dump(cleaned_map, f)
+            except Exception as e:
+                LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+
+        return cleaned_map
 
     def build_tantivy_query(self, terms, mode):
         if mode == 'Regex':
@@ -2891,8 +2946,8 @@ class SearchEngine:
 
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
-        if not os.path.exists(Config.BROWSE_MAP): return []
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        browse_map = self._load_browse_map()
+        if not browse_map: return []
         
         pages_meta = browse_map.get(sys_id, [])
         if not pages_meta: return []
@@ -2912,9 +2967,9 @@ class SearchEngine:
         return full_content
         
     def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
-        
+        browse_map = self._load_browse_map()
+        if not browse_map: return None
+
         if sys_id not in browse_map: return None
         pages = browse_map[sys_id]
         if not pages: return None
@@ -2969,8 +3024,8 @@ class SearchEngine:
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
-        if not os.path.exists(Config.BROWSE_MAP): return None
-        with open(Config.BROWSE_MAP, 'rb') as f: browse_map = pickle.load(f)
+        browse_map = self._load_browse_map()
+        if not browse_map: return None
 
         if not fl_id:
             return None
