@@ -2292,6 +2292,21 @@ class Indexer:
         total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
         processed_lines = 0
 
+        def add_page_to_browse_map(parsed, uid, full_header):
+            if not parsed['sys_id'] or not parsed['p_num']:
+                return
+            try:
+                p_val = int(parsed['p_num'])
+            except Exception:
+                return
+
+            # Avoid duplicates (e.g., same manuscript present in V0.7 and V0.8)
+            existing = browse_map[parsed['sys_id']]
+            if any(p['p_num'] == p_val for p in existing):
+                return
+
+            existing.append({'p_num': p_val, 'uid': uid, 'full_header': full_header})
+
         for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
             if not os.path.exists(fpath): continue
             with open(fpath, 'r', encoding='utf-8') as f:
@@ -2309,8 +2324,7 @@ class Indexer:
                                 full_header=str(chead), shelfmark=str(shelfmark)
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
-                            if parsed['sys_id'] and parsed['p_num']:
-                                browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                            add_page_to_browse_map(parsed, cid, chead)
                             total_docs += 1
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
@@ -2326,8 +2340,7 @@ class Indexer:
                         full_header=str(chead), shelfmark=str(shelfmark)
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
-                    if parsed['sys_id'] and parsed['p_num']:
-                        browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                    add_page_to_browse_map(parsed, cid, chead)
                     total_docs += 1
 
         writer.commit()
