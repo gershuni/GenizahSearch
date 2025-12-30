@@ -62,6 +62,8 @@ TRANSLATIONS = {
     "Img": "תמונה",
     "Src": "מקור",
     "Export Results": "יצא תוצאות",
+    "Export selected results": "יצא תוצאות נבחרות",
+    "Select All": "בחר הכל",
     "Reload shelfmark/title metadata": "רענן נתוני מספר מדף/כותרת",
     "Stop metadata loading": "עצור טעינת נתונים",
     "No results found.": "לא נמצאו תוצאות.",
