@@ -2382,6 +2382,17 @@ class GenizahGUI(QMainWindow):
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
         top_row.addWidget(btn_load)
 
+        # 1. Exclude & Filter (Moved to top row)
+        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
+        self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
+        self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
+        self.lbl_comp_status = QLabel("")
+
+        top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
+        top_row.addWidget(self.lbl_exclude_status)
+        top_row.addWidget(self.lbl_comp_status)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -2396,17 +2407,6 @@ class GenizahGUI(QMainWindow):
 
         # Single Row for Controls
         cr = QHBoxLayout()
-
-        # 1. Exclude & Filter
-        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
-        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
-        self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
-        self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
-        self.lbl_comp_status = QLabel("")
-
-        cr.addWidget(btn_exclude); cr.addWidget(btn_filter_text)
-        cr.addWidget(self.lbl_exclude_status)
-        cr.addWidget(self.lbl_comp_status)
 
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
