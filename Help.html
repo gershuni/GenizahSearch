@@ -122,7 +122,7 @@
         <li><b>Extended / Maximum:</b> Allows for greater flexibility in letter substitutions (e.g., Qof/Kaf, Tet/Tav), but may return less relevant results ("noise").</li>
         <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with typos or decoding errors.</li>
         <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
-        <li><b>Title:</b> Searches within the catalog titles of compositions (e.g., "Midrash Rabbah").</li>
+        <li><b>Title:</b> Searches within the catalog titles of compositions (e.g., "Midrash Rabbah"). For example, searching for "Mishnah" will retrieve all manuscripts identified as containing Mishnah.</li>
         <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
     </ul>
 
@@ -168,7 +168,8 @@
     <p>This tab enables convenient continuous reading of a full manuscript, synchronized with source images.</p>
     <ul>
         <li><b>Load:</b> Enter a System ID or Shelfmark. The search is flexible and ignores spaces or punctuation (e.g., <code>TS 13 15</code> finds <code>T-S 13.15</code>).</li>
-        <li><b>Navigate:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip pages.</li>
+        <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
+        <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> at the top left to move to the previous or next manuscript in the database file order.</li>
         <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge where supported).</li>
         <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling.</li>
     </ul>
@@ -258,7 +259,7 @@
         <li><b>Extended / Maximum:</b> מאפשרים גמישות רבה יותר בחילופי אותיות (כגון ק/כ, ט/ת), אך עלולים להחזיר תוצאות פחות רלוונטיות ("רעש").</li>
         <li><b>Fuzzy (עמום):</b> משתמש במרחק לווינשטיין (Levenshtein distance) למציאת מילים דומות גם אם יש שגיאות הקלדה/פענוח.</li>
         <li><b>Regex (ביטוי רגולרי):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code>\bא[א-ת]{3}\b</code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li>
-        <li><b>Title (כותרת):</b> חיפוש בתוך המידע הקטלוגי של הכותרות (למשל: "מדרש רבה").</li>
+        <li><b>Title (כותרת):</b> חיפוש בתוך המידע הקטלוגי של הכותרות (למשל: "מדרש רבה"). דוגמה: חיפוש "משנה" יביא את כל כתבי היד המזוהים כמשנה.</li>
         <li><b>Shelfmark (מספר מדף):</b> חיפוש מהיר של מספר מדף (למשל: "T-S 13.15").</li>
     </ul>
 
@@ -304,7 +305,8 @@
     <p>לשונית זו מאפשרת קריאה רציפה ונוחה של כתב יד שלם, עם סנכרון לתמונות המקור.</p>
     <ul>
         <li><b>טעינה:</b> הזינו מספר מערכת (System ID) או מספר מדף. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code>TS 13 15</code> ימצא את <code>T-S 13.15</code>).</li>
-        <li><b>ניווט:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים.</li>
+        <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
+        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
         <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג' במקרים נתמכים).</li>
         <li><b>View All:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה.</li>
     </ul>

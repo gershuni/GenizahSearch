@@ -116,6 +116,14 @@ class LabScoringDialog(QDialog):
         layout.addStretch()
         
         btn_box = QHBoxLayout()
+        # Help Button
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(30)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.clicked.connect(lambda: parent.open_help_center(anchor="lab"))
+        btn_box.addWidget(btn_help)
+
+        btn_box.addStretch()
         self.btn_save = QPushButton(tr("Save & Close")); self.btn_save.clicked.connect(self.save_and_close)
         self.btn_cancel = QPushButton(tr("Cancel")); self.btn_cancel.clicked.connect(self.reject)
         btn_box.addStretch(); btn_box.addWidget(self.btn_cancel); btn_box.addWidget(self.btn_save)
@@ -173,6 +181,14 @@ class LabPanel(QFrame):
 
         self.lbl_idx_status = QLabel("")
         self.layout.addWidget(self.lbl_idx_status)
+
+        # Help Button (Shared)
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(24)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 12px;")
+        # Assumes parent is GenizahGUI which has open_help_center
+        btn_help.clicked.connect(lambda: self.parent().open_help_center(anchor="lab"))
+        self.layout.addWidget(btn_help)
 
         # Spacer
         self.layout.addSpacing(20)
@@ -1022,8 +1038,8 @@ class HelpDialog(QDialog):
                 # Inject language attribute to control visibility of bilingual sections
                 if "<body" in content:
                     content = content.replace("<body", f"<body data-lang='{lang}'", 1)
-                base_url = QUrl.fromLocalFile(source_path)
-                self.text.setHtml(content, base_url)
+                # setHtml takes only one argument in standard PyQt6
+                self.text.setHtml(content)
                 if anchor:
                     QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
                 return
