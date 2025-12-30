@@ -537,6 +537,7 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.current_source = None
         self.init_ui()
 
     def init_ui(self):
@@ -554,6 +555,10 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(False)
         self.combo_source.currentIndexChanged.connect(self._on_source_changed)
 
+        self.combo_labels = QComboBox()
+        self.combo_labels.setVisible(False)
+        self.combo_labels.currentIndexChanged.connect(self._on_label_selected)
+
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setFixedWidth(30)
         btn_zoom_out.clicked.connect(lambda: self.scroll_area.zoom_out())
@@ -567,6 +572,7 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.clicked.connect(self.open_external)
 
         top_bar.addWidget(self.combo_source)
+        top_bar.addWidget(self.combo_labels)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
         top_bar.addWidget(btn_zoom_out)
@@ -580,6 +586,13 @@ class ManuscriptViewerWidget(QWidget):
         self.lbl_attribution.setStyleSheet("font-size: 10px; color: #7f8c8d; background: transparent; margin: 0px;")
         self.lbl_attribution.setVisible(False)
         layout.addWidget(self.lbl_attribution)
+
+        # Image label / alias
+        self.lbl_image_label = QLabel("")
+        self.lbl_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_image_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #2c3e50; background: transparent; margin: 0px;")
+        self.lbl_image_label.setVisible(False)
+        layout.addWidget(self.lbl_image_label)
 
         # Image Area
         self.scroll_area = ZoomableScrollArea()
@@ -619,6 +632,7 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
         self.combo_source.blockSignals(False)
 
+        self._build_label_nav()
         # External Link
         marc = meta.get('marc', {})
         self.external_url = marc.get('external_iiif_link')
@@ -636,6 +650,7 @@ class ManuscriptViewerWidget(QWidget):
             self.active_list = self.images_ext
             self.current_source = "ext"
 
+        self._build_label_nav()
         # Try to keep index within bounds
         if self.current_idx >= len(self.active_list):
             self.current_idx = 0
@@ -683,6 +698,9 @@ class ManuscriptViewerWidget(QWidget):
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
         self.loader_thread.start()
 
+        self._update_label_display(img_data, index)
+        self._sync_label_nav(index)
+
         # Preload next image
         self._preload(index + 1)
 
@@ -693,6 +711,63 @@ class ManuscriptViewerWidget(QWidget):
     def open_external(self):
         if self.external_url:
              QDesktopServices.openUrl(QUrl(self.external_url))
+
+    def _format_label(self, img_data, idx):
+        lbl = img_data.get('label')
+        if isinstance(lbl, list):
+            lbl = lbl[0] if lbl else ""
+        label_text = str(lbl) if lbl else f"{tr('Image')} {idx + 1}"
+        fl_id = img_data.get('fl_id')
+        if fl_id:
+            label_text = f"{label_text} (FL{fl_id})"
+        return label_text
+
+    def _build_label_nav(self):
+        self.combo_labels.blockSignals(True)
+        self.combo_labels.clear()
+
+        if not self.active_list:
+            self.combo_labels.setVisible(False)
+            self.combo_labels.blockSignals(False)
+            return
+
+        self.combo_labels.addItem(tr("Select Image"), -1)
+        has_label = False
+        for idx, img in enumerate(self.active_list):
+            text = self._format_label(img, idx)
+            self.combo_labels.addItem(text, idx)
+            has_label = True
+
+        self.combo_labels.setVisible(has_label)
+        self.combo_labels.blockSignals(False)
+        self._sync_label_nav(self.current_idx)
+
+    def _sync_label_nav(self, index):
+        if not self.combo_labels.isVisible():
+            return
+        self.combo_labels.blockSignals(True)
+        nav_idx = self.combo_labels.findData(index)
+        if nav_idx != -1:
+            self.combo_labels.setCurrentIndex(nav_idx)
+        self.combo_labels.blockSignals(False)
+
+    def _update_label_display(self, img_data, idx):
+        if not img_data:
+            self.lbl_image_label.setVisible(False)
+            self.lbl_image_label.setText("")
+            return
+        text = self._format_label(img_data, idx)
+        self.lbl_image_label.setText(text)
+        self.lbl_image_label.setVisible(bool(text))
+
+    def _on_label_selected(self, _index=None):
+        if not self.combo_labels.isVisible():
+            return
+        target_idx = self.combo_labels.currentData()
+        if target_idx is None or target_idx == -1:
+            return
+        if isinstance(target_idx, int):
+            self.set_page(target_idx)
 
 class HiddenScrollArea(QScrollArea):
     def __init__(self, text_with_markers="", anchor_text=None, parent=None):
