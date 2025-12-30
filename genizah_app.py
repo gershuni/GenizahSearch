@@ -686,6 +686,49 @@ class ManuscriptViewerWidget(QWidget):
         # Preload next image
         self._preload(index + 1)
 
+    def set_image_by_fl_id(self, fl_id):
+        """
+        Deterministic image loading using FL_ID.
+        1. Searches for FL_ID in the active image list (manifest).
+        2. If not found or list empty, uses direct fallback URL.
+        """
+        if not fl_id:
+            return
+
+        # Normalize FL ID to just digits for comparison
+        target_digits = re.sub(r"\D", "", str(fl_id))
+        if not target_digits: return
+
+        found_index = -1
+
+        # 1. Try to find in current active list
+        if self.active_list:
+            for i, item in enumerate(self.active_list):
+                # Check URL for FL ID (NLI IIIF convention)
+                # item['url'] usually looks like: .../IIIFv21/FL7734473
+                if f"FL{target_digits}" in item['url']:
+                    found_index = i
+                    break
+
+        if found_index != -1:
+            # Found in manifest - load by index (preserves sequence context)
+            self.set_page(found_index)
+        else:
+            # 2. Fallback: Direct Load
+            # This handles cases where manifest is missing or page is not in manifest
+            direct_url = f"https://iiif.nli.org.il/IIIFv21/FL{target_digits}/full/1000,/0/default.jpg"
+
+            self.scroll_area.lbl_img.setText(tr("Loading Direct..."))
+
+            if self.loader_thread and self.loader_thread.isRunning():
+                self.loader_thread.cancel()
+                self.loader_thread.wait()
+
+            self.loader_thread = ImageLoaderThread(direct_url)
+            self.loader_thread.image_loaded.connect(self.display_image)
+            self.loader_thread.load_failed.connect(lambda: self.scroll_area.lbl_img.setText(tr("No Image")))
+            self.loader_thread.start()
+
     def display_image(self, image):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
@@ -1491,6 +1534,7 @@ class ResultDialog(QDialog):
         # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data['raw_header'])
         self.current_sys_id = ids['sys_id']
+        self.current_fl_id = ids.get('fl_id') # Ensure FL_ID is set early to avoid race conditions
         try: p = int(ids['p_num']) 
         except: p = 1
         
@@ -1787,10 +1831,14 @@ class ResultDialog(QDialog):
             self.lbl_shelf.setText(shelf)
 
     def sync_external_view(self):
-        # Determine index
-        try: idx = int(self.current_p_num) - 1
-        except: idx = 0
-        self.ms_viewer.set_page(idx)
+        # Deterministic sync using FL_ID if available
+        if self.current_fl_id:
+            self.ms_viewer.set_image_by_fl_id(self.current_fl_id)
+        else:
+            # Fallback to index based on p_num
+            try: idx = int(self.current_p_num) - 1
+            except: idx = 0
+            self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -5419,19 +5467,28 @@ class GenizahGUI(QMainWindow):
 
         # עדכון שדה ה-FL אם קיים
         parsed = self.meta_mgr.parse_full_id_components(full_header)
-        if parsed.get('fl_id'):
-            self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
+        fl_id = parsed.get('fl_id')
+        if fl_id:
+            # FL ID already includes prefix 'FL' if extracted by new core logic,
+            # but check to be safe if 'FL' is missing.
+            clean_fl = fl_id if fl_id.startswith('FL') else f"FL{fl_id}"
+            self.browse_fl_input.setText(clean_fl)
         else:
             self.browse_fl_input.setText("")
             
         # This tells the large image viewer on the right to jump to the correct index
         if hasattr(self, 'browse_viewer') and self.browse_viewer.isVisible():
-            try: 
-                # p_num is 1-based, array index is 0-based
-                idx = int(self.current_browse_p) - 1
-            except: 
-                idx = 0
-            self.browse_viewer.set_page(idx)
+            if fl_id:
+                # Use deterministic sync by FL ID
+                self.browse_viewer.set_image_by_fl_id(fl_id)
+            else:
+                # Fallback to legacy index-based logic
+                try:
+                    # p_num is 1-based, array index is 0-based
+                    idx = int(self.current_browse_p) - 1
+                except:
+                    idx = 0
+                self.browse_viewer.set_page(idx)
         # -------------------------------
 
         # טעינת תמונה

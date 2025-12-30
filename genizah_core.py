@@ -1696,7 +1696,7 @@ class MetadataManager:
         Parse header into components regardless of order or separators.
         Fixes display issues for V0.7 paths.
         """
-        result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
+        result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'p_id': None, 'fl_id': None}
 
         # 1. System ID (99...)
         sys_match = re.search(r'(99\d{8,})', full_header)
@@ -1714,11 +1714,12 @@ class MetadataManager:
             # Remove P to get clean number
             raw_p = p_match.group(1) # P0001
             result['p_num'] = str(int(raw_p[1:]))
+            result['p_id'] = raw_p
 
         # 4. FL ID
         fl_match = re.search(r'(FL\d+)', full_header)
         if fl_match:
-            result['fl_id'] = fl_match.group(1).replace("FL", "")
+            result['fl_id'] = fl_match.group(1) # Keep FL prefix
 
         return result
 
@@ -2231,7 +2232,13 @@ class MetadataManager:
         return list(results)
 
     def get_display_data(self, full_header, src_label):
-        sys_id, p_num = self.parse_header_smart(full_header)
+        parsed = self.parse_full_id_components(full_header)
+        sys_id = parsed['sys_id']
+        p_num = parsed['p_num']
+
+        # Fallback for smart header if full parse failed partially
+        if not sys_id:
+            sys_id, p_num = self.parse_header_smart(full_header)
 
         meta = self.nli_cache.get(sys_id, {'shelfmark': '', 'title': ''})
         shelfmark = meta.get('shelfmark')
@@ -2245,7 +2252,10 @@ class MetadataManager:
             'title': meta.get('title', ''),
             'img': p_num,
             'source': src_label,
-            'id': sys_id
+            'id': sys_id,
+            'fl_id': parsed.get('fl_id'),
+            'ie_id': parsed.get('ie_id'),
+            'p_id': parsed.get('p_id')
         }
 
 # ==============================================================================
