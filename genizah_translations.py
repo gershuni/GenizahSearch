@@ -50,7 +50,7 @@ TRANSLATIONS = {
 
     # --- Tabs ---
     "Search": "חיפוש",
-    "Composition Search": "חיפוש חיבורים", # Updated
+    "Composition Search": "חיפוש חיבורים", 
     "Browse Manuscript": "עיון בכתב יד",
     "Settings & About": "הגדרות ואודות",
 
@@ -146,8 +146,8 @@ TRANSLATIONS = {
     "Filter Text": "סנן טקסט",
     "No composition data to export.": "אין נתוני חיבורים לייצוא.",
     "Excluded: {}": "הוחרגו: {}",
-    "Chunk: ": "גוש: ",
-    "Words per search block (Rec: 5-7)": "מילים בכל גוש חיפוש (מומלץ: 5-7)",
+    "Chunk: ": "מקטע: ",
+    "Words per search block (Rec: 5-7)": "מילים בכל מקטע חיפוש (מומלץ: 5-7)",
     "Max Freq: ": "תדירות מקס': ",
     "Ignore phrases appearing > X times (filters common phrases)": "התעלם מביטויים המופיעים מעל X פעמים (מסנן ביטויים נפוצים)",
     "Filter > ": "סינון > ",
@@ -235,8 +235,8 @@ TRANSLATIONS = {
     "Shelfmark not found.": "מספר המדף לא נמצא.",
     "Multiple shelfmarks found. Select one:": "נמצאו מספר מספרי מדף. בחר אחד:",
     "Nav": "ניווט",
-    "Previous Manuscript (File Order)": "כתב יד קודם (סדר קבצים)",
-    "Next Manuscript (File Order)": "כתב יד הבא (סדר קבצים)",
+    "Previous Manuscript (File Order)": "כתב היד הקודם (סדר קבצים)",
+    "Next Manuscript (File Order)": "כתב היד הבא (סדר קבצים)",
     "Total Manuscripts Found": "סה\"כ כתבי יד שנמצאו",
     "Bibliography": "ביבליוגרפיה",
     "Date": "תאריך",
@@ -253,8 +253,8 @@ TRANSLATIONS = {
     "Manuscript saved to:\n{}": "כתב היד נשמר אל:\n{}",
     "<< Prev": ">> הקודם", 
     "Next >>": "הבא <<",
-    "<< Prev Page": ">> דף קודם",
-    "Next Page >>": "דף הבא <<",
+    "<< Prev Page": "<< הדף הקודם",
+    "Next Page >>": "הדף הבא >>",
     "Page / Image": "עמוד / תמונה", 
     "Image": "תמונה",
     "Reset rotation": "אפס סיבוב",
@@ -319,7 +319,7 @@ TRANSLATIONS = {
     "Run Stage 2 re-ranking (slower but more precise).": "הרץ דירוג מחדש בשלב 2 (איטי יותר אך מדויק).",
     "Use Slop Window": "השתמש בחלון גמיש (Slop)",
     "Enable sliding window density check.": "הפעל בדיקת צפיפות בחלון גולש.",
-    "Use Rare Word Filtering": "השתמש בסינון מילים נדירות",
+    "Use Rare Word Filtering": "השתמש בסינון על ידי מילים נדירות",
     "Boost score for rare words found in document.": "העלה ציון עבור מילים נדירות שנמצאו במסמך.",
     "Prefix Mode (Begins with...)": "מצב קידומת (מתחיל ב...)",
     "Search for words starting with the query terms (e.g. 'lam' matches 'lama').": "חפש מילים המתחילות במונחי השאילתא (למשל 'למ' ימצא 'למה').",
@@ -333,21 +333,21 @@ TRANSLATIONS = {
     "Custom Variants (char=char, word=word)": "ווריאנטים מותאמים (תו=תו, מילה=מילה)",
     "Lab Index": "אינדקס מעבדה",
     "Rebuild Lab Index": "בנה מחדש אינדקס מעבדה",
-    "Max Candidates per Chunk:": "מקסימום מועמדים לגוש:",
+    "Max Candidates per Chunk:": "מקסימום מועמדים למקטע:",
     "Max Results to Display:": "מקסימום תוצאות להצגה:",
     "Max Results to Process:": "מקסימום תוצאות לעיבוד:",
-    "Min Chunk Score:": "ציון גוש מינימלי:",
+    "Min Chunk Score:": "ציון מקטע מינימלי:",
     "Max Final Results:": "מקסימום תוצאות סופיות:",
-    "Sequential Order Bonus:": "בונוס סדר רציף:",
-    "Coverage Penalty Power:": "חזקת קנס כיסוי:",
-    "Stop-Word Suppression:": "דיכוי מילות עצירה:",
+    "Sequential Order Bonus:": "בונוס רצף מילים:",
+    "Coverage Penalty Power:": "מקדם קנס כיסוי:",
+    "Stop-Word Suppression:": "סינון מילות עצירה:",
     "Score for Short Words (<3):": "ניקוד למילים קצרות (<3):",
     "Score for Common 3-Letter:": "ניקוד למילים נפוצות בנות 3 אותיות:",
     "Standard Weights:": "משקלים רגילים:",
     "Long Word Bonus:": "בונוס מילה ארוכה:",
     "Unique Match Base Score:": "ניקוד בסיס להתאמה ייחודית:",
     "Distance Penalty:": "קנס מרחק:",
-    "Repeated Word Factor:": "מקדם מילה חוזרת:",
+    "Repeated Word Factor:": "קנס על מילים חוזרות:",
     "Adjust how the algorithm prioritizes results.": "כוונן כיצד האלגוריתם מתעדף תוצאות.",
     "Points given for very short words (<3 letters). Keep low to reduce noise.": "נקודות הניתנות למילים קצרות מאוד (פחות מ-3 אותיות). השאר נמוך להפחתת רעש.",
     "Points for common 3-letter words (e.g. 'ליה', 'הכי').": "נקודות למילים נפוצות בנות 3 אותיות (למשל 'ליה', 'הכי').",
@@ -361,8 +361,8 @@ TRANSLATIONS = {
     "Minimum percentage of query terms required to consider a result relevant.": "אחוז מינימלי של מונחי שאילתה הדרוש כדי להחשיב תוצאה כרלוונטית.",
     "Maximum number of raw candidates to fetch from the index before detailed scoring.": "מספר מקסימלי של מועמדים גולמיים לשליפה מהאינדקס לפני ניקוד מפורט.",
     "Maximum number of documents to scan in Deep Scan mode.": "מספר מקסימלי של מסמכים לסריקה במצב סריקה עמוקה.",
-    "Maximum number of index hits to process per text chunk.": "מספר מקסימלי של תוצאות אינדקס לעיבוד עבור כל גוש טקסט.",
-    "Minimum score required for a chunk to be considered a match.": "ציון מינימלי הדרוש לגוש כדי להיחשב כהתאמה.",
+    "Maximum number of index hits to process per text chunk.": "מספר מקסימלי של תוצאות אינדקס לעיבוד עבור כל מקטע טקסט.",
+    "Minimum score required for a chunk to be considered a match.": "ציון מינימלי הדרוש למקטע כדי להיחשב כהתאמה.",
     "Maximum number of results to display in the tree (prevents freezing). All results are exported.": "מספר מקסימלי של תוצאות להצגה בעץ (מונע קפיאה). כל התוצאות מיוצאות.",
 
     # --- Result Dialog ---
@@ -443,7 +443,7 @@ TRANSLATIONS = {
     "COMP_HELP_HTML": """<div dir='rtl'><h3>חיפוש מקבילות</h3>
     <p>מוצא מקבילות בין טקסט המקור לגניזה.</p>
     <ul>
-    <li><b>גוש (Chunk):</b> מספר מילים בכל יחידת חיפוש (מומלץ 5-7).</li>
+    <li><b>מקטע (Chunk):</b> מספר מילים בכל יחידת חיפוש (מומלץ 5-7).</li>
     <li><b>תדירות מקס':</b> סנן ביטויים המופיעים מעל X פעמים.</li>
     <li><b>סינון >:</b> קבץ תוצאות אם כותרת מופיעה בתדירות גבוהה (העבר לנספח).</li>
     </ul></div>""",
@@ -491,7 +491,7 @@ TRANSLATIONS = {
 
             <h3>מוקדש לזכרו של מורנו האהוב, פרופ' מנחם כהנא ז\"ל</h3>
             <h3>קרדיטים</h3>
-            <p>כלי זה פותח בסיוע <b>Gemini 3.0</b> ו-<b>GPT 5.1</b>. תודתי נתונה לאבי שמידמן, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן ואלנתן חן על עצותיהם ותמיכתם.</p>
+            <p>כלי זה פותח בסיוע <b>Gemini 3.0</b> ו-<b>GPT 5.1</b>. תודתי נתונה לאבי שמידמן, אלישע רוזנצוייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר על עצותיהם ותמיכתם.</p>
 
             <h3>מקור הנתונים ותודות</h3>
             <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית.תודות רבות גם לשאר חברי הצוות: לואיג'י במבאצ'י, שרווה גוגאוולה, דריה וסיוטינסקי שפירא, משה לביא, אלנה לולי, חיים לפין, נורית עזר, בראת קוראר-ברכאת, בנימין קיסלינג וורד רזיאל קרצ'מר.</p>

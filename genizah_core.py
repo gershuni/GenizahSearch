@@ -698,9 +698,6 @@ class LabEngine:
                 smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
                 html_snippet = smart_snippet # No HTML conversion needed, pure markers
 
-                # --- FIX FOR VIEWER HIGHLIGHTING ---
-                # We extract the ACTUAL corrupted words found in the match window
-                # and create a Regex pattern from them. The GUI uses this pattern to highlight.
                 start_idx, end_idx = best_window
                 relevant_matches = matches[start_idx : end_idx + 1]
                 
@@ -2543,9 +2540,6 @@ class SearchEngine:
                 for v in all_vars:
                     if v == term: continue # Skip exact (already added)
                     
-                    # CRITICAL FIX: Filter out 1-letter noise variants
-                    # If original was >1 char, variant must be >1 char.
-                    # Prevents single-letter fallbacks that over-match
                     if len(term) > 1 and len(v) < 2:
                         continue
                         
@@ -2760,7 +2754,6 @@ class SearchEngine:
         """
         Scans composition chunks against the index.
         Returns aggregated results with WIDE source context.
-        FIX: Common phrases (> max_freq) are now moved to 'filtered' instead of being discarded.
         """
         # 1. Tokenize original text
         tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)

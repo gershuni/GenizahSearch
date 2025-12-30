@@ -373,13 +373,6 @@ class CheckBoxHeader(QHeaderView):
         padding = 4
         y = rect.top() + (rect.height() - box_size) // 2
 
-        # In RTL, column 0 is typically visually on the right.
-        # But QHeaderView paints logical index 0 using the given rect.
-        # If the layout is RTL, we want the checkbox at the "start" of the section?
-        # Usually Checkbox [Text]. In RTL: [Text] Checkbox?
-        # Or standard convention: Checkbox is always at start of line?
-        # Let's align it to the "start" (Left in LTR, Right in RTL).
-
         if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
             x = rect.right() - box_size - padding
         else:
@@ -405,23 +398,6 @@ class CheckBoxHeader(QHeaderView):
 
     def mousePressEvent(self, event):
         if self.logicalIndexAt(event.pos()) == 0:
-            # Hit testing
-            # We need the visual rect of the section corresponding to logical index 0
-            # Since sections can be reordered, visualIndex(0) gives position.
-            # But header uses viewport coordinates.
-            # sectionViewportPosition(0) gives the start (left edge in LTR) of logical section 0.
-
-            # Simple approach: Iterate visible sections to find logical index 0?
-            # Or use built-in geometry.
-
-            # Since logicalIndexAt gave us 0, we know the click is in section 0.
-            # We just need the rect of that section to check if it's on the checkbox.
-
-            # Finding the rect of logical section 0:
-            # position = sectionViewportPosition(0)
-            # size = sectionSize(0)
-            # But we need to handle x/y and scrolling.
-            # sectionViewportPosition returns X relative to viewport.
 
             sec_pos = self.sectionViewportPosition(0)
             sec_width = self.sectionSize(0)
@@ -456,7 +432,7 @@ class ZoomableScrollArea(QScrollArea):
 
         self.lbl_img = QLabel()
         self.lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_img.setScaledContents(False) # We manage scaling via Pixmap
+        self.lbl_img.setScaledContents(False) 
         self.lbl_img.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setWidget(self.lbl_img)
 
@@ -1823,23 +1799,11 @@ class ResultDialog(QDialog):
         self.combo_img_labels.blockSignals(True)
         self.combo_img_labels.clear()
 
-        # Filter map to only show labels relevant to current manuscript context if possible,
-        # but here we likely get map for full manuscript.
-        # We need to map Label -> Page Number.
-        # NLI canvas map is FL -> Label.
-        # We need a way to jump to page P based on Label selection.
-        # Since we don't have direct P->FL mapping for all pages in RAM unless loaded,
-        # we might just list them.
-        # For NLI, P usually correlates with sequence index + 1.
-
         has_labels = False
         if canvas_map:
             self.combo_img_labels.addItem(tr("Select Image"), -1)
             # Sort by FL for approximate order
             for fl, lbl in sorted(canvas_map.items()):
-                # We need to find which P corresponds to this FL.
-                # This is tricky without full manuscript map.
-                # However, SearchEngine.get_browse_page_by_fl can find P from FL.
                 self.combo_img_labels.addItem(lbl, fl)
             has_labels = True
 
@@ -1882,7 +1846,6 @@ class ResultDialog(QDialog):
             self.btn_ext_info.setVisible(False)
             return
 
-        # ... (rest of extended info logic) ...
         html = "<div style='font-family:Arial;'>"
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
@@ -2950,7 +2913,7 @@ class GenizahGUI(QMainWindow):
             <h3>Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l</h3>
             
             <h3>Credits</h3>
-            <p>This tool was developed with the coding assistance of <b>Gemini 3.0</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan and Elnatan Chen for their advice and support.</p>
+            <p>This tool was developed with the coding assistance of <b>Gemini 3.0</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen and Adiel Breuer for their advice and support.</p>
 
             <h3>Data Source & Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>. I am grateful to the project leaders – Daniel Stoekl Ben Ezra, Marina Rustow, Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger – and to Tsafra Siew and Yitzchak Gila from the National Library of Israel. Many thanks also to the rest of the project team: Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale, Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
@@ -3944,9 +3907,6 @@ class GenizahGUI(QMainWindow):
 
         credit_text = self._get_credit_header()
 
-        # רג'קס לזיהוי תווים שהורסים קבצי XML/Excel
-        # הורחב לכלול גם תווים בעייתיים נוספים ב-XML (כמו 0x1-0x8, 0xB-0xC, 0xE-0x1F, וגם 0x7F)
-        # למרות שאלו חוקיים ב-Python, אקסל נכשל עליהם ב-XML.
         illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
 
         def sanitize_for_excel(text):
@@ -3954,10 +3914,8 @@ class GenizahGUI(QMainWindow):
             if text is None: return ""
             t = str(text)
             
-            # 1. הסרת תווים בלתי חוקיים (כמו Null bytes)
             t = illegal_chars_re.sub('', t)
             
-            # 2. טיפול בנוסחאות זדוניות
             t = t.strip()
             if t.startswith(('=', '+', '-', '@')): 
                 t = "'" + t
@@ -4068,7 +4026,6 @@ class GenizahGUI(QMainWindow):
                     font_normal = InlineFont(color='000000', b=False)
 
                     def write_rich_cell(row, col, text):
-                        # הגנה ראשונית: ניקוי תווים אסורים מהטקסט הגולמי
                         safe_text = sanitize_for_excel(text)
                         
                         if '*' not in safe_text:
@@ -4115,7 +4072,6 @@ class GenizahGUI(QMainWindow):
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
                         curr_row += 1
 
-                    # רוחב עמודות
                     dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
                     for col, width in dims.items():
                         ws.column_dimensions[col].width = width
@@ -4436,16 +4392,11 @@ class GenizahGUI(QMainWindow):
                 filter_text=self.filter_text_content,
                 threshold=self.spin_filter.value()
             )
-            # -----------------------------------------------
-            
-            # בדיקת תאימות לאחור לסיגנל
             if hasattr(self.comp_thread, 'scan_finished_signal'):
                  self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
             else:
-                 # fallback למקרה שמישהו שינה שמות בקבצים אחרים
                  self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
 
-        # 3. חיבורים משותפים והתנעה
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         
         if hasattr(self.comp_thread, 'status_signal'):
@@ -4529,17 +4480,15 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.reset_comp_ui()
 
-        # 1. קליטת תוצאות (כולל known ממצב מעבדה)
         known_raw = []
         if isinstance(result_obj, dict):
             items = result_obj.get('main', [])
             filtered_items = result_obj.get('filtered', [])
-            known_raw = result_obj.get('known', []) # קליטת המוחרגים מהמעבדה
+            known_raw = result_obj.get('known', []) 
         else:
             items = result_obj or []
             filtered_items = []
 
-        # 2. קיבוץ לדפים לכתבי יד
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
         known_manuscripts = self.searcher.group_pages_by_manuscript(known_raw)
@@ -4547,7 +4496,6 @@ class GenizahGUI(QMainWindow):
         self.comp_raw_items = manuscripts
         self.comp_raw_filtered = filtered_manuscripts
         
-        # שמירת המוחרגים שהגיעו מהמעבדה
         self.comp_known = known_manuscripts 
 
         if not manuscripts and not filtered_manuscripts and not known_manuscripts:
@@ -4563,11 +4511,9 @@ class GenizahGUI(QMainWindow):
             self.comp_grouped_filtered_main = filtered_manuscripts
             self.comp_grouped_filtered_appendix = {}
             self.comp_grouped_filtered_summary = {}
-            # כאן אנו מעבירים ריק ל-display, אבל self.comp_known כבר מעודכן ויטופל ב-display
             self.display_comp_results(manuscripts, {}, {}, filtered_manuscripts, {}, {})
             return
 
-        # שליחה לקיבוץ (עבור חיפוש רגיל או מעבדה היררכי)
         self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
@@ -4605,23 +4551,17 @@ class GenizahGUI(QMainWindow):
     def on_comp_finished(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         self.comp_has_grouped_results = True
         
-        # --- התיקון: החלת סינון ידני (Exclusions) ---
-        # פונקציה זו לוקחת את התוצאות הראשיות והנספח, ומעבירה כתבי יד מוחרגים לרשימה נפרדת
         final_main, final_appx, manual_known = self._apply_manual_exclusions(main_res, main_appx)
         
-        # עדכון הרשימות הסופיות
         self.comp_grouped_main = final_main or []
         self.comp_grouped_appendix = final_appx or {}
-        self.comp_grouped_summary = main_summ or {} # הסיכום נשאר (אופציונלי לעדכן גם אותו)
+        self.comp_grouped_summary = main_summ or {} 
         
-        # הוספת המוחרגים החדשים לרשימת ה-Known הקיימת (למשל ממעבדה)
         if manual_known:
             if not self.comp_known:
                 self.comp_known = []
             self.comp_known.extend(manual_known)
             
-        # ---------------------------------------------
-
         self.comp_grouped_filtered_main = filt_res or []
         self.comp_grouped_filtered_appendix = filt_appx or {}
         self.comp_grouped_filtered_summary = filt_summ or {}
@@ -4825,22 +4765,15 @@ class GenizahGUI(QMainWindow):
             self.group_thread.wait()
         self.group_thread = None
 
-        # שמירת נתונים גולמיים
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
 
-        # 2. החלת החרגות (Exclusions)
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
         
-        # איחוד הידועים
         if not hasattr(self, 'comp_known'): self.comp_known = []
-        # Fix: Extend existing known list instead of overwriting it,
-        # to preserve items excluded by LabEngine (which are already in self.comp_known)
         self.comp_known.extend(known_main + known_filt)
 
-        # === התיקון הקריטי למיון ===
-        # עדכון משתני ה-Legacy כדי ש-_has_comp_results() יחזיר True והמיון יעבוד
         self.comp_main = clean_main
         self.comp_appendix = clean_appx
         self.comp_summary = main_summ
@@ -4848,7 +4781,6 @@ class GenizahGUI(QMainWindow):
         self.comp_filtered_appendix = clean_filt_appx
         self.comp_filtered_summary = filt_summ
         
-        # עדכון המשתנים החדשים (לייצוא ושימוש פנימי)
         self.comp_grouped_main = clean_main
         self.comp_grouped_appendix = clean_appx
         self.comp_grouped_summary = main_summ
@@ -4857,7 +4789,6 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_summary = filt_summ
 
         # Display Limit Logic
-        # Note: The engine now truncates 'clean_main' to MAX_FINAL, so we display all available items.
         full_main_count = len(clean_main)
         visible_main = clean_main
 
@@ -4872,7 +4803,6 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_status.setText(status_msg)
             self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
 
-        # איסוף IDs לטעינת מטא-דאטה
         ids_to_fetch = set()
         def _collect_id(item):
             sid = item.get('sys_id')
@@ -4881,11 +4811,9 @@ class GenizahGUI(QMainWindow):
             if sid and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
 
-        # 3. הכנת העץ
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
 
-        # --- שחזור פונקציית התצוגה היציבה (כדי שיראה יפה כמו ב-STABLE) ---
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
@@ -4907,13 +4835,11 @@ class GenizahGUI(QMainWindow):
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
                 pages = ms_item.get('pages', [])
-                # Case A: עמוד בודד
                 if len(pages) == 1:
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-                # Case B: מרובה עמודים
                 else:
                     if pages:
                         p0 = pages[0]
@@ -4945,14 +4871,11 @@ class GenizahGUI(QMainWindow):
             
             _collect_id(ms_item)
 
-        # --- לוגיקת תצוגה ---
 
-        # א. מצב שטוח (Flat)
         if self.chk_comp_flat.isChecked():
             all_flat = self._collect_comp_items(
                 clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
             )
-            # מיון ידני באמצעות הלוגיקה שלך
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
             
@@ -4963,7 +4886,6 @@ class GenizahGUI(QMainWindow):
             for item in visible_flat:
                 add_manuscript_node(root, item)
 
-        # ב. מצב היררכי (Grouped)
         else:
             # 1. Main Results (Sliced)
             sorted_main = self._sort_comp_items(clean_main)
@@ -4985,7 +4907,6 @@ class GenizahGUI(QMainWindow):
                 root_appx.setExpanded(False)
                 make_checkable(root_appx)
                 
-                # מיון הקבוצות לפי גודל, ואז מיון פנימי לפי העמודה הנבחרת
                 sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
                 for sig, items in sorted_groups:
                     group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
@@ -5026,7 +4947,6 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setUpdatesEnabled(True)
         self._update_recursive_button_state()
         
-        # טעינת מטא-דאטה חסרה
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
     
@@ -5036,7 +4956,6 @@ class GenizahGUI(QMainWindow):
         if not sid:
             sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
         
-        # ניסיון שליפה מהיר מהזיכרון
         shelf, t = self.meta_mgr.get_meta_for_id(sid)
         display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
         
@@ -5086,9 +5005,7 @@ class GenizahGUI(QMainWindow):
     
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
-        # אוסף את כל ה-IDs מהעץ שעדיין אין להם מדף
         missing_ids = set()
-        # סורק רק את ה-Batch הנוכחי או את הכל - לביצועים, עדיף להסתמך על הרשימה המקורית
         for item in self.batch_items:
             sid = item.get('sys_id')
             if not sid:
@@ -5098,7 +5015,6 @@ class GenizahGUI(QMainWindow):
                  missing_ids.add(sid)
         
         if missing_ids:
-            # מפעיל את ה-Thread הקיים שלך לעדכון ברקע
             self.start_metadata_loading(list(missing_ids))
     
     def on_comp_tree_item_changed(self, item, column):
@@ -5116,7 +5032,6 @@ class GenizahGUI(QMainWindow):
         # Sync "Select All" checkbox state
         all_checked = True
         root = self.comp_tree.invisibleRootItem()
-        # Optimize: if tree is empty, uncheck. If large, this loop is okay (usually < 500 nodes).
         if root.childCount() == 0:
             all_checked = False
         else:
@@ -5142,10 +5057,6 @@ class GenizahGUI(QMainWindow):
         for i in range(root.childCount()):
             item = root.child(i)
             item.setCheckState(0, state)
-            # Recursively set children?
-            # on_comp_tree_item_changed handles recursion but we blocked signals.
-            # So we must do it manually or unblock and set one by one?
-            # Setting recursively manually is faster.
             self._set_check_state_recursive(item, state)
         self.comp_tree.blockSignals(False)
 
@@ -5209,7 +5120,7 @@ class GenizahGUI(QMainWindow):
                     # Some pages selected
                     # Clone item
                     import copy
-                    new_item = copy.copy(child_data) # Shallow copy enough? Pages list needs new ref.
+                    new_item = copy.copy(child_data) .
                     new_item['pages'] = []
 
                     # Find checked pages
@@ -5447,13 +5358,7 @@ class GenizahGUI(QMainWindow):
             for j in range(category_node.childCount()):
                 sub_node = category_node.child(j)
 
-                # sub_node is either a Manuscript (Main) or a Group (Appendix)
-                # Check based on child count or data
-                # Appendix groups act as folders containing Manuscripts
                 if sub_node.childCount() > 0:
-                    # Could be Appendix Group OR Manuscript
-                    # Check if children are Manuscripts or Pages?
-                    # Manuscript nodes hold "type": "manuscript"
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
                     if d and d.get('type') == 'manuscript':
                         # It is a Manuscript with multiple pages
@@ -5725,16 +5630,13 @@ class GenizahGUI(QMainWindow):
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
-        # 1. השתמש באינדקס המוחלט אם קיים (מונע לופים)
         idx_arg = self.current_browse_internal_idx
         
-        # גיבוי: אם אין אינדקס, נסה לפי מספר עמוד
         p_arg = None
         if self.current_browse_p is not None:
             try: p_arg = int(self.current_browse_p)
             except: p_arg = 0
 
-        # 2. קריאה למנוע (עם האינדקס!)
         page_data = self.searcher.get_browse_page(
             self.current_browse_sid, 
             p_num=p_arg, 
@@ -5743,27 +5645,21 @@ class GenizahGUI(QMainWindow):
         )
 
         if page_data:
-            # 3. הצגת הדף ישירות בלי שאילתות נוספות
             self.browse_render_page(page_data)
         else:
             QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
     
     def browse_render_page(self, pd):
-        # עדכון משתני מצב
         self.current_browse_p = pd['p_num']
         
-        # שמירת האינדקס המוחלט לפעם הבאה (קריטי!)
         if 'internal_index' in pd:
             self.current_browse_internal_idx = pd['internal_index']
         else:
-            # חישוב משוער אם המנוע לא החזיר (לרוב יחזיר)
             self.current_browse_internal_idx = pd.get('current_idx', 1) - 1
 
-        # הצגת הטקסט
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
-        # עדכון כותרות
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
         info_text = f"<b>{shelf}</b><br>{title or ''}"
@@ -5771,12 +5667,10 @@ class GenizahGUI(QMainWindow):
         if shelf:
             self.browse_shelf_input.setText(shelf)
 
-        # עדכון מונה עמודים וכפתורים
         self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
         self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
         self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
 
-        # עדכון שדה ה-FL אם קיים
         parsed = self.meta_mgr.parse_full_id_components(full_header)
         if parsed.get('fl_id'):
             self.browse_fl_input.setText(f"FL{parsed['fl_id']}")
@@ -5793,7 +5687,6 @@ class GenizahGUI(QMainWindow):
             self.browse_viewer.set_page(idx)
         # -------------------------------
 
-        # טעינת תמונה
         if self.current_browse_sid in self.meta_mgr.nli_cache:
             self.fetch_browse_thumbnail(self.current_browse_sid)
         else:
@@ -5975,7 +5868,6 @@ class GenizahGUI(QMainWindow):
             best_snippet = pages[0].get('text', '') 
             best_ctx = pages[0].get('source_ctx', '')
 
-        # יצירת ה-Node של ההורה
         node = QTreeWidgetItem(parent)
         self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
         self._set_comp_tree_text(node, 1, display_shelf)
@@ -5986,10 +5878,8 @@ class GenizahGUI(QMainWindow):
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
-        # שמירת הסניפט המקורי כדי לשחזר בסגירה
         node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
 
-        # הצגת הסניפט בהורה
         pattern = pages[0].get('highlight_pattern') if pages else None
         self._set_comp_node_previews(node, best_ctx, best_snippet, pattern)
 
@@ -6048,47 +5938,36 @@ class GenizahGUI(QMainWindow):
         It rebuilds the full list of results from the tree but jumps to the specific clicked item.
         """
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data: return # התעלמות מכותרות ראשיות (כמו "Main")
+        if not data: return 
 
-        # 1. בניית רשימה שטוחה של כל התוצאות (עבור כפתורי Next/Prev)
         flat_list = []
         target_index = -1
         
-        # אנו צריכים לזהות את הפריט שעליו לחצנו בתוך הרשימה השטוחה
-        # נשווה לפי כתובת האובייקט (item) או לפי מזהה ייחודי
         clicked_node = item
         
-        # אם לחצנו על "הורה" (כתב יד) - המטרה היא הילד הראשון שלו (העמוד הכי טוב)
         if data.get('type') == 'manuscript' and item.childCount() > 0:
             clicked_node = item.child(0)
 
-        # פונקציית עזר שאוספת את הנתונים בצורה מסודרת
         def collect_node_data(node):
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
             if not node_data: return
 
-            # אם זה הורה שמכיל עמודים, לא מוסיפים אותו אלא את הילדים שלו
-            # (אלא אם כן הוא הורה ללא ילדים גרפיים, כלומר עמוד בודד)
             if node_data.get('type') == 'manuscript' and node.childCount() > 0:
                 for i in range(node.childCount()):
                     collect_node_data(node.child(i))
                 return
 
-            # חילוץ מטא-דאטה מלא
             raw_h = node_data.get('raw_header', '')
             sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
             
-            # וידוא שיש לנו Highlight Pattern (חשוב להדגשה האדומה!)
             hl_pattern = node_data.get('highlight_pattern')
             
-            # בניית האובייקט ל-Viewer
-            # חשוב: מעבירים את ה-source_ctx וה-text המקוריים מהעץ!
             ready_item = {
                 'uid': node_data.get('uid', sid),
                 'raw_header': raw_h,
-                'text': node_data.get('text', ''), # הסניפט עם ההדגשה
-                'full_text': None, # ייטען ב-Dialog
-                'source_ctx': node_data.get('source_ctx', ''), # הטקסט המקביל (חשוב!)
+                'text': node_data.get('text', ''),
+                'full_text': None, 
+                'source_ctx': node_data.get('source_ctx', ''),
                 'highlight_pattern': hl_pattern,
                 'display': {
                     'id': sid,
@@ -6101,32 +5980,24 @@ class GenizahGUI(QMainWindow):
             
             flat_list.append(ready_item)
             
-            # בדיקה האם זה הפריט שלחצנו עליו
             if node is clicked_node:
                 nonlocal target_index
                 target_index = len(flat_list) - 1
 
-        # סריקת העץ (Main -> Appendix -> Filtered -> Known)
         root = self.comp_tree.invisibleRootItem()
         for i in range(root.childCount()):
             category = root.child(i)
-            # אם הקטגוריה עצמה מכילה דפים (במצב שטוח)
             if category.data(0, Qt.ItemDataRole.UserRole):
                  collect_node_data(category)
             
-            # סריקת הילדים של הקטגוריה
             for j in range(category.childCount()):
                 sub = category.child(j)
-                # אם זה קבוצה (כמו בנספח) או סתם פריט
                 collect_node_data(sub)
 
         if not flat_list: return
         
-        # אם לא מצאנו (נדיר), נפתח את הראשון
         if target_index == -1: target_index = 0
 
-        # 3. פתיחת הדיאלוג עם הרשימה המלאה והאינדקס הנכון
-        # זה משחזר את הניווט (Result X of Y) ואת ההקשר
         try:
             dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
             dlg.exec()
@@ -6137,10 +6008,8 @@ class GenizahGUI(QMainWindow):
         """
         פותח את חלון הצפייה עבור מזהה ספציפי, ומנווט לעמוד המבוקש.
         """
-        # 1. שליפת המטא-דאטה
         meta = self.meta_mgr.fetch_nli_data(sys_id)
         
-        # 2. בניית אובייקט נתונים לדיאלוג
         item_data = {
             'display': {
                 'id': sys_id,
@@ -6156,26 +6025,21 @@ class GenizahGUI(QMainWindow):
             'raw_header': str(sys_id) 
         }
 
-        # 3. יצירת הדיאלוג
         try:
             dlg = ResultDialog(self, [item_data], 0, self.meta_mgr, self.searcher)
             
-            # 4. ניווט לתמונה הספציפית (אם התבקש)
             if target_page > 0:
                 dlg.load_page(target=target_page)
 
             dlg.exec()
         except Exception as e:
-            # הגנה מפני קריסות עתידיות בחלון הצפייה
             print(f"Error opening viewer: {e}")
             QMessageBox.warning(self, "Error", f"Could not open viewer: {e}")
             
     def navigate_manuscript(self, direction):
         """Move to prev/next manuscript based on FILE ORDER."""
-        # אם אין כתב יד טעון, נתחיל מהראשון
         current = self.current_browse_sid
         
-        # קריאה לפונקציה החדשה ב-SearchEngine
         new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
         
         if new_sid:
