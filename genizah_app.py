@@ -22,8 +22,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame, QSlider) 
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent 
+                             QScrollArea, QFrame, QSlider, QStyleOptionButton)
+from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
 from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
 
 from version import APP_VERSION
@@ -357,6 +357,48 @@ class ShelfmarkTableWidgetItem(QTableWidgetItem):
         text1 = self.text()
         text2 = other.text()
         return natural_sort_key(text1) < natural_sort_key(text2)
+
+class CheckBoxHeader(QHeaderView):
+    """Custom HeaderView that draws a checkbox in the first section."""
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.isChecked = False
+        self.setSectionsClickable(True)
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+
+        if logicalIndex == 0:
+            option = QStyleOptionButton()
+            box_size = 20 # Standard-ish
+            x = rect.left() + (rect.width() - box_size) // 2
+            y = rect.top() + (rect.height() - box_size) // 2
+
+            option.rect = QRect(x, y, box_size, box_size)
+            option.state = QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Active
+            if self.isChecked:
+                option.state |= QStyle.StateFlag.State_On
+            else:
+                option.state |= QStyle.StateFlag.State_Off
+
+            self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter)
+
+    def mousePressEvent(self, event):
+        if self.logicalIndexAt(event.pos()) == 0:
+            self.isChecked = not self.isChecked
+            self.viewport().update()
+            self.toggled.emit(self.isChecked)
+        else:
+            super().mousePressEvent(event)
+
+    def setChecked(self, checked):
+        if self.isChecked != checked:
+            self.isChecked = checked
+            self.viewport().update()
 
 class ZoomableScrollArea(QScrollArea):
     """A ScrollArea that supports hand-panning and wheel-zooming."""
@@ -2108,15 +2150,18 @@ class GenizahGUI(QMainWindow):
         self.results_placeholder.setWordWrap(True)
         self.results_placeholder.setStyleSheet("font-size: 16px; font-weight: bold; color: #c0392b;")
 
-        # Container for table and "Select All"
+        # Container for table
         self.table_container = QWidget()
         table_layout = QVBoxLayout(self.table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.chk_search_select_all = QCheckBox(tr("Select All"))
-        self.chk_search_select_all.setVisible(False)
-        self.chk_search_select_all.toggled.connect(self.on_search_select_all_toggled)
-        table_layout.addWidget(self.chk_search_select_all)
+        # Custom Header
+        self.chk_search_header = CheckBoxHeader(self.results_table)
+        self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
+        self.results_table.setHorizontalHeader(self.chk_search_header)
+        # Ensure column 0 is not sortable to avoid confusion with check action
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+
         table_layout.addWidget(self.results_table)
 
         self.results_stack = QStackedLayout()
@@ -2980,9 +3025,9 @@ class GenizahGUI(QMainWindow):
     def on_search_finished(self, results):
         self.reset_ui()
         # Reset Select All Checkbox
-        self.chk_search_select_all.blockSignals(True)
-        self.chk_search_select_all.setChecked(False)
-        self.chk_search_select_all.blockSignals(False)
+        self.chk_search_header.blockSignals(True)
+        self.chk_search_header.setChecked(False)
+        self.chk_search_header.blockSignals(False)
         self.lbl_search_export.setText(tr("Export Results") + ":")
 
         if not results:
@@ -2990,7 +3035,6 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
-            self.chk_search_select_all.setVisible(False)
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -3015,7 +3059,6 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(True)
         self.results_table.setSortingEnabled(False) # Disable sorting during population
         self.results_table.setRowCount(visible_count)
-        self.chk_search_select_all.setVisible(visible_count > 0)
 
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
@@ -3507,7 +3550,7 @@ class GenizahGUI(QMainWindow):
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
-                    for r in self.last_results:
+                    for r in results_to_export:
                         # Clean snippet: remove newlines for single-line export
                         snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
                         f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
