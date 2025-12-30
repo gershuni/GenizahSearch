@@ -2124,6 +2124,7 @@ class GenizahGUI(QMainWindow):
         self.group_thread = None
         self.is_searching = False
         self.is_comp_running = False
+        self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
@@ -2604,6 +2605,9 @@ class GenizahGUI(QMainWindow):
         self.browse_sys_input.returnPressed.connect(self.browse_load)
         self.browse_shelf_input.returnPressed.connect(self.browse_load)
         self.browse_fl_input.returnPressed.connect(self.browse_load)
+        self.browse_sys_input.textEdited.connect(lambda _t: self._set_last_browse_field("sys"))
+        self.browse_shelf_input.textEdited.connect(lambda _t: self._set_last_browse_field("shelf"))
+        self.browse_fl_input.textEdited.connect(lambda _t: self._set_last_browse_field("fl"))
         
         self.btn_b_catalog = QPushButton(tr("Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
@@ -2721,6 +2725,9 @@ class GenizahGUI(QMainWindow):
         else:
             self.browse_viewer.setVisible(True)
             self.browse_load_page()
+
+    def _set_last_browse_field(self, field):
+        self.last_browse_field = field
 
     def browse_load_page(self):
         """Load single page text and sync viewer."""
@@ -5490,51 +5497,88 @@ class GenizahGUI(QMainWindow):
         self.browse_viewer.load_images({}) # Clear viewer
 
         page_data = None
-        # 1) Resolve via FL
-        if fl_id:
-            page_data = self.searcher.get_browse_page_by_fl(fl_id, sid or None)
-            if not page_data and not sid:
-                QMessageBox.warning(self, tr("Error"), tr("FL not found."))
-                return
-            if page_data:
-                sid = page_data.get('sys_id', sid)
-                self.browse_sys_input.setText(sid or "")
-                self.browse_fl_input.setText(page_data.get('fl_id', fl_id))
 
-        # 2) Resolve via Shelfmark (if system not provided yet)
-        if not sid and shelf_query:
-            shelf_res = self.meta_mgr.resolve_system_by_shelfmark(shelf_query)
-            if shelf_res['sys_id']:
-                sid = shelf_res['sys_id']
-                # Prefill with canonical shelfmark if available
-                if shelf_res['selected_shelfmark']:
-                    self.browse_shelf_input.setText(shelf_res['selected_shelfmark'])
-                self.browse_sys_input.setText(sid or "")
-            elif shelf_res['options']:
-                def _format_option(opt, idx):
-                    base = opt['shelfmark']
-                    title = (opt.get('title') or "").strip()
-                    if title:
-                        base = f"{base} | {title}"
-                    label = f"{idx + 1}. {base}"
-                    if len(label) > 60:
-                        label = label[:57] + "..."
-                    return label
+        # Determine priority based on last edited field (default: shelfmark > system ID > FL)
+        priority = []
+        if self.last_browse_field == "fl" and fl_id:
+            priority.append("fl")
+        elif self.last_browse_field == "shelf" and shelf_query:
+            priority.append("shelf")
+        elif self.last_browse_field == "sys" and sid:
+            priority.append("sys")
 
-                display_options = [_format_option(opt, idx) for idx, opt in enumerate(shelf_res['options'])]
-                choice, ok = QInputDialog.getItem(
-                    self, tr("Shelfmark"), tr("Multiple shelfmarks found. Select one:"), display_options, 0, False
-                )
-                if not ok:
-                    return
-                if choice in display_options:
-                    idx = display_options.index(choice)
-                    opt = shelf_res['options'][idx]
-                    sid = opt['sys_id']
-                    self.browse_shelf_input.setText(opt['shelfmark'])
+        if shelf_query and "shelf" not in priority:
+            priority.append("shelf")
+        if sid and "sys" not in priority:
+            priority.append("sys")
+        if fl_id and "fl" not in priority:
+            priority.append("fl")
+
+        def format_option(opt, idx):
+            base = opt['shelfmark']
+            title = (opt.get('title') or "").strip()
+            if title:
+                base = f"{base} | {title}"
+            label = f"{idx + 1}. {base}"
+            if len(label) > 60:
+                label = label[:57] + "..."
+            return label
+
+        for field in priority:
+            if field == "fl":
+                if not fl_id:
+                    continue
+                pd = self.searcher.get_browse_page_by_fl(fl_id, sid or None)
+                if pd:
+                    page_data = pd
+                    sid = pd.get('sys_id', sid)
                     self.browse_sys_input.setText(sid or "")
-            else:
-                QMessageBox.warning(self, tr("Error"), tr("Shelfmark not found.")); return
+                    self.browse_fl_input.setText(pd.get('fl_id', fl_id))
+                    break
+                # If no other identifiers exist, stop and warn
+                if not sid and not shelf_query:
+                    QMessageBox.warning(self, tr("Error"), tr("FL not found."))
+                    return
+                continue
+
+            if field == "shelf":
+                if not shelf_query:
+                    continue
+                shelf_res = self.meta_mgr.resolve_system_by_shelfmark(shelf_query)
+                if shelf_res['sys_id']:
+                    sid = shelf_res['sys_id']
+                    if shelf_res['selected_shelfmark']:
+                        self.browse_shelf_input.setText(shelf_res['selected_shelfmark'])
+                    self.browse_sys_input.setText(sid or "")
+                    break
+                elif shelf_res['options']:
+                    options = shelf_res['options']
+                    if len(options) == 1:
+                        opt = options[0]
+                        sid = opt['sys_id']
+                        self.browse_shelf_input.setText(opt['shelfmark'])
+                        self.browse_sys_input.setText(sid or "")
+                        break
+                    display_options = [format_option(opt, idx) for idx, opt in enumerate(options)]
+                    choice, ok = QInputDialog.getItem(
+                        self, tr("Shelfmark"), tr("Multiple shelfmarks found. Select one:"), display_options, 0, False
+                    )
+                    if not ok:
+                        return
+                    if choice in display_options:
+                        idx = display_options.index(choice)
+                        opt = options[idx]
+                        sid = opt['sys_id']
+                        self.browse_shelf_input.setText(opt['shelfmark'])
+                        self.browse_sys_input.setText(sid or "")
+                        break
+                # Shelfmark was the chosen path; stop if not resolved
+                QMessageBox.warning(self, tr("Error"), tr("Shelfmark not found."))
+                return
+
+            if field == "sys":
+                if sid:
+                    break
 
         if not sid:
             msg = tr("FL not found.")
