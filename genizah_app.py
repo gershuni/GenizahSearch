@@ -1690,6 +1690,7 @@ class ResultDialog(QDialog):
         
         parsed_new = self.meta_mgr.parse_full_id_components(page_data['full_header'])
         self.current_fl_id = parsed_new['fl_id']
+        self._sync_combo_selection()
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
@@ -1782,6 +1783,28 @@ class ResultDialog(QDialog):
         except Exception:
             pass
 
+    def _sync_combo_selection(self):
+        """Sync the image selector dropdown with the current FL ID."""
+        if not self.current_fl_id:
+            return
+
+        # Normalize current FL (ensure digits)
+        current_digits = re.sub(r"\D", "", str(self.current_fl_id))
+
+        # Find index in combo (data is stored as string/int)
+        # We stored keys from canvas_map which are typically digits strings
+        idx = self.combo_img_labels.findData(current_digits)
+        if idx == -1:
+            # Try int if string failed
+            try:
+                idx = self.combo_img_labels.findData(int(current_digits))
+            except: pass
+
+        if idx != -1:
+            self.combo_img_labels.blockSignals(True)
+            self.combo_img_labels.setCurrentIndex(idx)
+            self.combo_img_labels.blockSignals(False)
+
     def on_enriched_data_loaded(self, meta):
         if not meta: return
         if self.current_sys_id not in self.meta_mgr.nli_cache: return
@@ -1799,13 +1822,22 @@ class ResultDialog(QDialog):
         has_labels = False
         if canvas_map:
             self.combo_img_labels.addItem(tr("Select Image"), -1)
-            # Sort by FL for approximate order
-            for fl, lbl in sorted(canvas_map.items()):
+            # Sort by FL for approximate order (numeric sort)
+            def _sort_key(item):
+                k, v = item
+                # Try to extract number from FL ID
+                try: return int(re.sub(r"\D", "", k))
+                except: return k
+
+            for fl, lbl in sorted(canvas_map.items(), key=_sort_key):
                 self.combo_img_labels.addItem(lbl, fl)
             has_labels = True
 
         self.combo_img_labels.setVisible(has_labels)
         self.combo_img_labels.blockSignals(False)
+
+        # Sync selection now that combo is populated
+        self._sync_combo_selection()
 
         # 2. Populate External / Image Viewer
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
