@@ -1839,6 +1839,7 @@ class MetadataManager:
             'date': '',
             'subjects': [],
             'physical_medium': '',
+            'attribution': '',
             'online_link': None,
             'external_iiif_link': None
         }
@@ -1917,6 +1918,10 @@ class MetadataManager:
                         val = get_sub('z')
                         if val: result['shelfmark_alt'] = val
 
+                    elif tag == '597': # Image credit / attribution
+                        val = get_sub('a')
+                        if val: result['attribution'] = val
+
             return result
         except Exception as e:
             LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
@@ -1935,6 +1940,7 @@ class MetadataManager:
         # 1. Fetch MARC (Bibliographic Data)
         marc_data = self.fetch_marc_data(system_id)
         current_meta['marc'] = marc_data
+        marc_attribution = marc_data.get('attribution')
 
         # 2. Determine Image Source (External CUDL vs Fallback NLI)
         image_list = []
@@ -1953,7 +1959,8 @@ class MetadataManager:
             if ext_data.get('canvases'):
                 images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
                 external_meta = ext_data.get('metadata', {})
-                current_meta['attribution'] = ext_data.get('attribution')
+                if not marc_attribution:
+                    current_meta['attribution'] = ext_data.get('attribution')
 
         # 2b. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)
@@ -1966,7 +1973,9 @@ class MetadataManager:
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
-        if not current_meta.get('attribution'):
+        if marc_attribution:
+            current_meta['attribution'] = marc_attribution
+        elif not current_meta.get('attribution'):
             current_meta['attribution'] = nli_iiif_data.get('attribution', '')
 
         if nli_iiif_data.get('canvas_map'):
