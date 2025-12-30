@@ -2281,6 +2281,67 @@ class MetadataManager:
 
         return list(results)
 
+    # ---------------- Shelfmark Resolution Helpers ----------------
+    def _normalize_shelfmark(self, shelfmark: str) -> str:
+        """Normalize shelfmarks for tolerant comparisons."""
+        if not shelfmark:
+            return ""
+        return re.sub(r"[\\.\\s/]", "", shelfmark).lower()
+
+    def _iter_shelfmark_sources(self):
+        """Yield shelfmark candidates from CSV bank and cached metadata."""
+        # CSV bank
+        for sys_id, data in self.csv_bank.items():
+            shelf = data.get('shelfmark', '')
+            title = data.get('title', '')
+            if shelf:
+                yield sys_id, shelf, title
+        # NLI cache (may contain enriched shelfmarks)
+        for sys_id, data in self.nli_cache.items():
+            shelf = data.get('shelfmark', '')
+            alt = data.get('shelfmark_alt', '')
+            title = data.get('title', '')
+            for candidate in [shelf, alt]:
+                if candidate:
+                    yield sys_id, candidate, title
+
+    def resolve_system_by_shelfmark(self, query, limit=10):
+        """
+        Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
+        Returns a dict: {'sys_id': ..., 'options': [...], 'selected_shelfmark': ...}
+        """
+        result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
+
+        norm_query = self._normalize_shelfmark(query)
+        if not norm_query:
+            return result
+
+        exact_matches = []
+        partial_matches = []
+        seen = set()
+
+        for sys_id, shelf, title in self._iter_shelfmark_sources():
+            norm_shelf = self._normalize_shelfmark(shelf)
+            if not norm_shelf or (sys_id, norm_shelf) in seen:
+                continue
+            seen.add((sys_id, norm_shelf))
+
+            entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
+            if norm_shelf == norm_query:
+                exact_matches.append(entry)
+            elif norm_query in norm_shelf:
+                partial_matches.append(entry)
+
+        if len(exact_matches) == 1:
+            result['sys_id'] = exact_matches[0]['sys_id']
+            result['selected_shelfmark'] = exact_matches[0]['shelfmark']
+            return result
+
+        # Aggregate suggestions (exact first, then partial), capped at limit
+        suggestions = exact_matches + partial_matches
+        result['options'] = suggestions[:limit]
+        return result
+
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
 
