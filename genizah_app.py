@@ -1440,17 +1440,10 @@ class ResultDialog(QDialog):
         btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
 
-        # Image Label Dropdown
-        self.combo_img_labels = QComboBox()
-        self.combo_img_labels.setFixedWidth(120)
-        self.combo_img_labels.setVisible(False)
-        self.combo_img_labels.currentIndexChanged.connect(self._on_img_label_selected)
-
         self.lbl_img_label = QLabel("")
         self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
 
         nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page);
-        nav_row.addWidget(self.combo_img_labels) # Added dropdown
         nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
@@ -1769,43 +1762,15 @@ class ResultDialog(QDialog):
         if checked:
             QTimer.singleShot(0, self.sync_external_view)
 
-    def _on_img_label_selected(self):
-        # Handle jump from dropdown
-        fl_val = self.combo_img_labels.currentData()
-        if fl_val == -1: return
-
-        try:
-            page_data = self.searcher.get_browse_page_by_fl(str(fl_val), self.current_sys_id)
-            if page_data:
-                target_p = page_data['p_num']
-                self.load_page(target=target_p)
-        except Exception:
-            pass
-
     def on_enriched_data_loaded(self, meta):
         if not meta: return
         if self.current_sys_id not in self.meta_mgr.nli_cache: return
 
-        # 1. Update Image Labels & Dropdown
+        # 1. Update Image Label
         fl_digits = re.sub(r"\D", "", str(self.current_fl_id or ""))
         canvas_map = meta.get('canvas_map', {})
         label = canvas_map.get(fl_digits)
         self.lbl_img_label.setText(f"({label})" if label else "")
-
-        # Populate combo box with sorted labels
-        self.combo_img_labels.blockSignals(True)
-        self.combo_img_labels.clear()
-
-        has_labels = False
-        if canvas_map:
-            self.combo_img_labels.addItem(tr("Select Image"), -1)
-            # Sort by FL for approximate order
-            for fl, lbl in sorted(canvas_map.items()):
-                self.combo_img_labels.addItem(lbl, fl)
-            has_labels = True
-
-        self.combo_img_labels.setVisible(has_labels)
-        self.combo_img_labels.blockSignals(False)
 
         # 2. Populate External / Image Viewer
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
