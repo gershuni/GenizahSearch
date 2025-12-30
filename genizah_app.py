@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton)
 from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument
+from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform
 
 from version import APP_VERSION
 
@@ -461,12 +461,19 @@ class ZoomableScrollArea(QScrollArea):
         self._pixmap = None
         self._zoom_factor = 1.0
         self._drag_start_pos = None
+        self._rotation = 0
 
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def set_image(self, pixmap):
         self._pixmap = pixmap
         self._zoom_factor = 1.0 # Reset zoom on new image
+        self._rotation = 0
+        self._update_view()
+
+    def rotate_view(self, degrees):
+        """Add degrees to current rotation and update."""
+        self._rotation = (self._rotation + degrees) % 360
         self._update_view()
 
     def _update_view(self):
@@ -474,11 +481,14 @@ class ZoomableScrollArea(QScrollArea):
             self.lbl_img.setText(tr("No Image"))
             return
 
-        scaled_w = int(self._pixmap.width() * self._zoom_factor)
-        scaled_h = int(self._pixmap.height() * self._zoom_factor)
+        transform = QTransform().rotate(self._rotation)
+        source_pix = self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
+        scaled_w = int(source_pix.width() * self._zoom_factor)
+        scaled_h = int(source_pix.height() * self._zoom_factor)
 
         # Keep aspect ratio
-        scaled_pix = self._pixmap.scaled(
+        scaled_pix = source_pix.scaled(
             scaled_w, scaled_h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
@@ -562,6 +572,22 @@ class ManuscriptViewerWidget(QWidget):
         btn_zoom_in.setFixedWidth(30)
         btn_zoom_in.clicked.connect(lambda: self.scroll_area.zoom_in())
 
+        # Rotation controls
+        btn_rot_left = QPushButton("↺")
+        btn_rot_left.setToolTip(tr("Rotate Left"))
+        btn_rot_left.setFixedWidth(30)
+        btn_rot_left.clicked.connect(lambda: self.scroll_area.rotate_view(-90))
+
+        btn_rot_right = QPushButton("↻")
+        btn_rot_right.setToolTip(tr("Rotate Right"))
+        btn_rot_right.setFixedWidth(30)
+        btn_rot_right.clicked.connect(lambda: self.scroll_area.rotate_view(90))
+
+        btn_rot_180 = QPushButton("180°")
+        btn_rot_180.setToolTip(tr("Rotate 180"))
+        btn_rot_180.setFixedWidth(40)
+        btn_rot_180.clicked.connect(lambda: self.scroll_area.rotate_view(180))
+
         self.btn_external = QPushButton(tr("External Site"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
@@ -569,6 +595,10 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addWidget(self.combo_source)
         top_bar.addStretch()
         top_bar.addWidget(self.btn_external)
+        top_bar.addWidget(btn_rot_left)
+        top_bar.addWidget(btn_rot_right)
+        top_bar.addWidget(btn_rot_180)
+        top_bar.addSpacing(10)
         top_bar.addWidget(btn_zoom_out)
         top_bar.addWidget(btn_zoom_in)
 
