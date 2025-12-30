@@ -2318,17 +2318,16 @@ class GenizahGUI(QMainWindow):
         
         # Results Table Setup
         self.COL_CHECKBOX = 0
-        self.COL_VIEW = 1
-        self.COL_BROWSE = 2
-        self.COL_SYS_ID = 3
-        self.COL_SHELF = 4
-        self.COL_TITLE = 5
-        self.COL_SNIPPET = 6
-        self.COL_IMG = 7
-        self.COL_SRC = 8
+        self.COL_ACTIONS = 1
+        self.COL_SYS_ID = 2
+        self.COL_SHELF = 3
+        self.COL_TITLE = 4
+        self.COL_SNIPPET = 5
+        self.COL_IMG = 6
+        self.COL_SRC = 7
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(9)
-        self.results_table.setHorizontalHeaderLabels(["", "", "", tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(8)
+        self.results_table.setHorizontalHeaderLabels(["", tr("Actions"), tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
 
         # Custom Header
         self.chk_search_header = CheckBoxHeader(self.results_table)
@@ -2336,15 +2335,13 @@ class GenizahGUI(QMainWindow):
         self.results_table.setHorizontalHeader(self.chk_search_header)
 
         self.results_table.setColumnWidth(self.COL_CHECKBOX, 30) # Checkbox column
-        self.results_table.setColumnWidth(self.COL_VIEW, 40)
-        self.results_table.setColumnWidth(self.COL_BROWSE, 40)
+        self.results_table.setColumnWidth(self.COL_ACTIONS, 70)
         self.results_table.setColumnWidth(self.COL_SYS_ID, 135)
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
-        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_VIEW, QHeaderView.ResizeMode.Fixed)
-        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_BROWSE, QHeaderView.ResizeMode.Fixed)
+        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
@@ -3316,13 +3313,27 @@ class GenizahGUI(QMainWindow):
                 item_chk.setData(Qt.ItemDataRole.UserRole, res)
                 self.results_table.setItem(i, self.COL_CHECKBOX, item_chk)
 
-                # View (opens result dialog)
-                view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
-                self.results_table.setCellWidget(i, self.COL_VIEW, view_btn)
+                # Actions column (ghost buttons container)
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setContentsMargins(2, 2, 2, 2)
+                actions_layout.setSpacing(4)
+                actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                # Browse (opens browse tab)
-                browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
-                self.results_table.setCellWidget(i, self.COL_BROWSE, browse_btn)
+                view_btn = self._create_action_button(
+                    self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+                    tr("View result"),
+                    lambda _, r=res: self.show_full_text_for_result(r),
+                )
+                browse_btn = self._create_action_button(
+                    self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
+                    tr("Browse manuscript"),
+                    lambda _, r=res: self.open_result_in_browse_from_table(r),
+                )
+
+                actions_layout.addWidget(view_btn)
+                actions_layout.addWidget(browse_btn)
+                self.results_table.setCellWidget(i, self.COL_ACTIONS, actions_widget)
 
                 # System ID column
                 item_sid = QTableWidgetItem(sid)
@@ -3464,14 +3475,13 @@ class GenizahGUI(QMainWindow):
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
-    def _create_action_button(self, symbol, tooltip, callback):
+    def _create_action_button(self, icon, tooltip, callback):
         btn = QToolButton(self.results_table)
-        btn.setText(symbol)
+        btn.setIcon(icon)
         btn.setToolTip(tooltip)
         btn.setAutoRaise(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(28, 24)
-        btn.setStyleSheet("font-size: 14px;")
         btn.clicked.connect(callback)
         return btn
 
