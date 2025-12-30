@@ -671,6 +671,21 @@ class ManuscriptViewerWidget(QWidget):
 
         return None
 
+    def set_image_by_fl_id(self, fl_id):
+        digits = re.sub(r"\D", "", str(fl_id or ""))
+        if not digits:
+            return False
+
+        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
+        self.images_nli = [{'label': f"FL{digits}", 'url': fallback_url, 'fl_id': digits}]
+        self.images_ext = []
+        self.active_list = self.images_nli
+        self.current_source = "nli"
+        self.combo_source.clear()
+        self.combo_source.addItem(f"NLI (1)", "nli")
+        self.combo_source.setVisible(False)
+        return True
+
     def load_images(self, meta, initial_idx=0):
         self.external_provider = self._detect_external_provider(meta)
 
@@ -707,6 +722,14 @@ class ManuscriptViewerWidget(QWidget):
 
         self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
         self.combo_source.blockSignals(False)
+
+        if not self.active_list:
+            fl_ids = meta.get('fl_ids') if meta else []
+            if isinstance(fl_ids, str):
+                fl_ids = [fl_ids]
+            for fl in fl_ids or []:
+                if self.set_image_by_fl_id(fl):
+                    break
 
         # External Link
         marc = meta.get('marc', {})
@@ -945,10 +968,8 @@ class ImageLoaderThread(QThread):
                         logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
 
         # 2. Download from Network (if not in cache)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://www.nli.org.il/"
-        }
+        headers = dict(Config.HTTP_HEADERS)
+        headers["Referer"] = "https://www.nli.org.il/"
 
         data = None
         

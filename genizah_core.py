@@ -1099,6 +1099,9 @@ class Config:
     VARIANT_GEN_LIMIT = 5000
     REGEX_VARIANTS_LIMIT = 3000
     WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
+    NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    HTTP_HEADERS = {"User-Agent": USER_AGENT}
     
     @staticmethod
     def resource_path(relative_path: str) -> str:
@@ -1774,10 +1777,8 @@ class MetadataManager:
 
     def fetch_iiif_manifest(self, system_id):
         """Fetch and parse IIIF manifest for physical description, attribution, and image labels."""
-        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
+        headers = Config.HTTP_HEADERS
 
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
@@ -1820,10 +1821,8 @@ class MetadataManager:
     def fetch_marc_data(self, system_id):
         """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
         # Use the specific IIIF/MARC endpoint which is more reliable
-        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+        headers = Config.HTTP_HEADERS
 
         result = {
             'bibliography': [],
@@ -1964,7 +1963,7 @@ class MetadataManager:
         if nli_iiif_data.get('canvas_map'):
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
             for fl_id, label in sorted_map:
-                url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}"
+                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
                 images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
         if not current_meta.get('physical_desc'):
@@ -2060,13 +2059,11 @@ class MetadataManager:
             return result
 
     def _fetch_single_worker(self, system_id):
-        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         # Initialize default meta structure
         meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        headers = Config.HTTP_HEADERS
         
         import time 
 
@@ -2173,7 +2170,7 @@ class MetadataManager:
             if not digits or len(digits) < 4: continue
             
             # Return the URL that worked in debug
-            return f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/400,/0/default.jpg"
+            return f"{Config.NLI_IIIF_BASE}/FL{digits}/full/400,/0/default.jpg"
                 
         return None
 
@@ -2187,10 +2184,8 @@ class MetadataManager:
         return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
 
     def _fetch_fl_ids(self, system_id):
-        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+        headers = Config.HTTP_HEADERS
         try:
             session = self._make_session()
             resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
