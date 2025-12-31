@@ -1487,7 +1487,7 @@ class ResultDialog(QDialog):
         self.btn_ext_info.setVisible(False)
 
         # Toggle Image Button
-        self.btn_toggle_image = QPushButton(tr("Image"))
+        self.btn_toggle_image = QPushButton("🖼️")
         self.btn_toggle_image.setCheckable(True)
         self.btn_toggle_image.setChecked(True) # Default open
         self.btn_toggle_image.clicked.connect(self.toggle_external_viewer)
@@ -2674,8 +2674,7 @@ class GenizahGUI(QMainWindow):
 
         # Image Toggle
         self.btn_b_toggle_img = QPushButton()
-        self.btn_b_toggle_img.setText("")
-        self.btn_b_toggle_img.setIcon(QIcon.fromTheme("image-x-generic", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)))
+        self.btn_b_toggle_img.setText("🖼️")
         self.btn_b_toggle_img.setToolTip(tr("Show/Hide Image"))
         self.btn_b_toggle_img.setCheckable(True)
         self.btn_b_toggle_img.setChecked(True)
