@@ -120,7 +120,14 @@ class LabScoringDialog(QDialog):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: parent.open_help_center(anchor="lab"))
+        # Find main window to call open_help_center
+        def open_help():
+            main = parent
+            while main and not hasattr(main, 'open_help_center'):
+                main = main.parent()
+            if main: main.open_help_center(anchor="lab")
+
+        btn_help.clicked.connect(open_help)
         btn_box.addWidget(btn_help)
 
         btn_box.addStretch()
@@ -186,8 +193,14 @@ class LabPanel(QFrame):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(24)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 12px;")
-        # Assumes parent is GenizahGUI which has open_help_center
-        btn_help.clicked.connect(lambda: self.parent().open_help_center(anchor="lab"))
+
+        def open_help_panel():
+            main = self.parent()
+            while main and not hasattr(main, 'open_help_center'):
+                main = main.parent()
+            if main: main.open_help_center(anchor="lab")
+
+        btn_help.clicked.connect(open_help_panel)
         self.layout.addWidget(btn_help)
 
         # Spacer
@@ -1035,10 +1048,50 @@ class HelpDialog(QDialog):
             try:
                 with open(source_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # Inject language attribute to control visibility of bilingual sections
-                if "<body" in content:
-                    content = content.replace("<body", f"<body data-lang='{lang}'", 1)
-                # setHtml takes only one argument in standard PyQt6
+
+                # --- 1. LANGUAGE FILTERING (CSS Injection) ---
+                # Instead of regex, we inject CSS to hide the unused language.
+                # This is safer and works with QTextBrowser's limited CSS support.
+                css_lang = ""
+                if lang == 'he':
+                    css_lang = "<style>.lang-en { display: none; }</style>"
+                else:
+                    css_lang = "<style>.lang-he { display: none; }</style>"
+
+                if "</head>" in content:
+                    content = content.replace("</head>", css_lang + "</head>")
+                else:
+                    content = css_lang + content
+
+                # --- 2. DARK MODE HANDLING (CSS Injection) ---
+                # Detect dark mode using standard palette check
+                is_dark = False
+                app = QApplication.instance()
+                if app:
+                    bg_color = app.palette().window().color()
+                    # Simple heuristic: if window background is dark
+                    if bg_color.lightness() < 128:
+                        is_dark = True
+
+                # If dark mode, inject a style block to override colors
+                # because QTextBrowser doesn't support CSS variables or @media
+                if is_dark:
+                    dark_style = """
+                    <style>
+                        body { background-color: #1e1e1e; color: #e0e0e0; }
+                        h1, h2, h3, h4 { color: #ecf0f1; border-bottom-color: #3498db; }
+                        .section, .box, .nav-box { background-color: #333; border-color: #444; color: #e0e0e0; }
+                        a { color: #5dade2; }
+                        code { background-color: #444; color: #e74c3c; }
+                        .subtitle { color: #aaa; }
+                    </style>
+                    """
+                    # Insert before </head>
+                    if "</head>" in content:
+                        content = content.replace("</head>", dark_style + "</head>")
+                    else:
+                        content = dark_style + content
+
                 self.text.setHtml(content)
                 if anchor:
                     QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
@@ -2271,7 +2324,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
