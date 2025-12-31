@@ -224,7 +224,7 @@ class ShelfmarkLoaderThread(QThread):
         try:
             total = len(self.sids)
             if total == 0:
-                self.finished_signal.emit(True)
+                self.finished_signal.emit(False)
                 return
 
             # הגדרת Callback שמקשר בין המנהל (Core) לבין ה-GUI (Signals)
@@ -248,7 +248,7 @@ class ShelfmarkLoaderThread(QThread):
         except Exception as e:
             # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
             print(f"Error in background loader: {e}")
-            self.finished_signal.emit(False)
+            self.finished_signal.emit(True)
 
 class AIWorkerThread(QThread):
     """Send a prompt to the AI manager in the background."""
