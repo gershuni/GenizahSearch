@@ -236,6 +236,12 @@ class LabPanel(QFrame):
             self.spin_scan_limit.valueChanged.connect(self.on_change)
             self.layout.addWidget(self.spin_scan_limit)
 
+            # Dynamic Weights
+            self.chk_dynamic = QCheckBox(tr("Use Dynamic Corpus Stats (HTR-Aware)"))
+            self.chk_dynamic.setToolTip(tr("Analyzes the corpus to detect and penalize HTR errors (e.g., if 'Tet' appears 4x more than expected, it is treated as noise). Saves a report to Reports folder."))
+            self.chk_dynamic.clicked.connect(self.on_change)
+            self.layout.addWidget(self.chk_dynamic)
+
             self.layout.addStretch()
 
             # Advanced Scoring
@@ -287,6 +293,8 @@ class LabPanel(QFrame):
             self.spin_limit.setValue(self.settings.candidate_limit)
             if hasattr(self, 'spin_scan_limit'):
                 self.spin_scan_limit.setValue(getattr(self.settings, 'lab_scan_limit', 50000))
+            if hasattr(self, 'chk_dynamic'):
+                self.chk_dynamic.setChecked(getattr(self.settings, 'use_dynamic_weights', False))
         elif self.mode == 'comp':
             self.spin_chunk_limit.setValue(self.settings.comp_chunk_limit)
             self.spin_min_score.setValue(self.settings.comp_min_score)
@@ -300,6 +308,8 @@ class LabPanel(QFrame):
             self.settings.candidate_limit = self.spin_limit.value()
             if hasattr(self, 'spin_scan_limit'):
                 self.settings.lab_scan_limit = self.spin_scan_limit.value()
+            if hasattr(self, 'chk_dynamic'):
+                self.settings.use_dynamic_weights = self.chk_dynamic.isChecked()
         elif self.mode == 'comp':
             self.settings.comp_chunk_limit = self.spin_chunk_limit.value()
             self.settings.comp_min_score = self.spin_min_score.value()

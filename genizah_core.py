@@ -12,6 +12,7 @@ import requests
 import threading
 import time
 import xml.etree.ElementTree as ET
+import csv
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
@@ -31,12 +32,21 @@ HEBREW_FREQ = {
     'ך': 13, 'ם': 7, 'ן': 11, 'ף': 17, 'ץ': 22
 }
 
-def encode_word_shmidman(word: str) -> str:
+STANDARD_HEBREW_DIST = {
+    'י': 11.5, 'ו': 10.2, 'ה': 8.5, 'א': 8.2, 'ל': 7.2, 'מ': 6.5, 'ת': 5.5,
+    'ב': 5.2, 'ר': 5.1, 'ש': 4.3, 'נ': 4.0, 'ד': 2.8, 'כ': 2.5, 'ע': 2.4,
+    'ח': 2.3, 'ק': 2.0, 'פ': 1.8, 'ס': 1.5, 'ט': 1.1, 'ז': 0.9, 'ג': 0.8,
+    'צ': 0.8, 'ץ': 0.4, 'ף': 0.3, 'ך': 0.3, 'ם': 2.5, 'ן': 1.0
+}
+
+def encode_word_shmidman(word: str, freq_map=None) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
+    if freq_map is None:
+        freq_map = HEBREW_FREQ
     letters = []
     for idx, ch in enumerate(word):
-        if ch in HEBREW_FREQ:
-            letters.append((idx, ch, HEBREW_FREQ[ch]))
+        if ch in freq_map:
+            letters.append((idx, ch, freq_map[ch]))
 
     if not letters:
         return ""
@@ -46,12 +56,12 @@ def encode_word_shmidman(word: str) -> str:
     return "".join(ch for _, ch, _ in rarest_sorted)
 
 
-def text_to_fingerprint(text: str) -> str:
+def text_to_fingerprint(text: str, freq_map=None) -> str:
     """Convert free text into a fingerprint representation."""
     tokens = re.findall(Config.WORD_TOKEN_PATTERN, text or "")
     encoded_tokens = []
     for tok in tokens:
-        encoded = encode_word_shmidman(tok)
+        encoded = encode_word_shmidman(tok, freq_map=freq_map)
         if encoded:
             encoded_tokens.append(encoded)
     return " ".join(encoded_tokens)
@@ -108,6 +118,8 @@ class LabSettings:
         # Display Limit
         self.lab_display_limit = 500
 
+        self.use_dynamic_weights = False
+
         self.load()
 
     def load(self):
@@ -116,6 +128,7 @@ class LabSettings:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
+                    self.use_dynamic_weights = data.get('use_dynamic_weights', False)
                     self.candidate_limit = data.get('candidate_limit', 2000)
                     self.min_should_match = data.get('min_should_match', 60)
                     self.gap_penalty = data.get('gap_penalty', 2)
@@ -145,6 +158,7 @@ class LabSettings:
             with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump({
                     'custom_variants': self.custom_variants,
+                    'use_dynamic_weights': self.use_dynamic_weights,
                     'candidate_limit': self.candidate_limit,
                     'min_should_match': self.min_should_match,
                     'gap_penalty': self.gap_penalty,
@@ -184,6 +198,16 @@ class LabEngine:
         self.lab_index = None
         self.lab_searcher = None
         self.lab_index_needs_rebuild = False
+        self.dynamic_rank_map = None
+
+        # Try load dynamic weights
+        if os.path.exists(Config.LAB_WEIGHTS_FILE):
+            try:
+                with open(Config.LAB_WEIGHTS_FILE, 'r', encoding='utf-8') as f:
+                    self.dynamic_rank_map = json.load(f)
+            except Exception:
+                pass
+
         self._reload_lab_index()
 
     def _close_index(self):
@@ -228,6 +252,11 @@ class LabEngine:
 
     def rebuild_lab_index(self, progress_callback=None):
         LAB_LOGGER.info(f"Starting REBUILD at: {Config.LAB_INDEX_DIR}")
+
+        # 1. Always Calculate Dynamic Weights First
+        LAB_LOGGER.info("Calculating dynamic corpus statistics...")
+        self.dynamic_rank_map = calculate_smart_weights(Config.FILE_V8)
+
         self._close_index()
         time.sleep(0.5)
 
@@ -247,8 +276,9 @@ class LabEngine:
         builder.add_text_field("text_normalized", stored=True, tokenizer_name="simple")
         builder.add_text_field("text_ngram", stored=False, tokenizer_name="whitespace") # Legacy
         
-        # The critical field
-        builder.add_text_field(self.LAB_FINGERPRINT_FIELD, stored=False, tokenizer_name="simple")
+        # The critical fields
+        builder.add_text_field(self.LAB_FINGERPRINT_FIELD, stored=False, tokenizer_name="simple") # Static
+        builder.add_text_field("fingerprint_dyn", stored=False, tokenizer_name="simple")          # Dynamic
         
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
@@ -292,13 +322,17 @@ class LabEngine:
                         if cid and ctext:
                             original = "\n".join(ctext)
                             norm = self.lab_index_normalize(original)
-                            fp = text_to_fingerprint(original)
+
+                            fp_static = text_to_fingerprint(original, freq_map=HEBREW_FREQ)
+                            fp_dyn = text_to_fingerprint(original, freq_map=self.dynamic_rank_map)
+
                             sm = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
 
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid),
                                 text_normalized=norm,
-                                fingerprint=fp,
+                                fingerprint=fp_static,
+                                fingerprint_dyn=fp_dyn,
                                 content=original,
                                 full_header=str(chead),
                                 shelfmark=str(sm),
@@ -317,11 +351,14 @@ class LabEngine:
                 # Last doc
                 if cid and ctext:
                     original = "\n".join(ctext)
-                    fp = text_to_fingerprint(original)
+                    fp_static = text_to_fingerprint(original, freq_map=HEBREW_FREQ)
+                    fp_dyn = text_to_fingerprint(original, freq_map=self.dynamic_rank_map)
+
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid),
                         text_normalized=self.lab_index_normalize(original),
-                        fingerprint=fp,
+                        fingerprint=fp_static,
+                        fingerprint_dyn=fp_dyn,
                         content=original,
                         full_header=str(chead),
                         shelfmark=str("Unknown"),
@@ -337,27 +374,30 @@ class LabEngine:
         self._reload_lab_index()
         return total_docs
 
-    def _create_lab_query(self, query_str, slop=0):
+    def _create_lab_query(self, query_str, slop=0, field_name=None):
         """
         Helper to construct the Tantivy query object based on settings.
         """
+        if field_name is None:
+            field_name = self.LAB_FINGERPRINT_FIELD
+
         tokens = query_str.split()
         if not tokens:
             return None
 
         # If 100% match required, use Phrase Query
         if self.settings.min_should_match >= 100:
-            final_query_str = f'{self.LAB_FINGERPRINT_FIELD}:"{query_str}"~{slop}'
+            final_query_str = f'{field_name}:"{query_str}"~{slop}'
         else:
             # OR query
-            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in tokens]
+            clauses = [f'{field_name}:{t}' for t in tokens]
             final_query_str = " OR ".join(clauses)
 
         # Try parsing strategies
         strategies = [
             lambda: self.lab_index.parse_query(final_query_str),
-            lambda: self.lab_index.parse_query(final_query_str, [self.LAB_FINGERPRINT_FIELD]),
-            lambda: self.lab_index.parse_query(final_query_str, [self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD)])
+            lambda: self.lab_index.parse_query(final_query_str, [field_name]),
+            lambda: self.lab_index.parse_query(final_query_str, [self.lab_index.schema.get_field(field_name)])
         ]
 
         for strategy in strategies:
@@ -436,7 +476,7 @@ class LabEngine:
             
         return final_weight
 
-    def _calculate_match_metrics(self, text, query_fingerprints_list, original_query_str):
+    def _calculate_match_metrics(self, text, query_fingerprints_list, original_query_str, freq_map=None):
         """
         Calculates score with STRICT FREQUENCY CAP & SEQUENTIAL ORDER.
         1. Words appearing more times in text than in query yield ZERO score.
@@ -469,7 +509,7 @@ class LabEngine:
         
         for m in re.finditer(r"[\w\u0590-\u05FF\']+", text):
             word = m.group()
-            fp = encode_word_shmidman(word)
+            fp = encode_word_shmidman(word, freq_map=freq_map)
             if fp in q_fp_set:
                 matches.append({
                     'start': m.start(),
@@ -639,8 +679,14 @@ class LabEngine:
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
 
+        # Determine strategy: Static or Dynamic
+        use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
+
+        target_field = "fingerprint_dyn" if use_dyn else self.LAB_FINGERPRINT_FIELD
+        target_map = self.dynamic_rank_map if use_dyn else HEBREW_FREQ
+
         # 1. Prepare Fingerprints
-        fp_str = text_to_fingerprint(query_str)
+        fp_str = text_to_fingerprint(query_str, freq_map=target_map)
         if not fp_str: return []
         
         query_fp_list = fp_str.split()
@@ -648,7 +694,7 @@ class LabEngine:
         # 2. Fetch Candidates
         slop = max(50, int(self.settings.gap_penalty) * 10) 
 
-        query_obj = self._create_lab_query(fp_str, slop)
+        query_obj = self._create_lab_query(fp_str, slop, field_name=target_field)
         if not query_obj: return []
 
         results = []
@@ -681,7 +727,7 @@ class LabEngine:
                 uid = doc['unique_id'][0]
 
                 # --- Core: Calculate Score & Find Matches ---
-                custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str)
+                custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str, freq_map=target_map)
                 
                 if custom_score < 15: 
                     continue
@@ -759,6 +805,11 @@ class LabEngine:
         if not full_text:
             return {'main': [], 'filtered': [], 'known': []} # Added known
 
+        # Determine strategy: Static or Dynamic
+        use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
+        target_field = "fingerprint_dyn" if use_dyn else self.LAB_FINGERPRINT_FIELD
+        target_map = self.dynamic_rank_map if use_dyn else HEBREW_FREQ
+
         # Normalize exclusion list for fast lookup
         excluded_set = set(str(x) for x in (excluded_ids or []))
 
@@ -788,7 +839,7 @@ class LabEngine:
             
             if self._is_phrase_statistically_weak(chunk_text): continue
 
-            fp_str = text_to_fingerprint(chunk_text)
+            fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
             if not fp_str or len(chunk_tokens) < 4: continue
             
             fp_list = fp_str.split()
@@ -796,7 +847,7 @@ class LabEngine:
 
             # Query with Boost
             query_tokens = fp_str.split()
-            clauses = [f'{self.LAB_FINGERPRINT_FIELD}:{t}' for t in query_tokens]
+            clauses = [f'{target_field}:{t}' for t in query_tokens]
             core_query = " OR ".join(clauses)
             final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
             
@@ -834,7 +885,7 @@ class LabEngine:
                     if filter_text and filter_text in content:
                         is_filtered_match = True
 
-                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text)
+                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
                     
                     found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
                     common_fps = found_unique_fps.intersection(needed_unique_fps)
@@ -972,7 +1023,12 @@ class LabEngine:
             # Note: Create a Term object for the specific field
             # In some tantivy-py versions command is doc_freq
             # We check how many documents contain the word
-            count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(self.LAB_FINGERPRINT_FIELD), word)
+
+            # Determine field based on setting
+            use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
+            target_field = "fingerprint_dyn" if use_dyn else self.LAB_FINGERPRINT_FIELD
+
+            count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(target_field), word)
             return count > threshold
         except Exception:
             # If error/unsupported, assume word is not too common to avoid missing it
@@ -995,7 +1051,11 @@ class LabEngine:
             # but could check raw word if stored,
             # or its Fingerprint.
             # Assuming Fingerprint check as it's our indexed field:
-            fp_word = encode_word_shmidman(w)
+
+            use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
+            target_map = self.dynamic_rank_map if use_dyn else HEBREW_FREQ
+
+            fp_word = encode_word_shmidman(w, freq_map=target_map)
             if not fp_word: continue
             
             # If word is *not* too common, anchor found!
@@ -1088,6 +1148,7 @@ class Config:
     LAB_DIR = os.path.join(INDEX_DIR, "lab")
     LAB_INDEX_DIR = os.path.join(INDEX_DIR, "lab_index")
     LAB_CONFIG_FILE = os.path.join(LAB_DIR, "lab_config.json")
+    LAB_WEIGHTS_FILE = os.path.join(LAB_DIR, "lab_weights.json")
     LAB_LOG_FILE = os.path.join(LAB_DIR, "lab_genizah.log")
 
     # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
@@ -3170,3 +3231,101 @@ class SearchEngine:
             pass # Current ID not found in list
             
         return None
+
+def calculate_smart_weights(file_path):
+    """
+    Analyzes corpus to generate HTR-aware letter frequency weights.
+    Returns: A dictionary mapping letter -> rank (integer, higher is rarer/better).
+    """
+    total_letters = 0
+    counts = defaultdict(int)
+
+    # 1. Sample Corpus (First 50k lines)
+    try:
+        if not os.path.exists(file_path):
+            LAB_LOGGER.warning(f"Corpus file not found at {file_path}. Using static weights.")
+            return HEBREW_FREQ
+
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
+            for i, line in enumerate(f):
+                if i >= 50000: break
+                # Skip headers/markers
+                if line.startswith("==>") or line.startswith("###"): continue
+
+                # Count Hebrew letters only
+                for char in line:
+                    if 'א' <= char <= 'ת':
+                        counts[char] += 1
+                        total_letters += 1
+    except Exception as e:
+        LAB_LOGGER.error(f"Failed to calculate smart weights: {e}")
+        return HEBREW_FREQ
+
+    if total_letters == 0:
+        return HEBREW_FREQ
+
+    # 2. Analyze & Score
+    analysis_rows = []
+    scored_letters = []
+
+    for char, count in counts.items():
+        if char not in STANDARD_HEBREW_DIST: continue # Only standard letters
+
+        corpus_pct = (count / total_letters) * 100
+        standard_pct = STANDARD_HEBREW_DIST.get(char, 0.1) # Avoid div/0
+
+        ratio = corpus_pct / standard_pct
+
+        # Base Score: Inverse Frequency (High pct -> Low Score)
+        score = (1 / corpus_pct) if corpus_pct > 0 else 100
+
+        # Penalty: If HTR sees it way more than expected (>1.5x), it's likely noise
+        original_score = score
+        if ratio > 1.5:
+            score = score / (ratio ** 2)
+
+        scored_letters.append((char, score))
+
+        analysis_rows.append({
+            'Letter': char,
+            'Standard_Pct': round(standard_pct, 2),
+            'Corpus_Pct': round(corpus_pct, 2),
+            'Ratio_Suspicion': round(ratio, 2),
+            'Original_Score': round(original_score, 4),
+            'Penalized_Score': round(score, 4)
+        })
+
+    # 3. Save Report
+    try:
+        os.makedirs(Config.REPORTS_DIR, exist_ok=True)
+        report_path = os.path.join(Config.REPORTS_DIR, "HTR_Frequency_Analysis.csv")
+        with open(report_path, 'w', encoding='utf-8-sig', newline='') as f:
+            fieldnames = ['Letter', 'Standard_Pct', 'Corpus_Pct', 'Ratio_Suspicion', 'Original_Score', 'Penalized_Score']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(sorted(analysis_rows, key=lambda x: x['Penalized_Score'])) # Sort by score (worst first)
+    except Exception as e:
+        LAB_LOGGER.warning(f"Failed to save HTR report: {e}")
+
+    # 4. Normalize to Ranks (1 to N)
+    # Sort by score ascending (Low score = Common/Noisy = Rank 1)
+    scored_letters.sort(key=lambda x: x[1])
+
+    rank_map = {}
+    for rank, (char, _) in enumerate(scored_letters, start=1):
+        rank_map[char] = rank
+
+    # Ensure final letters map to their standard counterparts if missing, or handle them
+    # Heuristic: Map final letters roughly to their normal form's rank or keep static default if not found?
+    # Better: If final forms were counted (they are in range), they get their own rank.
+    # Note: STANDARD_HEBREW_DIST includes finals. My loop 'א' <= char <= 'ת' includes them.
+
+    # 5. Save Weights JSON
+    try:
+        os.makedirs(Config.LAB_DIR, exist_ok=True)
+        with open(Config.LAB_WEIGHTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(rank_map, f, indent=4)
+    except Exception as e:
+        LAB_LOGGER.error(f"Failed to save lab weights JSON: {e}")
+
+    return rank_map
