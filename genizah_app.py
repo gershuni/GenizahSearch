@@ -3254,8 +3254,8 @@ class GenizahGUI(QMainWindow):
                     lambda _, r=res: self.open_result_in_browse_from_table(r),
                 )
 
-                actions_widget.add_btn(view_btn)
                 actions_widget.add_btn(browse_btn)
+                actions_widget.add_btn(view_btn)
                 self.results_table.setCellWidget(i, self.COL_ACTIONS, actions_widget)
 
                 # System ID column
