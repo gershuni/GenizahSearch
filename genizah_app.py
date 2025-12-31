@@ -3175,6 +3175,8 @@ class GenizahGUI(QMainWindow):
         t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
         return f"<div dir='rtl'>{t}</div>"
 
+    BATCH_SIZE = 50
+
     def on_search_finished(self, results):
         self.reset_ui()
         # Reset Select All Checkbox
@@ -3193,107 +3195,154 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid = {}
             return
 
-        self.last_results = results 
+        self.last_results = results
 
         # Display Limit Logic (Lab Mode)
         display_limit = len(results)
         if self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
             display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500)
 
-        visible_count = min(len(results), display_limit)
+        self.target_display_limit = min(len(results), display_limit)
 
-        if visible_count < len(results):
-            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(visible_count, len(results)))
+        # Determine status label
+        if self.target_display_limit < len(results):
+            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(self.target_display_limit, len(results)))
             self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
         else:
             self.status_label.setText(tr("Found {} results. Loading metadata...").format(len(results)))
             self.status_label.setStyleSheet("color: black;")
 
         for b in self.export_buttons: b.setEnabled(True)
-        self.results_table.setSortingEnabled(False) # Disable sorting during population
-        self.results_table.setRowCount(visible_count)
 
+        # Reset Table and Lazy Load State
+        self.results_table.setSortingEnabled(False)
+        self.results_table.setRowCount(0) # Clear table
+
+        self.current_result_index = 0
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
-        self._res_map_by_sid = {r['display']['id']: r for r in results} # New: map for metadata updates
+        self._res_map_by_sid = {r['display']['id']: r for r in results}
 
+        # Connect Scroll Signal (Ensure single connection)
+        try:
+            self.results_table.verticalScrollBar().valueChanged.disconnect(self.check_scroll_load)
+        except TypeError:
+            pass # Not connected
+        self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
+
+        # Start initial batch
+        self.load_next_batch()
+
+        # Metadata Collection (Always collect all IDs for export readiness)
         ids = []
         for i, res in enumerate(results):
             meta = res['display']
             parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta.get('id')
 
-            # Metadata Collection (Always collect all IDs for export readiness)
             # Pull immediate metadata from CSV/cache
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
             needs_fetch = (shelf == "Unknown" and (not title))
             if needs_fetch: ids.append(sid)
 
-            # Table Population (Respect Display Limit)
-            if i < visible_count:
-                # Checkbox column
-                item_chk = QTableWidgetItem()
-                item_chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                item_chk.setCheckState(Qt.CheckState.Unchecked)
-                # Store full result data here for retrieval after sort
-                item_chk.setData(Qt.ItemDataRole.UserRole, res)
-                self.results_table.setItem(i, self.COL_CHECKBOX, item_chk)
-
-                # Actions column (ghost buttons container)
-                actions_widget = ActionsHoverWidget()
-
-                view_btn = self._create_action_button(
-                    "👁",
-                    tr("View result"),
-                    lambda _, r=res: self.show_full_text_for_result(r),
-                )
-                browse_btn = self._create_action_button(
-                    "📖",
-                    tr("Browse manuscript"),
-                    lambda _, r=res: self.open_result_in_browse_from_table(r),
-                )
-
-                actions_widget.add_btn(browse_btn)
-                actions_widget.add_btn(view_btn)
-                self.results_table.setCellWidget(i, self.COL_ACTIONS, actions_widget)
-
-                # System ID column
-                item_sid = QTableWidgetItem(sid)
-                item_sid.setData(Qt.ItemDataRole.UserRole, res)
-                self.results_table.setItem(i, self.COL_SYS_ID, item_sid)
-
-                if needs_fetch:
-                    item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
-                    item_title = QTableWidgetItem(tr("Loading..."))
-                else:
-                    item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                    item_title = QTableWidgetItem(title if title else "")
-
-                # Shelfmark column
-                self.results_table.setItem(i, self.COL_SHELF, item_shelf)
-                self.shelfmark_items_by_sid[sid] = item_shelf
-
-                # Title column
-                self.results_table.setItem(i, self.COL_TITLE, item_title)
-                self.title_items_by_sid[sid] = item_title
-
-                # Snippet column (Widget)
-                # Render asterisks to HTML for display
-                html_snippet = self.render_asterisks_to_html(res['snippet'])
-                lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                self.results_table.setCellWidget(i, self.COL_SNIPPET, lbl)
-
-                # Col 5: Img
-                self.results_table.setItem(i, self.COL_IMG, QTableWidgetItem(meta['img']))
-
-                # Col 6: Source
-                self.results_table.setItem(i, self.COL_SRC, QTableWidgetItem(meta['source']))
-
-                self.result_row_by_sys_id[sid] = i
-
-        self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
+
+    def check_scroll_load(self, value):
+        bar = self.results_table.verticalScrollBar()
+        if value > bar.maximum() * 0.95:
+            self.load_next_batch()
+
+    def load_next_batch(self):
+        if self.current_result_index >= self.target_display_limit:
+            return
+
+        end_index = min(self.current_result_index + self.BATCH_SIZE, self.target_display_limit)
+        current_rows = self.results_table.rowCount()
+        new_count = current_rows + (end_index - self.current_result_index)
+
+        self.results_table.setSortingEnabled(False)
+        self.results_table.setRowCount(new_count)
+
+        for i in range(self.current_result_index, end_index):
+            res = self.last_results[i]
+            row_idx = current_rows + (i - self.current_result_index)
+
+            meta = res['display']
+            parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
+            sid = parsed['sys_id'] or meta.get('id')
+
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+            needs_fetch = (shelf == "Unknown" and (not title))
+
+            # Checkbox column
+            item_chk = QTableWidgetItem()
+            item_chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            item_chk.setCheckState(Qt.CheckState.Unchecked)
+            item_chk.setData(Qt.ItemDataRole.UserRole, res)
+            self.results_table.setItem(row_idx, self.COL_CHECKBOX, item_chk)
+
+            # --- COLUMN 1: ACTIONS (New Implementation) ---
+            # Create a container widget for the buttons
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            actions_layout.setSpacing(4)
+            actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Button 1: View Result
+            view_btn = self._create_action_button(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+                tr("View result"),
+                lambda _, r=res: self.show_full_text_for_result(r),
+            )
+
+            # Button 2: Browse Manuscript
+            browse_btn = self._create_action_button(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
+                tr("Browse manuscript"),
+                lambda _, r=res: self.open_result_in_browse_from_table(r),
+            )
+
+            actions_layout.addWidget(view_btn)
+            actions_layout.addWidget(browse_btn)
+            self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
+
+            # System ID column
+            item_sid = QTableWidgetItem(sid)
+            item_sid.setData(Qt.ItemDataRole.UserRole, res)
+            self.results_table.setItem(row_idx, self.COL_SYS_ID, item_sid)
+
+            if needs_fetch:
+                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
+                item_title = QTableWidgetItem(tr("Loading..."))
+            else:
+                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
+                item_title = QTableWidgetItem(title if title else "")
+
+            # Shelfmark column
+            self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
+            self.shelfmark_items_by_sid[sid] = item_shelf
+
+            # Title column
+            self.results_table.setItem(row_idx, self.COL_TITLE, item_title)
+            self.title_items_by_sid[sid] = item_title
+
+            # Snippet column
+            html_snippet = self.render_asterisks_to_html(res['snippet'])
+            lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.results_table.setCellWidget(row_idx, self.COL_SNIPPET, lbl)
+
+            # Col 5: Img
+            self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(meta['img']))
+
+            # Col 6: Source
+            self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(meta['source']))
+
+            self.result_row_by_sys_id[sid] = row_idx
+
+        self.current_result_index = end_index
+        self.results_table.setSortingEnabled(True)
 
     def start_metadata_loading(self, ids):
         if not ids:
