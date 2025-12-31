@@ -1068,34 +1068,9 @@ class HelpDialog(QDialog):
                     # Remove the block including markers
                     content = content[:s_idx] + content[e_idx + len(end_marker):]
 
-                # --- 2. DARK MODE HANDLING (CSS Injection) ---
-                # Detect dark mode using standard palette check
-                is_dark = False
-                app = QApplication.instance()
-                if app:
-                    bg_color = app.palette().window().color()
-                    # Simple heuristic: if window background is dark
-                    if bg_color.lightness() < 128:
-                        is_dark = True
-
-                # If dark mode, inject a style block to override colors
-                # because QTextBrowser doesn't support CSS variables or @media
-                if is_dark:
-                    dark_style = """
-                    <style>
-                        body { background-color: #1e1e1e; color: #e0e0e0; }
-                        h1, h2, h3, h4 { color: #ecf0f1; border-bottom-color: #3498db; }
-                        .section, .box, .nav-box { background-color: #333; border-color: #444; color: #e0e0e0; }
-                        a { color: #5dade2; }
-                        code { background-color: #444; color: #e74c3c; }
-                        .subtitle { color: #aaa; }
-                    </style>
-                    """
-                    # Insert before </head>
-                    if "</head>" in content:
-                        content = content.replace("</head>", dark_style + "</head>")
-                    else:
-                        content = dark_style + content
+                # Removed explicit Dark Mode CSS injection to allow "native" palette behavior
+                # as requested by the user ("do what the previous version did").
+                # By removing explicit background colors in HTML, QTextBrowser uses QPalette.
 
                 self.text.setHtml(content)
                 if anchor:
