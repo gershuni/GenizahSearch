@@ -2606,13 +2606,18 @@ class GenizahGUI(QMainWindow):
         self.browse_shelf_input.textEdited.connect(lambda _t: self._set_last_browse_field("shelf"))
         self.browse_fl_input.textEdited.connect(lambda _t: self._set_last_browse_field("fl"))
         
-        self.btn_b_catalog = QPushButton(tr("Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
+        # Find Parallels (Top Row)
+        self.btn_find_parallels = QPushButton(tr("Find parallels"))
+        self.btn_find_parallels.clicked.connect(self.browse_search_parallels)
+        self.btn_find_parallels.setEnabled(False)
+
+        self.btn_b_catalog = QPushButton(tr("View on Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
         
+        # View All and Save moved to Nav Bar, defined here as class members
         self.btn_b_save = QPushButton(tr("Save")); self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
         self.btn_b_save.clicked.connect(self.browse_save_full); self.btn_b_save.setEnabled(False)
         
-        # View All Button
         self.btn_b_all = QPushButton(tr("View All"))
         self.btn_b_all.setCheckable(True)
         self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
@@ -2626,10 +2631,9 @@ class GenizahGUI(QMainWindow):
         row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
+        row1.addWidget(self.btn_find_parallels)
         row1.addSpacing(20)
-        row1.addWidget(self.btn_b_all)
         row1.addWidget(self.btn_b_catalog)
-        row1.addWidget(self.btn_b_save)
         row1.addStretch()
 
         # Help
@@ -2658,13 +2662,34 @@ class GenizahGUI(QMainWindow):
 
         # Navigation Bar (Above Text)
         nav_bar = QHBoxLayout()
-        self.btn_b_prev = QPushButton(tr("<< Prev Page")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
-        self.btn_b_next = QPushButton(tr("Next Page >>")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
-        self.lbl_page_count = QLabel("0/0")
-
+        self.btn_b_prev = QPushButton(tr("< Prev")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
+        self.btn_b_next = QPushButton(tr("Next >")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
 
-        nav_bar.addWidget(self.btn_b_prev); nav_bar.addStretch(); nav_bar.addWidget(self.lbl_page_count); nav_bar.addStretch(); nav_bar.addWidget(self.btn_b_next)
+        # Page Combo
+        self.combo_browse_page = QComboBox()
+        self.combo_browse_page.setEditable(False)
+        self.combo_browse_page.setFixedWidth(100)
+        self.combo_browse_page.currentIndexChanged.connect(self.on_browse_page_combo_changed)
+
+        # Image Toggle
+        self.btn_b_toggle_img = QPushButton()
+        self.btn_b_toggle_img.setText("")
+        self.btn_b_toggle_img.setIcon(QIcon.fromTheme("image-x-generic", self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)))
+        self.btn_b_toggle_img.setToolTip(tr("Show/Hide Image"))
+        self.btn_b_toggle_img.setCheckable(True)
+        self.btn_b_toggle_img.setChecked(True)
+        self.btn_b_toggle_img.clicked.connect(self.toggle_browse_image)
+        self.btn_b_toggle_img.setEnabled(False)
+
+        # Layout: [< Prev] [Page Combo] [Next >] [View All] [Save] [Image Toggle]
+        nav_bar.addWidget(self.btn_b_prev)
+        nav_bar.addWidget(self.combo_browse_page)
+        nav_bar.addWidget(self.btn_b_next)
+        nav_bar.addWidget(self.btn_b_all)
+        nav_bar.addWidget(self.btn_b_save)
+        nav_bar.addWidget(self.btn_b_toggle_img)
+        nav_bar.addStretch()
         text_layout.addLayout(nav_bar)
 
         self.browse_text = QTextBrowser()
@@ -2716,6 +2741,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_save.setEnabled(True)
         self.btn_b_all.setEnabled(True)
+        self.btn_find_parallels.setEnabled(True)
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
@@ -2723,10 +2749,63 @@ class GenizahGUI(QMainWindow):
     def toggle_browse_view_all(self, checked):
         if checked:
             self.browse_viewer.setVisible(False)
+            self.btn_b_toggle_img.setEnabled(False)
             self.browse_load_all()
         else:
-            self.browse_viewer.setVisible(True)
+            self.btn_b_toggle_img.setEnabled(True)
+            self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
             self.browse_load_page()
+
+    def on_browse_page_combo_changed(self, index):
+        if index < 0: return
+        if not self.current_browse_sid: return
+
+        # We assume index in combo maps 1:1 to absolute_index
+        page_data = self.searcher.get_browse_page(
+            self.current_browse_sid,
+            absolute_index=index,
+            next_prev=0
+        )
+
+        if page_data:
+            self.browse_render_page(page_data)
+
+    def toggle_browse_image(self):
+        visible = self.btn_b_toggle_img.isChecked()
+        self.browse_viewer.setVisible(visible)
+
+    def browse_search_parallels(self):
+        if not self.current_browse_sid: return
+
+        # Get Title
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        full_title = meta.get('title') or ""
+        # Truncate title
+        words = full_title.split()
+        if len(words) > 6:
+            short_title = " ".join(words[:6]) + "..."
+        else:
+            short_title = full_title
+
+        text_content = ""
+
+        if self.btn_b_all.isChecked():
+             # Full Text
+             pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+             if pages:
+                 text_content = "\n\n".join([p['text'] for p in pages])
+        else:
+             # Current Page
+             if self.current_browse_internal_idx is not None:
+                 pd = self.searcher.get_browse_page(self.current_browse_sid, absolute_index=self.current_browse_internal_idx)
+                 if pd: text_content = pd['text']
+
+        if text_content:
+            self.send_result_to_composition(
+                {'display': {'id': self.current_browse_sid}},
+                source_text=text_content,
+                title=short_title
+            )
 
     def _set_last_browse_field(self, field):
         self.last_browse_field = field
@@ -5705,6 +5784,14 @@ class GenizahGUI(QMainWindow):
         else:
             self.current_browse_internal_idx = pd.get('current_idx', 1) - 1
 
+        # If we are rendering a page, we are not in View All mode
+        if self.btn_b_all.isChecked():
+            self.btn_b_all.blockSignals(True)
+            self.btn_b_all.setChecked(False)
+            self.btn_b_all.blockSignals(False)
+            self.btn_b_toggle_img.setEnabled(True)
+            self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
@@ -5715,7 +5802,20 @@ class GenizahGUI(QMainWindow):
         if shelf:
             self.browse_shelf_input.setText(shelf)
 
-        self.lbl_page_count.setText(f"{pd['current_idx']}/{pd['total_pages']}")
+        # Update Combo
+        total = pd['total_pages']
+        curr_idx = pd['current_idx'] # 1-based index
+
+        self.combo_browse_page.blockSignals(True)
+        if self.combo_browse_page.count() != total:
+            self.combo_browse_page.clear()
+            items = [str(i) for i in range(1, total + 1)]
+            self.combo_browse_page.addItems(items)
+
+        if 0 < curr_idx <= total:
+            self.combo_browse_page.setCurrentIndex(curr_idx - 1)
+        self.combo_browse_page.blockSignals(False)
+
         self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
         self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
 
