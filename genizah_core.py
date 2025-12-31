@@ -255,7 +255,7 @@ class LabEngine:
 
         # 1. Always Calculate Dynamic Weights First
         LAB_LOGGER.info("Calculating dynamic corpus statistics...")
-        self.dynamic_rank_map = calculate_smart_weights(Config.FILE_V8)
+        self.dynamic_rank_map = calculate_smart_weights(Config.FILE_V8, sample_size=None)
 
         self._close_index()
         time.sleep(0.5)
@@ -3232,99 +3232,120 @@ class SearchEngine:
             
         return None
 
-def calculate_smart_weights(file_path):
+def calculate_smart_weights(file_path, sample_size=None):
     """
     Analyzes corpus to generate HTR-aware letter frequency weights.
-    Returns: A dictionary mapping letter -> rank (integer, higher is rarer/better).
+    Robust version: Tries multiple encodings to ensure file reading.
     """
+    size_desc = "ALL lines" if sample_size is None else f"{sample_size} lines"
+    LAB_LOGGER.info(f"Calculating smart weights from {file_path} (Sample: {sample_size})...")
+    
     total_letters = 0
     counts = defaultdict(int)
+    
+    encodings_to_try = ['utf-8-sig', 'utf-8', 'windows-1255', 'iso-8859-8', 'latin-1']
+    
+    file_read_success = False
+    
+    for enc in encodings_to_try:
+        try:
+            temp_counts = defaultdict(int)
+            temp_total = 0
+            
+            with open(file_path, 'r', encoding=enc) as f:
+                for i, line in enumerate(f):
+                    if sample_size is not None and i >= sample_size: 
+                        break
+                    if line.startswith("==>") or line.startswith("###"): continue
+                    
+                    text = re.sub(r"[^\u0590-\u05FF]", "", line)
+                    if not text: continue
+                    
+                    for char in text:
+                        temp_counts[char] += 1
+                        temp_total += 1
+            
+            if temp_total > 0:
+                counts = temp_counts
+                total_letters = temp_total
+                file_read_success = True
+                LAB_LOGGER.info(f"Successfully read corpus using encoding: {enc}")
+                break
+                
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+        except Exception as e:
+            LAB_LOGGER.error(f"Error reading file with {enc}: {e}")
+            break
 
-    # 1. Sample Corpus (First 50k lines)
-    try:
-        if not os.path.exists(file_path):
-            LAB_LOGGER.warning(f"Corpus file not found at {file_path}. Using static weights.")
-            return HEBREW_FREQ
-
-        with open(file_path, 'r', encoding='utf-8-sig') as f:
-            for i, line in enumerate(f):
-                if i >= 50000: break
-                # Skip headers/markers
-                if line.startswith("==>") or line.startswith("###"): continue
-
-                # Count Hebrew letters only
-                for char in line:
-                    if 'א' <= char <= 'ת':
-                        counts[char] += 1
-                        total_letters += 1
-    except Exception as e:
-        LAB_LOGGER.error(f"Failed to calculate smart weights: {e}")
+    if not file_read_success or total_letters == 0:
+        LAB_LOGGER.error("Failed to read corpus with any encoding or file is empty. Using static weights.")
         return HEBREW_FREQ
-
-    if total_letters == 0:
-        return HEBREW_FREQ
-
+    
     # 2. Analyze & Score
     analysis_rows = []
-    scored_letters = []
+    final_scores = {}
 
     for char, count in counts.items():
-        if char not in STANDARD_HEBREW_DIST: continue # Only standard letters
-
+        if char not in STANDARD_HEBREW_DIST: continue
+        
         corpus_pct = (count / total_letters) * 100
-        standard_pct = STANDARD_HEBREW_DIST.get(char, 0.1) # Avoid div/0
-
+        standard_pct = STANDARD_HEBREW_DIST.get(char, 0.1)
+        
         ratio = corpus_pct / standard_pct
-
-        # Base Score: Inverse Frequency (High pct -> Low Score)
-        score = (1 / corpus_pct) if corpus_pct > 0 else 100
-
-        # Penalty: If HTR sees it way more than expected (>1.5x), it's likely noise
+        score = (1 / corpus_pct) if corpus_pct > 0 else 100.0
+        
         original_score = score
         if ratio > 1.5:
             score = score / (ratio ** 2)
-
-        scored_letters.append((char, score))
-
+            
+        final_scores[char] = score
+        
         analysis_rows.append({
             'Letter': char,
-            'Standard_Pct': round(standard_pct, 2),
-            'Corpus_Pct': round(corpus_pct, 2),
+            'Standard_Pct': round(standard_pct, 4),
+            'Corpus_Pct': round(corpus_pct, 4),
             'Ratio_Suspicion': round(ratio, 2),
             'Original_Score': round(original_score, 4),
             'Penalized_Score': round(score, 4)
         })
 
     # 3. Save Report
+    LAB_LOGGER.info(f"DEBUG: Preparing to save HTR report with {len(analysis_rows)} rows...") # <--- שורה חדשה
     try:
         os.makedirs(Config.REPORTS_DIR, exist_ok=True)
         report_path = os.path.join(Config.REPORTS_DIR, "HTR_Frequency_Analysis.csv")
+        
         with open(report_path, 'w', encoding='utf-8-sig', newline='') as f:
             fieldnames = ['Letter', 'Standard_Pct', 'Corpus_Pct', 'Ratio_Suspicion', 'Original_Score', 'Penalized_Score']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(sorted(analysis_rows, key=lambda x: x['Penalized_Score'])) # Sort by score (worst first)
+            sorted_rows = sorted(analysis_rows, key=lambda x: x['Ratio_Suspicion'], reverse=True)
+            writer.writerows(sorted_rows)
+            
+        LAB_LOGGER.info(f"SUCCESS: HTR Report saved to: {report_path}") # <--- שורה חדשה לאישור הצלחה
+        
     except Exception as e:
         LAB_LOGGER.warning(f"Failed to save HTR report: {e}")
 
-    # 4. Normalize to Ranks (1 to N)
-    # Sort by score ascending (Low score = Common/Noisy = Rank 1)
-    scored_letters.sort(key=lambda x: x[1])
-
+    # 4. Normalize to Ranks
+    LAB_LOGGER.info("DEBUG: Normalizing scores to integer ranks...") # <--- שורה חדשה
+    sorted_chars = sorted(final_scores.keys(), key=lambda x: final_scores[x], reverse=True)
     rank_map = {}
-    for rank, (char, _) in enumerate(scored_letters, start=1):
-        rank_map[char] = rank
-
-    # Ensure final letters map to their standard counterparts if missing, or handle them
-    # Heuristic: Map final letters roughly to their normal form's rank or keep static default if not found?
-    # Better: If final forms were counted (they are in range), they get their own rank.
-    # Note: STANDARD_HEBREW_DIST includes finals. My loop 'א' <= char <= 'ת' includes them.
-
-    # 5. Save Weights JSON
+    max_rank = len(sorted_chars)
+    for i, char in enumerate(sorted_chars):
+        rank_map[char] = max_rank - i
+        
+    # 5. Save JSON
     try:
         os.makedirs(Config.LAB_DIR, exist_ok=True)
+        LAB_LOGGER.info(f"DEBUG: Saving JSON weights to {Config.LAB_WEIGHTS_FILE}...") # <--- שורה חדשה
+        
         with open(Config.LAB_WEIGHTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(rank_map, f, indent=4)
+            json.dump(rank_map, f, ensure_ascii=False, indent=2)
+            
+        LAB_LOGGER.info(f"SUCCESS: Lab weights JSON saved successfully.") # <--- שורה חדשה לאישור הצלחה
+        
     except Exception as e:
         LAB_LOGGER.error(f"Failed to save lab weights JSON: {e}")
 
