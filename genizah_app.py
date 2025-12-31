@@ -2826,7 +2826,21 @@ class GenizahGUI(QMainWindow):
         # Update Nav
         self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
         self.btn_b_next.setEnabled(page_data['current_idx'] < page_data['total_pages'])
-        self.lbl_page_count.setText(f"{page_data['current_idx']} / {page_data['total_pages']}")
+
+        # Update Combo
+        total = page_data['total_pages']
+        curr_idx = page_data['current_idx'] # 1-based index
+
+        self.combo_browse_page.blockSignals(True)
+        if self.combo_browse_page.count() != total:
+            self.combo_browse_page.clear()
+            items = [str(i) for i in range(1, total + 1)]
+            self.combo_browse_page.addItems(items)
+
+        if 0 < curr_idx <= total:
+            self.combo_browse_page.setCurrentIndex(curr_idx - 1)
+        self.combo_browse_page.setEnabled(True)
+        self.combo_browse_page.blockSignals(False)
 
         # Update Text
         raw_text = page_data['text']
@@ -2887,7 +2901,7 @@ class GenizahGUI(QMainWindow):
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
-        self.lbl_page_count.setText(tr("Continuous View"))
+        self.combo_browse_page.setEnabled(False)
         
         # Scroll to the page we were looking at
         if self.current_browse_p:
