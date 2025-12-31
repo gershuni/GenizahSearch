@@ -106,7 +106,7 @@
     <div class="section">
     <h2 id="intro">Introduction: How it Works</h2>
     <p>Genizah Search Pro provides fast and advanced access to the transcription corpus of the "MiDRASH" project. The software is based on a high-speed search engine (Tantivy) and integrates unique algorithms to handle the Hebrew spelling variations typical of Genizah manuscripts.</p>
-    <p>The software runs locally on your computer but uses an internet connection to fetch bibliographic data and images from the National Library of Israel.</p>
+    <p>The software runs locally on your computer but uses an internet connection to fetch metadata and images from the National Library of Israel and Cambridge University Library. It will work without an internet connection, but without images and some extended information. Note: If your connection is not a home network (such as a mobile hotspot), library servers may block your access.</p>
     </div>
 
     <div class="section">
@@ -116,11 +116,11 @@
     <h3>Search Modes</h3>
     <ul>
         <li><b>Exact:</b> Matches only the exact word as typed.</li>
-        <li><b>Variants:</b> Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod). This is the recommended default mode.</li>
-        <li><b>Extended / Maximum:</b> Allows for greater flexibility in letter substitutions (e.g., Qof/Kaf, Tet/Tav), but may return less relevant results ("noise").</li>
-        <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with typos or decoding errors.</li>
-        <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
-        <li><b>Title:</b> Searches within the catalog titles of compositions (e.g., "Midrash Rabbah").</li>
+        <li><b>Variants:</b> Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod).</li>
+        <li><b>Extended / Maximum:</b> Allows for greater flexibility in letter substitutions (e.g., Qof/Kaf, Tet/Tav), but may return less relevant results ("noise") and take longer to search.</li>
+        <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with decoding errors.</li>
+        <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph. You can ask an external AI for a suitable string, or use the built-in AI tool in the software, which requires providing an API key in Settings.</li>
+        <li><b>Title:</b> Searches within the catalog titles of compositions. Example: searching "Mishneh Torah" will retrieve all manuscripts identified as Maimonides' Mishneh Torah.</li>
         <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
     </ul>
 
@@ -128,13 +128,14 @@
     <ul>
         <li><b>Gap:</b> Defines how many words can separate search terms. A value of 0 requires an exact sequence.</li>
         <li><b>Select All:</b> A checkbox at the top of the table allows you to select all results (or currently displayed results) for focused export.</li>
-        <li><b>Preview:</b> Double-clicking a row opens the full Manuscript Viewer on that page.</li>
+        <li><b>Preview:</b> Double-clicking a row opens the full Manuscript Viewer on that page. Clicking the "👁" button will lead to the same result.</li>
+        <li><b>Browse Manuscript:</b> Clicking the "📖" icon will open the manuscript in the "Browse Manuscript" tab. A similar browse button is also found in the Manuscript Viewer.</li>
     </ul>
     </div>
 
     <div class="section">
     <h2 id="composition">Composition Search</h2>
-    <p>This tool is designed for researchers wishing to find parallels for a complete literary text (such as a Piyyut, Mishnah chapter, or Midrash) within the Genizah.</p>
+    <p>This tool is designed for researchers wishing to find parallels for a complete literary text (such as a Piyyut, medieval commentary, or other rare work) within the Genizah, thereby locating additional textual witnesses, both direct and indirect.</p>
 
     <h3>How it Works (The Mechanism)</h3>
     <p>Unlike a regular search, the engine does not search for the entire text as a single unit. The process works as follows:</p>
@@ -147,8 +148,8 @@
 
     <h3>Important Parameters</h3>
     <ul>
-        <li><b>Chunk:</b> The number of words in each search unit. The recommendation is <b>5-7 words</b>. A value too low returns many false positives; too high might miss results with slight wording variations.</li>
-        <li><b>Max Freq:</b> A tool to filter "common words". If the engine detects that a sequence appears thousands of times (e.g., "And the Lord spoke to Moses saying"), it ignores it to avoid polluting results.</li>
+        <li><b>Chunk:</b> The number of words in each search unit. A value too low will return many irrelevant results; a value too high might miss true results.</li>
+        <li><b>Max Freq:</b> A tool to filter common expressions. If the engine detects that a sequence appears many times in the corpus (like idioms or verses), it will filter it to the Appendix.</li>
         <li><b>Filter >:</b> If a specific title (e.g., "Siddur Rav Saadia Gaon") appears more than X times in the results, the software groups these results under a single "Group" in the Appendix to avoid flooding the main list.</li>
         <li><b>Sort by shelfmark only:</b> Disables smart grouping and displays a flat, sorted list of all found manuscripts.</li>
     </ul>
@@ -156,8 +157,8 @@
     <h3>Advanced Options</h3>
     <ul>
         <li><b>Exclude Manuscripts:</b> Allows you to enter a list of known manuscripts to hide from results (they will appear under the "Excluded" category).</li>
-        <li><b>Filter Text:</b> Allows entering specific texts to mark as "Filtered" in the results.</li>
-        <li><b>Recursive Search:</b> After getting results, this button searches again using the texts of the found manuscripts as a basis for further searching.</li>
+        <li><b>Filter Text:</b> Allows entering specific texts to mark as "Filtered" in the results. For example, if your text quotes verses, Mishnah, or Gemara, you can enter these texts into the filter so this "noise" is not displayed.</li>
+        <li><b>Recursive Search:</b> After getting results, this button searches again using the texts of the found manuscripts as a basis for further searching. The search can be fully recursive, or only on results you select after the initial search.</li>
     </ul>
     </div>
 
@@ -169,13 +170,13 @@
         <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
         <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> at the top left to move to the previous or next manuscript in the database file order.</li>
         <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge where supported).</li>
-        <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling.</li>
+        <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling and for saving as a text file.</li>
     </ul>
     </div>
 
     <div class="section">
     <h2 id="lab">Lab Mode</h2>
-    <p>The <b>Lab Mode</b> button activates an experimental and more advanced search engine ("LabEngine").</p>
+    <p>The "Lab Mode" button activates an experimental and more advanced search engine.</p>
     <ul>
         <li><b>Deep Scan:</b> A much deeper and thorough scan. Significantly slower, but recommended for finding rare phrases or ensuring nothing is missed.</li>
         <li><b>Fingerprint Algorithm:</b> In this mode, the engine uses a different method for identifying words based on rare letters, allowing greater flexibility in identifying corruptions.</li>
@@ -186,8 +187,8 @@
 
     <h4>Search Tab Parameters</h4>
     <ul>
-        <li><b>Min Match %:</b> Minimum percentage of query terms required to consider a result relevant.</li>
-        <li><b>Max Results to Process:</b> Maximum number of raw candidates to fetch from the index before detailed scoring.</li>
+        <li><b>Min Match %:</b> Minimum percentage of the query text required to consider a result relevant.</li>
+        <li><b>Max Results to Process:</b> Maximum number of raw candidates to fetch from the index before detailed scoring. The software first retrieves potential candidates, then searches within them. More candidates result in better accuracy but slower performance.</li>
         <li><b>Deep Limit:</b> Maximum number of documents to scan in Deep Scan mode.</li>
     </ul>
 
@@ -215,7 +216,7 @@
     <h2 id="export">Exporting Data</h2>
     <p>At any stage, you can export results for external use:</p>
     <ul>
-        <li><b>XLSX (Excel):</b> Recommended format. Includes rich formatting, links, and color highlighting of found words within context.</li>
+        <li><b>XLSX (Excel):</b> Includes rich formatting and color highlighting of found words within context.</li>
         <li><b>CSV:</b> Raw data format, suitable for importing into other databases.</li>
         <li><b>TXT:</b> Simple readable text report.</li>
     </ul>
@@ -268,14 +269,14 @@
     <ul>
         <li><b>מרחק:</b> מגדיר כמה מילים יכולות להפריד בין מילות החיפוש. ערך 0 מחייב רצף מדויק.</li>
         <li><b>בחר הכל:</b> בראש הטבלה ישנה תיבת סימון המאפשרת לבחור את כל התוצאות (או את התוצאות המוצגות כרגע) לצורך ייצוא ממוקד.</li>
-        <li><b>תצוגה מקדימה:</b> לחיצה כפולה על שורה תפתח את צפיין כתב היד המלא באותו עמוד. לחיצה על לחצן ה"עין" תוביל לאותה תוצאה.</li>
-		<li><b>עיון בכתב יד:</b> לחיצה על לחצן הספר תוביל לפתיחת כתב היד בלשונית עיון בכתב יד. לחצן עיון דומה נמצא גם בצפיין כתב היד.</li>
+        <li><b>תצוגה מקדימה:</b> לחיצה כפולה על שורה תפתח את צפיין כתב היד המלא באותו עמוד. לחיצה על לחצן ה"👁" תוביל לאותה תוצאה.</li>
+		<li><b>עיון בכתב יד:</b> לחיצה על לחצן ה"📖" תוביל לפתיחת כתב היד בלשונית עיון בכתב יד. לחצן עיון דומה נמצא גם בצפיין כתב היד.</li>
     </ul>
     </div>
 
     <div class="section">
     <h2 id="composition">חיפוש חיבורים</h2>
-    <p>כלי זה נועד לחוקרים המעוניינים למצוא מקבילות לטקסט ספרותי שלם (כגון פיוט, פרק במשנה, או מדרש) בתוך הגניזה.</p>
+    <p>כלי זה נועד לחוקרים המעוניינים למצוא מקבילות לטקסט ספרותי שלם (כגון פיוט, פירוש מימי הביניים או חיבור נדיר אחר) בתוך הגניזה, ובכך לאתר עדי נוסח נוספים, ישירים ועקיפים.</p>
 
     <h3>איך זה עובד? (המנגנון)</h3>
     <p>בניגוד לחיפוש רגיל, המנוע לא מחפש את הטקסט כולו כמקשה אחת. התהליך מתבצע כך:</p>
@@ -289,7 +290,7 @@
     <h3>פרמטרים חשובים</h3>
     <ul>
         <li><b>מקטע:</b> מספר המילים בכל יחידת חיפוש. ערך נמוך יחזיר הרבה תוצאות לא רלוונטיות; ערך גבוה עלול להחמיץ תוצאות אמת.</li>
-        <li><b>תדירות מקס':</b> כלי לסינון "מילים נפוצות". אם המנוע מגלה שרצף מילים מסוים מופיע פעמים רבות בקורפוס (כמו מטבעות לשון או פסוקים), הוא יסנן אותו לנספח.</li>
+        <li><b>תדירות מקס':</b> כלי לסינון ביטויים נפוצים. אם המנוע מגלה שרצף מילים מסוים מופיע פעמים רבות בקורפוס (כמו מטבעות לשון או פסוקים), הוא יסנן אותו לנספח.</li>
         <li><b>סינון >:</b> אם כותרת מסוימת (למשל "סידור רב סעדיה גאון") מופיעה בתוצאות יותר מ-X פעמים, התוכנה תקבץ את כל התוצאות הללו תחת "קבוצה" אחת בנספח, כדי לא להציף את הרשימה הראשית.</li>
         <li><b>מיין לפי מספר מדף בלבד:</b> מבטל את הקיבוץ החכם ומציג רשימה שטוחה וממוינת של כל כתבי היד שנמצאו.</li>
     </ul>
@@ -297,8 +298,8 @@
     <h3>אפשרויות מתקדמות</h3>
     <ul>
         <li><b>החרג כתבי יד:</b> מאפשר להזין רשימה של כתבי יד שאתם כבר מכירים ורוצים להסתיר מהתוצאות (יופיעו תחת קטגוריית "מוחרגים").</li>
-        <li><b>סנן טקסט:</b> מאפשר להזין טקסטים ספציפיים שברצונכם לסמן כ"מסוננים" בתוצאות.</li>
-        <li><b>חיפוש רקורסיבי:</b> לאחר קבלת תוצאות, כפתור זה יחפש שוב במאגר, הפעם תוך שימוש בטקסטים של כתבי היד שנמצאו כבסיס לחיפוש נוסף.</li>
+        <li><b>סנן טקסט:</b> מאפשר להזין טקסטים ספציפיים שברצונכם לסמן כ"מסוננים" בתוצאות. לדוגמה, אם הטקסט שלכם מצטט פסוקים או משנה או גמרא, תוכלו להכניס את הטקסטים האלה לתוך הסינון וכך "רעש" זה לא יוצג.</li>
+        <li><b>חיפוש רקורסיבי:</b> לאחר קבלת תוצאות, כפתור זה יחפש שוב במאגר, הפעם תוך שימוש בטקסטים של כתבי היד שנמצאו כבסיס לחיפוש נוסף. החיפוש יכול להיות רקורסיבי מלא, או רק בתוצאות שתבחרו לאחר החיפוש הראשוני.</li>
     </ul>
     </div>
 
@@ -308,17 +309,17 @@
     <ul>
         <li><b>טעינה:</b> הזינו מספר מערכת או מספר מדף. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S 13.15</bdi></code>).</li>
         <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
-        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
+        <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">▶</span> <span style="border:1px solid #ccc; padding:0 4px;">◀</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
         <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג' במקרים נתמכים).</li>
-        <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה.</li>
+        <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה ולשמירה כקובץ טקסט.</li>
     </ul>
     </div>
 
     <div class="section">
     <h2 id="lab">מצב מעבדה</h2>
-    <p>כפתור ה"מצב מעבדה" מפעיל מנוע חיפוש ניסיוני ומתקדם יותר.</p>
+    <p>כפתור "מצב מעבדה" מפעיל מנוע חיפוש ניסיוני ומתקדם יותר.</p>
     <ul>
-        <li><b>סריקה עמוקה:</b> סריקה מעמיקה ויסודית יותר. איטית משמעותית, אך מומלצת לחיפוש ביטויים נדירים או כשרוצים לוודא שלא פיספסתם כלום.</li>
+        <li><b>סריקה עמוקה:</b> סריקה מעמיקה ויסודית יותר. איטית משמעותית, אך מומלצת לחיפוש ביטויים נדירים או כשרוצים לוודא שלא החמצתם כלום.</li>
         <li><b>אלגוריתם טביעת אצבע:</b> המנוע במצב זה משתמש בשיטה שונה לזיהוי מילים, המבוססת על האותיות הנדירות במילה, מה שמאפשר גמישות רבה יותר בזיהוי שיבושים.</li>
     </ul>
 
@@ -327,15 +328,15 @@
 
     <h4>פרמטרים ללשונית חיפוש</h4>
     <ul>
-        <li><b>אחוז התאמה מינימלי:</b> אחוז המילים המינימלי מהשאילתא שחייב להופיע כדי שהתוצאה תיחשב רלוונטית.</li>
-        <li><b>מקסימום תוצאות לעיבוד:</b> מספר המועמדים הגולמיים המקסימלי שיישלף מהאינדקס לפני שלב הניקוד המפורט.</li>
-        <li><b>מגבלת עומק:</b> מספר המסמכים המקסימלי לסריקה במצב "סריקה עמוקה".</li>
+        <li><b>אחוז התאמה מינימלי:</b> אחוז הטקסט המזערי מהשאילתא שחייב להופיע כדי שהתוצאה תיחשב רלוונטית.</li>
+        <li><b>מקסימום תוצאות לעיבוד:</b> מספר המועמדים הגולמיים המרבי שיישלף מהאינדקס לפני שלב הניקוד המפורט. התוכנה שולפת ראשית מועמדים פוטנציאליים, ואז מחפשת בהם. מספר מועמדים רב יותר ימצא תוצאות טובות יותר, אבל יהיה איטי יותר.</li>
+        <li><b>מגבלת עומק:</b> מספר המסמכים המרבי לסריקה במצב "סריקה עמוקה".</li>
     </ul>
 
     <h4>פרמטרים ללשונית חיפוש חיבורים</h4>
     <ul>
-        <li><b>מקסימום מועמדים למקטע:</b> מספר התוצאות המקסימלי שיעובדו עבור כל מקטע טקסט.</li>
-        <li><b>ציון מקטע מינימלי:</b> הניקוד המינימלי הנדרש כדי שמקטע ייחשב כ"נמצא".</li>
+        <li><b>מקסימום מועמדים למקטע:</b> מספר התוצאות המרבי שיעובדו עבור כל מקטע טקסט.</li>
+        <li><b>ציון מקטע מינימלי:</b> הניקוד המזערי הנדרש כדי שמקטע ייחשב כ"נמצא".</li>
         <li><b>מקסימום תוצאות סופיות:</b> מספר התוצאות שיוצגו בעץ כדי למנוע קיפאון של הממשק (כל התוצאות עדיין נשמרות בייצוא).</li>
     </ul>
 
@@ -356,7 +357,7 @@
     <h2 id="export">ייצוא נתונים</h2>
     <p>בכל שלב ניתן לייצא את התוצאות לשימוש חיצוני:</p>
     <ul>
-        <li><b><bdi dir="ltr">XLSX</bdi> (אקסל):</b> הפורמט המומלץ. כולל עיצוב עשיר, קישורים, וסימון בצבע של המילים שנמצאו בתוך הקשר המשפט.</li>
+        <li><b><bdi dir="ltr">XLSX</bdi> (אקסל):</b> כולל עיצוב עשיר וסימון בצבע של המילים שנמצאו בתוך הקשר המשפט.</li>
         <li><b><bdi dir="ltr">CSV</bdi>:</b> פורמט נתונים גולמי, מתאים לייבוא למסדי נתונים אחרים.</li>
         <li><b><bdi dir="ltr">TXT</bdi>:</b> דוח טקסט פשוט וקריא.</li>
     </ul>
