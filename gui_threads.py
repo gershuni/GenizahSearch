@@ -217,22 +217,32 @@ class ShelfmarkLoaderThread(QThread):
         self.meta_mgr = meta_mgr
         self.sids = sids
 
+    def request_cancel(self):
+        self.requestInterruption()
+
     def run(self):
         try:
             total = len(self.sids)
             if total == 0:
-                self.finished_signal.emit(True)
+                self.finished_signal.emit(False) # Not cancelled (Success)
                 return
 
             # הגדרת Callback שמקשר בין המנהל (Core) לבין ה-GUI (Signals)
             def update_gui(curr, tot, sid):
                 self.progress_signal.emit(curr, tot, sid)
 
+            def check_cancel():
+                return self.isInterruptionRequested()
+
             # שימוש בפונקציה היעילה החדשה שכתבנו ב-MetadataManager
             # היא תטפל לבד בבדיקת CSV ובשימוש ב-20 ה-Threads לרשת
-            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui)
+            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui, check_cancel=check_cancel)
             
-            self.finished_signal.emit(True)
+            # If interrupted, emit True (Cancelled), else False (Success)
+            if self.isInterruptionRequested():
+                self.finished_signal.emit(True)
+            else:
+                self.finished_signal.emit(False)
         except Exception as e:
             # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
             print(f"Error in background loader: {e}")
@@ -272,7 +282,7 @@ class StartupThread(QThread):
 
 class EnrichMetadataThread(QThread):
     """Fetch extended metadata (IIIF/MARC) in the background."""
-    finished_signal = pyqtSignal(dict)
+    finished_signal = pyqtSignal(str, dict)
 
     def __init__(self, meta_mgr, system_id):
         super().__init__()
@@ -283,10 +293,10 @@ class EnrichMetadataThread(QThread):
         try:
             # This method (in genizah_core.py) handles network errors gracefully
             data = self.meta_mgr.enrich_metadata(self.system_id)
-            self.finished_signal.emit(data)
+            self.finished_signal.emit(self.system_id, data)
         except Exception:
             # If something unexpected happens, just emit empty to avoid hanging
-            self.finished_signal.emit({})
+            self.finished_signal.emit(self.system_id, {})
 
 
 class ExternalResourceThread(QThread):

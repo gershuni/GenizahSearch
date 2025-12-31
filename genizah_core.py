@@ -2213,7 +2213,7 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return thumb_url
         
-    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True):
+    def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True, check_cancel=None):
         """
         Populate metadata cache. 
         use_network=False -> Only loads from local CSV/Cache (Instant).
@@ -2221,6 +2221,7 @@ class MetadataManager:
         """
         # Step A: Fast fetch from CSV (no network)
         for sid in system_ids:
+            if check_cancel and check_cancel(): return
             if sid not in self.nli_cache and sid in self.csv_bank:
                 self.fetch_nli_data(sid) # This fetches from CSV automatically now
         
@@ -2242,6 +2243,7 @@ class MetadataManager:
         current_progress = len(system_ids) - len(to_fetch)
         
         for future in as_completed(futures):
+            if check_cancel and check_cancel(): break
             sid, meta = future.result()
             self.nli_cache[sid] = meta
             current_progress += 1
