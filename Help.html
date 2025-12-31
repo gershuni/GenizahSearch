@@ -93,6 +93,7 @@
 <body>
 
 <!-- ================= ENGLISH CONTENT ================= -->
+<!-- START_LANG_EN -->
 <div class="lang-en ltr">
     <h1>Genizah Search Pro – User Guide</h1>
     <div class="subtitle">Comprehensive guide for searching, analyzing, and browsing the Cairo Genizah</div>
@@ -228,8 +229,10 @@
     <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
     </div>
 </div>
+<!-- END_LANG_EN -->
 
 <!-- ================= HEBREW CONTENT ================= -->
+<!-- START_LANG_HE -->
 <div class="lang-he rtl">
     <h1>עזרה למשתמש – Genizah Search Pro</h1>
     <div class="subtitle">מדריך מקיף לחיפוש, ניתוח ועיון בגניזה הקהירית</div>
@@ -365,6 +368,44 @@
     <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (Checkbox). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
     </div>
 </div>
+<!-- END_LANG_HE -->
+
+<!-- Browser-only Script for toggling -->
+<script>
+    (function() {
+        // Simple logic to detect user language or show both if in browser
+        // This script is ignored by QTextBrowser
+        var userLang = navigator.language || navigator.userLanguage;
+        var isHebrew = userLang.indexOf("he") === 0;
+
+        var en = document.querySelector('.lang-en');
+        var he = document.querySelector('.lang-he');
+
+        // Add Toggle Button
+        var btn = document.createElement("button");
+        btn.innerHTML = "Switch Language / החלף שפה";
+        btn.style.cssText = "position:fixed; top:10px; right:10px; padding:10px; z-index:1000; background:#3498db; color:white; border:none; cursor:pointer;";
+        document.body.appendChild(btn);
+
+        function updateView(hebrew) {
+            if(hebrew) {
+                if(en) en.style.display = 'none';
+                if(he) he.style.display = 'block';
+            } else {
+                if(en) en.style.display = 'block';
+                if(he) he.style.display = 'none';
+            }
+        }
+
+        // Initial state
+        updateView(isHebrew);
+
+        btn.onclick = function() {
+            isHebrew = !isHebrew;
+            updateView(isHebrew);
+        };
+    })();
+</script>
 
 </body>
 </html>

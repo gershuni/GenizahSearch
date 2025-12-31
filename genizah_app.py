@@ -1049,19 +1049,24 @@ class HelpDialog(QDialog):
                 with open(source_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
-                # --- 1. LANGUAGE FILTERING (CSS Injection) ---
-                # Instead of regex, we inject CSS to hide the unused language.
-                # This is safer and works with QTextBrowser's limited CSS support.
-                css_lang = ""
+                # --- 1. LANGUAGE FILTERING (Content Stripping) ---
+                # Since QTextBrowser ignores "display: none", we must remove the unused language block manually.
+                # We rely on markers added to Help.html.
                 if lang == 'he':
-                    css_lang = "<style>.lang-en { display: none; }</style>"
+                    # Keep Hebrew -> Remove English
+                    start_marker = "<!-- START_LANG_EN -->"
+                    end_marker = "<!-- END_LANG_EN -->"
                 else:
-                    css_lang = "<style>.lang-he { display: none; }</style>"
+                    # Keep English -> Remove Hebrew
+                    start_marker = "<!-- START_LANG_HE -->"
+                    end_marker = "<!-- END_LANG_HE -->"
 
-                if "</head>" in content:
-                    content = content.replace("</head>", css_lang + "</head>")
-                else:
-                    content = css_lang + content
+                s_idx = content.find(start_marker)
+                e_idx = content.find(end_marker)
+
+                if s_idx != -1 and e_idx != -1:
+                    # Remove the block including markers
+                    content = content[:s_idx] + content[e_idx + len(end_marker):]
 
                 # --- 2. DARK MODE HANDLING (CSS Injection) ---
                 # Detect dark mode using standard palette check
