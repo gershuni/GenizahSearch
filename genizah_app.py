@@ -1766,7 +1766,7 @@ class ResultDialog(QDialog):
             self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
             self.enrich_worker.start()
         else:
-            self.on_enriched_data_loaded(cached_meta)
+            self.on_enriched_data_loaded(self.current_sys_id, cached_meta)
 
     def apply_metadata(self, meta):
         # 1. Update Text Labels
@@ -1789,8 +1789,11 @@ class ResultDialog(QDialog):
         if checked:
             QTimer.singleShot(0, self.sync_external_view)
 
-    def on_enriched_data_loaded(self, meta):
+    def on_enriched_data_loaded(self, sid, meta):
         if not meta: return
+        # Verify this data is for the currently displayed result to prevent race conditions
+        if sid != self.current_sys_id:
+            return
         if self.current_sys_id not in self.meta_mgr.nli_cache: return
 
         # 1. Update Image Label
@@ -2682,8 +2685,9 @@ class GenizahGUI(QMainWindow):
 
         return panel
 
-    def on_browse_enriched_loaded(self, meta):
+    def on_browse_enriched_loaded(self, sid, meta):
         if not meta: return
+        if sid != self.current_browse_sid: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
         # 1. Update Info Label (Top Bar)
