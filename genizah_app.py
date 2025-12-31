@@ -116,6 +116,21 @@ class LabScoringDialog(QDialog):
         layout.addStretch()
         
         btn_box = QHBoxLayout()
+        # Help Button
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(30)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        # Find main window to call open_help_center
+        def open_help():
+            main = parent
+            while main and not hasattr(main, 'open_help_center'):
+                main = main.parent()
+            if main: main.open_help_center(anchor="lab")
+
+        btn_help.clicked.connect(open_help)
+        btn_box.addWidget(btn_help)
+
+        btn_box.addStretch()
         self.btn_save = QPushButton(tr("Save & Close")); self.btn_save.clicked.connect(self.save_and_close)
         self.btn_cancel = QPushButton(tr("Cancel")); self.btn_cancel.clicked.connect(self.reject)
         btn_box.addStretch(); btn_box.addWidget(self.btn_cancel); btn_box.addWidget(self.btn_save)
@@ -173,6 +188,20 @@ class LabPanel(QFrame):
 
         self.lbl_idx_status = QLabel("")
         self.layout.addWidget(self.lbl_idx_status)
+
+        # Help Button (Shared)
+        btn_help = QPushButton("?")
+        btn_help.setFixedWidth(24)
+        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 12px;")
+
+        def open_help_panel():
+            main = self.parent()
+            while main and not hasattr(main, 'open_help_center'):
+                main = main.parent()
+            if main: main.open_help_center(anchor="lab")
+
+        btn_help.clicked.connect(open_help_panel)
+        self.layout.addWidget(btn_help)
 
         # Spacer
         self.layout.addSpacing(20)
@@ -997,11 +1026,31 @@ class HelpDialog(QDialog):
             try:
                 with open(source_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # Inject language attribute to control visibility of bilingual sections
-                if "<body" in content:
-                    content = content.replace("<body", f"<body data-lang='{lang}'", 1)
-                base_url = QUrl.fromLocalFile(source_path)
-                self.text.setHtml(content, base_url)
+
+                # --- 1. LANGUAGE FILTERING (Content Stripping) ---
+                # Since QTextBrowser ignores "display: none", we must remove the unused language block manually.
+                # We rely on markers added to Help.html.
+                if lang == 'he':
+                    # Keep Hebrew -> Remove English
+                    start_marker = "<!-- START_LANG_EN -->"
+                    end_marker = "<!-- END_LANG_EN -->"
+                else:
+                    # Keep English -> Remove Hebrew
+                    start_marker = "<!-- START_LANG_HE -->"
+                    end_marker = "<!-- END_LANG_HE -->"
+
+                s_idx = content.find(start_marker)
+                e_idx = content.find(end_marker)
+
+                if s_idx != -1 and e_idx != -1:
+                    # Remove the block including markers
+                    content = content[:s_idx] + content[e_idx + len(end_marker):]
+
+                # Removed explicit Dark Mode CSS injection to allow "native" palette behavior
+                # as requested by the user ("do what the previous version did").
+                # By removing explicit background colors in HTML, QTextBrowser uses QPalette.
+
+                self.text.setHtml(content)
                 if anchor:
                     QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
                 return
@@ -2217,7 +2266,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: self.open_help_center(anchor="search"))
+        btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
