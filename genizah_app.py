@@ -1974,6 +1974,24 @@ class ResultDialog(QDialog):
     def open_viewer(self):
         if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
+class ActionsHoverWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.buttons = []
+
+    def add_btn(self, btn):
+        self.layout().addWidget(btn)
+        self.buttons.append(btn)
+        btn.setVisible(False)
+
+    def set_buttons_visible(self, visible):
+        for b in self.buttons:
+            b.setVisible(visible)
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -2036,6 +2054,7 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
         self.comp_thread = None 
         self.comp_worker = None
+        self.hovered_row = -1
 
 
         self.init_ui()
@@ -2245,6 +2264,10 @@ class GenizahGUI(QMainWindow):
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
+
+        self.results_table.setMouseTracking(True)
+        self.results_table.cellEntered.connect(self.on_table_cell_entered)
+        self.results_table.installEventFilter(self)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
@@ -3110,6 +3133,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setRowCount(0) 
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
+        self.hovered_row = -1
 
         if self.btn_lab_mode_toggle.isChecked():
             if not self.lab_engine:
@@ -3217,25 +3241,21 @@ class GenizahGUI(QMainWindow):
                 self.results_table.setItem(i, self.COL_CHECKBOX, item_chk)
 
                 # Actions column (ghost buttons container)
-                actions_widget = QWidget()
-                actions_layout = QHBoxLayout(actions_widget)
-                actions_layout.setContentsMargins(2, 2, 2, 2)
-                actions_layout.setSpacing(4)
-                actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                actions_widget = ActionsHoverWidget()
 
                 view_btn = self._create_action_button(
-                    self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
+                    "👁",
                     tr("View result"),
                     lambda _, r=res: self.show_full_text_for_result(r),
                 )
                 browse_btn = self._create_action_button(
-                    self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
+                    "📖",
                     tr("Browse manuscript"),
                     lambda _, r=res: self.open_result_in_browse_from_table(r),
                 )
 
-                actions_layout.addWidget(view_btn)
-                actions_layout.addWidget(browse_btn)
+                actions_widget.add_btn(view_btn)
+                actions_widget.add_btn(browse_btn)
                 self.results_table.setCellWidget(i, self.COL_ACTIONS, actions_widget)
 
                 # System ID column
@@ -3378,15 +3398,47 @@ class GenizahGUI(QMainWindow):
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
-    def _create_action_button(self, icon, tooltip, callback):
+    def _create_action_button(self, content, tooltip, callback):
         btn = QToolButton(self.results_table)
-        btn.setIcon(icon)
+        if isinstance(content, str):
+            btn.setText(content)
+            f = btn.font()
+            f.setPointSize(12)
+            btn.setFont(f)
+        else:
+            btn.setIcon(content)
         btn.setToolTip(tooltip)
         btn.setAutoRaise(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(28, 24)
         btn.clicked.connect(callback)
         return btn
+
+    def on_table_cell_entered(self, row, col):
+        if row == self.hovered_row:
+            return
+
+        # Hide previous
+        if self.hovered_row != -1:
+            w = self.results_table.cellWidget(self.hovered_row, self.COL_ACTIONS)
+            if isinstance(w, ActionsHoverWidget):
+                w.set_buttons_visible(False)
+
+        self.hovered_row = row
+
+        # Show new
+        w = self.results_table.cellWidget(row, self.COL_ACTIONS)
+        if isinstance(w, ActionsHoverWidget):
+            w.set_buttons_visible(True)
+
+    def eventFilter(self, source, event):
+        if source == self.results_table and event.type() == QEvent.Type.Leave:
+            if self.hovered_row != -1:
+                w = self.results_table.cellWidget(self.hovered_row, self.COL_ACTIONS)
+                if isinstance(w, ActionsHoverWidget):
+                    w.set_buttons_visible(False)
+                self.hovered_row = -1
+        return super().eventFilter(source, event)
 
     def _collect_sorted_results(self):
         sorted_results = []
