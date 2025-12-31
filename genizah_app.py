@@ -2056,10 +2056,6 @@ class GenizahGUI(QMainWindow):
         self.comp_worker = None
         self.hovered_row = -1
 
-        # Lazy Loading State
-        self.BATCH_SIZE = 500
-        self.displayed_count = 0
-
 
         self.init_ui()
 
@@ -3179,119 +3175,6 @@ class GenizahGUI(QMainWindow):
         t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
         return f"<div dir='rtl'>{t}</div>"
 
-    def load_next_batch(self):
-        """Loads the next batch of search results into the table (Lazy Loading)."""
-        start_idx = self.displayed_count
-        end_idx = min(start_idx + self.BATCH_SIZE, len(self.last_results))
-
-        if start_idx >= end_idx:
-            return
-
-        self.results_table.setSortingEnabled(False)
-        self.results_table.setUpdatesEnabled(False)
-
-        current_rows = self.results_table.rowCount()
-        rows_to_add = end_idx - start_idx
-        self.results_table.setRowCount(current_rows + rows_to_add)
-
-        for i_batch in range(start_idx, end_idx):
-            res = self.last_results[i_batch]
-            row_idx = current_rows + (i_batch - start_idx) # Correct row index in table
-
-            meta = res['display']
-            parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
-            sid = parsed['sys_id'] or meta.get('id')
-
-            # Fetch metadata from cache (should be pre-loaded or loading)
-            shelf, title = self.meta_mgr.get_meta_for_id(sid)
-            needs_fetch = (shelf == "Unknown" and (not title))
-
-            # Checkbox column
-            item_chk = QTableWidgetItem()
-            item_chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            item_chk.setCheckState(Qt.CheckState.Unchecked)
-            item_chk.setData(Qt.ItemDataRole.UserRole, res)
-            self.results_table.setItem(row_idx, self.COL_CHECKBOX, item_chk)
-
-            # Actions column
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(4)
-            actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            view_btn = self._create_action_button(
-                self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView),
-                tr("View result"),
-                lambda _, r=res: self.show_full_text_for_result(r),
-            )
-            browse_btn = self._create_action_button(
-                self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon),
-                tr("Browse manuscript"),
-                lambda _, r=res: self.open_result_in_browse_from_table(r),
-            )
-
-            actions_layout.addWidget(view_btn)
-            actions_layout.addWidget(browse_btn)
-            self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
-
-            # System ID column
-            item_sid = QTableWidgetItem(sid)
-            item_sid.setData(Qt.ItemDataRole.UserRole, res)
-            self.results_table.setItem(row_idx, self.COL_SYS_ID, item_sid)
-
-            if needs_fetch:
-                item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
-                item_title = QTableWidgetItem(tr("Loading..."))
-            else:
-                item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
-
-            # Shelfmark column
-            self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
-            self.shelfmark_items_by_sid[sid] = item_shelf
-
-            # Title column
-            self.results_table.setItem(row_idx, self.COL_TITLE, item_title)
-            self.title_items_by_sid[sid] = item_title
-
-            # Snippet column
-            html_snippet = self.render_asterisks_to_html(res['snippet'])
-            lbl = QLabel(html_snippet); lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.results_table.setCellWidget(row_idx, self.COL_SNIPPET, lbl)
-
-            # Img
-            self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(meta['img']))
-
-            # Source
-            self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(meta['source']))
-
-            self.result_row_by_sys_id[sid] = row_idx
-
-        self.displayed_count = end_idx
-        self.results_table.setUpdatesEnabled(True)
-        self.results_table.setSortingEnabled(True)
-
-        # Update Status
-        self._update_lazy_status()
-
-    def check_scroll_load(self, value):
-        """Check if scrollbar is near bottom to trigger lazy load."""
-        bar = self.results_table.verticalScrollBar()
-        if value >= bar.maximum() - 20: # Threshold
-             self.load_next_batch()
-
-    def _update_lazy_status(self):
-        total = len(self.last_results)
-        current = self.displayed_count
-        if current < total:
-            msg = tr("Showing top {} of {} results. Scroll for more.").format(current, total)
-            self.status_label.setText(msg)
-            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
-        else:
-            self.status_label.setText(tr("Found {} results. Loading metadata...").format(total))
-            self.status_label.setStyleSheet("color: black;")
-
     def on_search_finished(self, results):
         self.reset_ui()
         # Reset Select All Checkbox
@@ -3299,12 +3182,6 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header.setChecked(False)
         self.chk_search_header.blockSignals(False)
         self.lbl_search_export.setText(tr("Export Results") + ":")
-
-        # Disconnect previous scroll signals to prevent duplicates
-        try:
-            self.results_table.verticalScrollBar().valueChanged.disconnect(self.check_scroll_load)
-        except TypeError:
-            pass # Not connected
 
         if not results:
             self.status_label.setText(tr("No results found."))
@@ -3317,31 +3194,42 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results 
-        self.displayed_count = 0
 
-        # Enable Export Buttons immediately
+        # Display Limit Logic (Lab Mode)
+        display_limit = len(results)
+        if self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
+            display_limit = getattr(self.lab_engine.settings, 'lab_display_limit', 500)
+
+        visible_count = min(len(results), display_limit)
+
+        if visible_count < len(results):
+            self.status_label.setText(tr("Showing top {} of {} results. (Export for full list)").format(visible_count, len(results)))
+            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
+        else:
+            self.status_label.setText(tr("Found {} results. Loading metadata...").format(len(results)))
+            self.status_label.setStyleSheet("color: black;")
+
         for b in self.export_buttons: b.setEnabled(True)
+        self.results_table.setSortingEnabled(False) # Disable sorting during population
+        self.results_table.setRowCount(visible_count)
 
-        self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
-        self._res_map_by_sid = {r['display']['id']: r for r in results}
+        self._res_map_by_sid = {r['display']['id']: r for r in results} # New: map for metadata updates
 
-        # Collect IDs for ALL results to fetch metadata in background
         ids = []
-        for r in results:
-            meta = r['display']
-            parsed = self.meta_mgr.parse_full_id_components(r['raw_header'])
+        for i, res in enumerate(results):
+            meta = res['display']
+            parsed = self.meta_mgr.parse_full_id_components(res['raw_header'])
             sid = parsed['sys_id'] or meta.get('id')
 
+            # Metadata Collection (Always collect all IDs for export readiness)
+            # Pull immediate metadata from CSV/cache
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
             needs_fetch = (shelf == "Unknown" and (not title))
             if needs_fetch: ids.append(sid)
 
-        # Connect Scroll & Load First Batch
-        self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
-        self.load_next_batch()
             # Table Population (Respect Display Limit)
             if i < visible_count:
                 # Checkbox column
@@ -3404,6 +3292,7 @@ class GenizahGUI(QMainWindow):
 
                 self.result_row_by_sys_id[sid] = i
 
+        self.results_table.setSortingEnabled(True) # Re-enable sorting
         self.start_metadata_loading(ids)
 
     def start_metadata_loading(self, ids):

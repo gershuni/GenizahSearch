@@ -217,9 +217,6 @@ class ShelfmarkLoaderThread(QThread):
         self.meta_mgr = meta_mgr
         self.sids = sids
 
-    def request_cancel(self):
-        self.requestInterruption()
-
     def run(self):
         try:
             total = len(self.sids)
@@ -231,20 +228,11 @@ class ShelfmarkLoaderThread(QThread):
             def update_gui(curr, tot, sid):
                 self.progress_signal.emit(curr, tot, sid)
 
-            def check_cancel():
-                return self.isInterruptionRequested()
-
             # שימוש בפונקציה היעילה החדשה שכתבנו ב-MetadataManager
             # היא תטפל לבד בבדיקת CSV ובשימוש ב-20 ה-Threads לרשת
-            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui, check_cancel=check_cancel)
+            self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui)
             
-            # If interrupted, we still signal finish but maybe with False?
-            # Logic in genizah_app handles cancel flag on finish, but here we just emit True/False
-            # If it was cancelled, we might want to signal that, or simply finish.
-            # Given existing logic, we just emit True (finished/cancelled gracefully) or False (Error).
-            # We can check interruption status before emitting.
-            was_cancelled = self.isInterruptionRequested()
-            self.finished_signal.emit(was_cancelled)
+            self.finished_signal.emit(True)
         except Exception as e:
             # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
             print(f"Error in background loader: {e}")
