@@ -401,9 +401,9 @@ class ShelfmarkCompleter(QCompleter):
     Input "T-S" -> Normalized "ts" -> Matches model items where UserRole starts with "ts".
     """
     def splitPath(self, path):
-        # Normalize input: Remove MS prefix, non-alphanumeric, lowercase
+        # Normalize input: Remove MS prefix, non-alphanumeric (but keep dots/slashes), lowercase
         text = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', path, flags=re.IGNORECASE)
-        norm = re.sub(r"[^\w]", "", text).lower()
+        norm = re.sub(r"[^\w\./]", "", text).lower()
         return [norm]
 
     def pathFromIndex(self, index):
@@ -2245,7 +2245,7 @@ class GenizahGUI(QMainWindow):
 
         def normalize(text):
             t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-            return re.sub(r"[^\w]", "", t).lower()
+            return re.sub(r"[^\w\./]", "", t).lower()
 
         for s in shelfmarks:
             item = QStandardItem(s)
