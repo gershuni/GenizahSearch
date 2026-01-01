@@ -2226,19 +2226,24 @@ class GenizahGUI(QMainWindow):
 
     def _check_shelfmark_completer_ready(self):
         if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
-            self.setup_shelfmark_completer()
-            self.shelf_init_timer.stop()
-            self.shelf_init_timer = None
+            if self.setup_shelfmark_completer():
+                self.shelf_init_timer.stop()
+                self.shelf_init_timer = None
         # Add a timeout/limit? For now, we assume it eventually loads or stays empty (if file missing).
         # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
 
     def setup_shelfmark_completer(self):
         """Initialize the shelfmark autocomplete with data from csv_bank."""
-        if not self.meta_mgr: return
+        if not self.meta_mgr: return False
 
-        # 1. Extract unique shelfmarks
-        shelfmarks = sorted(list({v['shelfmark'] for v in self.meta_mgr.csv_bank.values() if v.get('shelfmark')}))
-        if not shelfmarks: return
+        # 1. Extract unique shelfmarks (Protected against background updates)
+        try:
+            shelfmarks = sorted(list({v['shelfmark'] for v in self.meta_mgr.csv_bank.values() if v.get('shelfmark')}))
+        except RuntimeError:
+            # Dictionary changed size during iteration (background loader still running)
+            return False
+
+        if not shelfmarks: return False
 
         # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
         self.shelf_model = QStandardItemModel()
@@ -2263,6 +2268,8 @@ class GenizahGUI(QMainWindow):
         # 4. Attach to Input
         if hasattr(self, 'browse_shelf_input'):
             self.browse_shelf_input.setCompleter(self.shelf_completer)
+
+        return True
              
     def init_ui(self):
         if CURRENT_LANG == 'he':
