@@ -73,6 +73,156 @@ def natural_sort_key(text):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
 
 
+def are_shelfmarks_sequential(s1, s2):
+    """
+    Checks if two shelfmarks are sequential (e.g., 'Bodl 1/1' -> 'Bodl 1/2').
+    Rules:
+    1. Must share identical base string before the LAST slash.
+    2. Suffix after last slash must be an integer.
+    3. Integer_B == Integer_A + 1.
+    """
+    if not s1 or not s2: return False
+
+    s1 = s1.strip()
+    s2 = s2.strip()
+
+    if '/' not in s1 or '/' not in s2: return False
+
+    base1, _, suff1 = s1.rpartition('/')
+    base2, _, suff2 = s2.rpartition('/')
+
+    if base1 != base2: return False
+
+    try:
+        i1 = int(suff1)
+        i2 = int(suff2)
+        return i2 == i1 + 1
+    except ValueError:
+        return False
+
+
+class DocumentIterator:
+    """Helper to iterate corpus files and stitch sequential pages."""
+    def __init__(self, meta_mgr):
+        self.meta_mgr = meta_mgr
+
+    def yield_stitched_docs(self, progress_callback=None, total_lines_est=0):
+        prev_doc = None
+        processed_count = 0
+
+        for curr_doc in self._iter_raw_docs(progress_callback, total_lines_est):
+            for stitched in self._process_stitch(prev_doc, curr_doc):
+                yield stitched
+            prev_doc = curr_doc
+
+        # Yield the very last document (which has nothing after it to stitch)
+        if prev_doc:
+            prev_doc['content_index'] = prev_doc['content_clean']
+            # Ensure metadata fields are present even if not stitched
+            if 'shelfmark' not in prev_doc:
+                prev_doc['shelfmark'] = self.meta_mgr.get_shelfmark_from_header(prev_doc['chead'])
+            if 'sys_id' not in prev_doc:
+                prev_doc['sys_id'] = self.meta_mgr.parse_full_id_components(prev_doc['chead']).get('sys_id')
+            yield prev_doc
+
+    def _iter_raw_docs(self, progress_callback=None, total_lines_est=0):
+        """Yields raw document dictionaries from files."""
+        processed_count = 0
+        # Files order matches Indexer logic: V0.8 then V0.7
+        files = [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]
+
+        for fpath, label in files:
+            if not os.path.exists(fpath): continue
+
+            # Using utf-8-sig as in LabEngine for safety
+            with open(fpath, 'r', encoding='utf-8-sig') as f:
+                cid, chead, ctext = None, None, []
+
+                for line in f:
+                    processed_count += 1
+                    line = line.strip()
+                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
+
+                    if is_sep:
+                        if cid and ctext:
+                            yield {
+                                'cid': cid,
+                                'chead': chead,
+                                'ctext': ctext,
+                                'source': label,
+                                'content_clean': "\n".join(ctext)
+                            }
+
+                        # Reset for next
+                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
+                        cid = self.meta_mgr.extract_unique_id(line)
+                        ctext = []
+
+                        if progress_callback and processed_count % 1000 == 0:
+                            progress_callback(processed_count, total_lines_est)
+                    else:
+                        ctext.append(line)
+
+                # Handle last doc of file
+                if cid and ctext:
+                    yield {
+                        'cid': cid,
+                        'chead': chead,
+                        'ctext': ctext,
+                        'source': label,
+                        'content_clean': "\n".join(ctext)
+                    }
+
+    def _process_stitch(self, prev_doc, curr_doc):
+        """
+        Determines if we should stitch curr_doc to prev_doc.
+        Yields prev_doc (modified) if ready.
+        """
+        if prev_doc is None:
+            return [] # Nothing to yield yet
+
+        # Get metadata for comparison
+        # Note: Indexer relies on header parsing, LabEngine relies on meta_mgr
+        # We should use consistent logic.
+
+        # Extract System IDs
+        prev_sys = self.meta_mgr.parse_full_id_components(prev_doc['chead']).get('sys_id')
+        curr_sys = self.meta_mgr.parse_full_id_components(curr_doc['chead']).get('sys_id')
+
+        # Extract Shelfmarks (using cache/csv logic)
+        prev_shelf = self.meta_mgr.get_shelfmark_from_header(prev_doc['chead'])
+        curr_shelf = self.meta_mgr.get_shelfmark_from_header(curr_doc['chead'])
+
+        should_stitch = False
+
+        # Condition 1: Same System ID (and not None)
+        if prev_sys and curr_sys and prev_sys == curr_sys:
+             should_stitch = True
+
+        # Condition 2: Sequential Shelfmarks (Bodleian Exception)
+        # IF SysIDs differ AND Shelfmarks are sequential slash
+        elif are_shelfmarks_sequential(prev_shelf, curr_shelf):
+             should_stitch = True
+
+        if should_stitch:
+            # Stitching: append separator + first 50 words of current
+            words = curr_doc['content_clean'].split()
+            # Handle potential None or empty
+            if not words: words = []
+
+            snippet = " ".join(words[:50])
+            separator = " [>>>] "
+            prev_doc['content_index'] = prev_doc['content_clean'] + separator + snippet
+        else:
+            prev_doc['content_index'] = prev_doc['content_clean']
+
+        # Add shelfmark/sys_id to doc to avoid re-parsing later if needed
+        prev_doc['shelfmark'] = prev_shelf
+        prev_doc['sys_id'] = prev_sys
+
+        return [prev_doc]
+
+
 try:
     import google.generativeai as genai
     HAS_GENAI = True
@@ -283,91 +433,61 @@ class LabEngine:
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("source", stored=True)
+        # content: Clean text
         builder.add_text_field("content", stored=True, tokenizer_name="simple")
+        # content_index: Stitched text (indexed for searching)
+        builder.add_text_field("content_index", stored=True, tokenizer_name="simple")
 
         schema = builder.build()
         index = tantivy.Index(schema, path=Config.LAB_INDEX_DIR)
         self._ensure_lab_tokenizers(index)
         writer = index.writer(heap_size=50_000_000)
 
-        # --- Pre-calculation for progress percentage ---
-        def count_documents(fname, label):
+        # Use shared counting logic if possible, or just copy-paste from Indexer
+        def count_lines(fname):
             if not os.path.exists(fname): return 0
-            count = 0
             try:
-                with open(fname, 'r', encoding='utf-8-sig') as f:
-                    for line in f:
-                        if label == "V0.8" and line.startswith("==>"): count += 1
-                        elif label == "V0.7" and line.startswith("###"): count += 1
-            except Exception: pass
-            return count
+                with open(fname, 'r', encoding='utf-8-sig') as f: return sum(1 for line in f)
+            except: return 0
 
         estimated_total = count_documents(Config.FILE_V8, "V0.8") + count_documents(Config.FILE_V7, "V0.7")
         LAB_LOGGER.info(f"Estimated total docs: {estimated_total}")
-
-        total_docs = 0
         
-        def process_file(fpath, label):
-            nonlocal total_docs
-            if not os.path.exists(fpath): return
-            LAB_LOGGER.info(f"Indexing {label}...")
-            
-            with open(fpath, 'r', encoding='utf-8-sig') as f:
-                cid, chead, ctext = None, None, []
-                for line in f:
-                    line = line.strip()
-                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
+        # Use DocumentIterator for smart stitching
+        doc_iter = DocumentIterator(self.meta_mgr)
+        total_docs = 0
+        total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
 
-                    if is_sep:
-                        if cid and ctext:
-                            original = "\n".join(ctext)
-                            norm = self.lab_index_normalize(original)
+        for doc in doc_iter.yield_stitched_docs(progress_callback, total_lines):
+            cid = doc['cid']
+            chead = doc['chead']
+            clean_text = doc['content_clean']
+            stitched_text = doc.get('content_index', clean_text)
+            label = doc['source']
 
-                            fp_static = text_to_fingerprint(original, freq_map=HEBREW_FREQ)
-                            fp_dyn = text_to_fingerprint(original, freq_map=self.dynamic_rank_map)
+            norm = self.lab_index_normalize(clean_text)
 
-                            sm = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
+            # FINGERPRINT FROM STITCHED TEXT (Important!)
+            fp_static = text_to_fingerprint(stitched_text, freq_map=HEBREW_FREQ)
+            fp_dyn = text_to_fingerprint(stitched_text, freq_map=self.dynamic_rank_map)
 
-                            writer.add_document(tantivy.Document(
-                                unique_id=str(cid),
-                                text_normalized=norm,
-                                fingerprint=fp_static,
-                                fingerprint_dyn=fp_dyn,
-                                content=original,
-                                full_header=str(chead),
-                                shelfmark=str(sm),
-                                source=str(label)
-                            ))
-                            total_docs += 1
-                            if progress_callback and total_docs % 1000 == 0:
-                                progress_callback(total_docs, estimated_total)
-                        
-                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
-                        cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = [] 
-                    else:
-                        ctext.append(line)
-                
-                # Last doc
-                if cid and ctext:
-                    original = "\n".join(ctext)
-                    fp_static = text_to_fingerprint(original, freq_map=HEBREW_FREQ)
-                    fp_dyn = text_to_fingerprint(original, freq_map=self.dynamic_rank_map)
+            sm = doc.get('shelfmark')
+            if not sm:
+                sm = self.meta_mgr.get_shelfmark_from_header(chead) or "Unknown"
 
-                    writer.add_document(tantivy.Document(
-                        unique_id=str(cid),
-                        text_normalized=self.lab_index_normalize(original),
-                        fingerprint=fp_static,
-                        fingerprint_dyn=fp_dyn,
-                        content=original,
-                        full_header=str(chead),
-                        shelfmark=str("Unknown"),
-                        source=str(label)
-                    ))
-                    total_docs += 1
+            writer.add_document(tantivy.Document(
+                unique_id=str(cid),
+                text_normalized=norm,
+                fingerprint=fp_static,
+                fingerprint_dyn=fp_dyn,
+                content=str(clean_text),
+                content_index=str(stitched_text),
+                full_header=str(chead),
+                shelfmark=str(sm),
+                source=str(label)
+            ))
 
-        process_file(Config.FILE_V8, "V0.8")
-        process_file(Config.FILE_V7, "V0.7")
+            total_docs += 1
 
         writer.commit()
         LAB_LOGGER.info(f"Rebuild done. {total_docs} docs committed.")
@@ -877,15 +997,18 @@ class LabEngine:
             for score, doc_addr in iterator:
                 try:
                     doc = self.lab_searcher.doc(doc_addr)
-                    content = doc['content'][0]
+
+                    # Fetch Stitched Text for scoring (matches crossing boundary)
+                    stitched_content = doc['content_index'][0] if 'content_index' in doc else doc['content'][0]
+                    clean_content = doc['content'][0]
                     uid = doc['unique_id'][0]
 
                     # --- Filter Text Logic ---
                     is_filtered_match = False
-                    if filter_text and filter_text in content:
+                    if filter_text and filter_text in stitched_content:
                         is_filtered_match = True
 
-                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
+                    match_score, matches, best_window = self._calculate_match_metrics(stitched_content, fp_list, chunk_text, freq_map=target_map)
                     
                     found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
                     common_fps = found_unique_fps.intersection(needed_unique_fps)
@@ -898,7 +1021,9 @@ class LabEngine:
                         results_map[uid] = {
                             'uid': uid, 'total_score': 0, 'hits_count': 0,
                             'raw_header': doc['full_header'][0], 'source': doc['source'][0],
-                            'content': content, 'best_chunk_score': -1,
+                            'content': stitched_content, # Use stitched for snippet generation later
+                            'clean_content': clean_content, # Preserve clean
+                            'best_chunk_score': -1,
                             'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
                             'is_text_filtered': False
                         }
@@ -953,7 +1078,7 @@ class LabEngine:
                     else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
                 merged.append((curr_s, curr_e))
             
-            content = data['content']
+            content = data['content'] # This is stitched_content as per above
             for s, e in merged:
                 start = max(0, s - 60); end = min(len(content), e + 60)
                 snip = content[start:end]
@@ -972,7 +1097,7 @@ class LabEngine:
                 'source_ctx': "\n\n".join(src_snippets),
                 'text': "\n...\n".join(ms_snips),        
                 'highlight_pattern': hl_pattern,
-                'full_text': data['content'],
+                'full_text': data.get('clean_content', content), # Restore clean text for viewer
                 'is_text_filtered': data.get('is_text_filtered', False)
             }
             raw_final_items.append(item)
@@ -2473,13 +2598,21 @@ class Indexer:
 
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
-        builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+        # content: Clean text for display (stored only)
+        builder.add_text_field("content", stored=True, tokenizer_name="raw")
+        # content_index: Stitched text for searching (indexed + stored for snippets)
+        builder.add_text_field("content_index", stored=True, tokenizer_name="whitespace")
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         schema = builder.build()
         
         index = tantivy.Index(schema, path=db_path)
+        # Register raw tokenizer for non-indexed fields if needed, though 'raw' is usually default or similar
+        # But 'content' is not indexed, so tokenizer doesn't matter much except Tantivy might require one.
+        # Let's stick to simple or whitespace for content if we want consistent storage.
+        # Actually 'raw' tokenizer keeps it as is.
+
         writer = index.writer(heap_size=30_000_000)
         
         total_docs = 0
@@ -2490,45 +2623,37 @@ class Indexer:
             with open(fname, 'r', encoding='utf-8') as f: return sum(1 for line in f)
 
         total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
-        processed_lines = 0
 
-        for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
-            if not os.path.exists(fpath): continue
-            with open(fpath, 'r', encoding='utf-8') as f:
-                cid, chead, ctext = None, None, []
-                for line in f:
-                    processed_lines += 1
-                    line = line.strip()
-                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
-                    
-                    if is_sep:
-                        if cid and ctext:
-                            shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
-                            writer.add_document(tantivy.Document(
-                                unique_id=str(cid), content="\n".join(ctext), source=str(label),
-                                full_header=str(chead), shelfmark=str(shelfmark)
-                            ))
-                            parsed = self.meta_mgr.parse_full_id_components(chead)
-                            if parsed['sys_id'] and parsed['p_num']:
-                                browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
-                            total_docs += 1
-                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
-                        cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = []
-                    else: ctext.append(line)
-                    if progress_callback and processed_lines % 1000 == 0:
-                        progress_callback(processed_lines, total_lines)
-                
-                if cid and ctext:
-                    shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
-                    writer.add_document(tantivy.Document(
-                        unique_id=str(cid), content=" ".join(ctext), source=str(label),
-                        full_header=str(chead), shelfmark=str(shelfmark)
-                    ))
-                    parsed = self.meta_mgr.parse_full_id_components(chead)
-                    if parsed['sys_id'] and parsed['p_num']:
-                        browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
-                    total_docs += 1
+        # Use DocumentIterator for smart stitching
+        doc_iter = DocumentIterator(self.meta_mgr)
+
+        for doc in doc_iter.yield_stitched_docs(progress_callback, total_lines):
+            cid = doc['cid']
+            chead = doc['chead']
+            clean_text = doc['content_clean']
+            stitched_text = doc.get('content_index', clean_text)
+            label = doc['source']
+
+            # Shelfmark resolution
+            shelfmark = doc.get('shelfmark')
+            if not shelfmark:
+                shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
+
+            writer.add_document(tantivy.Document(
+                unique_id=str(cid),
+                content=str(clean_text),
+                content_index=str(stitched_text),
+                source=str(label),
+                full_header=str(chead),
+                shelfmark=str(shelfmark)
+            ))
+
+            # Build browse map
+            parsed = self.meta_mgr.parse_full_id_components(chead)
+            if parsed['sys_id'] and parsed['p_num']:
+                browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+
+            total_docs += 1
 
         writer.commit()
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
@@ -2790,7 +2915,8 @@ class SearchEngine:
         pattern_str = regex.pattern
 
         try:
-            query = self.index.parse_query(t_query_str, ["content"])
+            # Query the stitched content_index
+            query = self.index.parse_query(t_query_str, ["content_index"])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
         except Exception as e:
             LOGGER.warning("Search query failed to parse/execute for pattern %s: %s", t_query_str, e)
@@ -2805,15 +2931,25 @@ class SearchEngine:
                 progress_callback(i, total_hits)
             try:
                 doc = self.searcher.doc(doc_addr)
-                content = doc['content'][0]
-                hl_c = self.highlight(content, regex, False)
-                hl_f = self.highlight(content, regex, True)
+
+                # Fetch clean text and stitched text
+                clean_content = doc['content'][0]
+                stitched_content = doc['content_index'][0] if 'content_index' in doc else clean_content
+
+                # Highlight using Stitched content (to show overlap)
+                hl_c = self.highlight(stitched_content, regex, False)
+                hl_f = self.highlight(stitched_content, regex, True)
+
                 if hl_c:
                     meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
                     results.append({
-                        'display': meta, 'snippet': hl_c, 'full_text': content,
-                        'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
-                        'raw_file_hl': hl_f, 'highlight_pattern': pattern_str
+                        'display': meta,
+                        'snippet': hl_c,
+                        'full_text': clean_content, # Viewer sees clean text
+                        'uid': doc['unique_id'][0],
+                        'raw_header': doc['full_header'][0],
+                        'raw_file_hl': hl_f,
+                        'highlight_pattern': pattern_str
                     })
             except Exception as e:
                 LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
