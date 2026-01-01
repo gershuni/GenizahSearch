@@ -23,9 +23,11 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor
+                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
+                             QCompleter)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
+from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
+                         QStandardItemModel, QStandardItem)
 
 from version import APP_VERSION
 
@@ -392,6 +394,21 @@ def log_tls_relaxation_notice():
         )
         _TLS_NOTICE_LOGGED = True
 
+
+class ShelfmarkCompleter(QCompleter):
+    """
+    Custom Completer that normalizes input before matching.
+    Input "T-S" -> Normalized "ts" -> Matches model items where UserRole starts with "ts".
+    """
+    def splitPath(self, path):
+        # Normalize input: Remove MS prefix, non-alphanumeric, lowercase
+        text = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', path, flags=re.IGNORECASE)
+        norm = re.sub(r"[^\w]", "", text).lower()
+        return [norm]
+
+    def pathFromIndex(self, index):
+        # Return the pretty display text when an item is selected
+        return index.data(Qt.ItemDataRole.DisplayRole)
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
@@ -2199,8 +2216,53 @@ class GenizahGUI(QMainWindow):
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
 
+            # Start checking for CSV bank readiness to init Autocomplete
+            self.shelf_init_timer = QTimer(self)
+            self.shelf_init_timer.timeout.connect(self._check_shelfmark_completer_ready)
+            self.shelf_init_timer.start(500)
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
+
+    def _check_shelfmark_completer_ready(self):
+        if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
+            self.setup_shelfmark_completer()
+            self.shelf_init_timer.stop()
+            self.shelf_init_timer = None
+        # Add a timeout/limit? For now, we assume it eventually loads or stays empty (if file missing).
+        # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
+
+    def setup_shelfmark_completer(self):
+        """Initialize the shelfmark autocomplete with data from csv_bank."""
+        if not self.meta_mgr: return
+
+        # 1. Extract unique shelfmarks
+        shelfmarks = sorted(list({v['shelfmark'] for v in self.meta_mgr.csv_bank.values() if v.get('shelfmark')}))
+        if not shelfmarks: return
+
+        # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
+        self.shelf_model = QStandardItemModel()
+
+        def normalize(text):
+            t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
+            return re.sub(r"[^\w]", "", t).lower()
+
+        for s in shelfmarks:
+            item = QStandardItem(s)
+            item.setData(normalize(s), Qt.ItemDataRole.UserRole)
+            self.shelf_model.appendRow(item)
+
+        # 3. Setup Completer
+        # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
+        self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self)
+        self.shelf_completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+        self.shelf_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.shelf_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.shelf_completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+
+        # 4. Attach to Input
+        if hasattr(self, 'browse_shelf_input'):
+            self.browse_shelf_input.setCompleter(self.shelf_completer)
              
     def init_ui(self):
         if CURRENT_LANG == 'he':
