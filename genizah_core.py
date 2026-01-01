@@ -1300,6 +1300,28 @@ def save_language(lang):
     except Exception as e:
         LOGGER.error("Failed to save language preference to %s: %s", Config.LANGUAGE_FILE, e)
 
+def load_app_config():
+    """Load general app configuration (non-AI)."""
+    cfg = {}
+    if os.path.exists(Config.CONFIG_FILE):
+        try:
+            with open(Config.CONFIG_FILE, 'rb') as f:
+                cfg = pickle.load(f)
+        except Exception:
+            pass
+    return cfg
+
+def save_app_config(new_data):
+    """Update general app configuration with new keys."""
+    try:
+        cfg = load_app_config()
+        cfg.update(new_data)
+        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
+        with open(Config.CONFIG_FILE, 'wb') as f:
+            pickle.dump(cfg, f)
+    except Exception as e:
+        LOGGER.error("Failed to save config: %s", e)
+
 # Global language state
 CURRENT_LANG = load_language()
 
