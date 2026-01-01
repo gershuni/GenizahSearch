@@ -400,15 +400,30 @@ class ShelfmarkCompleter(QCompleter):
     Custom Completer that normalizes input before matching.
     Input "T-S" -> Normalized "ts" -> Matches model items where UserRole starts with "ts".
     """
+    def __init__(self, model, parent=None, valid_keys=None):
+        super().__init__(model, parent)
+        self.valid_keys = valid_keys or set()
+
+    @staticmethod
+    def normalize(text):
+        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
+        return re.sub(r"[^\w\./]", "", t).lower()
+
     def splitPath(self, path):
-        # Normalize input: Remove MS prefix, non-alphanumeric (but keep dots/slashes), lowercase
-        text = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', path, flags=re.IGNORECASE)
-        norm = re.sub(r"[^\w\./]", "", text).lower()
-        return [norm]
+        return [self.normalize(path)]
 
     def pathFromIndex(self, index):
         # Return the pretty display text when an item is selected
         return index.data(Qt.ItemDataRole.DisplayRole)
+
+    def complete(self, rect=QRect()):
+        # Hide popup if there is an exact match
+        text = self.widget().text()
+        norm = self.normalize(text)
+        if norm in self.valid_keys:
+            self.popup().hide()
+            return
+        super().complete(rect)
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
@@ -2247,19 +2262,18 @@ class GenizahGUI(QMainWindow):
 
         # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
         self.shelf_model = QStandardItemModel()
-
-        def normalize(text):
-            t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-            return re.sub(r"[^\w\./]", "", t).lower()
+        self.valid_shelf_keys = set()
 
         for s in shelfmarks:
             item = QStandardItem(s)
-            item.setData(normalize(s), Qt.ItemDataRole.UserRole)
+            norm = ShelfmarkCompleter.normalize(s)
+            self.valid_shelf_keys.add(norm)
+            item.setData(norm, Qt.ItemDataRole.UserRole)
             self.shelf_model.appendRow(item)
 
         # 3. Setup Completer
         # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
-        self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self)
+        self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self, valid_keys=self.valid_shelf_keys)
         self.shelf_completer.setCompletionRole(Qt.ItemDataRole.UserRole)
         self.shelf_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.shelf_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
