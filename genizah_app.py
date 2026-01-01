@@ -2913,6 +2913,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_save.setEnabled(True)
         self.btn_b_all.setEnabled(True)
         self.btn_find_parallels.setEnabled(True)
+        self.btn_b_toggle_img.setEnabled(True)
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
@@ -5923,6 +5924,7 @@ class GenizahGUI(QMainWindow):
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
         self.btn_b_save.setEnabled(False)
+        self.btn_b_toggle_img.setEnabled(False)
 
         # Trigger Unified Enrichment (Meta + Images)
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
