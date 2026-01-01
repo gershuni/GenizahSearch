@@ -4434,7 +4434,7 @@ class GenizahGUI(QMainWindow):
             if digits_only and digits_only == cleaned:
                 sys_ids.add(cleaned)
             else:
-                norm = self.normalize_shelfmark(e)
+                norm = self._normalize_shelfmark(e)
                 if norm:
                     shelves.add(norm)
 
@@ -4480,7 +4480,7 @@ class GenizahGUI(QMainWindow):
             self.meta_mgr.fetch_nli_data(sys_id)
 
         _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
-        norm_shelf = self.normalize_shelfmark(shelf)
+        norm_shelf = self._normalize_shelfmark(shelf)
         if norm_shelf and norm_shelf in self.excluded_shelfmarks:
             return True
         return False
