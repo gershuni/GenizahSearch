@@ -283,6 +283,20 @@ TRANSLATIONS = {
     "Please configure your AI Provider & Key in Settings.": "אנא הגדר ספק AI ומפתח בהגדרות.",
     "Saved to {}": "נשמר אל {}",
 
+    # --- Updates ---
+    "Download Update": "הורד עדכון",
+    "Dismiss until next version": "הסתר עד לגרסה הבאה",
+    "New version available: {}": "גרסה חדשה זמינה: {}",
+    "Application": "יישום",
+    "Check for Updates": "בדוק עדכונים",
+    "Checking...": "בודק...",
+    "Update Available": "עדכון זמין",
+    "A new version is available: {}": "גרסה חדשה זמינה: {}",
+    "Open download page?": "לפתוח את דף ההורדה?",
+    "Up to date": "התוכנה מעודכנת",
+    "You are using the latest version.": "הגרסה שברשותך היא העדכנית ביותר.",
+    "Update Error": "שגיאה בבדיקת עדכונים",
+
     # --- Indexing ---
     "Index not found.\nWould you like to build it now?\n(Requires 'Transcriptions.txt' next to this app)": "האינדקס לא נמצא.\nהאם ברצונך לבנות אותו כעת?\n(דורש את הקובץ 'Transcriptions.txt' לצד התוכנה)",
     "Index Missing": "אינדקס חסר",
