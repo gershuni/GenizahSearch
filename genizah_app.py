@@ -5860,6 +5860,12 @@ class GenizahGUI(QMainWindow):
         self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
         self.enrich_browse_worker.start()
 
+        # Try to render page text immediately if possible
+        if page_data:
+            self.browse_render_page(page_data)
+        elif self.current_browse_sid:
+            self.browse_load_page()
+
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
@@ -5897,6 +5903,13 @@ class GenizahGUI(QMainWindow):
             self.btn_b_all.blockSignals(False)
             self.btn_b_toggle_img.setEnabled(True)
             self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+
+        # Enable core buttons immediately when content is available
+        self.btn_find_parallels.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
+        self.btn_b_all.setEnabled(True)
+        if self.current_browse_sid:
+            self.btn_b_catalog.setEnabled(True)
 
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
