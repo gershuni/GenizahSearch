@@ -33,7 +33,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -47,10 +47,66 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
+
+class UpdateNotificationBar(QFrame):
+    """A narrow notification bar at the top of the screen."""
+
+    dismissed = pyqtSignal(str) # Emits version string on dismiss
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.download_url = ""
+        self.version_tag = ""
+
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #d1ecf1; color: #0c5460; border-bottom: 1px solid #bee5eb;")
+        self.setFixedHeight(40)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+
+        self.lbl_msg = QLabel()
+        self.lbl_msg.setStyleSheet("font-weight: bold; font-size: 13px; border: none; background: transparent;")
+
+        self.btn_download = QPushButton(tr("Download Update"))
+        self.btn_download.setStyleSheet("background-color: #17a2b8; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.btn_download.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_download.clicked.connect(self.on_download)
+
+        self.btn_dismiss = QPushButton("✕")
+        self.btn_dismiss.setToolTip(tr("Dismiss until next version"))
+        self.btn_dismiss.setStyleSheet("""
+            QPushButton { background: transparent; color: #0c5460; font-weight: bold; border: none; font-size: 16px; }
+            QPushButton:hover { color: #dc3545; }
+        """)
+        self.btn_dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dismiss.clicked.connect(self.on_dismiss)
+
+        layout.addWidget(self.lbl_msg)
+        layout.addStretch()
+        layout.addWidget(self.btn_download)
+        layout.addSpacing(10)
+        layout.addWidget(self.btn_dismiss)
+
+        self.hide()
+
+    def show_update(self, version, url):
+        self.version_tag = version
+        self.download_url = url
+        self.lbl_msg.setText(tr("New version available: {}").format(version))
+        self.show()
+
+    def on_download(self):
+        if self.download_url:
+            QDesktopServices.openUrl(QUrl(self.download_url))
+
+    def on_dismiss(self):
+        self.hide()
+        self.dismissed.emit(self.version_tag)
 
 BATCH_SIZE = 500
 
@@ -2199,6 +2255,9 @@ class GenizahGUI(QMainWindow):
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
 
+            # Automatic Update Check
+            self.check_updates_auto()
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
              
@@ -2223,7 +2282,19 @@ class GenizahGUI(QMainWindow):
         lang_btn.clicked.connect(self.toggle_language)
         self.tabs.setCornerWidget(lang_btn, Qt.Corner.TopRightCorner if CURRENT_LANG == 'en' else Qt.Corner.TopLeftCorner)
 
-        self.setCentralWidget(self.tabs)
+        # Main Layout wrapper for Notification Bar
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Update Bar (Hidden by default)
+        self.update_bar = UpdateNotificationBar()
+        self.update_bar.dismissed.connect(self.on_update_dismissed)
+        main_layout.addWidget(self.update_bar)
+
+        main_layout.addWidget(self.tabs)
+        self.setCentralWidget(central_widget)
 
     def toggle_language(self):
         new_lang = 'en' if CURRENT_LANG == 'he' else 'he'
@@ -3025,6 +3096,20 @@ class GenizahGUI(QMainWindow):
 
         al.addLayout(row1); al.addLayout(row2)
         gb_ai.setLayout(al); layout.addWidget(gb_ai)
+
+        # Application / Updates
+        gb_app = QGroupBox(tr("Application"))
+        app_layout = QHBoxLayout()
+
+        self.lbl_version = QLabel(f"Version: {APP_VERSION}")
+        self.btn_check_updates = QPushButton(tr("Check for Updates"))
+        self.btn_check_updates.clicked.connect(self.check_updates_manual)
+
+        app_layout.addWidget(self.lbl_version)
+        app_layout.addStretch()
+        app_layout.addWidget(self.btn_check_updates)
+        gb_app.setLayout(app_layout)
+        layout.addWidget(gb_app)
         
         gb_about = QGroupBox(tr("About"))
         abl = QVBoxLayout()
@@ -5946,6 +6031,64 @@ class GenizahGUI(QMainWindow):
             else:
                 self.browse_thumb.setText(tr("Waiting..."))
     
+    def check_updates_auto(self):
+        """Run update checker silently at startup."""
+        self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=False)
+        self.update_thread.finished_signal.connect(self.on_update_result)
+        self.update_thread.start()
+
+    def check_updates_manual(self):
+        """Run update checker with UI feedback."""
+        self.btn_check_updates.setEnabled(False)
+        self.btn_check_updates.setText(tr("Checking..."))
+
+        self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=True)
+        self.update_thread.finished_signal.connect(self.on_update_result)
+        self.update_thread.error_signal.connect(self.on_update_error)
+        self.update_thread.start()
+
+    def on_update_result(self, found, version, url, is_manual):
+        # Reset manual button state
+        if is_manual:
+            self.btn_check_updates.setEnabled(True)
+            self.btn_check_updates.setText(tr("Check for Updates"))
+
+        if found:
+            # Check if dismissed previously (only for auto check)
+            if not is_manual:
+                cfg = load_app_config()
+                last_dismissed = cfg.get('last_dismissed_version')
+                if last_dismissed == version:
+                    return # Silent return if already dismissed
+
+            # Show Feedback
+            if is_manual:
+                # Dialog for manual
+                msg = tr("A new version is available: {}").format(version)
+                reply = QMessageBox.question(self, tr("Update Available"), msg + "\n\n" + tr("Open download page?"),
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    QDesktopServices.openUrl(QUrl(url))
+            else:
+                # Notification Bar for auto
+                self.update_bar.show_update(version, url)
+
+        else:
+            if is_manual:
+                QMessageBox.information(self, tr("Up to date"), tr("You are using the latest version."))
+
+    def on_update_error(self, err, is_manual):
+        if is_manual:
+            self.btn_check_updates.setEnabled(True)
+            self.btn_check_updates.setText(tr("Check for Updates"))
+            QMessageBox.warning(self, tr("Update Error"), err)
+        else:
+            logger.warning(f"Auto-update check failed: {err}")
+
+    def on_update_dismissed(self, version):
+        """Save dismissed version to config."""
+        save_app_config({'last_dismissed_version': version})
+
     def run_indexing(self):
         # 1. Pre-check: Does the input file exist?
         if not os.path.exists(Config.FILE_V8):

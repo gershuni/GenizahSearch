@@ -1,6 +1,7 @@
 """Worker threads used by the PyQt GUI for long-running operations."""
 
 # gui_threads.py
+import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager
 
@@ -314,3 +315,39 @@ class ExternalResourceThread(QThread):
             self.finished_signal.emit(data)
         except Exception:
             self.finished_signal.emit({})
+
+class UpdateCheckerThread(QThread):
+    """Check for updates on GitHub."""
+
+    # found, version, url, is_manual_check
+    finished_signal = pyqtSignal(bool, str, str, bool)
+    error_signal = pyqtSignal(str, bool)
+
+    def __init__(self, current_version, is_manual=False):
+        super().__init__()
+        self.current_version = current_version
+        self.is_manual = is_manual
+
+    def run(self):
+        try:
+            url = "https://api.github.com/repos/gershuni/GenizahSearch/releases/latest"
+            resp = requests.get(url, timeout=5)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                tag = data.get('tag_name', '').strip()
+                html_url = data.get('html_url', '')
+
+                # Simple SemVer comparison (stripping 'v' prefix)
+                curr_v = [int(x) for x in self.current_version.replace('v','').split('.') if x.isdigit()]
+                remote_v = [int(x) for x in tag.replace('v','').split('.') if x.isdigit()]
+
+                if remote_v > curr_v:
+                    self.finished_signal.emit(True, tag, html_url, self.is_manual)
+                else:
+                    self.finished_signal.emit(False, tag, html_url, self.is_manual)
+            else:
+                self.error_signal.emit(f"GitHub API Error: {resp.status_code}", self.is_manual)
+
+        except Exception as e:
+            self.error_signal.emit(str(e), self.is_manual)
