@@ -2908,36 +2908,7 @@ class GenizahGUI(QMainWindow):
             self.browse_text.setText(tr("Page not found."))
             return
 
-        self.current_browse_p = page_data['p_num']
-
-        # Update Nav
-        self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
-        self.btn_b_next.setEnabled(page_data['current_idx'] < page_data['total_pages'])
-
-        # Update Combo
-        total = page_data['total_pages']
-        curr_idx = page_data['current_idx'] # 1-based index
-
-        self.combo_browse_page.blockSignals(True)
-        if self.combo_browse_page.count() != total:
-            self.combo_browse_page.clear()
-            items = [str(i) for i in range(1, total + 1)]
-            self.combo_browse_page.addItems(items)
-
-        if 0 < curr_idx <= total:
-            self.combo_browse_page.setCurrentIndex(curr_idx - 1)
-        self.combo_browse_page.setEnabled(True)
-        self.combo_browse_page.blockSignals(False)
-
-        # Update Text
-        raw_text = page_data['text']
-        html = raw_text.replace("\n", "<br>")
-        self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
-
-        # Sync Image Viewer
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
-        self.browse_viewer.set_page(idx)
+        self.browse_render_page(page_data)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
