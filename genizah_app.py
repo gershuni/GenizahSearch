@@ -404,10 +404,11 @@ class CheckBoxHeader(QHeaderView):
     """Custom HeaderView that draws a checkbox in the first section."""
     toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, non_sortable_cols=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.isChecked = False
         self.setSectionsClickable(True)
+        self.non_sortable_cols = non_sortable_cols if non_sortable_cols else []
 
     def get_checkbox_rect(self, rect):
         box_size = 20
@@ -438,8 +439,8 @@ class CheckBoxHeader(QHeaderView):
             self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter)
 
     def mousePressEvent(self, event):
-        if self.logicalIndexAt(event.pos()) == 0:
-
+        idx = self.logicalIndexAt(event.pos())
+        if idx == 0:
             sec_pos = self.sectionViewportPosition(0)
             sec_width = self.sectionSize(0)
             sec_rect = QRect(sec_pos, 0, sec_width, self.height())
@@ -450,7 +451,14 @@ class CheckBoxHeader(QHeaderView):
                 self.isChecked = not self.isChecked
                 self.viewport().update()
                 self.toggled.emit(self.isChecked)
-                return # Consume event
+                return # Consume event (Checkbox toggle)
+
+            # If we clicked the header area but NOT the checkbox, check if sort should be blocked
+            if 0 in self.non_sortable_cols:
+                return # Prevent sort on col 0
+
+        elif idx in self.non_sortable_cols:
+            return # Prevent sort
 
         super().mousePressEvent(event)
 
@@ -2308,16 +2316,17 @@ class GenizahGUI(QMainWindow):
         self.COL_ACTIONS = 1
         self.COL_SYS_ID = 2
         self.COL_SHELF = 3
-        self.COL_TITLE = 4
-        self.COL_SNIPPET = 5
-        self.COL_IMG = 6
+        self.COL_IMG = 4
+        self.COL_TITLE = 5
+        self.COL_SNIPPET = 6
         self.COL_SRC = 7
 
         self.results_table = QTableWidget(); self.results_table.setColumnCount(8)
-        self.results_table.setHorizontalHeaderLabels(["", tr("Actions"), tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Snippet"), tr("Img"), tr("Src")])
+        self.results_table.setHorizontalHeaderLabels(["", tr("Actions"), tr("System ID"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
 
         # Custom Header
-        self.chk_search_header = CheckBoxHeader(self.results_table)
+        # Disable sort for Checkbox (0), Actions (1), and Image (4)
+        self.chk_search_header = CheckBoxHeader(self.results_table, non_sortable_cols=[0, 1, 4])
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
 
@@ -3450,6 +3459,11 @@ class GenizahGUI(QMainWindow):
         self._res_map_by_sid = {r['display']['id']: r for r in results}
 
         for b in self.export_buttons: b.setEnabled(True)
+
+        # Hide Source column if secondary source file (V0.7) is missing or empty
+        # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
+        has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
+        self.results_table.setColumnHidden(self.COL_SRC, not has_multiple_sources)
 
         self.load_next_batch()
 
