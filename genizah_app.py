@@ -23,9 +23,11 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem)
-from PyQt6.QtCore import Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF
-from PyQt6.QtGui import QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor
+                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
+                             QCompleter)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
+from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
+                         QStandardItemModel, QStandardItem)
 
 from version import APP_VERSION
 
@@ -448,6 +450,36 @@ def log_tls_relaxation_notice():
         )
         _TLS_NOTICE_LOGGED = True
 
+
+class ShelfmarkCompleter(QCompleter):
+    """
+    Custom Completer that normalizes input before matching.
+    Input "T-S" -> Normalized "ts" -> Matches model items where UserRole starts with "ts".
+    """
+    def __init__(self, model, parent=None, valid_keys=None):
+        super().__init__(model, parent)
+        self.valid_keys = valid_keys or set()
+
+    @staticmethod
+    def normalize(text):
+        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
+        return re.sub(r"[^\w\./]", "", t).lower()
+
+    def splitPath(self, path):
+        return [self.normalize(path)]
+
+    def pathFromIndex(self, index):
+        # Return the pretty display text when an item is selected
+        return index.data(Qt.ItemDataRole.DisplayRole)
+
+    def complete(self, rect=QRect()):
+        # Hide popup if there is an exact match
+        text = self.widget().text()
+        norm = self.normalize(text)
+        if norm in self.valid_keys:
+            self.popup().hide()
+            return
+        super().complete(rect)
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""
@@ -2255,11 +2287,61 @@ class GenizahGUI(QMainWindow):
                     self.tabs.setCurrentIndex(3) 
                     self.run_indexing()
 
+            # Start checking for CSV bank readiness to init Autocomplete
+            self.shelf_init_timer = QTimer(self)
+            self.shelf_init_timer.timeout.connect(self._check_shelfmark_completer_ready)
+            self.shelf_init_timer.start(500)
             # Automatic Update Check
             self.check_updates_auto()
 
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
+
+    def _check_shelfmark_completer_ready(self):
+        if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
+            if self.setup_shelfmark_completer():
+                self.shelf_init_timer.stop()
+                self.shelf_init_timer = None
+        # Add a timeout/limit? For now, we assume it eventually loads or stays empty (if file missing).
+        # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
+
+    def setup_shelfmark_completer(self):
+        """Initialize the shelfmark autocomplete with data from csv_bank."""
+        if not self.meta_mgr: return False
+
+        # 1. Extract unique shelfmarks (Protected against background updates)
+        try:
+            shelfmarks = sorted(list({v['shelfmark'] for v in self.meta_mgr.csv_bank.values() if v.get('shelfmark')}))
+        except RuntimeError:
+            # Dictionary changed size during iteration (background loader still running)
+            return False
+
+        if not shelfmarks: return False
+
+        # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
+        self.shelf_model = QStandardItemModel()
+        self.valid_shelf_keys = set()
+
+        for s in shelfmarks:
+            item = QStandardItem(s)
+            norm = ShelfmarkCompleter.normalize(s)
+            self.valid_shelf_keys.add(norm)
+            item.setData(norm, Qt.ItemDataRole.UserRole)
+            self.shelf_model.appendRow(item)
+
+        # 3. Setup Completer
+        # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
+        self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self, valid_keys=self.valid_shelf_keys)
+        self.shelf_completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+        self.shelf_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.shelf_completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.shelf_completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+
+        # 4. Attach to Input
+        if hasattr(self, 'browse_shelf_input'):
+            self.browse_shelf_input.setCompleter(self.shelf_completer)
+
+        return True
              
     def init_ui(self):
         if CURRENT_LANG == 'he':
@@ -2910,36 +2992,7 @@ class GenizahGUI(QMainWindow):
             self.browse_text.setText(tr("Page not found."))
             return
 
-        self.current_browse_p = page_data['p_num']
-
-        # Update Nav
-        self.btn_b_prev.setEnabled(page_data['current_idx'] > 1)
-        self.btn_b_next.setEnabled(page_data['current_idx'] < page_data['total_pages'])
-
-        # Update Combo
-        total = page_data['total_pages']
-        curr_idx = page_data['current_idx'] # 1-based index
-
-        self.combo_browse_page.blockSignals(True)
-        if self.combo_browse_page.count() != total:
-            self.combo_browse_page.clear()
-            items = [str(i) for i in range(1, total + 1)]
-            self.combo_browse_page.addItems(items)
-
-        if 0 < curr_idx <= total:
-            self.combo_browse_page.setCurrentIndex(curr_idx - 1)
-        self.combo_browse_page.setEnabled(True)
-        self.combo_browse_page.blockSignals(False)
-
-        # Update Text
-        raw_text = page_data['text']
-        html = raw_text.replace("\n", "<br>")
-        self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
-
-        # Sync Image Viewer
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
-        self.browse_viewer.set_page(idx)
+        self.browse_render_page(page_data)
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
@@ -4450,7 +4503,7 @@ class GenizahGUI(QMainWindow):
             if digits_only and digits_only == cleaned:
                 sys_ids.add(cleaned)
             else:
-                norm = self.normalize_shelfmark(e)
+                norm = self._normalize_shelfmark(e)
                 if norm:
                     shelves.add(norm)
 
@@ -4496,7 +4549,7 @@ class GenizahGUI(QMainWindow):
             self.meta_mgr.fetch_nli_data(sys_id)
 
         _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
-        norm_shelf = self.normalize_shelfmark(shelf)
+        norm_shelf = self._normalize_shelfmark(shelf)
         if norm_shelf and norm_shelf in self.excluded_shelfmarks:
             return True
         return False
@@ -5876,6 +5929,12 @@ class GenizahGUI(QMainWindow):
         self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
         self.enrich_browse_worker.start()
 
+        # Try to render page text immediately if possible
+        if page_data:
+            self.browse_render_page(page_data)
+        elif self.current_browse_sid:
+            self.browse_load_page()
+
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
@@ -5913,6 +5972,13 @@ class GenizahGUI(QMainWindow):
             self.btn_b_all.blockSignals(False)
             self.btn_b_toggle_img.setEnabled(True)
             self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+
+        # Enable core buttons immediately when content is available
+        self.btn_find_parallels.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
+        self.btn_b_all.setEnabled(True)
+        if self.current_browse_sid:
+            self.btn_b_catalog.setEnabled(True)
 
         browse_html_text = pd['text'].replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
