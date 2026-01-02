@@ -999,8 +999,12 @@ class LabEngine:
                     doc = self.lab_searcher.doc(doc_addr)
 
                     # Fetch Stitched Text for scoring (matches crossing boundary)
-                    stitched_content = doc['content_index'][0] if 'content_index' in doc else doc['content'][0]
                     clean_content = doc['content'][0]
+                    try:
+                        stitched_content = doc['content_index'][0]
+                    except (KeyError, IndexError):
+                        stitched_content = clean_content
+
                     uid = doc['unique_id'][0]
 
                     # --- Filter Text Logic ---
@@ -2934,7 +2938,10 @@ class SearchEngine:
 
                 # Fetch clean text and stitched text
                 clean_content = doc['content'][0]
-                stitched_content = doc['content_index'][0] if 'content_index' in doc else clean_content
+                try:
+                    stitched_content = doc['content_index'][0]
+                except (KeyError, IndexError):
+                    stitched_content = clean_content
 
                 # Highlight using Stitched content (to show overlap)
                 hl_c = self.highlight(stitched_content, regex, False)
