@@ -211,7 +211,7 @@ class DocumentIterator:
             if not words: words = []
 
             snippet = " ".join(words[:50])
-            separator = " [>>>] "
+            separator = " "
             prev_doc['content_index'] = prev_doc['content_clean'] + separator + snippet
         else:
             prev_doc['content_index'] = prev_doc['content_clean']
