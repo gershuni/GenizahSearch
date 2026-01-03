@@ -693,6 +693,7 @@ class ManuscriptViewerWidget(QWidget):
         self.current_idx = 0
         self.loader_thread = None
         self.external_provider = None
+        self._full_image_loaded = False
         self.init_ui()
 
     def init_ui(self):
@@ -895,6 +896,7 @@ class ManuscriptViewerWidget(QWidget):
         self.current_idx = index
         img_data = self.active_list[index]
         base_url = img_data['url']
+        thumb_url = img_data.get('thumb_url')
 
         self.scroll_area.set_status_message(tr("Loading..."))
 
@@ -904,6 +906,12 @@ class ManuscriptViewerWidget(QWidget):
 
         final_url = self._resolve_url(base_url)
 
+        # 2-Stage Loading Logic
+        if thumb_url:
+            # Stage 1: Load thumbnail immediately (placeholder)
+            self._load_thumb_placeholder(thumb_url)
+
+        # Stage 2: Load full image in background
         self.loader_thread = ImageLoaderThread(final_url)
         self.loader_thread.image_loaded.connect(self.display_image)
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
@@ -912,7 +920,35 @@ class ManuscriptViewerWidget(QWidget):
         # Preload next image
         self._preload(index + 1)
 
+    def _load_thumb_placeholder(self, url):
+        """Loads a thumbnail as a temporary placeholder while full image loads."""
+        # Capture current index to prevent stale updates on rapid navigation
+        request_idx = self.current_idx
+
+        # We'll use a unique worker for this specific thumb request to avoid race conditions with main loader
+        worker = ImageLoaderThread(url)
+
+        def on_thumb_ready(img):
+            # RACE CONDITION FIX:
+            # 1. Only update if we are still on the same page index
+            if self.current_idx != request_idx:
+                return
+
+            # 2. Only update if the full image HAS NOT loaded yet.
+            if self._full_image_loaded:
+                return
+
+            if not img.isNull():
+                pix = QPixmap.fromImage(img)
+                self.scroll_area.set_image(pix)
+
+        worker.image_loaded.connect(on_thumb_ready)
+        worker.start()
+        self._thumb_worker = worker
+
     def display_image(self, image):
+        self._full_image_loaded = True # Mark full image as ready
+
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
         self.slider_rotation.setValue(0)
@@ -2974,10 +3010,6 @@ class GenizahGUI(QMainWindow):
                  if pd: text_content = pd['text']
 
         if text_content:
-            # CLEANUP: Remove "Image X (Folio Y)" headers if they were embedded in text?
-            # get_part_text_sequence returns raw text, so headers are separate in the dict.
-            # We joined s['text'] above, so we are good.
-
             self.send_result_to_composition(
                 {'display': {'id': self.current_browse_sid}},
                 source_text=text_content,
@@ -3062,17 +3094,22 @@ class GenizahGUI(QMainWindow):
         # We need to know if this manuscript belongs to an Oxford Part to show the aggregated view.
         # Check cache or enriched metadata.
         meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-
-        # Try to resolve shelfmark to check Oxford map
-        shelf_for_ox = meta.get('shelfmark')
-        if not shelf_for_ox or shelf_for_ox == 'Unknown':
-            shelf_for_ox, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
-
-        ox_vol, ox_folio = self.meta_mgr._parse_oxford_volume_and_folio(shelf_for_ox)
         part_data = None
 
-        if ox_vol and ox_folio is not None:
-            part_data = self.meta_mgr.oxford_parts_lookup.get((ox_vol, ox_folio))
+        # A. Direct Lookup from CSV (Authoritative)
+        ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(self.current_browse_sid)
+        if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
+            part_data = self.meta_mgr.oxford_parts_by_id[ox_part_id]
+
+        # B. Fallback to Parsing (Legacy)
+        if not part_data:
+            shelf_for_ox = meta.get('shelfmark')
+            if not shelf_for_ox or shelf_for_ox == 'Unknown':
+                shelf_for_ox, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+
+            ox_vol, ox_folio = self.meta_mgr._parse_oxford_volume_and_folio(shelf_for_ox)
+            if ox_vol and ox_folio is not None:
+                part_data = self.meta_mgr.oxford_parts_lookup.get((ox_vol, ox_folio))
 
         html_content = []
 

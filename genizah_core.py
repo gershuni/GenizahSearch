@@ -1630,7 +1630,10 @@ class MetadataManager:
         # Oxford Data Structures
         self.oxford_db = {}
         self.oxford_parts_lookup = {}  # (vol, folio) -> part_data
-        self.reverse_shelfmark_map = {}  # (vol, folio) -> sys_id
+        self.oxford_parts_by_id = {}   # part_id_str -> part_data
+        self.sys_id_to_oxford_part = {} # sys_id -> part_id_str
+        self.oxford_part_to_sys_ids = defaultdict(list) # part_id_str -> [sys_ids]
+        # reverse_shelfmark_map deprecated in favor of direct mapping from CSV
 
         # Load Oxford DB
         oxford_path = os.path.join(Config.BASE_DIR, "oxford_full_db.json")
@@ -1673,39 +1676,50 @@ class MetadataManager:
 
         LOGGER.info("Loading libraries.csv from %s", Config.LIBRARIES_CSV)
         
-        import csv
         try:
             with open(Config.LIBRARIES_CSV, 'r', encoding='utf-8', errors='replace') as f:
-                reader = csv.reader(f, delimiter=',')
-                next(reader, None) # Skip header
+                # Use DictReader to handle columns by name if available
+                reader = csv.DictReader(f)
+
+                # Check if we have the new column
+                has_oxford_col = 'oxford_part_id' in (reader.fieldnames or [])
+
+                # Fallback if headers are missing or not matching expected names (legacy CSV)
+                if not reader.fieldnames or 'system_number' not in reader.fieldnames:
+                    # Re-open for standard reader if DictReader fails to identify structure
+                    f.seek(0)
+                    std_reader = csv.reader(f)
+                    next(std_reader, None) # Skip header
+                    for row in std_reader:
+                        if not row or len(row) < 2: continue
+                        sys_id = "".join(ch for ch in str(row[0]) if ch.isdigit())
+                        shelf = row[1].split('|')[0].strip()
+                        title = row[5].strip() if len(row) > 5 else ""
+                        self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+                    return
 
                 for row in reader:
-
-                    if not row or len(row) < 2:
-                        continue
-                    # Format: system_number | call_numbers | ... | titles
-                    raw_sys_id = row[0]
+                    raw_sys_id = row.get('system_number', '')
                     sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
 
-                    # Call numbers can be multiple separated by '|'
-                    # We take the shortest one that looks like a shelfmark, or just the first
-                    raw_shelves = row[1].split('|')
+                    # Shelfmark logic
+                    raw_shelves = row.get('call_numbers', '').split('|')
                     shelf = raw_shelves[0].strip()
-                    # Try to find a nice short shelfmark
                     for s in raw_shelves:
                         s = s.strip()
                         if s and len(s) < len(shelf):
                             shelf = s
 
-                    # Title is column index 5 (0-based)
-                    title = ""
-                    if len(row) > 5:
-                        title = row[5].strip()
+                    title = row.get('titles_non_placeholder', '').strip()
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
 
-            # Build reverse map for Oxford lookups
-            self._build_reverse_shelfmark_map()
+                    # Oxford Mapping
+                    if has_oxford_col:
+                        ox_id = row.get('oxford_part_id', '').strip()
+                        if ox_id:
+                            self.sys_id_to_oxford_part[sys_id] = ox_id
+                            self.oxford_part_to_sys_ids[ox_id].append(sys_id)
 
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
@@ -1750,33 +1764,18 @@ class MetadataManager:
         count = 0
         for vol_id, items in self.oxford_db.items():
             for key, part_data in items.items():
-                # Key is like "MS. Heb. a. 1/2"
-                # This implies "Volume a. 1"
-                # But the range [3, 23] applies to folios in that volume.
-                # We need to extract the Volume string from the Key.
+                # Store the key in the object for reverse lookup
+                part_data['part_id'] = key
+                self.oxford_parts_by_id[key] = part_data
 
-                # Parse the Key to get the Volume base
+                # Maintain legacy lookup for safety/fallback (vol/folio based)
                 vol, _ = self._parse_oxford_volume_and_folio(key)
-
                 if vol and part_data.get('folio_range'):
                     start, end = part_data['folio_range']
-                    # Map every folio in range to this Part
                     for f in range(start, end + 1):
                         self.oxford_parts_lookup[(vol, f)] = part_data
                     count += 1
-        LOGGER.info(f"Built Oxford parts lookup with {count} parts mapping to {len(self.oxford_parts_lookup)} folios.")
-
-    def _build_reverse_shelfmark_map(self):
-        """Map (Volume, Folio) -> SystemID using CSV bank."""
-        count = 0
-        for sys_id, data in self.csv_bank.items():
-            shelf = data.get('shelfmark')
-            if shelf:
-                vol, folio = self._parse_oxford_volume_and_folio(shelf)
-                if vol and folio is not None:
-                    self.reverse_shelfmark_map[(vol, folio)] = sys_id
-                    count += 1
-        LOGGER.info(f"Built reverse shelfmark map with {count} entries.")
+        LOGGER.info(f"Built Oxford parts lookup with {count} parts.")
 
     def get_meta_for_id(self, sys_id):
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
@@ -2143,46 +2142,80 @@ class MetadataManager:
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
         # 3. Check for Oxford Part Match
-        # We check if this System ID's shelfmark maps to an Oxford Part
-        shelf_for_ox = current_meta.get('shelfmark')
-        if not shelf_for_ox or shelf_for_ox == 'Unknown':
-            shelf_for_ox, _ = self.get_meta_for_id(system_id)
+        # Direct lookup using new mapping
+        ox_part_id = self.sys_id_to_oxford_part.get(system_id)
 
-        ox_vol, ox_folio = self._parse_oxford_volume_and_folio(shelf_for_ox)
+        # Fallback to parsing if not found in CSV map (e.g. older CSV)
+        if not ox_part_id:
+            shelf_for_ox = current_meta.get('shelfmark')
+            if not shelf_for_ox or shelf_for_ox == 'Unknown':
+                shelf_for_ox, _ = self.get_meta_for_id(system_id)
+            ox_vol, ox_folio = self._parse_oxford_volume_and_folio(shelf_for_ox)
+            if ox_vol and ox_folio is not None:
+                # Find part via lookup
+                p_data = self.oxford_parts_lookup.get((ox_vol, ox_folio))
+                if p_data: ox_part_id = p_data.get('part_id')
 
-        if ox_vol and ox_folio is not None:
-            ox_key = (ox_vol, ox_folio)
-            if ox_key in self.oxford_parts_lookup:
-                part_data = self.oxford_parts_lookup[ox_key]
+        if ox_part_id and ox_part_id in self.oxford_parts_by_id:
+            part_data = self.oxford_parts_by_id[ox_part_id]
 
-                # Inject Oxford Metadata
-                if 'metadata' in part_data:
-                    for k, v in part_data['metadata'].items():
-                        if v:
-                            external_meta[f"Oxford {k.title()}"] = v
+            # Inject Oxford Metadata
+            if 'metadata' in part_data:
+                for k, v in part_data['metadata'].items():
+                    if v:
+                        external_meta[f"Oxford {k.title()}"] = v
 
-                    # Use description if missing
-                    if not current_meta.get('desc') and part_data['metadata'].get('contents'):
-                        current_meta['desc'] = part_data['metadata']['contents']
+                # Use description if missing
+                if not current_meta.get('desc') and part_data['metadata'].get('contents'):
+                    current_meta['desc'] = part_data['metadata']['contents']
 
-                # Inject Oxford Images (Filtered by Folio)
-                if 'images' in part_data:
-                    target_folio_str = str(ox_folio)
-                    # We look for images like "7a", "7b" for folio 7
-                    for img in part_data['images']:
-                        lbl = img.get('label', '')
+            # Inject Oxford Images (Filtered by Folio if we know the folio, or ALL if direct part match?)
+            # Usually we want images relevant to THIS fragment.
+            # If we used direct mapping, we might not know the exact folio number easily unless we parse.
+            # However, typically Oxford Parts images are listed completely.
+            # If the SysID covers the whole part, we show all.
+            # If it covers a specific folio, we might want to filter.
+            # BUT: Users often want to see context.
+            # Let's show ALL images for the part if mapped directly,
+            # OR try to filter if we have folio info?
+            # User instruction didn't specify filtering change, but "View All" implies seeing everything.
+            # The Viewer is per-fragment.
+            # Let's keep the filter logic IF we can derive folio, otherwise show all?
+            # Actually, standard behavior is to show images for the fragment.
+            # Let's try to infer folio from shelfmark still, just for filtering images?
+            # Or simpler: show all images associated with this Part ID.
+            # If "MS. Heb. a. 1/2" has 20 images, and this SysID is just folio 3...
+            # Ideally we show folio 3.
+            # I will try to parse the folio from the shelfmark to keep the filter.
+
+            target_folio_str = None
+            shelf_chk = current_meta.get('shelfmark') or self.get_meta_for_id(system_id)[0]
+            _, f_num = self._parse_oxford_volume_and_folio(shelf_chk)
+            if f_num: target_folio_str = str(f_num)
+
+            if 'images' in part_data:
+                for img in part_data['images']:
+                    lbl = img.get('label', '')
+
+                    # If we have a specific folio, filter. If not, include all (safe fallback).
+                    include = True
+                    if target_folio_str:
                         # Regex: Starts with folio number, followed by optional letter, then end
-                        if re.match(f"^{target_folio_str}[a-z]?$", lbl, re.IGNORECASE):
-                            # Avoid duplicates
-                            if not any(x['url'] == img['full_url'] for x in images_ext):
-                                images_ext.append({
-                                    'label': f"Oxford {lbl}",
-                                    'url': img['full_url']
-                                })
+                        if not re.match(f"^{target_folio_str}[a-z]?$", lbl, re.IGNORECASE):
+                            include = False
 
-                # Set attribution if missing
-                if not current_meta.get('attribution'):
-                    current_meta['attribution'] = "Bodleian Library, University of Oxford"
+                    if include:
+                        # Avoid duplicates
+                        if not any(x['url'] == img['full_url'] for x in images_ext):
+                            images_ext.append({
+                                'label': f"Oxford {lbl}",
+                                'url': img['full_url'],
+                                'thumb_url': img.get('thumb_url')
+                            })
+
+            # Set attribution if missing
+            if not current_meta.get('attribution'):
+                current_meta['attribution'] = "Bodleian Library, University of Oxford"
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
@@ -3244,99 +3277,54 @@ class SearchEngine:
         Fetch text sequence for an Oxford Part spanning multiple folios/system IDs.
         Returns list of {'text': ..., 'header': 'Image X (Folio Y)', ...}
         """
-        if not part_data or 'folio_range' not in part_data:
+        if not part_data:
             return []
 
-        start, end = part_data['folio_range']
+        part_id = part_data.get('part_id')
+        if not part_id:
+            # Fallback scan if part_id wasn't injected yet (older state)
+            for k, v in self.meta_mgr.oxford_parts_by_id.items():
+                if v is part_data:
+                    part_id = k
+                    break
 
-        # Determine the volume key for this part (needed for reverse lookup)
-        # We can extract it from the part's key in oxford_parts_lookup if we had it,
-        # or we can infer it from a sample image URL? No.
-        # We need the volume string.
-        # However, part_data itself doesn't contain the normalized volume string.
-        # We must find which key in oxford_parts_lookup points to this object?
-        # That is O(N).
-
-        # Better: Iterate range and try to find matching SystemID for each folio
-        # using reverse_shelfmark_map. But reverse_shelfmark_map needs (vol, folio).
-        # We don't know 'vol' just from 'part_data'.
-        # Solution: When passing part_data, we usually just found it via a key (vol, folio).
-        # But this method is called from UI with just part_data.
-
-        # Workaround: Find the volume from the first successful reverse lookup
-        # We can iterate all volumes? No, that's inefficient.
-
-        # Let's try to parse the first image label to guess?
-        # Or... MetadataManager could store the volume in part_data during build?
-        # Let's modify _build_oxford_maps to inject 'normalized_vol' into part_data.
-        # BUT, modifying the dict might persist if we are not careful (it's in memory).
-        # That seems safe.
-
-        # Wait, I cannot modify _build_oxford_maps in this step as it was previous step.
-        # I will rely on reverse lookups or...
-        # Let's check if we can infer vol from sys_id that triggered this?
-        # The caller (GenizahGUI) has the current sys_id.
-        # It can pass the shelfmark or we can look it up.
-
-        # Actually, let's look at how we get part_data.
-        # In UI: enrich_metadata finds it.
-        # If I can't easily get the volume, I might have to scan.
-        # However, since we are inside SearchEngine, we have access to MetaManager.
-
-        # Let's search the reverse map for the current folio range?
-        # No, the reverse map is (vol, folio) -> sys_id.
-
-        # Let's try to extract volume from one of the images?
-        # "MS_HEB_a_1_3a.jpg" -> vol "hebe1"? No "a_1" -> "heba1".
-        # This is unreliable.
-
-        # Re-reading my previous step: _build_oxford_maps populates oxford_parts_lookup.
-        # I will do a quick scan of oxford_parts_lookup to find the key for this part_data object.
-        # Since it's a reference comparison, it should be fast enough or I can just break after one hit.
-
-        target_vol = None
-        for (v, f), data in self.meta_mgr.oxford_parts_lookup.items():
-            if data is part_data:
-                target_vol = v
-                break
-
-        if not target_vol:
+        if not part_id:
             return []
+
+        # 1. Retrieve associated System IDs from new map
+        sys_ids = self.meta_mgr.oxford_part_to_sys_ids.get(part_id, [])
+
+        # 2. Deduplicate
+        unique_sys_ids = list(set(sys_ids))
+
+        # 3. Sort (Crucial for reading order)
+        # Use shelfmark for natural sorting (usually contains folio number)
+        def sort_key(sid):
+            shelf = self.meta_mgr.nli_cache.get(sid, {}).get('shelfmark')
+            if not shelf:
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+            return natural_sort_key(shelf or "")
+
+        unique_sys_ids.sort(key=sort_key)
 
         sequence = []
 
-        # Now iterate the full range
-        for folio in range(start, end + 1):
-            sys_id = self.meta_mgr.reverse_shelfmark_map.get((target_vol, folio))
+        for sys_id in unique_sys_ids:
+            # Try to infer folio number from shelfmark for display
+            shelf, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            _, f_num = self.meta_mgr._parse_oxford_volume_and_folio(shelf)
+            folio_label = f"Folio {f_num}" if f_num is not None else "Folio ?"
 
-            # If we have a system ID, get its text
-            if sys_id:
-                # Find the page in that manuscript that corresponds to this folio?
-                # Usually a fragment (System ID) in Genizah is 1-2 pages.
-                # If libraries.csv says "MS.../7", it usually means the whole item is Folio 7.
-                # So we fetch the whole text for that System ID.
-                # But wait, what if the System ID contains multiple pages (recto/verso)?
-                # We should append them all.
+            pages = self.get_full_manuscript(sys_id)
+            for p in pages:
+                header = f"Image {p['p_num']} ({folio_label})"
 
-                # Fetch all pages for this System ID
-                pages = self.get_full_manuscript(sys_id)
-                for p in pages:
-                    # Construct a nice header
-                    # Image X (Folio Y)
-                    # Use the page's image label if possible, or just the folio
-                    header = f"Image {p['p_num']} (Folio {folio})"
-
-                    sequence.append({
-                        'text': p['text'],
-                        'header': header,
-                        'sys_id': sys_id,
-                        'folio': folio,
-                        'p_num': p['p_num']
-                    })
-            else:
-                # Missing folio in our index?
-                # Maybe display a placeholder or skip
-                pass
+                sequence.append({
+                    'text': p['text'],
+                    'header': header,
+                    'sys_id': sys_id,
+                    'p_num': p['p_num']
+                })
 
         return sequence
 
