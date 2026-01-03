@@ -2928,6 +2928,62 @@ class GenizahGUI(QMainWindow):
             self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
             self.browse_load_page()
 
+    def browse_search_parallels(self):
+        if not self.current_browse_sid: return
+
+        # Get Title
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        full_title = meta.get('title') or ""
+        # Truncate title
+        words = full_title.split()
+        if len(words) > 6:
+            short_title = " ".join(words[:6]) + "..."
+        else:
+            short_title = full_title
+
+        text_content = ""
+
+        if self.btn_b_all.isChecked():
+             # Check if we have specialized Oxford sequence text (in browse_text HTML)
+             # The simplest way is to grab the raw text from the text browser,
+             # but QPlainTextEdit/TextBrowser might have formatting.
+             # Better to re-fetch the sequence if it's an Oxford part.
+
+             # 1. Check if Oxford Part
+             shelf_for_ox = meta.get('shelfmark')
+             if not shelf_for_ox or shelf_for_ox == 'Unknown':
+                 shelf_for_ox, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+
+             ox_vol, ox_folio = self.meta_mgr._parse_oxford_volume_and_folio(shelf_for_ox)
+             part_data = None
+             if ox_vol and ox_folio is not None:
+                 part_data = self.meta_mgr.oxford_parts_lookup.get((ox_vol, ox_folio))
+
+             if part_data:
+                 seq = self.searcher.get_part_text_sequence(part_data)
+                 text_content = "\n\n".join([s['text'] for s in seq])
+             else:
+                 # Standard Full Text
+                 pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+                 if pages:
+                     text_content = "\n\n".join([p['text'] for p in pages])
+        else:
+             # Current Page
+             if self.current_browse_internal_idx is not None:
+                 pd = self.searcher.get_browse_page(self.current_browse_sid, absolute_index=self.current_browse_internal_idx)
+                 if pd: text_content = pd['text']
+
+        if text_content:
+            # CLEANUP: Remove "Image X (Folio Y)" headers if they were embedded in text?
+            # get_part_text_sequence returns raw text, so headers are separate in the dict.
+            # We joined s['text'] above, so we are good.
+
+            self.send_result_to_composition(
+                {'display': {'id': self.current_browse_sid}},
+                source_text=text_content,
+                title=short_title
+            )
+
     def on_browse_page_combo_changed(self, index):
         if index < 0: return
         if not self.current_browse_sid: return
@@ -3002,38 +3058,81 @@ class GenizahGUI(QMainWindow):
         self.browse_text.setText(tr("Loading full manuscript..."))
         QApplication.processEvents() # Refresh UI
         
-        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-        if not pages:
-            QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
-            return
-
-        # Get enriched map if available
+        # 1. Check for Oxford Part Logic
+        # We need to know if this manuscript belongs to an Oxford Part to show the aggregated view.
+        # Check cache or enriched metadata.
         meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-        canvas_map = meta.get('canvas_map', {})
+
+        # Try to resolve shelfmark to check Oxford map
+        shelf_for_ox = meta.get('shelfmark')
+        if not shelf_for_ox or shelf_for_ox == 'Unknown':
+            shelf_for_ox, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+
+        ox_vol, ox_folio = self.meta_mgr._parse_oxford_volume_and_folio(shelf_for_ox)
+        part_data = None
+
+        if ox_vol and ox_folio is not None:
+            part_data = self.meta_mgr.oxford_parts_lookup.get((ox_vol, ox_folio))
 
         html_content = []
-        for p in pages:
-            # Anchor for scrolling
-            anchor = f'<a name="page_{p["p_num"]}"></a>'
+
+        if part_data:
+            # OXFORD PART MODE: Aggregate multiple manuscripts/folios
+            sequence = self.searcher.get_part_text_sequence(part_data)
             
-            # Visual Separator
-            img_lbl = tr("Image")
-            fl_id = p.get('fl_id')
+            if not sequence:
+                self.browse_text.setText(tr("No text found for this Part."))
+                return
 
-            # Resolve Label
-            fl_digits = re.sub(r"\D", "", str(fl_id or ""))
-            label = canvas_map.get(fl_digits, "")
+            for seg in sequence:
+                header = seg.get('header', 'Page')
+                text = seg.get('text', '')
 
-            fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
-            label_suffix = f" - {label}" if label else ""
+                # Visual Separator
+                separator = f"""
+                <div style='background-color: #e8f4f8; color: #2c3e50; padding: 8px; margin-top: 20px; border-bottom: 2px solid #3498db;'>
+                    <b>{header}</b>
+                </div>
+                """
 
-            separator = f"""
-            <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
-            </div>
-            """
-            
-            # Content with line breaks preserved
+                page_html = text.replace('\n', '<br>')
+                html_content.append(separator)
+                html_content.append(f"<div dir='rtl' style='margin-bottom: 30px;'>{page_html}</div>")
+
+        else:
+            # STANDARD MODE
+            pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+            if not pages:
+                QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
+                return
+
+            canvas_map = meta.get('canvas_map', {})
+
+            for p in pages:
+                # Anchor for scrolling
+                anchor = f'<a name="page_{p["p_num"]}"></a>'
+
+                # Visual Separator
+                img_lbl = tr("Image")
+                fl_id = p.get('fl_id')
+
+                # Resolve Label
+                fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+                label = canvas_map.get(fl_digits, "")
+
+                fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+                label_suffix = f" - {label}" if label else ""
+
+                separator = f"""
+                <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
+                    <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
+                </div>
+                """
+
+                page_html = p['text'].replace('\n', '<br>')
+                html_content.append(anchor)
+                html_content.append(separator)
+                html_content.append(f"<div dir='rtl' style='margin-bottom: 30px;'>{page_html}</div>")
             content = p['text'].replace("\n", "<br>")
             
             html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")

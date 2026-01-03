@@ -1627,6 +1627,21 @@ class MetadataManager:
             except Exception as e:
                 LOGGER.error("Failed to create index directory for metadata at %s: %s", Config.INDEX_DIR, e)
 
+        # Oxford Data Structures
+        self.oxford_db = {}
+        self.oxford_parts_lookup = {}  # (vol, folio) -> part_data
+        self.reverse_shelfmark_map = {}  # (vol, folio) -> sys_id
+
+        # Load Oxford DB
+        oxford_path = os.path.join(Config.BASE_DIR, "oxford_full_db.json")
+        if os.path.exists(oxford_path):
+            try:
+                with open(oxford_path, 'r', encoding='utf-8') as f:
+                    self.oxford_db = json.load(f)
+                self._build_oxford_maps()
+            except Exception as e:
+                LOGGER.error("Failed to load Oxford DB: %s", e)
+
         # Load small caches immediately
         self._load_small_caches()
 
@@ -1688,9 +1703,80 @@ class MetadataManager:
                         title = row[5].strip()
 
                     self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+
+            # Build reverse map for Oxford lookups
+            self._build_reverse_shelfmark_map()
+
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
+
+    def _parse_oxford_volume_and_folio(self, shelfmark):
+        """
+        Parse shelfmark into (normalized_volume, folio_number).
+        Handles: "MS. Heb. a. 1/2", "MS heb. a.3/16"
+        Returns (None, None) if parsing fails.
+        """
+        if not shelfmark: return None, None
+
+        # Remove common prefixes to clean up the "Volume" part later
+        s = shelfmark.strip()
+
+        # Regex: Capture Volume (lazy) then Separator then Number (end of string)
+        # Separators: / . or " fol. "
+        match = re.search(r'^(.*?)(?:[\./\s]|(?:\s+fol\.?\s+))(\d+)$', s, re.IGNORECASE)
+
+        if match:
+            raw_vol = match.group(1)
+            raw_num = match.group(2)
+
+            # Normalize volume: remove "MS", "Bodl", non-alphanumeric
+            # "MS. Heb. a. 1" -> "heba1"
+            vol_clean = re.sub(r'^(?:bodl\.?|ms\.?)\s*', '', raw_vol, flags=re.IGNORECASE)
+            norm_vol = re.sub(r'[^\w]', '', vol_clean).lower()
+
+            # If still starts with ms (e.g. from MS heb), strip it
+            if norm_vol.startswith('ms'): norm_vol = norm_vol[2:]
+
+            try:
+                return norm_vol, int(raw_num)
+            except ValueError:
+                pass
+
+        return None, None
+
+    def _build_oxford_maps(self):
+        """Build lookup map from Oxford DB."""
+        count = 0
+        for vol_id, items in self.oxford_db.items():
+            for key, part_data in items.items():
+                # Key is like "MS. Heb. a. 1/2"
+                # This implies "Volume a. 1"
+                # But the range [3, 23] applies to folios in that volume.
+                # We need to extract the Volume string from the Key.
+
+                # Parse the Key to get the Volume base
+                vol, _ = self._parse_oxford_volume_and_folio(key)
+
+                if vol and part_data.get('folio_range'):
+                    start, end = part_data['folio_range']
+                    # Map every folio in range to this Part
+                    for f in range(start, end + 1):
+                        self.oxford_parts_lookup[(vol, f)] = part_data
+                    count += 1
+        LOGGER.info(f"Built Oxford parts lookup with {count} parts mapping to {len(self.oxford_parts_lookup)} folios.")
+
+    def _build_reverse_shelfmark_map(self):
+        """Map (Volume, Folio) -> SystemID using CSV bank."""
+        count = 0
+        for sys_id, data in self.csv_bank.items():
+            shelf = data.get('shelfmark')
+            if shelf:
+                vol, folio = self._parse_oxford_volume_and_folio(shelf)
+                if vol and folio is not None:
+                    self.reverse_shelfmark_map[(vol, folio)] = sys_id
+                    count += 1
+        LOGGER.info(f"Built reverse shelfmark map with {count} entries.")
 
     def get_meta_for_id(self, sys_id):
         # Normalize sys_id to digits only (handles BOM/RTL marks/stray chars)
@@ -2055,6 +2141,48 @@ class MetadataManager:
 
         if nli_iiif_data.get('canvas_map'):
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
+
+        # 3. Check for Oxford Part Match
+        # We check if this System ID's shelfmark maps to an Oxford Part
+        shelf_for_ox = current_meta.get('shelfmark')
+        if not shelf_for_ox or shelf_for_ox == 'Unknown':
+            shelf_for_ox, _ = self.get_meta_for_id(system_id)
+
+        ox_vol, ox_folio = self._parse_oxford_volume_and_folio(shelf_for_ox)
+
+        if ox_vol and ox_folio is not None:
+            ox_key = (ox_vol, ox_folio)
+            if ox_key in self.oxford_parts_lookup:
+                part_data = self.oxford_parts_lookup[ox_key]
+
+                # Inject Oxford Metadata
+                if 'metadata' in part_data:
+                    for k, v in part_data['metadata'].items():
+                        if v:
+                            external_meta[f"Oxford {k.title()}"] = v
+
+                    # Use description if missing
+                    if not current_meta.get('desc') and part_data['metadata'].get('contents'):
+                        current_meta['desc'] = part_data['metadata']['contents']
+
+                # Inject Oxford Images (Filtered by Folio)
+                if 'images' in part_data:
+                    target_folio_str = str(ox_folio)
+                    # We look for images like "7a", "7b" for folio 7
+                    for img in part_data['images']:
+                        lbl = img.get('label', '')
+                        # Regex: Starts with folio number, followed by optional letter, then end
+                        if re.match(f"^{target_folio_str}[a-z]?$", lbl, re.IGNORECASE):
+                            # Avoid duplicates
+                            if not any(x['url'] == img['full_url'] for x in images_ext):
+                                images_ext.append({
+                                    'label': f"Oxford {lbl}",
+                                    'url': img['full_url']
+                                })
+
+                # Set attribution if missing
+                if not current_meta.get('attribution'):
+                    current_meta['attribution'] = "Bodleian Library, University of Oxford"
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
@@ -3110,6 +3238,107 @@ class SearchEngine:
         except Exception as e:
             LOGGER.warning("Failed to retrieve full text for uid %s: %s", uid, e)
         return None
+
+    def get_part_text_sequence(self, part_data):
+        """
+        Fetch text sequence for an Oxford Part spanning multiple folios/system IDs.
+        Returns list of {'text': ..., 'header': 'Image X (Folio Y)', ...}
+        """
+        if not part_data or 'folio_range' not in part_data:
+            return []
+
+        start, end = part_data['folio_range']
+
+        # Determine the volume key for this part (needed for reverse lookup)
+        # We can extract it from the part's key in oxford_parts_lookup if we had it,
+        # or we can infer it from a sample image URL? No.
+        # We need the volume string.
+        # However, part_data itself doesn't contain the normalized volume string.
+        # We must find which key in oxford_parts_lookup points to this object?
+        # That is O(N).
+
+        # Better: Iterate range and try to find matching SystemID for each folio
+        # using reverse_shelfmark_map. But reverse_shelfmark_map needs (vol, folio).
+        # We don't know 'vol' just from 'part_data'.
+        # Solution: When passing part_data, we usually just found it via a key (vol, folio).
+        # But this method is called from UI with just part_data.
+
+        # Workaround: Find the volume from the first successful reverse lookup
+        # We can iterate all volumes? No, that's inefficient.
+
+        # Let's try to parse the first image label to guess?
+        # Or... MetadataManager could store the volume in part_data during build?
+        # Let's modify _build_oxford_maps to inject 'normalized_vol' into part_data.
+        # BUT, modifying the dict might persist if we are not careful (it's in memory).
+        # That seems safe.
+
+        # Wait, I cannot modify _build_oxford_maps in this step as it was previous step.
+        # I will rely on reverse lookups or...
+        # Let's check if we can infer vol from sys_id that triggered this?
+        # The caller (GenizahGUI) has the current sys_id.
+        # It can pass the shelfmark or we can look it up.
+
+        # Actually, let's look at how we get part_data.
+        # In UI: enrich_metadata finds it.
+        # If I can't easily get the volume, I might have to scan.
+        # However, since we are inside SearchEngine, we have access to MetaManager.
+
+        # Let's search the reverse map for the current folio range?
+        # No, the reverse map is (vol, folio) -> sys_id.
+
+        # Let's try to extract volume from one of the images?
+        # "MS_HEB_a_1_3a.jpg" -> vol "hebe1"? No "a_1" -> "heba1".
+        # This is unreliable.
+
+        # Re-reading my previous step: _build_oxford_maps populates oxford_parts_lookup.
+        # I will do a quick scan of oxford_parts_lookup to find the key for this part_data object.
+        # Since it's a reference comparison, it should be fast enough or I can just break after one hit.
+
+        target_vol = None
+        for (v, f), data in self.meta_mgr.oxford_parts_lookup.items():
+            if data is part_data:
+                target_vol = v
+                break
+
+        if not target_vol:
+            return []
+
+        sequence = []
+
+        # Now iterate the full range
+        for folio in range(start, end + 1):
+            sys_id = self.meta_mgr.reverse_shelfmark_map.get((target_vol, folio))
+
+            # If we have a system ID, get its text
+            if sys_id:
+                # Find the page in that manuscript that corresponds to this folio?
+                # Usually a fragment (System ID) in Genizah is 1-2 pages.
+                # If libraries.csv says "MS.../7", it usually means the whole item is Folio 7.
+                # So we fetch the whole text for that System ID.
+                # But wait, what if the System ID contains multiple pages (recto/verso)?
+                # We should append them all.
+
+                # Fetch all pages for this System ID
+                pages = self.get_full_manuscript(sys_id)
+                for p in pages:
+                    # Construct a nice header
+                    # Image X (Folio Y)
+                    # Use the page's image label if possible, or just the folio
+                    header = f"Image {p['p_num']} (Folio {folio})"
+
+                    sequence.append({
+                        'text': p['text'],
+                        'header': header,
+                        'sys_id': sys_id,
+                        'folio': folio,
+                        'p_num': p['p_num']
+                    })
+            else:
+                # Missing folio in our index?
+                # Maybe display a placeholder or skip
+                pass
+
+        return sequence
 
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
