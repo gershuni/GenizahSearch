@@ -1,0 +1,68 @@
+{
+    "3": {
+        "MS. Heb. a. 1/2": {
+            "volume_url": "https://hebrew.bodleian.ox.ac.uk/catalog/volume_3",
+            "direct_link": "https://hebrew.bodleian.ox.ac.uk/catalog/volume_3#MS_Heb_a_1-part2",
+            "metadata": {
+                "title": "Biblical fragments",
+                "languages": "",
+                "contents": "Biblical fragments\nThe two Masorahs, sometimes fuller than in the editions (see\nfol. 3\nto xxi. 2). At end of 23rd (MS. 22nd) Psalm are the words\nעד כאן ביום ראשון\n; all with vowel points and accents.\nLanguage(s):\nHebrew\nα.\nfol. 3\n2 Chronicles\na.\n(\nfol. 3\n) 2 Chronicles xx. 34 (הראשנים) to xxv. 15 (את עמם)\nb.\n(\nfol. 6\n) 2 Chronicles xxix. 1 (וחמש) to xxxii. 24 (יחזקיהו)\nβ.\nfol. 9\nEsther ix. 12 (לאסתר) to end\nγ.\nfol. 9b\nPsalms\nThe divisions are marked for the Psalms, no number for Ps. i: Ps. ii is in the MS. i. Many omissions supplied on the margins by a later hand.\na.\n(\nfol. 9b\n) Psalms i. 1 to vii. 6 (חיי)\nb.\n(\nfol. 11\n) Psalms xvii. 12 (כאריה) to xxviii. 3, MS. xxvii (ועם).",
+                "provenance": "Provenance and Acquisition Bought through the Rev. G. J. Chester , 1890-1 (from the Genizah)."
+            },
+            "folio_range": [
+                3,
+                23
+            ],
+            "images": [
+                {
+                    "label": "3a",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_a_1_3a.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_a_1_3a.jpg"
+                },
+                {
+                    "label": "3b",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_a_1_3b.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_a_1_3b.jpg"
+                },
+                {
+                    "label": "4a",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_a_1_4a.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_a_1_4a.jpg"
+                },
+                {
+                    "label": "4b",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_a_1_4b.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_a_1_4b.jpg"
+                }
+            ]
+        }
+    },
+    "7": {
+        "MS. Heb. b. 1/1": {
+            "volume_url": "https://hebrew.bodleian.ox.ac.uk/catalog/volume_7",
+            "direct_link": "https://hebrew.bodleian.ox.ac.uk/catalog/volume_7#MS_Heb_b_1-part1",
+            "metadata": {
+                "title": "Babylonian Talmud ברכות",
+                "languages": "",
+                "contents": "Fol. 1\nBabylonian Talmud ברכות\nfrom שנ̇ לפתח חטאת רובץ (fol. 61, l. 3 from below) to 62b, obliterated.\nLanguage(s):\nHebrew",
+                "provenance": "Provenance and Acquisition Bought through the Rev. G. J. Chester , 1890 (from the Genizah)."
+            },
+            "folio_range": [
+                1,
+                1
+            ],
+            "images": [
+                {
+                    "label": "1a",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_b_1_1a.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_b_1_1a.jpg"
+                },
+                {
+                    "label": "1b",
+                    "full_url": "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_b_1_1b.jpg",
+                    "thumb_url": "https://hebrew.bodleian.ox.ac.uk/fragments/thumbs/MS_HEB_b_1_1b.jpg"
+                }
+            ]
+        }
+    }
+}
