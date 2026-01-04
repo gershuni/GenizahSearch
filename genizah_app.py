@@ -1978,18 +1978,34 @@ class ResultDialog(QDialog):
 
         # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})
-        if not marc and not meta.get('physical_desc'):
-            self.btn_ext_info.setVisible(False)
-            return
+        ext_meta = meta.get('external_meta', {})
 
         html = "<div style='font-family:Arial;'>"
 
-        # Neubauer / Oxford Data
-        ext_meta = meta.get('external_meta', {})
-        neubauer = ext_meta.get('Oxford Neubauer')
-        if neubauer:
-             cat_url = f"https://genizah.bodleian.ox.ac.uk/catalog/{neubauer}"
-             html += f"<p><b>Neubauer:</b> {neubauer} <a href='{cat_url}'>[Catalogue]</a></p>"
+        # Neubauer / Oxford Data (Grouped)
+        oxford_fields = []
+        for k, v in ext_meta.items():
+            # Filter standard Oxford keys (Title, Contents etc)
+            # Since we stripped "Oxford " prefix, they are just "Title", "Contents"
+            if k in ['Title', 'Contents', 'Provenance', 'Language', 'Bibliography']:
+                oxford_fields.append(f"<b>{k}:</b> {v}")
+
+        # Check for Neubauer ID
+        nb_id = None
+        ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(self.current_sys_id)
+        if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
+            nb_id = self.meta_mgr.oxford_parts_by_id[ox_part_id].get('neubauer')
+
+        if oxford_fields or nb_id:
+             html += f"<div style='background:#f0f0f0; padding:10px; margin-bottom:10px; border-left: 4px solid #3498db;'>"
+             html += f"<b>Neubauer Catalogue Information:</b><br>"
+
+             if nb_id:
+                 cat_url = f"https://genizah.bodleian.ox.ac.uk/catalog/{nb_id}"
+                 html += f"<b>ID:</b> {nb_id} <a href='{cat_url}' style='color:#2980b9;'>[Open Oxford Website]</a><br>"
+
+             html += "<br>".join(oxford_fields)
+             html += "</div>"
 
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
@@ -2024,6 +2040,14 @@ class ResultDialog(QDialog):
 
         self.lbl_title.setText(meta.get('title', ''))
         shelf = meta.get('shelfmark')
+
+        # Determine if we should append Neubauer ID to Header
+        ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(self.current_sys_id)
+        if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
+            pd = self.meta_mgr.oxford_parts_by_id[ox_part_id]
+            nb = pd.get('neubauer')
+            if nb: shelf = f"{shelf} (Neubauer {nb})"
+
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
@@ -2925,7 +2949,15 @@ class GenizahGUI(QMainWindow):
         # Dummy placeholders
         self.browse_thumb = QLabel()
         self.btn_b_ext = QPushButton()
+
+        # Extended Info Panel (Hidden by default)
         self.browse_side_panel = QTextBrowser()
+        self.browse_side_panel.setVisible(False)
+        self.browse_side_panel.setMaximumHeight(200)
+        self.browse_side_panel.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
+
+        # Add to left side
+        text_layout.addWidget(self.browse_side_panel)
 
         return panel
 
@@ -2934,8 +2966,46 @@ class GenizahGUI(QMainWindow):
         if sid != self.current_browse_sid: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
-        # 1. Update Info Label (Top Bar)
+        # 1. Update Info Label (Top Bar) & Side Panel
         marc = meta.get('marc', {})
+        ext_meta = meta.get('external_meta', {})
+
+        # Build Side Panel HTML
+        html = "<div style='font-family:Arial;'>"
+        oxford_fields = []
+        for k, v in ext_meta.items():
+            if k in ['Title', 'Contents', 'Provenance', 'Language', 'Bibliography']:
+                oxford_fields.append(f"<b>{k}:</b> {v}")
+
+        ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(sid)
+        nb_id = None
+        if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
+            nb_id = self.meta_mgr.oxford_parts_by_id[ox_part_id].get('neubauer')
+
+        if oxford_fields or nb_id:
+             html += f"<div style='background:#f0f0f0; padding:10px; margin-bottom:10px; border-left: 4px solid #3498db;'>"
+             html += f"<b>Neubauer Catalogue Information:</b><br>"
+             if nb_id:
+                 cat_url = f"https://genizah.bodleian.ox.ac.uk/catalog/{nb_id}"
+                 html += f"<b>ID:</b> {nb_id} <a href='{cat_url}' style='color:#2980b9;'>[Open Oxford Website]</a><br>"
+             html += "<br>".join(oxford_fields)
+             html += "</div>"
+
+        date_val = marc.get('date')
+        if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys: html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        notes = marc.get('notes', [])
+        if notes: html += f"<p><b>{tr('Notes')}:</b> {'; '.join(notes)}</p>"
+
+        html += "</div>"
+
+        self.browse_side_panel.setHtml(html)
+        # Show panel if Oxford data exists
+        self.browse_side_panel.setVisible(bool(oxford_fields or nb_id))
+
         shelf = meta.get('shelfmark')
         title = meta.get('title')
         if shelf and shelf != "Unknown":
@@ -3111,6 +3181,9 @@ class GenizahGUI(QMainWindow):
         ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(self.current_browse_sid)
         if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
             part_data = self.meta_mgr.oxford_parts_by_id[ox_part_id]
+            # Update Shelfmark input with Neubauer ID if available
+            nb = part_data.get('neubauer')
+            if nb: self.browse_shelf_input.setText(nb)
 
         # B. Fallback to Parsing (Legacy)
         if not part_data:
@@ -5992,6 +6065,32 @@ class GenizahGUI(QMainWindow):
         if fl_id and "fl" not in priority:
             priority.append("fl")
 
+        # Neubauer Detection Logic
+        # If user entered something in Shelfmark that looks like a Neubauer ID, assume they want that part.
+        if shelf_query and not sid:
+            # Check direct Neubauer mapping in Oxford parts
+            # We iterate parts to find matching Neubauer ID. This might be slow if list is huge,
+            # but Oxford list is ~3000 parts, so feasible.
+            target_part = None
+            q_clean = shelf_query.lower().replace("neubauer", "").strip()
+
+            for part in self.meta_mgr.oxford_parts_by_id.values():
+                nb = part.get('neubauer')
+                if nb and str(nb).lower() == q_clean:
+                    target_part = part
+                    break
+
+            if target_part:
+                # Found a Neubauer match! Switch to the first System ID of this part
+                part_sys_ids = self.meta_mgr.oxford_part_to_sys_ids.get(target_part['part_id'])
+                if part_sys_ids:
+                    # Pick first one (sorted logic handled in core, but list is raw here)
+                    # We rely on browse_load later to build the full list
+                    sid = part_sys_ids[0]
+                    # Put "sys" at top priority now
+                    if "sys" in priority: priority.remove("sys")
+                    priority.insert(0, "sys")
+
         def format_option(opt, idx):
             base = opt['shelfmark']
             title = (opt.get('title') or "").strip()
@@ -6111,10 +6210,38 @@ class GenizahGUI(QMainWindow):
             # Find current index in the unified list
             current_idx = self.combo_browse_page.currentIndex()
             new_idx = current_idx + d
+
             if 0 <= new_idx < len(self.current_part_nav_list):
                 self.on_browse_page_combo_changed(new_idx)
             else:
-                QMessageBox.information(self, tr("Nav"), tr("End of part."))
+                # Part Boundary Reached
+                if d > 0:
+                    # Next Manuscript (Beyond Part)
+                    # Find the last system ID in the current part
+                    last_item = self.current_part_nav_list[-1]
+                    last_sid = last_item['sys_id']
+
+                    # Find neighbor of LAST system ID
+                    new_sid = self.searcher.get_adjacent_sys_id_by_file_order(last_sid, 1)
+                    if new_sid:
+                        self.browse_sys_input.setText(new_sid)
+                        self._set_last_browse_field("sys")
+                        self.browse_load()
+                    else:
+                        QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+                else:
+                    # Prev Manuscript (Beyond Part)
+                    # Find first system ID
+                    first_item = self.current_part_nav_list[0]
+                    first_sid = first_item['sys_id']
+
+                    new_sid = self.searcher.get_adjacent_sys_id_by_file_order(first_sid, -1)
+                    if new_sid:
+                        self.browse_sys_input.setText(new_sid)
+                        self._set_last_browse_field("sys")
+                        self.browse_load()
+                    else:
+                        QMessageBox.information(self, tr("Nav"), tr("Start of file list."))
             return
 
         if not self.current_browse_sid: return

@@ -2164,7 +2164,7 @@ class MetadataManager:
             if 'metadata' in part_data:
                 for k, v in part_data['metadata'].items():
                     if v:
-                        external_meta[f"Oxford {k.title()}"] = v
+                        external_meta[k.title()] = v
 
                 # Use description if missing
                 if not current_meta.get('desc') and part_data['metadata'].get('contents'):
@@ -2217,6 +2217,10 @@ class MetadataManager:
             # Set attribution if missing
             if not current_meta.get('attribution'):
                 current_meta['attribution'] = "Bodleian Library, University of Oxford"
+
+            # Prioritize Oxford thumbnail if available
+            if images_ext and 'thumb_url' in images_ext[0]:
+                current_meta['thumb_url'] = images_ext[0]['thumb_url']
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
