@@ -1983,6 +1983,14 @@ class ResultDialog(QDialog):
             return
 
         html = "<div style='font-family:Arial;'>"
+
+        # Neubauer / Oxford Data
+        ext_meta = meta.get('external_meta', {})
+        neubauer = ext_meta.get('Oxford Neubauer')
+        if neubauer:
+             cat_url = f"https://genizah.bodleian.ox.ac.uk/catalog/{neubauer}"
+             html += f"<p><b>Neubauer:</b> {neubauer} <a href='{cat_url}'>[Catalogue]</a></p>"
+
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
 
@@ -3010,6 +3018,9 @@ class GenizahGUI(QMainWindow):
                  if pd: text_content = pd['text']
 
         if text_content:
+            # Strip headers (e.g. Folio 5 Image 10)
+            text_content = re.sub(r'(Folio\s+\d+\s+)?Image\s+[0-9a-z]+(\s+\(Folio\s+\d+\))?', '', text_content, flags=re.IGNORECASE)
+
             self.send_result_to_composition(
                 {'display': {'id': self.current_browse_sid}},
                 source_text=text_content,
@@ -5961,6 +5972,7 @@ class GenizahGUI(QMainWindow):
         # Reset UI
         self.browse_text.setText(tr("Loading metadata..."))
         self.browse_viewer.load_images({}) # Clear viewer
+        self.current_part_nav_list = [] # Reset unified nav
 
         page_data = None
 
@@ -6057,6 +6069,26 @@ class GenizahGUI(QMainWindow):
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
         
+        # --- NEW: Oxford Part Navigation Detection ---
+        # If this manuscript belongs to an Oxford Part, generate the unified navigation list immediately.
+        # This ensures the combo box is populated correctly in browse_render_page.
+
+        # 1. Lookup Part ID
+        ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(sid)
+        if not ox_part_id:
+            # Fallback check (if shelfmark input was used)
+            # Try to resolve part from shelfmark if not in map
+            s_chk, _ = self.meta_mgr.get_meta_for_id(sid)
+            v, f = self.meta_mgr._parse_oxford_volume_and_folio(s_chk)
+            if v and f:
+                pd = self.meta_mgr.oxford_parts_lookup.get((v, f))
+                if pd: ox_part_id = pd.get('part_id')
+
+        if ox_part_id and ox_part_id in self.meta_mgr.oxford_parts_by_id:
+            part_data = self.meta_mgr.oxford_parts_by_id[ox_part_id]
+            self.current_part_nav_list = self.searcher.get_oxford_part_navigation(part_data)
+        # ---------------------------------------------
+
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
         self.btn_b_save.setEnabled(False)
@@ -6074,6 +6106,17 @@ class GenizahGUI(QMainWindow):
             self.browse_load_page()
 
     def browse_navigate(self, d):
+        # Unified Navigation: Check if we are in a Part List
+        if hasattr(self, 'current_part_nav_list') and self.current_part_nav_list:
+            # Find current index in the unified list
+            current_idx = self.combo_browse_page.currentIndex()
+            new_idx = current_idx + d
+            if 0 <= new_idx < len(self.current_part_nav_list):
+                self.on_browse_page_combo_changed(new_idx)
+            else:
+                QMessageBox.information(self, tr("Nav"), tr("End of part."))
+            return
+
         if not self.current_browse_sid: return
 
         idx_arg = self.current_browse_internal_idx
@@ -6128,22 +6171,50 @@ class GenizahGUI(QMainWindow):
         if shelf:
             self.browse_shelf_input.setText(shelf)
 
-        # Update Combo
-        total = pd['total_pages']
-        curr_idx = pd['current_idx'] # 1-based index
-
+        # Update Combo (Unified Logic)
         self.combo_browse_page.blockSignals(True)
-        if self.combo_browse_page.count() != total:
-            self.combo_browse_page.clear()
-            items = [str(i) for i in range(1, total + 1)]
-            self.combo_browse_page.addItems(items)
 
-        if 0 < curr_idx <= total:
-            self.combo_browse_page.setCurrentIndex(curr_idx - 1)
+        if hasattr(self, 'current_part_nav_list') and self.current_part_nav_list:
+            # --- UNIFIED LIST MODE ---
+            # Populate if empty or different
+            # We assume the list doesn't change within the same part session
+            if self.combo_browse_page.count() != len(self.current_part_nav_list):
+                self.combo_browse_page.clear()
+                items = [item['label'] for item in self.current_part_nav_list]
+                self.combo_browse_page.addItems(items)
+
+            # Find current index in the unified list
+            target_combo_idx = -1
+            for i, nav_item in enumerate(self.current_part_nav_list):
+                # Match both System ID and internal page index
+                if nav_item['sys_id'] == self.current_browse_sid and nav_item['p_idx'] == self.current_browse_internal_idx:
+                    target_combo_idx = i
+                    break
+
+            if target_combo_idx != -1:
+                self.combo_browse_page.setCurrentIndex(target_combo_idx)
+
+            # Update Nav Buttons
+            self.btn_b_prev.setEnabled(target_combo_idx > 0)
+            self.btn_b_next.setEnabled(target_combo_idx < len(self.current_part_nav_list) - 1)
+
+        else:
+            # --- STANDARD MODE ---
+            total = pd['total_pages']
+            curr_idx = pd['current_idx'] # 1-based index
+
+            if self.combo_browse_page.count() != total:
+                self.combo_browse_page.clear()
+                items = [str(i) for i in range(1, total + 1)]
+                self.combo_browse_page.addItems(items)
+
+            if 0 < curr_idx <= total:
+                self.combo_browse_page.setCurrentIndex(curr_idx - 1)
+
+            self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
+            self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
+
         self.combo_browse_page.blockSignals(False)
-
-        self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
-        self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
 
         parsed = self.meta_mgr.parse_full_id_components(full_header)
         if parsed.get('fl_id'):

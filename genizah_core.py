@@ -1766,6 +1766,7 @@ class MetadataManager:
             for key, part_data in items.items():
                 # Store the key in the object for reverse lookup
                 part_data['part_id'] = key
+                part_data['neubauer'] = vol_id
                 self.oxford_parts_by_id[key] = part_data
 
                 # Maintain legacy lookup for safety/fallback (vol/folio based)
@@ -3275,7 +3276,7 @@ class SearchEngine:
     def get_part_text_sequence(self, part_data):
         """
         Fetch text sequence for an Oxford Part spanning multiple folios/system IDs.
-        Returns list of {'text': ..., 'header': 'Image X (Folio Y)', ...}
+        Returns list of {'text': ..., 'header': 'Folio X Image Ya', ...}
         """
         if not part_data:
             return []
@@ -3298,26 +3299,62 @@ class SearchEngine:
         unique_sys_ids = list(set(sys_ids))
 
         # 3. Sort (Crucial for reading order)
-        # Use shelfmark for natural sorting (usually contains folio number)
+        # Sort based on FILE ORDER (Transcriptions.txt) via browse_map keys
+
+        # Load map if needed to get order
+        if not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids:
+            self._ordered_sys_ids = []
+            if os.path.exists(Config.BROWSE_MAP):
+                try:
+                    with open(Config.BROWSE_MAP, 'rb') as f:
+                        b_map = pickle.load(f)
+                        self._ordered_sys_ids = list(b_map.keys())
+                except Exception: pass
+
+        # Create a rank map for O(1) lookup
+        rank_map = {sid: i for i, sid in enumerate(self._ordered_sys_ids)}
+
         def sort_key(sid):
+            # Primary: File Order
+            if sid in rank_map:
+                return (0, rank_map[sid])
+            # Secondary: Natural Sort of Shelfmark
             shelf = self.meta_mgr.nli_cache.get(sid, {}).get('shelfmark')
             if not shelf:
                 shelf, _ = self.meta_mgr.get_meta_for_id(sid)
-            return natural_sort_key(shelf or "")
+            return (1, natural_sort_key(shelf or ""))
 
         unique_sys_ids.sort(key=sort_key)
 
         sequence = []
+        ox_images = part_data.get('images', [])
 
         for sys_id in unique_sys_ids:
             # Try to infer folio number from shelfmark for display
             shelf, _ = self.meta_mgr.get_meta_for_id(sys_id)
             _, f_num = self.meta_mgr._parse_oxford_volume_and_folio(shelf)
-            folio_label = f"Folio {f_num}" if f_num is not None else "Folio ?"
 
             pages = self.get_full_manuscript(sys_id)
-            for p in pages:
-                header = f"Image {p['p_num']} ({folio_label})"
+            for i, p in enumerate(pages):
+                # Advanced Header Formatting
+                suffix = "a" if (i % 2 == 0) else "b" # Fallback guess
+
+                # Check Oxford images list for matching folio
+                label_cand = None
+                if f_num is not None:
+                    target = str(f_num)
+                    # Find images starting with this folio number
+                    matches = [img.get('label', '') for img in ox_images
+                               if img.get('label', '').startswith(target)]
+                    if i < len(matches):
+                        label_cand = matches[i]
+
+                if label_cand:
+                    header = f"Folio {f_num} Image {label_cand}"
+                elif f_num:
+                    header = f"Folio {f_num} Image {i+1}{suffix}"
+                else:
+                    header = f"Image {p['p_num']}"
 
                 sequence.append({
                     'text': p['text'],
@@ -3327,6 +3364,72 @@ class SearchEngine:
                 })
 
         return sequence
+
+    def get_oxford_part_navigation(self, part_data):
+        """
+        Returns a flat list of all pages in an Oxford Part for unified navigation.
+        [{'sys_id': ..., 'p_idx': 0, 'label': 'Image 3a'}, ...]
+        """
+        if not part_data: return []
+
+        part_id = part_data.get('part_id') or next((k for k, v in self.meta_mgr.oxford_parts_by_id.items() if v is part_data), None)
+        if not part_id: return []
+
+        sys_ids = self.meta_mgr.oxford_part_to_sys_ids.get(part_id, [])
+        unique_sys_ids = list(set(sys_ids))
+
+        # Reuse sort logic
+        if not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids:
+            self._ordered_sys_ids = []
+            if os.path.exists(Config.BROWSE_MAP):
+                try:
+                    with open(Config.BROWSE_MAP, 'rb') as f:
+                        b_map = pickle.load(f)
+                        self._ordered_sys_ids = list(b_map.keys())
+                except Exception: pass
+
+        rank_map = {sid: i for i, sid in enumerate(self._ordered_sys_ids)}
+
+        def sort_key(sid):
+            if sid in rank_map: return (0, rank_map[sid])
+            shelf = self.meta_mgr.nli_cache.get(sid, {}).get('shelfmark')
+            if not shelf: shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+            return (1, natural_sort_key(shelf or ""))
+
+        unique_sys_ids.sort(key=sort_key)
+
+        nav_list = []
+        ox_images = part_data.get('images', [])
+
+        for sys_id in unique_sys_ids:
+            shelf, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            _, f_num = self.meta_mgr._parse_oxford_volume_and_folio(shelf)
+
+            # Efficient page count check
+            browse_map = self._load_browse_map()
+            pages = browse_map.get(sys_id, [])
+
+            for i, p in enumerate(pages):
+                suffix = "a" if (i % 2 == 0) else "b"
+                label_cand = None
+                if f_num is not None:
+                    target = str(f_num)
+                    matches = [img.get('label', '') for img in ox_images
+                               if img.get('label', '').startswith(target)]
+                    if i < len(matches):
+                        label_cand = matches[i]
+
+                # Simplified label for dropdown
+                simple_lbl = label_cand if label_cand else (f"{f_num}{suffix}" if f_num else str(p['p_num']))
+
+                nav_list.append({
+                    'sys_id': sys_id,
+                    'p_idx': i, # 0-based index for get_browse_page
+                    'label': simple_lbl,
+                    'full_url': (ox_images[i]['full_url'] if i < len(ox_images) and f_num else None) # Optional safety?
+                })
+
+        return nav_list
 
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
