@@ -775,6 +775,10 @@ class ManuscriptViewerWidget(QWidget):
         if "cudl.lib.cam.ac.uk" in url:
             return "cambridge"
 
+        # Oxford Check
+        if meta and meta.get('oxford_link'):
+            return "oxford"
+
         for img in meta.get('images_ext', []) or []:
             if "cudl.lib.cam.ac.uk" in (img.get('url', '').lower()):
                 return "cambridge"
@@ -789,6 +793,7 @@ class ManuscriptViewerWidget(QWidget):
         fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
         self.images_nli = [{'label': f"FL{digits}", 'url': fallback_url, 'fl_id': digits}]
         self.images_ext = []
+        self.images_oxford = []
         self.active_list = self.images_nli
         self.current_source = "nli"
         self.combo_source.clear()
@@ -807,21 +812,34 @@ class ManuscriptViewerWidget(QWidget):
         else:
             self.lbl_attribution.setVisible(False)
 
-        # meta contains 'images_nli' and 'images_ext'
+        # meta contains 'images_nli', 'images_ext', 'images_oxford'
         self.images_nli = meta.get('images_nli', [])
         self.images_ext = meta.get('images_ext', [])
+        self.images_oxford = meta.get('images_oxford', [])
 
         # Determine default source
         self.combo_source.blockSignals(True)
         self.combo_source.clear()
 
-        if self.images_ext:
+        # Logic: Oxford > Cambridge/Ext > NLI
+        if self.images_oxford:
+            self.combo_source.addItem(f"Oxford ({len(self.images_oxford)})", "oxford")
+            if self.images_nli:
+                self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+            if self.images_ext:
+                self.combo_source.addItem(f"External ({len(self.images_ext)})", "ext")
+
+            self.active_list = self.images_oxford
+            self.current_source = "oxford"
+
+        elif self.images_ext:
             ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
             self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
             self.active_list = self.images_ext
             self.current_source = "ext"
+
         elif self.images_nli:
             self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
             self.active_list = self.images_nli
@@ -830,7 +848,7 @@ class ManuscriptViewerWidget(QWidget):
             self.active_list = []
             self.current_source = None
 
-        self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
+        self.combo_source.setVisible(self.combo_source.count() > 1)
         self.combo_source.blockSignals(False)
 
         if not self.active_list:
@@ -843,10 +861,16 @@ class ManuscriptViewerWidget(QWidget):
 
         # External Link
         marc = meta.get('marc', {})
-        self.external_url = marc.get('external_iiif_link')
-        if self.external_url:
-            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
-            self.btn_external.setText(btn_label)
+
+        if self.external_provider == "oxford":
+            self.external_url = meta.get('oxford_link')
+            self.btn_external.setText("View at Oxford")
+        else:
+            self.external_url = marc.get('external_iiif_link')
+            if self.external_url:
+                btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+                self.btn_external.setText(btn_label)
+
         self.btn_external.setVisible(bool(self.external_url))
 
         # Set Page
@@ -857,6 +881,9 @@ class ManuscriptViewerWidget(QWidget):
         if data == "nli":
             self.active_list = self.images_nli
             self.current_source = "nli"
+        elif data == "oxford":
+            self.active_list = self.images_oxford
+            self.current_source = "oxford"
         else:
             self.active_list = self.images_ext
             self.current_source = "ext"
@@ -874,12 +901,14 @@ class ManuscriptViewerWidget(QWidget):
 
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
-        url = self.active_list[index]['url']
+        img_data = self.active_list[index]
+        url = img_data['url']
         final = self._resolve_url(url)
+        thumb = img_data.get('thumb_url')
 
         # Spawn thread without connecting signals (just for cache)
         # Store ref to prevent GC
-        self.preload_worker = ImageLoaderThread(final)
+        self.preload_worker = ImageLoaderWorker(final, thumb_url=thumb)
         self.preload_worker.start()
 
     def set_page(self, index):
@@ -895,6 +924,7 @@ class ManuscriptViewerWidget(QWidget):
         self.current_idx = index
         img_data = self.active_list[index]
         base_url = img_data['url']
+        thumb_url = img_data.get('thumb_url')
 
         self.scroll_area.set_status_message(tr("Loading..."))
 
@@ -904,18 +934,28 @@ class ManuscriptViewerWidget(QWidget):
 
         final_url = self._resolve_url(base_url)
 
-        self.loader_thread = ImageLoaderThread(final_url)
-        self.loader_thread.image_loaded.connect(self.display_image)
+        self.loader_thread = ImageLoaderWorker(final_url, thumb_url=thumb_url)
+        self.loader_thread.image_loaded_bytes.connect(self.display_image_from_bytes)
+        self.loader_thread.image_loaded_path.connect(self.display_image_from_path)
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
         self.loader_thread.start()
 
         # Preload next image
         self._preload(index + 1)
 
-    def display_image(self, image):
-        pix = QPixmap.fromImage(image)
-        self.scroll_area.set_image(pix)
-        self.slider_rotation.setValue(0)
+    def display_image_from_bytes(self, data):
+        img = QImage.fromData(data)
+        if not img.isNull():
+            pix = QPixmap.fromImage(img)
+            self.scroll_area.set_image(pix)
+            self.slider_rotation.setValue(0)
+
+    def display_image_from_path(self, path):
+        img = QImage(path)
+        if not img.isNull():
+            pix = QPixmap.fromImage(img)
+            self.scroll_area.set_image(pix)
+            self.slider_rotation.setValue(0)
 
     def open_external(self):
         if self.external_url:
@@ -1002,20 +1042,30 @@ class HiddenScrollArea(QScrollArea):
         # Maintain highlight focus when column width changes
         QTimer.singleShot(10, self._center_on_match)
         
-class ImageLoaderThread(QThread):
+class ImageLoaderWorker(QThread):
     """
-    Smart Image Loader:
-    1. Checks Local Disk Cache first.
-    2. If missing, Downloads from IIIF (with Rosetta fallback).
-    3. Saves successful downloads to Disk Cache.
+    Smart Image Loader (Thread Safe):
+    Downloads image data (bytes) or loads from disk, but DOES NOT create QPixmaps in this thread.
+
+    Logic:
+    1. Checks Local Disk Cache (if applicable).
+    2. If missing, downloads from Network.
+    3. Emits 'image_loaded_bytes' (bytes) or 'image_loaded_path' (str).
+    4. Supports Oxford Logic: Can take a Thumbnail URL (placeholder) and a Full URL.
+       - Prioritizes loading Full from Disk.
+       - If Full not on Disk:
+         - Loads/Downloads Thumbnail (fast) -> Emits.
+         - Then Downloads Full -> Saves to Disk -> Emits.
     """
 
-    image_loaded = pyqtSignal(QImage)
+    image_loaded_bytes = pyqtSignal(bytes)
+    image_loaded_path = pyqtSignal(str)
     load_failed = pyqtSignal()
 
-    def __init__(self, url):
+    def __init__(self, full_url, thumb_url=None):
         super().__init__()
-        self.url = url
+        self.full_url = full_url
+        self.thumb_url = thumb_url
         self._cancelled = False
         
         # Ensure cache directory exists
@@ -1023,85 +1073,92 @@ class ImageLoaderThread(QThread):
             try:
                 os.makedirs(Config.IMAGE_CACHE_DIR)
             except Exception as e:
-                logger.warning(
-                    "Could not create image cache directory at %s: %s; image caching disabled for this session.",
-                    Config.IMAGE_CACHE_DIR,
-                    e,
-                )
+                logger.warning("Could not create image cache dir: %s", e)
 
     def cancel(self):
         self._cancelled = True
 
+    def _get_cache_filename(self, url):
+        """Generate a filename hash for caching."""
+        if not url: return None
+        # Try to use FL ID for NLI
+        fl_match = re.search(r'FL(\d+)', url)
+        if fl_match:
+            return f"FL{fl_match.group(1)}.jpg"
+
+        # Use Oxford/Other distinctive part
+        # Oxford: .../MS_HEB_a_1_3a.jpg
+        name_match = re.search(r'/([^/]+\.jpg)$', url)
+        if name_match:
+            return name_match.group(1)
+
+        # Fallback: Hash
+        import hashlib
+        h = hashlib.md5(url.encode('utf-8')).hexdigest()
+        return f"img_{h}.jpg"
+
     def run(self):
-        if not self.url:
+        if not self.full_url:
             self.load_failed.emit()
             return
 
-        # 1. Try to identify the FL ID to use as a filename
-        fl_match = re.search(r'FL(\d+)', self.url)
-        local_path = None
-        
-        if fl_match:
-            fl_id = fl_match.group(1)
-            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}.jpg")
-            
-            # --- CHECK LOCAL CACHE ---
-            if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                img = QImage(local_path)
-                if not img.isNull():
-                    self.image_loaded.emit(img)
-                    return
-                else:
-                    # Corrupt file? Delete it so we re-download
-                    try:
-                        os.remove(local_path)
-                    except Exception as e:
-                        logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
+        cache_name = self._get_cache_filename(self.full_url)
+        local_path = os.path.join(Config.IMAGE_CACHE_DIR, cache_name) if cache_name else None
 
-        # 2. Download from Network (if not in cache)
-        headers = dict(Config.HTTP_HEADERS)
-        headers["Referer"] = "https://www.nli.org.il/"
+        # 1. Check Full Image in Cache (Best Case)
+        if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            if not self._cancelled:
+                self.image_loaded_path.emit(local_path)
+            return
 
-        data = None
-        
-        # Attempt A: Original URL
-        data = self._download_bytes(self.url, headers)
-        
-        # Attempt B: Fallback to Rosetta if Attempt A failed and we have an FL ID
-        if data is None and fl_match and not self._cancelled:
-            fl_digits = fl_match.group(1)
-            logger.info("Cache miss & IIIF failed. Trying Rosetta fallback for FL%s...", fl_digits)
-            fallback_url = MetadataManager.get_rosetta_fallback_url(fl_digits)
-            if fallback_url:
-                data = self._download_bytes(fallback_url, headers)
+        # 2. If Full not cached, and we have a Thumb, try to show Thumb first
+        if self.thumb_url:
+            # Check Thumb Cache? Or just download (thumbs are small)
+            # Just download thumb to bytes for speed
+            thumb_data = self._download_bytes(self.thumb_url)
+            if thumb_data and not self._cancelled:
+                self.image_loaded_bytes.emit(thumb_data)
 
-        # 3. Process Result
-        if data:
-            img = QImage.fromData(data)
-            if not img.isNull():
-                self.image_loaded.emit(img)
-                
-                # --- SAVE TO LOCAL CACHE ---
-                if local_path and not self._cancelled:
-                    try:
-                        with open(local_path, 'wb') as f:
-                            f.write(data)
-                        logger.debug("Saved thumbnail cache to %s", local_path)
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to write thumbnail cache for %s: %s; future loads will re-download.",
-                            local_path,
-                            e,
-                        )
+        if self._cancelled: return
+
+        # 3. Download Full Image
+        full_data = self._download_bytes(self.full_url)
+        
+        # Fallback logic for NLI (Rosetta)
+        if full_data is None and "iiif.nli.org.il" in self.full_url:
+             fl_match = re.search(r'FL(\d+)', self.full_url)
+             if fl_match:
+                 fallback = MetadataManager.get_rosetta_fallback_url(fl_match.group(1))
+                 if fallback:
+                     full_data = self._download_bytes(fallback)
+
+        if full_data:
+            # Save to disk
+            if local_path:
+                try:
+                    with open(local_path, 'wb') as f:
+                        f.write(full_data)
+                    # Emit path
+                    if not self._cancelled:
+                        self.image_loaded_path.emit(local_path)
+                except Exception:
+                    # Emit bytes if save failed
+                    if not self._cancelled:
+                        self.image_loaded_bytes.emit(full_data)
             else:
-                self.load_failed.emit()
+                if not self._cancelled:
+                    self.image_loaded_bytes.emit(full_data)
         else:
             self.load_failed.emit()
 
-    def _download_bytes(self, target_url, headers):
-        """Helper to download bytes safely."""
+    def _download_bytes(self, target_url):
+        if not target_url: return None
+        headers = dict(Config.HTTP_HEADERS)
+        headers["Referer"] = "https://www.nli.org.il/"
+
         try:
-            resp = requests.get(target_url, headers=headers, timeout=25, stream=True, verify=False)
+            # Oxford/NLI might need specific headers? Config.HTTP_HEADERS covers User-Agent.
+            resp = requests.get(target_url, headers=headers, timeout=45, stream=True, verify=False)
             if self._cancelled: return None
             if resp.status_code == 200:
                 return resp.content
@@ -2052,8 +2109,8 @@ class ResultDialog(QDialog):
             self.on_img_failed()
             return
 
-        self.img_thread = ImageLoaderThread(thumb_url)
-        self.img_thread.image_loaded.connect(self.on_img_loaded)
+        self.img_thread = ImageLoaderWorker(thumb_url)
+        self.img_thread.image_loaded_bytes.connect(self.on_img_bytes_loaded)
         self.img_thread.load_failed.connect(self.on_img_failed)
         self.img_thread.start()
         
@@ -2071,10 +2128,17 @@ class ResultDialog(QDialog):
             return
 
         # Create and start thread
-        self.browse_img_thread = ImageLoaderThread(thumb_url)
-        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
+        self.browse_img_thread = ImageLoaderWorker(thumb_url)
+        self.browse_img_thread.image_loaded_bytes.connect(self.on_browse_img_bytes_loaded)
         self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
         self.browse_img_thread.start()
+
+    def on_img_bytes_loaded(self, data):
+        img = QImage.fromData(data)
+        if img.isNull():
+            self.on_img_failed()
+            return
+        self.on_img_loaded(img)
 
     def on_img_loaded(self, image):
         pix = QPixmap.fromImage(image)
@@ -2962,10 +3026,23 @@ class GenizahGUI(QMainWindow):
         text_content = ""
 
         if self.btn_b_all.isChecked():
-             # Full Text
-             pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-             if pages:
-                 text_content = "\n\n".join([p['text'] for p in pages])
+             # Check for Oxford Special Handling
+             ox_part_id = self.meta_mgr.sys_id_to_oxford_part.get(self.current_browse_sid)
+             if ox_part_id:
+                 # Use the stitched text logic again
+                 stitched_text, _ = self.searcher.get_part_text_sequence(ox_part_id)
+                 if stitched_text:
+                     # Strip headers for the algorithm
+                     # The Core creates: === Folio X (ID: Y) ===
+                     # We replace newlines around it with single spaces to keep text flowing
+                     text_content = re.sub(r'\s*=== Folio .*? ===\s*', ' ', stitched_text)
+                 else:
+                     text_content = ""
+             else:
+                 # Standard Full Text
+                 pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+                 if pages:
+                     text_content = "\n\n".join([p['text'] for p in pages])
         else:
              # Current Page
              if self.current_browse_internal_idx is not None:
@@ -6055,10 +6132,17 @@ class GenizahGUI(QMainWindow):
             self.on_browse_img_failed()
             return
 
-        self.browse_img_thread = ImageLoaderThread(thumb_url)
-        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
+        self.browse_img_thread = ImageLoaderWorker(thumb_url)
+        self.browse_img_thread.image_loaded_bytes.connect(self.on_browse_img_bytes_loaded)
         self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
         self.browse_img_thread.start()
+
+    def on_browse_img_bytes_loaded(self, data):
+        img = QImage.fromData(data)
+        if img.isNull():
+            self.on_browse_img_failed()
+            return
+        self.on_browse_img_loaded(img)
 
     def on_browse_img_loaded(self, image):
         pix = QPixmap.fromImage(image)
@@ -6401,10 +6485,33 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
     def navigate_manuscript(self, direction):
-        """Move to prev/next manuscript based on FILE ORDER."""
-        current = self.current_browse_sid
-        
-        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        """Move to prev/next manuscript based on FILE ORDER, handling Oxford Part stitching."""
+        current_sys_id = self.current_browse_sid
+        current_ref_sid = current_sys_id
+
+        # Oxford Part Logic: If we are in "View All" mode and viewing an Oxford Part
+        # We need to jump relative to the *entire part*.
+        if self.btn_b_all.isChecked():
+            ox_part = self.meta_mgr.sys_id_to_oxford_part.get(current_sys_id)
+            if ox_part:
+                # Get all SIDs for this part
+                sids = self.meta_mgr.oxford_part_to_sys_ids.get(ox_part, [])
+
+                # Filter/Sort by File Order to be safe
+                if hasattr(self.searcher, '_ordered_sys_ids') and self.searcher._ordered_sys_ids:
+                    ordered_part_sids = [s for s in self.searcher._ordered_sys_ids if s in sids]
+                    if ordered_part_sids:
+                        sids = ordered_part_sids
+
+                if sids:
+                    if direction == 1:
+                        # Moving Next: Jump from the LAST item in this part
+                        current_ref_sid = sids[-1]
+                    else:
+                        # Moving Prev: Jump from the FIRST item in this part
+                        current_ref_sid = sids[0]
+
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current_ref_sid, direction)
         
         if new_sid:
             self.browse_sys_input.setText(new_sid)

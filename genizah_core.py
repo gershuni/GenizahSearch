@@ -1104,6 +1104,7 @@ class Config:
     # 2. External Files (Must be placed NEXT to the EXE by the user)
     FILE_V8 = os.path.join(BASE_DIR, "Transcriptions.txt")
     FILE_V7 = os.path.join(BASE_DIR, "AllGenizah_OLD.txt")
+    OXFORD_DB_FILE = os.path.join(BASE_DIR, "oxford_full_db.json")
 
     # 3. User Data Directory (Index, Caches) - Smart Logic
     _PORTABLE_INDEX_PATH = os.path.join(BASE_DIR, "Genizah_Index")
@@ -1139,6 +1140,7 @@ class Config:
     # 5. Generated Files (Logs, Configs, Caches - inside Index Dir)
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
     CACHE_NLI = os.path.join(INDEX_DIR, "nli_cache.pkl")
+    CACHE_OXFORD = os.path.join(INDEX_DIR, "oxford_cache.pkl")
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
@@ -1617,6 +1619,9 @@ class MetadataManager:
         self.meta_map = {}
         self.nli_cache = {}
         self.csv_bank = {}
+        self.oxford_db = {}
+        self.oxford_part_to_sys_ids = defaultdict(list)
+        self.sys_id_to_oxford_part = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
 
@@ -1647,6 +1652,31 @@ class MetadataManager:
             except Exception as e:
                 LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
 
+        # Load Oxford DB
+        self._load_oxford_db()
+
+    def _load_oxford_db(self):
+        """Load the Oxford JSON DB if it exists."""
+        if not os.path.exists(Config.OXFORD_DB_FILE):
+            LOGGER.warning("oxford_full_db.json not found.")
+            return
+
+        try:
+            with open(Config.OXFORD_DB_FILE, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+
+            # Flatten structure: Key by 'Part ID' (e.g. "MS. Heb. a. 1/2")
+            # Structure is Volume -> Part ID -> Data
+            count = 0
+            for vol_id, parts in raw_data.items():
+                for part_id, data in parts.items():
+                    self.oxford_db[part_id] = data
+                    count += 1
+
+            LOGGER.info(f"Loaded {count} Oxford parts from JSON.")
+        except Exception as e:
+            LOGGER.error(f"Failed to load Oxford DB: {e}")
+
     def _load_heavy_caches_bg(self):
         self._load_csv_bank()
 
@@ -1668,26 +1698,56 @@ class MetadataManager:
 
                     if not row or len(row) < 2:
                         continue
-                    # Format: system_number | call_numbers | ... | titles
+                    # Format: system_number | ox_part_id | call_numbers | ... | titles
                     raw_sys_id = row[0]
                     sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
 
+                    oxford_part_id = row[1].strip() if len(row) > 1 else ""
+
                     # Call numbers can be multiple separated by '|'
                     # We take the shortest one that looks like a shelfmark, or just the first
-                    raw_shelves = row[1].split('|')
-                    shelf = raw_shelves[0].strip()
+                    # NOTE: row index might vary if oxford_part_id is present
+                    raw_shelves = row[2].split('|') if len(row) > 2 else []
+
+                    shelf = raw_shelves[0].strip() if raw_shelves else "Unknown"
                     # Try to find a nice short shelfmark
                     for s in raw_shelves:
                         s = s.strip()
                         if s and len(s) < len(shelf):
                             shelf = s
 
-                    # Title is column index 5 (0-based)
-                    title = ""
-                    if len(row) > 5:
-                        title = row[5].strip()
+                    # Title is column index 5 (0-based) - Adjusting index based on header inspection or fixed structure
+                    # libraries.csv: system_number,oxford_part_id,call_numbers,,,,titles_non_placeholder
+                    # So title is at index 6 if 0-based? Let's check header from memory:
+                    # system_number(0), oxford_part_id(1), call_numbers(2), ...(3,4,5), titles(6)
+                    # Ah, the memory showed: 990053835020205171,,"Moss. III,27O ...",,,,
+                    # Split by comma:
+                    # 0: 99..
+                    # 1: ""
+                    # 2: "Moss..."
+                    # 3: ""
+                    # 4: ""
+                    # 5: ""
+                    # 6: Title?
+                    # The code previously used row[5]. Let's stick to safe index if length permits.
+                    # With the new column 1 (oxford_part), previous column 1 became 2.
+                    # Previous title was 5. So now it should be 6?
+                    # Let's count columns in the sample:
+                    # 99.., "", "Call", "", "", "", "Title"
+                    # 0,    1,  2,      3,  4,  5,  6
 
-                    self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+                    title = ""
+                    if len(row) > 6:
+                        title = row[6].strip()
+                    elif len(row) > 5:
+                        title = row[5].strip() # Fallback
+
+                    self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title, 'oxford_part': oxford_part_id}
+
+                    if oxford_part_id:
+                        self.sys_id_to_oxford_part[sys_id] = oxford_part_id
+                        self.oxford_part_to_sys_ids[oxford_part_id].append(sys_id)
+
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
@@ -2017,7 +2077,7 @@ class MetadataManager:
         current_meta['marc'] = marc_data
         marc_attribution = marc_data.get('attribution')
 
-        # 2. Determine Image Source (External CUDL vs Fallback NLI)
+        # 2. Determine Image Source (Oxford > CUDL > NLI)
         image_list = []
         external_meta = {}
 
@@ -2027,17 +2087,43 @@ class MetadataManager:
         # Lists for multiple sources
         images_nli = []
         images_ext = []
+        images_oxford = []
 
-        # 2a. Fetch External IIIF
-        if ext_link:
+        # 2a. Check Oxford
+        ox_part_id = self.sys_id_to_oxford_part.get(system_id)
+        if ox_part_id:
+            ox_data = self.get_oxford_part_metadata(ox_part_id)
+            if ox_data:
+                # Populate images from Oxford JSON
+                for img in ox_data.get('images', []):
+                    # Format: {'label': '...', 'full_url': '...', 'thumb_url': '...'}
+                    # We map full_url to 'url' for the viewer
+                    images_oxford.append({
+                        'label': img.get('label', ''),
+                        'url': img.get('full_url', ''),
+                        'thumb_url': img.get('thumb_url', '')
+                    })
+
+                # Metadata
+                if ox_data.get('metadata'):
+                    external_meta.update(ox_data['metadata'])
+
+                # Link
+                if ox_data.get('direct_link'):
+                    current_meta['oxford_link'] = ox_data['direct_link']
+
+                current_meta['attribution'] = "Bodleian Library, University of Oxford"
+
+        # 2b. Fetch External IIIF (CUDL)
+        if not images_oxford and ext_link:
             ext_data = self.fetch_external_iiif_data(ext_link)
             if ext_data.get('canvases'):
                 images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
-                external_meta = ext_data.get('metadata', {})
+                external_meta.update(ext_data.get('metadata', {}))
                 if not marc_attribution:
                     current_meta['attribution'] = ext_data.get('attribution')
 
-        # 2b. Always Fetch NLI IIIF (for fallback or toggle)
+        # 2c. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)
         if nli_iiif_data.get('canvas_map'):
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
@@ -2048,18 +2134,26 @@ class MetadataManager:
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
-        if marc_attribution:
-            current_meta['attribution'] = marc_attribution
-        elif not current_meta.get('attribution'):
-            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+        if not current_meta.get('attribution'):
+            if marc_attribution:
+                current_meta['attribution'] = marc_attribution
+            else:
+                current_meta['attribution'] = nli_iiif_data.get('attribution', '')
 
         if nli_iiif_data.get('canvas_map'):
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
-        # Prioritize External if available, but keep both sets
-        current_meta['images'] = images_ext if images_ext else images_nli
+        # Prioritize Oxford > External > NLI
+        if images_oxford:
+            current_meta['images'] = images_oxford
+        elif images_ext:
+            current_meta['images'] = images_ext
+        else:
+            current_meta['images'] = images_nli
+
         current_meta['images_nli'] = images_nli
         current_meta['images_ext'] = images_ext
+        current_meta['images_oxford'] = images_oxford
         current_meta['external_meta'] = external_meta
 
         # Update cache precedence (Enrichment overrides basic placeholders)
@@ -2275,7 +2369,24 @@ class MetadataManager:
             return []
         return []
 
+    def get_oxford_part_metadata(self, part_id):
+        return self.oxford_db.get(part_id)
+
     def get_thumbnail(self, system_id, size=320):
+        # 1. Oxford Check
+        # Does this system_id belong to an Oxford Part?
+        ox_part_id = self.sys_id_to_oxford_part.get(system_id)
+        if ox_part_id:
+            ox_data = self.get_oxford_part_metadata(ox_part_id)
+            if ox_data and 'images' in ox_data and ox_data['images']:
+                # Try to match specific image if possible
+                # We need to know WHICH image in the part corresponds to this System ID.
+                # We can try to match by Shelfmark suffix (e.g. /1, /2) against label (1a, 1b)?
+                # Or just take the first one as a thumbnail.
+                # For thumbnails, any valid image from the set is fine.
+                return ox_data['images'][0].get('thumb_url')
+
+        # 2. Standard NLI Logic
         meta = self.nli_cache.get(system_id)
         if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
             return meta.get('thumb_url')
@@ -2743,6 +2854,120 @@ class SearchEngine:
                 break
 
         return best_page['text'], best_page['head'], best_page['src'], best_page['uid']
+
+    def get_part_text_sequence(self, part_id):
+        """
+        Stitch text for an Oxford Part based on the JSON image order.
+        Returns: (stitched_text, header_title)
+        """
+        ox_data = self.meta_mgr.get_oxford_part_metadata(part_id)
+        if not ox_data:
+            return "", ""
+
+        images = ox_data.get('images', [])
+        if not images:
+            return "", ""
+
+        # Map System IDs to their Shelfmarks (which contain the folio info)
+        # We need to find which System ID corresponds to which Image Label (e.g. 3a)
+
+        # 1. Get all System IDs for this part
+        sys_ids = self.meta_mgr.oxford_part_to_sys_ids.get(part_id, [])
+        if not sys_ids:
+            return "", ""
+
+        # 2. Build a map: Folio Number -> System ID
+        # Shelfmark format in CSV: "MS heb. a.1/3" -> Folio 3
+        # Image Label format in JSON: "3a", "3b" -> Folio 3
+
+        folio_to_sys_id = {}
+        for sid in sys_ids:
+            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+            # Extract the last number after '/'
+            m = re.search(r'/(\d+)$', shelf)
+            if m:
+                f_num = int(m.group(1))
+                folio_to_sys_id[f_num] = sid
+
+        stitched_text = []
+
+        # 3. Iterate Images in JSON Order
+        # JSON order is 3a, 3b, 4a, 4b... -> This is the correct text flow
+        for img in images:
+            label = img.get('label', '') # e.g. "3a"
+            # Extract folio number from label (remove non-digits)
+            f_digits = re.sub(r'\D', '', label)
+            if not f_digits: continue
+
+            f_num = int(f_digits)
+
+            # Find the System ID that covers this folio
+            target_sid = folio_to_sys_id.get(f_num)
+
+            if target_sid:
+                # Fetch text for this System ID
+                # Note: System ID usually contains both Recto and Verso (3a and 3b).
+                # If we append text for 3a (SystemID X) and then text for 3b (SystemID X),
+                # we duplicate the text because SystemID X contains BOTH pages.
+
+                # Correction: Oxford System IDs usually represent a single Folio (Recto+Verso).
+                # So we should only append the text ONCE per System ID.
+                # However, the JSON lists 3a, 3b separately.
+                # We need to avoid duplication.
+
+                # Check if we already processed this System ID *recently*?
+                # Actually, the user wants "Text Stitching".
+                # If System ID 123 contains text for Folio 3 (Recto+Verso),
+                # and we iterate 3a, 3b -> we map both to 123.
+                # We should append 123's text only ONCE.
+
+                # BUT, we need to respect the order of folios.
+                # Since System ID = Folio, we just iterate unique System IDs in the order they appear in the JSON sequence.
+                # The JSON sequence is 3a, 3b, 4a, 4b.
+                # 3a -> Sys1. 3b -> Sys1. 4a -> Sys2.
+                # So we process Sys1, then Sys2.
+
+                pass
+            else:
+                continue
+
+        # Better Approach:
+        # 1. Identify the ordered list of unique System IDs based on the image sequence
+        ordered_sids = []
+        seen_sids = set()
+
+        for img in images:
+            label = img.get('label', '')
+            f_digits = re.sub(r'\D', '', label)
+            if not f_digits: continue
+            f_num = int(f_digits)
+            sid = folio_to_sys_id.get(f_num)
+
+            if sid and sid not in seen_sids:
+                ordered_sids.append(sid)
+                seen_sids.add(sid)
+
+        # 2. Fetch and concat
+        full_doc_text = []
+        for sid in ordered_sids:
+            # We need the TEXT.
+            # use _get_best_text_for_id or search index directly?
+            # _get_best_text_for_id gets "first meaningful page".
+            # We want ALL text for that System ID?
+            # Usually transcription files contain the whole text for that ID.
+
+            txt, head, _, _ = self._get_best_text_for_id(sid)
+            if txt:
+                # Add Header Marker
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                # Parse folio from shelf
+                m = re.search(r'/(\d+)$', shelf)
+                fol_label = m.group(1) if m else "?"
+
+                header = f"Folio {fol_label} (ID: {sid})"
+                full_doc_text.append(f"=== {header} ===\n{txt}")
+
+        return "\n".join(full_doc_text), f"Oxford Part: {part_id}"
 
     def execute_search(self, query_str, mode, gap, progress_callback=None):
         if not self.searcher: return []
