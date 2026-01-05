@@ -9,6 +9,7 @@ import threading
 import json
 import requests
 import urllib3
+import hashlib
 import csv
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -689,9 +690,11 @@ class ManuscriptViewerWidget(QWidget):
         super().__init__(parent)
         self.images_nli = []
         self.images_ext = []
+        self.images_oxford = []
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.loader_worker = None
         self.external_provider = None
         self.init_ui()
 
@@ -810,16 +813,26 @@ class ManuscriptViewerWidget(QWidget):
         # meta contains 'images_nli' and 'images_ext'
         self.images_nli = meta.get('images_nli', [])
         self.images_ext = meta.get('images_ext', [])
+        self.images_oxford = meta.get('images_oxford', [])
 
         # Determine default source
         self.combo_source.blockSignals(True)
         self.combo_source.clear()
 
+        if self.images_oxford:
+            self.combo_source.addItem(f"Oxford Bodleian ({len(self.images_oxford)})", "oxford")
         if self.images_ext:
             ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
             self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+        if self.images_nli and self.combo_source.findData("nli") == -1:
+            self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+
+        if self.images_oxford:
+            self.active_list = self.images_oxford
+            self.current_source = "oxford"
+        elif self.images_ext:
             self.active_list = self.images_ext
             self.current_source = "ext"
         elif self.images_nli:
@@ -830,7 +843,8 @@ class ManuscriptViewerWidget(QWidget):
             self.active_list = []
             self.current_source = None
 
-        self.combo_source.setVisible(len(self.images_nli) > 0 and len(self.images_ext) > 0)
+        # Show toggle when multiple options exist
+        self.combo_source.setVisible(self.combo_source.count() > 1)
         self.combo_source.blockSignals(False)
 
         if not self.active_list:
@@ -843,9 +857,9 @@ class ManuscriptViewerWidget(QWidget):
 
         # External Link
         marc = meta.get('marc', {})
-        self.external_url = marc.get('external_iiif_link')
+        self.external_url = meta.get('direct_link') or marc.get('external_iiif_link')
         if self.external_url:
-            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+            btn_label = tr("Oxford Bodleian") if self.current_source == "oxford" else (tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website"))
             self.btn_external.setText(btn_label)
         self.btn_external.setVisible(bool(self.external_url))
 
@@ -857,6 +871,9 @@ class ManuscriptViewerWidget(QWidget):
         if data == "nli":
             self.active_list = self.images_nli
             self.current_source = "nli"
+        elif data == "oxford":
+            self.active_list = self.images_oxford
+            self.current_source = "oxford"
         else:
             self.active_list = self.images_ext
             self.current_source = "ext"
@@ -874,7 +891,7 @@ class ManuscriptViewerWidget(QWidget):
 
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
-        url = self.active_list[index]['url']
+        url = self.active_list[index].get('url') or self.active_list[index].get('full_url')
         final = self._resolve_url(url)
 
         # Spawn thread without connecting signals (just for cache)
@@ -894,20 +911,31 @@ class ManuscriptViewerWidget(QWidget):
 
         self.current_idx = index
         img_data = self.active_list[index]
-        base_url = img_data['url']
+        base_url = img_data.get('url') or img_data.get('full_url')
 
         self.scroll_area.set_status_message(tr("Loading..."))
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
             self.loader_thread.wait()
+        if self.loader_worker and self.loader_worker.isRunning():
+            self.loader_worker.cancel()
+            self.loader_worker.wait()
 
-        final_url = self._resolve_url(base_url)
-
-        self.loader_thread = ImageLoaderThread(final_url)
-        self.loader_thread.image_loaded.connect(self.display_image)
-        self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
-        self.loader_thread.start()
+        if self.current_source == "oxford":
+            thumb = img_data.get('thumb_url')
+            full = img_data.get('full_url') or base_url
+            self.loader_worker = ImageLoaderWorker(thumb, full)
+            self.loader_worker.placeholder_ready.connect(self.display_image)
+            self.loader_worker.image_loaded.connect(self.display_image)
+            self.loader_worker.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
+            self.loader_worker.start()
+        else:
+            final_url = self._resolve_url(base_url)
+            self.loader_thread = ImageLoaderThread(final_url)
+            self.loader_thread.image_loaded.connect(self.display_image)
+            self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
+            self.loader_thread.start()
 
         # Preload next image
         self._preload(index + 1)
@@ -1109,7 +1137,81 @@ class ImageLoaderThread(QThread):
         except Exception as e:
             logger.warning("Image download failed for %s: %s", target_url, e)
             return None
-                
+
+class ImageLoaderWorker(QThread):
+    """Oxford-friendly loader: cache -> thumbnail placeholder -> high-res download."""
+
+    placeholder_ready = pyqtSignal(QImage)
+    image_loaded = pyqtSignal(QImage)
+    load_failed = pyqtSignal()
+
+    def __init__(self, thumb_url, full_url):
+        super().__init__()
+        self.thumb_url = thumb_url
+        self.full_url = full_url
+        self._cancelled = False
+        os.makedirs(Config.IMAGE_CACHE_DIR, exist_ok=True)
+
+    def cancel(self):
+        self._cancelled = True
+
+    def _hash_name(self, url):
+        return hashlib.sha1(url.encode('utf-8')).hexdigest() + ".jpg"
+
+    def _load_from_disk(self, path):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            img = QImage(path)
+            if not img.isNull():
+                return img
+        return None
+
+    def _download(self, url):
+        if not url:
+            return None
+        try:
+            resp = requests.get(url, headers=Config.HTTP_HEADERS, timeout=25, stream=True, verify=False)
+            if self._cancelled:
+                return None
+            if resp.status_code == 200:
+                return resp.content
+        except Exception as e:
+            logger.debug("Image download failed for %s: %s", url, e)
+        return None
+
+    def run(self):
+        if not self.full_url:
+            self.load_failed.emit()
+            return
+
+        cache_path = os.path.join(Config.IMAGE_CACHE_DIR, self._hash_name(self.full_url))
+
+        cached = self._load_from_disk(cache_path)
+        if cached:
+            self.image_loaded.emit(cached)
+            return
+
+        # Emit placeholder if possible
+        if self.thumb_url:
+            thumb_bytes = self._download(self.thumb_url)
+            if thumb_bytes and not self._cancelled:
+                thumb_img = QImage.fromData(thumb_bytes)
+                if not thumb_img.isNull():
+                    self.placeholder_ready.emit(thumb_img)
+
+        data = self._download(self.full_url)
+        if data and not self._cancelled:
+            img = QImage.fromData(data)
+            if not img.isNull():
+                self.image_loaded.emit(img)
+                try:
+                    with open(cache_path, 'wb') as f:
+                        f.write(data)
+                except Exception as e:
+                    logger.debug("Failed to write Oxford cache %s: %s", cache_path, e)
+                return
+
+        self.load_failed.emit()
+
 class HelpDialog(QDialog):
     """Display HTML help content from the bundled Help.html file with graceful fallback."""
     def __init__(self, parent, title, source_path=None, anchor=None, fallback_html="", lang="en"):
@@ -1518,6 +1620,7 @@ class ResultDialog(QDialog):
         self.current_page_text = None
         self.current_page_uid = None
         self.current_internal_idx = None
+        self.current_catalog_url = None
         
         self.current_meta_request = 0
         self.extended_info_visible = False
@@ -1942,6 +2045,7 @@ class ResultDialog(QDialog):
 
         # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})
+        oxford_meta = meta.get('oxford_meta')
         if not marc and not meta.get('physical_desc'):
             self.btn_ext_info.setVisible(False)
             return
@@ -1974,9 +2078,23 @@ class ResultDialog(QDialog):
             for b in bib: html += f"<li>{b}</li>"
             html += "</ul></p>"
 
+        if oxford_meta:
+            md = oxford_meta.get('metadata', {})
+            title_ox = md.get('title')
+            contents = md.get('contents')
+            provenance = md.get('provenance')
+            if title_ox:
+                html += f"<p><b>{tr('Title')} (Oxford):</b> {title_ox}</p>"
+            if contents:
+                html += f"<p><b>{tr('Contents')}:</b> {contents}</p>"
+            if provenance:
+                html += f"<p><b>{tr('Provenance')}:</b> {provenance}</p>"
+
         html += "</div>"
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
+        if oxford_meta:
+            self.btn_ext_info.setChecked(True)
 
         self.lbl_title.setText(meta.get('title', ''))
         shelf = meta.get('shelfmark')
@@ -1984,6 +2102,14 @@ class ResultDialog(QDialog):
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
             self.lbl_shelf.setText(shelf)
+        if oxford_meta:
+            ox_title = oxford_meta.get('metadata', {}).get('title')
+            if ox_title:
+                self.lbl_title.setText(ox_title)
+
+        self.current_catalog_url = meta.get('direct_link') or (oxford_meta.get('direct_link') if oxford_meta else None)
+        if self.current_catalog_url:
+            self.btn_img.setText(tr("View on Website"))
 
     def sync_external_view(self):
         # Determine index
@@ -2129,7 +2255,11 @@ class ResultDialog(QDialog):
             super().closeEvent(event)
 
     def open_catalog(self):
-        if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
+        url = self.current_catalog_url
+        if not url and self.current_sys_id:
+            url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def open_viewer(self):
         if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
@@ -2186,6 +2316,9 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_appendix = {}
         self.comp_grouped_summary = {}
         self.comp_sort_mode = "score"
+        self.current_oxford_part_id = None
+        self.completer_meta = {}
+        self._pending_view_all = False
         self.comp_sort_reverse = True
         self.comp_grouped_filtered_main = []
         self.comp_grouped_filtered_appendix = {}
@@ -2321,12 +2454,43 @@ class GenizahGUI(QMainWindow):
         # 2. Setup Models (Optimized with QStandardItemModel + UserRole)
         self.shelf_model = QStandardItemModel()
         self.valid_shelf_keys = set()
+        self.completer_meta = {}
 
         for s in shelfmarks:
             item = QStandardItem(s)
             norm = ShelfmarkCompleter.normalize(s)
             self.valid_shelf_keys.add(norm)
             item.setData(norm, Qt.ItemDataRole.UserRole)
+            payload = {'type': 'standard'}
+            item.setData(payload, Qt.ItemDataRole.UserRole + 1)
+            self.completer_meta[norm] = payload
+            self.shelf_model.appendRow(item)
+
+        # Oxford part entries (Set A - standard access)
+        for part_id in sorted(self.meta_mgr.part_to_systems.keys(), key=natural_sort_key):
+            item = QStandardItem(part_id)
+            norm = ShelfmarkCompleter.normalize(part_id)
+            if norm in self.valid_shelf_keys:
+                continue
+            self.valid_shelf_keys.add(norm)
+            item.setData(norm, Qt.ItemDataRole.UserRole)
+            first_sid = self.searcher.get_first_sys_for_part(part_id) if self.searcher else None
+            payload = {'type': 'oxford_part', 'mode': 'standard', 'part_id': part_id, 'first_sys': first_sid}
+            item.setData(payload, Qt.ItemDataRole.UserRole + 1)
+            self.completer_meta[norm] = payload
+            self.shelf_model.appendRow(item)
+
+        # Oxford Neubauer entries (Set B)
+        for part_id, neubauer_label in sorted(self.meta_mgr.neubauer_lookup.items(), key=lambda x: natural_sort_key(x[0])):
+            disp = f"{part_id} (Neubauer)"
+            item = QStandardItem(disp)
+            norm = ShelfmarkCompleter.normalize(disp)
+            self.valid_shelf_keys.add(norm)
+            item.setData(norm, Qt.ItemDataRole.UserRole)
+            first_sid = self.searcher.get_first_sys_for_part(part_id) if self.searcher else None
+            payload = {'type': 'oxford_part', 'mode': 'neubauer', 'part_id': part_id, 'first_sys': first_sid}
+            item.setData(payload, Qt.ItemDataRole.UserRole + 1)
+            self.completer_meta[norm] = payload
             self.shelf_model.appendRow(item)
 
         # 3. Setup Completer
@@ -2894,6 +3058,9 @@ class GenizahGUI(QMainWindow):
         marc = meta.get('marc', {})
         shelf = meta.get('shelfmark')
         title = meta.get('title')
+        oxford_meta = meta.get('oxford_meta')
+        if meta.get('oxford_part_id') and not self.current_oxford_part_id:
+            self.current_oxford_part_id = meta.get('oxford_part_id')
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
@@ -2901,6 +3068,16 @@ class GenizahGUI(QMainWindow):
         label_text = f"<b>{shelf or ''}</b>"
         if title: label_text += f" | {title}"
         if meta.get('physical_desc'): label_text += f" | {meta['physical_desc']}"
+        if oxford_meta:
+            ox_title = oxford_meta.get('metadata', {}).get('title')
+            contents = oxford_meta.get('metadata', {}).get('contents')
+            provenance = oxford_meta.get('metadata', {}).get('provenance')
+            if ox_title and ox_title not in label_text:
+                label_text += f" | {ox_title}"
+            if contents:
+                label_text += f" | {contents}"
+            if provenance:
+                label_text += f" | {provenance}"
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
@@ -2914,14 +3091,23 @@ class GenizahGUI(QMainWindow):
         self.btn_b_all.setEnabled(True)
         self.btn_find_parallels.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
+        if oxford_meta and oxford_meta.get('direct_link'):
+            self.btn_b_catalog.setText(tr("View at Oxford"))
+        else:
+            self.btn_b_catalog.setText(tr("View on Ktiv"))
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
+        if self._pending_view_all:
+            self._pending_view_all = False
+            self.btn_b_all.setChecked(True)
+            self.toggle_browse_view_all(True)
 
     def toggle_browse_view_all(self, checked):
         if checked:
-            self.browse_viewer.setVisible(False)
-            self.btn_b_toggle_img.setEnabled(False)
+            if not self.current_oxford_part_id:
+                self.browse_viewer.setVisible(False)
+                self.btn_b_toggle_img.setEnabled(False)
             self.browse_load_all()
         else:
             self.btn_b_toggle_img.setEnabled(True)
@@ -2963,9 +3149,14 @@ class GenizahGUI(QMainWindow):
 
         if self.btn_b_all.isChecked():
              # Full Text
-             pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-             if pages:
-                 text_content = "\n\n".join([p['text'] for p in pages])
+             if self.current_oxford_part_id:
+                 part_text = self.searcher.get_part_text_sequence(self.current_oxford_part_id)
+                 if part_text:
+                     text_content = re.sub(r"Folio \d+ Image \S+", "", part_text)
+             else:
+                 pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+                 if pages:
+                     text_content = "\n\n".join([p['text'] for p in pages])
         else:
              # Current Page
              if self.current_browse_internal_idx is not None:
@@ -3001,6 +3192,32 @@ class GenizahGUI(QMainWindow):
         
         self.browse_text.setText(tr("Loading full manuscript..."))
         QApplication.processEvents() # Refresh UI
+
+        if self.current_oxford_part_id:
+            part_text = self.searcher.get_part_text_sequence(self.current_oxford_part_id)
+            if not part_text:
+                QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
+                return
+            html = part_text.replace("\n", "<br>")
+            self.browse_text.setHtml(f"<div dir='rtl'>{html}</div>")
+            self.btn_b_prev.setEnabled(False)
+            self.btn_b_next.setEnabled(False)
+            self.combo_browse_page.setEnabled(False)
+            ox_meta = self.meta_mgr.oxford_db.get(self.current_oxford_part_id, {})
+            images = ox_meta.get('images', [])
+            if images:
+                self.browse_viewer.setVisible(True)
+                self.btn_b_toggle_img.setEnabled(True)
+                self.browse_viewer.load_images({
+                    'images_oxford': images,
+                    'direct_link': ox_meta.get('direct_link'),
+                    'metadata': ox_meta.get('metadata', {}),
+                    'attribution': "Oxford Bodleian Library"
+                }, 0)
+            md = ox_meta.get('metadata', {})
+            bits = [md.get('title'), md.get('contents'), md.get('provenance')]
+            self.browse_info_lbl.setText(" | ".join([b for b in bits if b]))
+            return
         
         pages = self.searcher.get_full_manuscript(self.current_browse_sid)
         if not pages:
@@ -3078,22 +3295,28 @@ class GenizahGUI(QMainWindow):
                                             os.path.join(Config.REPORTS_DIR, default_name), 
                                             "Text (*.txt)")
         if not path: return
-        
-        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-        if not pages: return
-        
+        content = None
+        if self.current_oxford_part_id and self.btn_b_all.isChecked():
+            content = self.searcher.get_part_text_sequence(self.current_oxford_part_id)
+            pages = None
+        else:
+            pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+
         with open(path, 'w', encoding='utf-8') as f:
-            # Header
             f.write(self._get_credit_header())
             f.write(f"System ID: {self.current_browse_sid}\n")
             f.write(f"Shelfmark: {meta.get('shelfmark', 'Unknown')}\n")
             f.write(f"Title: {meta.get('title', 'Unknown')}\n")
             f.write("="*50 + "\n\n")
             
-            for p in pages:
-                f.write(f"--- Page {p['p_num']} ---\n")
-                f.write(p['text'])
+            if content:
+                f.write(content)
                 f.write("\n\n")
+            elif pages:
+                for p in pages:
+                    f.write(f"--- Page {p['p_num']} ---\n")
+                    f.write(p['text'])
+                    f.write("\n\n")
             lab_config = self._get_lab_config_block()
             if lab_config:
                 f.write(lab_config)
@@ -5822,6 +6045,19 @@ class GenizahGUI(QMainWindow):
         fl_id = self.browse_fl_input.text().strip()
         if not sid and not fl_id and not shelf_query: return
 
+        self.current_oxford_part_id = None
+        selected_payload = None
+        if shelf_query:
+            norm = ShelfmarkCompleter.normalize(shelf_query)
+            selected_payload = self.completer_meta.get(norm)
+            if selected_payload and selected_payload.get('type') == 'oxford_part':
+                self.current_oxford_part_id = selected_payload.get('part_id')
+                first_sid = selected_payload.get('first_sys') or (self.searcher.get_first_sys_for_part(self.current_oxford_part_id) if self.searcher else None)
+                if first_sid:
+                    sid = first_sid
+                    self.browse_sys_input.setText(sid or "")
+                shelf_query = self.current_oxford_part_id
+
         # Reset UI
         self.browse_text.setText(tr("Loading metadata..."))
         self.browse_viewer.load_images({}) # Clear viewer
@@ -5917,9 +6153,13 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Error"), msg)
             return
 
+        if not self.current_oxford_part_id and sid in self.meta_mgr.system_to_part:
+            self.current_oxford_part_id = self.meta_mgr.system_to_part.get(sid)
+
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
+        self._pending_view_all = bool(selected_payload and selected_payload.get('mode') == 'neubauer')
         
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
@@ -5957,7 +6197,14 @@ class GenizahGUI(QMainWindow):
         if page_data:
             self.browse_render_page(page_data)
         else:
-            QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
+            new_sid = self.searcher.get_adjacent_sys_id_by_file_order(self.current_browse_sid, d)
+            if new_sid:
+                self.browse_sys_input.setText(new_sid)
+                self.current_browse_sid = new_sid
+                self.current_oxford_part_id = self.meta_mgr.system_to_part.get(new_sid)
+                self.browse_load()
+            else:
+                QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
     
     def browse_render_page(self, pd):
         self.current_browse_p = pd['p_num']
@@ -6035,8 +6282,16 @@ class GenizahGUI(QMainWindow):
             threading.Thread(target=worker, daemon=True).start()
         
     def browse_open_catalog(self):
-        if self.current_browse_sid:
-            QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+        url = None
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {}) if self.current_browse_sid else {}
+        if meta.get('direct_link'):
+            url = meta.get('direct_link')
+        elif self.current_oxford_part_id and self.current_oxford_part_id in self.meta_mgr.oxford_db:
+            url = self.meta_mgr.oxford_db[self.current_oxford_part_id].get('direct_link')
+        if not url and self.current_browse_sid:
+            url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _on_browse_thumb_resolved(self, sid, _unused_url):
         if sid != self.current_browse_sid:

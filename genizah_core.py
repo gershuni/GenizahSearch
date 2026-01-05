@@ -1617,6 +1617,10 @@ class MetadataManager:
         self.meta_map = {}
         self.nli_cache = {}
         self.csv_bank = {}
+        self.oxford_db = {}
+        self.system_to_part = {}
+        self.part_to_systems = defaultdict(list)
+        self.neubauer_lookup = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
 
@@ -1636,6 +1640,7 @@ class MetadataManager:
         threading.Thread(target=self._build_file_map_background, daemon=True).start()
 
     def _load_small_caches(self):
+        self._load_oxford_db()
         if os.path.exists(Config.CACHE_NLI):
             try:
                 with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
@@ -1649,6 +1654,22 @@ class MetadataManager:
 
     def _load_heavy_caches_bg(self):
         self._load_csv_bank()
+
+    def _load_oxford_db(self):
+        """Load Oxford Bodleian dataset into memory."""
+        json_path = os.path.join(Config.INTERNAL_DIR, "oxford_full_db.json")
+        if not os.path.exists(json_path):
+            return
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            flattened = {}
+            for _vol, parts in raw.items():
+                for part_id, payload in parts.items():
+                    flattened[part_id] = payload
+            self.oxford_db = flattened
+        except Exception as e:
+            LOGGER.warning("Failed to load Oxford DB from %s: %s", json_path, e)
 
     def _load_csv_bank(self):
         """Load the massive CSV file into memory for instant lookup."""
@@ -1687,7 +1708,34 @@ class MetadataManager:
                     if len(row) > 5:
                         title = row[5].strip()
 
-                    self.csv_bank[sys_id] = {'shelfmark': shelf, 'title': title}
+                    call_numbers = [c.strip() for c in raw_shelves if c.strip()]
+
+                    oxford_part = None
+                    neubauer = None
+                    for cn in call_numbers:
+                        if not neubauer and "neubauer" in cn.lower():
+                            neubauer = cn
+                        if not oxford_part:
+                            m = re.search(r'(?i)ms\.?\s*heb\.?\s*([a-z])\.?\s*(\d+)(?:[./](\d+))?', cn)
+                            if m:
+                                letter, vol, sub = m.group(1), m.group(2), m.group(3)
+                                oxford_part = f"MS. Heb. {letter}. {vol}"
+                                if sub:
+                                    oxford_part += f"/{sub}"
+
+                    if oxford_part and oxford_part in self.oxford_db:
+                        self.system_to_part[sys_id] = oxford_part
+                        self.part_to_systems[oxford_part].append(sys_id)
+                        if neubauer:
+                            self.neubauer_lookup[oxford_part] = neubauer
+
+                    self.csv_bank[sys_id] = {
+                        'shelfmark': shelf,
+                        'title': title,
+                        'call_numbers': call_numbers,
+                        'oxford_part_id': oxford_part,
+                        'neubauer': neubauer
+                    }
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
@@ -1844,8 +1892,20 @@ class MetadataManager:
                 'desc': '', 
                 'fl_ids': [], 
                 'thumb_url': None, 
-                'thumb_checked': True # Mark as checked to prevent repeated image download attempts
+                'thumb_checked': True, # Mark as checked to prevent repeated image download attempts
+                'oxford_part_id': row.get('oxford_part_id'),
+                'neubauer': row.get('neubauer')
             }
+            part_id = row.get('oxford_part_id')
+            if part_id and part_id in self.oxford_db:
+                part_meta = self.oxford_db.get(part_id, {})
+                meta['oxford_meta'] = part_meta
+                meta['direct_link'] = part_meta.get('direct_link')
+                meta['images_oxford'] = part_meta.get('images', [])
+                meta['attribution'] = "Oxford Bodleian Library"
+                images = part_meta.get('images') or []
+                if images:
+                    meta['thumb_url'] = images[0].get('thumb_url')
             self.nli_cache[system_id] = meta
             return meta
 
@@ -2280,6 +2340,17 @@ class MetadataManager:
         if meta and meta.get('thumb_checked') and meta.get('thumb_url'):
             return meta.get('thumb_url')
 
+        # Oxford-first policy
+        if meta and meta.get('oxford_part_id') and meta.get('oxford_meta'):
+            imgs = meta.get('oxford_meta', {}).get('images') or meta.get('images_oxford') or []
+            if imgs:
+                thumb = imgs[0].get('thumb_url')
+                if thumb:
+                    meta['thumb_url'] = thumb
+                    meta['thumb_checked'] = True
+                    self.nli_cache[system_id] = meta
+                    return thumb
+
         fl_ids = []
         if meta:
             fl_ids = meta.get('fl_ids', [])
@@ -2553,6 +2624,7 @@ class SearchEngine:
         self.var_mgr = variants_mgr
         self.index = None
         self.searcher = None
+        self._ordered_sys_ids = []
         self.reload_index()
 
     def reload_index(self):
@@ -2583,6 +2655,17 @@ class SearchEngine:
                 LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
 
         return cleaned_map
+
+    def _ensure_ordered_sys_ids(self):
+        if getattr(self, "_ordered_sys_ids", None):
+            return self._ordered_sys_ids
+        if not os.path.exists(Config.BROWSE_MAP):
+            self._ordered_sys_ids = []
+            return self._ordered_sys_ids
+        with open(Config.BROWSE_MAP, 'rb') as f:
+            b_map = pickle.load(f)
+        self._ordered_sys_ids = list(b_map.keys())
+        return self._ordered_sys_ids
 
     def build_tantivy_query(self, terms, mode):
         if mode == 'Regex':
@@ -3132,6 +3215,63 @@ class SearchEngine:
                     'fl_id': parsed.get('fl_id')
                 })
         return full_content
+
+    def get_first_sys_for_part(self, part_id):
+        """Return the first system ID for a given Oxford part, respecting file order."""
+        if not part_id:
+            return None
+        ordered = self._ensure_ordered_sys_ids()
+        part_map = getattr(self.meta_mgr, "part_to_systems", {})
+        candidates = part_map.get(part_id, [])
+        if not candidates:
+            return None
+        if not ordered:
+            return sorted(candidates, key=natural_sort_key)[0]
+        for sid in ordered:
+            if sid in candidates:
+                return sid
+        return candidates[0]
+
+    def get_part_text_sequence(self, part_id):
+        """
+        Build a tightly concatenated text sequence for an Oxford part.
+        Iterates Oxford JSON images and aligns them to system IDs derived from CSV/browse order.
+        """
+        if not part_id:
+            return ""
+        ox_db = getattr(self.meta_mgr, "oxford_db", {})
+        part_meta = ox_db.get(part_id, {})
+        images = part_meta.get('images') or []
+        if not images:
+            return ""
+
+        sys_ids = self.meta_mgr.part_to_systems.get(part_id, [])
+        if not sys_ids:
+            return ""
+
+        ordered_sys = self._ensure_ordered_sys_ids()
+        if ordered_sys:
+            sys_ids = [sid for sid in ordered_sys if sid in sys_ids]
+
+        browse_map = self._load_browse_map()
+        segments = []
+
+        for idx, img in enumerate(images):
+            if idx >= len(sys_ids):
+                continue
+            sid = sys_ids[idx]
+            pages = browse_map.get(sid, [])
+            if not pages:
+                continue
+            page_entry = pages[0] if idx >= len(pages) else pages[idx]
+            text = self.get_full_text_by_id(page_entry['uid'])
+            if not text:
+                continue
+            label = img.get('label') or ""
+            header = f"Folio {idx + 1} Image {label}".strip()
+            segments.append(f"{header}\n{text}")
+
+        return "".join(segments)
         
     def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
         browse_map = self._load_browse_map()
@@ -3230,13 +3370,8 @@ class SearchEngine:
         This relies on browse_map preserving insertion order.
         """
         # Load map if not already cached in memory for navigation
-        if not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids:
-            if not os.path.exists(Config.BROWSE_MAP):
-                return None
-            with open(Config.BROWSE_MAP, 'rb') as f:
-                b_map = pickle.load(f)
-                # list(dict.keys()) returns items in insertion order (File Order)
-                self._ordered_sys_ids = list(b_map.keys())
+        if not getattr(self, '_ordered_sys_ids', None):
+            self._ensure_ordered_sys_ids()
 
         if not current_sys_id:
             return self._ordered_sys_ids[0] if self._ordered_sys_ids else None
