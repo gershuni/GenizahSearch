@@ -2204,6 +2204,10 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        # Codicological Parts (Neubauer) browsing state
+        self.current_browse_part_id = None
+        self.current_browse_part_folios = []
+        self.current_browse_part_folio_idx = 0
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -2306,7 +2310,7 @@ class GenizahGUI(QMainWindow):
         # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
 
     def setup_shelfmark_completer(self):
-        """Initialize the shelfmark autocomplete with data from csv_bank."""
+        """Initialize the shelfmark autocomplete with data from csv_bank and Parts."""
         if not self.meta_mgr: return False
 
         # 1. Extract unique shelfmarks (Protected against background updates)
@@ -2322,12 +2326,30 @@ class GenizahGUI(QMainWindow):
         self.shelf_model = QStandardItemModel()
         self.valid_shelf_keys = set()
 
+        # Add regular shelfmarks
         for s in shelfmarks:
             item = QStandardItem(s)
             norm = ShelfmarkCompleter.normalize(s)
             self.valid_shelf_keys.add(norm)
             item.setData(norm, Qt.ItemDataRole.UserRole)
             self.shelf_model.appendRow(item)
+
+        # 2b. Add Codicological Parts (Neubauer) with (neubauer) suffix
+        try:
+            part_list = self.meta_mgr.get_part_autocomplete_list()
+            for part_info in part_list:
+                display = part_info['display']  # e.g., "MS. Heb. d. 29/2 (neubauer)"
+                normalized = part_info['normalized']
+
+                item = QStandardItem(display)
+                item.setData(normalized, Qt.ItemDataRole.UserRole)
+                # Store part_id for later retrieval
+                item.setData(part_info['part_id'], Qt.ItemDataRole.UserRole + 1)
+                self.valid_shelf_keys.add(normalized)
+                self.shelf_model.appendRow(item)
+        except Exception as e:
+            # Parts might not be loaded yet, that's OK
+            pass
 
         # 3. Setup Completer
         # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
@@ -2761,6 +2783,14 @@ class GenizahGUI(QMainWindow):
         self.btn_next_ms.setToolTip(tr("Next Manuscript (File Order)"))
         self.btn_next_ms.setFixedWidth(25)
         self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
+
+        # Toggle for Parts vs Folios navigation
+        self.btn_nav_mode = QPushButton(tr("Parts"))
+        self.btn_nav_mode.setToolTip(tr("Toggle navigation mode: Parts (Neubauer) / Folios"))
+        self.btn_nav_mode.setCheckable(True)
+        self.btn_nav_mode.setChecked(False)
+        self.btn_nav_mode.setFixedWidth(50)
+        self.btn_nav_mode.clicked.connect(self._toggle_nav_mode)
         
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
@@ -2795,11 +2825,12 @@ class GenizahGUI(QMainWindow):
         self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
         self.btn_b_all.setEnabled(False)
         
-        row1.addWidget(self.btn_prev_ms)    
-        row1.addWidget(QLabel(tr("System ID:")))        
-        row1.addWidget(self.browse_sys_input)    
+        row1.addWidget(self.btn_prev_ms)
+        row1.addWidget(QLabel(tr("System ID:")))
+        row1.addWidget(self.browse_sys_input)
         row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
         row1.addWidget(self.btn_next_ms)
+        row1.addWidget(self.btn_nav_mode)
         row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
@@ -5828,6 +5859,12 @@ class GenizahGUI(QMainWindow):
 
         page_data = None
 
+        # Check if this is a Part identifier (Neubauer)
+        part_id, is_part = self.meta_mgr.parse_part_identifier(shelf_query)
+        if is_part:
+            self._browse_load_part(part_id)
+            return
+
         # Determine priority based on last edited field (default: shelfmark > system ID > FL)
         priority = []
         if self.last_browse_field == "fl" and fl_id:
@@ -5936,6 +5973,83 @@ class GenizahGUI(QMainWindow):
             self.browse_render_page(page_data)
         elif self.current_browse_sid:
             self.browse_load_page()
+
+    def _browse_load_part(self, part_id):
+        """
+        Load a Codicological Part (Neubauer) for browsing.
+        A Part may contain multiple folios - we load the first one and enable Part navigation.
+        """
+        if not self.searcher or not self.meta_mgr:
+            return
+
+        # Get all folios in this Part
+        folios = self.meta_mgr.get_folios_for_part(part_id)
+        if not folios:
+            QMessageBox.warning(self, tr("Error"), tr("No folios found for this Part."))
+            return
+
+        # Get Part metadata from Oxford
+        part_meta = self.meta_mgr.get_part_metadata(part_id)
+
+        # Store Part browsing state
+        self.current_browse_part_id = part_id
+        self.current_browse_part_folios = folios
+        self.current_browse_part_folio_idx = 0  # Start with first folio
+
+        # Load first folio
+        first_sid = folios[0]
+        self.current_browse_sid = first_sid
+        self.current_browse_p = None
+        self.current_browse_internal_idx = None
+
+        # Update UI fields
+        self.browse_sys_input.setText(first_sid)
+        self.browse_shelf_input.setText(f"{part_id} (neubauer)")
+
+        # Display Part metadata in info label
+        part_title = part_meta.get('title', '') if part_meta else ''
+        part_contents = part_meta.get('contents', '') if part_meta else ''
+
+        # Get our CSV title if available (for Hebrew)
+        shelf, csv_title = self.meta_mgr.get_meta_for_id(first_sid)
+        combined_title = csv_title if csv_title else part_title
+
+        # Format folio range info
+        folio_range = part_meta.get('folio_range', []) if part_meta else []
+        range_str = ""
+        if len(folio_range) == 2:
+            range_str = f" (fols. {folio_range[0]}-{folio_range[1]})"
+
+        info_text = f"<b>{part_id}</b>{range_str}"
+        if combined_title:
+            info_text += f"<br/>{combined_title}"
+
+        self.browse_info_lbl.setText(info_text)
+
+        # Disable controls until loaded
+        self.btn_b_catalog.setEnabled(False)
+        self.btn_b_save.setEnabled(False)
+        self.btn_b_toggle_img.setEnabled(False)
+
+        # Load images from Part directly (Oxford images)
+        part_images = self.meta_mgr.get_part_images(part_id)
+        if part_images:
+            # Convert Part images to format expected by viewer
+            images_ext = [{'label': img.get('label', ''), 'url': img.get('full_url', '')} for img in part_images]
+            self.browse_viewer.load_images({
+                'images_nli': [],
+                'images_ext': images_ext,
+                'provider': 'Oxford (Bodleian)',
+            })
+            self.browse_viewer.set_page(0)
+
+        # Load first page text
+        self.browse_load_page()
+
+        # Enable controls
+        self.btn_b_catalog.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
+        self.btn_b_toggle_img.setEnabled(True)
 
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
@@ -6400,24 +6514,71 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
-    def navigate_manuscript(self, direction):
-        """Move to prev/next manuscript based on FILE ORDER."""
-        current = self.current_browse_sid
-        
-        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
-        
-        if new_sid:
-            self.browse_sys_input.setText(new_sid)
-            
-            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
-            if shelf and shelf != "Unknown":
-                self.browse_shelf_input.setText(shelf)
-
-            # נותן עדיפות ל-System ID וטוען
-            self._set_last_browse_field("sys")
-            self.browse_load()
+    def _toggle_nav_mode(self):
+        """Toggle between Parts and Folios navigation mode."""
+        if self.btn_nav_mode.isChecked():
+            self.btn_nav_mode.setText(tr("Folios"))
+            self.btn_nav_mode.setToolTip(tr("Currently: Navigate by Folios. Click to switch to Parts."))
+            self.btn_prev_ms.setToolTip(tr("Previous Folio"))
+            self.btn_next_ms.setToolTip(tr("Next Folio"))
         else:
-            QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+            self.btn_nav_mode.setText(tr("Parts"))
+            self.btn_nav_mode.setToolTip(tr("Currently: Navigate by Parts (Neubauer). Click to switch to Folios."))
+            self.btn_prev_ms.setToolTip(tr("Previous Part (Neubauer)"))
+            self.btn_next_ms.setToolTip(tr("Next Part (Neubauer)"))
+
+    def navigate_manuscript(self, direction):
+        """Move to prev/next manuscript based on navigation mode."""
+        current = self.current_browse_sid
+
+        # Check if we're in Parts navigation mode
+        if self.btn_nav_mode.isChecked():
+            # Navigate by Folios (file order)
+            new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+
+            if new_sid:
+                # Clear Part state when navigating by folios
+                self.current_browse_part_id = None
+                self.current_browse_part_folios = []
+                self.current_browse_part_folio_idx = 0
+
+                self.browse_sys_input.setText(new_sid)
+
+                shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+
+                self._set_last_browse_field("sys")
+                self.browse_load()
+            else:
+                QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+        else:
+            # Navigate by Parts (Neubauer)
+            self._navigate_by_part(direction)
+
+    def _navigate_by_part(self, direction):
+        """Navigate to next/previous Part (Neubauer codicological unit)."""
+        current_sid = self.current_browse_sid
+        if not current_sid:
+            return
+
+        # Get current Part
+        current_part = self.current_browse_part_id
+        if not current_part:
+            # Try to find Part for current folio
+            current_part = self.meta_mgr.get_part_for_folio(current_sid)
+
+        if current_part:
+            # Get adjacent Part
+            adjacent_part = self.meta_mgr.codico_mgr.get_adjacent_part(current_part, direction)
+            if adjacent_part:
+                self._browse_load_part(adjacent_part)
+                return
+            else:
+                QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
+        else:
+            # No Part found for current folio - fallback to file order
+            QMessageBox.information(self, tr("Nav"), tr("No Part found for current manuscript."))
     
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
