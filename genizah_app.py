@@ -2393,6 +2393,18 @@ class GenizahGUI(QMainWindow):
             item.setData(norm, Qt.ItemDataRole.UserRole)
             self.shelf_model.appendRow(item)
 
+        # Add Neubauer (Oxford Part) entries
+        if hasattr(self.meta_mgr, 'oxford_db'):
+            for part_id in self.meta_mgr.oxford_db.keys():
+                display_label = f"{part_id} (Neubauer)"
+                item = QStandardItem(display_label)
+                # Store exact Part ID in UserRole for easy detection
+                # We prefix/suffix to distinguish or just use display label logic
+                norm = ShelfmarkCompleter.normalize(display_label)
+                self.valid_shelf_keys.add(norm)
+                item.setData(norm, Qt.ItemDataRole.UserRole)
+                self.shelf_model.appendRow(item)
+
         # 3. Setup Completer
         # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
         self.shelf_completer = ShelfmarkCompleter(self.shelf_model, self, valid_keys=self.valid_shelf_keys)
@@ -5951,6 +5963,22 @@ class GenizahGUI(QMainWindow):
             if field == "shelf":
                 if not shelf_query:
                     continue
+
+                # Check for Neubauer/Oxford Part directly
+                is_neubauer = "(Neubauer)" in shelf_query
+                clean_shelf = shelf_query.replace(" (Neubauer)", "").strip()
+
+                if is_neubauer and clean_shelf in self.meta_mgr.oxford_db:
+                    # Found a Neubauer Part!
+                    # 1. Get first System ID
+                    sids = self.meta_mgr.oxford_part_to_sys_ids.get(clean_shelf)
+                    if sids:
+                        sid = sids[0] # Start with first
+                        self.browse_sys_input.setText(sid)
+                        # 2. Trigger View All
+                        self.btn_b_all.setChecked(True)
+                        break
+
                 shelf_res = self.meta_mgr.resolve_system_by_shelfmark(shelf_query)
                 if shelf_res['sys_id']:
                     sid = shelf_res['sys_id']
@@ -6173,6 +6201,10 @@ class GenizahGUI(QMainWindow):
         
         # In genizah_core, we now guarantee that 'thumb_url' comes from 907 $d if available
         thumb_url = meta.get('thumb_url') if meta else None
+
+        # Fallback: If missing, ask MetaManager to resolve it (checks Oxford/NLI dynamic)
+        if not thumb_url and self.meta_mgr:
+            thumb_url = self.meta_mgr.get_thumbnail(sys_id)
 
         if thumb_url:
             self.start_browse_download(sys_id, thumb_url)
@@ -6514,6 +6546,17 @@ class GenizahGUI(QMainWindow):
         new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current_ref_sid, direction)
         
         if new_sid:
+            # If in "View All" mode, ensure we land on the START of the new part if it's also Oxford
+            if self.btn_b_all.isChecked():
+                new_ox_part = self.meta_mgr.sys_id_to_oxford_part.get(new_sid)
+                if new_ox_part:
+                    # Find the FIRST system ID of this new part to ensure we load from start
+                    new_part_sids = self.meta_mgr.oxford_part_to_sys_ids.get(new_ox_part, [])
+                    if hasattr(self.searcher, '_ordered_sys_ids') and self.searcher._ordered_sys_ids:
+                        ordered_new = [s for s in self.searcher._ordered_sys_ids if s in new_part_sids]
+                        if ordered_new:
+                            new_sid = ordered_new[0]
+
             self.browse_sys_input.setText(new_sid)
             
             shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
