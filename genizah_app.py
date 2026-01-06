@@ -3257,6 +3257,27 @@ class GenizahGUI(QMainWindow):
         full_html = "".join(html_content)
         self.browse_text.setHtml(full_html)
 
+        # Update info label with Oxford Part info in View All mode
+        part_id = self.current_browse_part_id
+        if not part_id and self.current_browse_sid:
+            part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
+
+        if part_id:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+            info_text = f"<b>{part_display}</b> - View All"
+            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
+            if len(folio_range) == 2:
+                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
+            part_info += "</span>"
+            if oxford_title:
+                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
+            info_text += part_info
+            self.browse_info_lbl.setText(info_text)
+
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
@@ -6460,6 +6481,26 @@ class GenizahGUI(QMainWindow):
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
         info_text = f"<b>{shelf}</b><br>{title or ''}"
+
+        # Add Oxford Part info if available
+        part_id = self.current_browse_part_id
+        if not part_id and self.current_browse_sid:
+            part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
+
+        if part_id:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
+            if len(folio_range) == 2:
+                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
+            part_info += "</span>"
+            if oxford_title:
+                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
+            info_text += part_info
+
         self.browse_info_lbl.setText(info_text)
         if shelf:
             self.browse_shelf_input.setText(shelf)
