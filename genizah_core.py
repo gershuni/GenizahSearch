@@ -1840,6 +1840,17 @@ class CodicologicalManager:
             return f"{part_id} part"
         return part_id
 
+    def get_part_label(self, part_id):
+        """Return a short Part label suitable for shelfmark suffixes (e.g., "part 23")."""
+        if not part_id:
+            return ""
+
+        match = re.search(r'/([A-Za-z0-9]+)$', part_id)
+        if match:
+            return f"part {match.group(1)}"
+
+        return "part"
+
     def is_part_id(self, identifier):
         """Check if an identifier is a Part ID (vs a regular shelfmark)."""
         # Check for "part" suffix (new format)

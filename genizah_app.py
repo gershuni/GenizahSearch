@@ -2068,14 +2068,15 @@ class ResultDialog(QDialog):
         self.btn_ext_info.setVisible(True)
 
         self.lbl_title.setText(meta.get('title', ''))
-        shelf = meta.get('shelfmark')
+            shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
             # Add Part info to shelfmark if available
             if oxford_part_id:
-                part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
-                shelf = f"{shelf} [{part_display}]"
+                part_label = self.meta_mgr.codico_mgr.get_part_label(oxford_part_id)
+                if part_label:
+                    shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)
 
     def sync_external_view(self):
