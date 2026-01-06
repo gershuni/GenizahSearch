@@ -1,9 +1,21 @@
-## 📜 Genizah Search Pro 4.0
+## 📜 Genizah Search Pro 4.1
 
 **Research Tool for the Cairo Genizah**
 
 Genizah Search Pro is a software for searching and researching Cairo Genizah manuscripts, based on the automatic transcriptions from the MiDRASH Project.
-**Version 4.0** transforms the software into a standalone research environment, featuring an integrated image viewer and an algorithmic search engine ("Lab Mode").
+**Version 4.1** adds support for Oxford Bodleian Library's codicological units (Neubauer catalog Parts), enhancing manuscript browsing with proper manuscript identification.
+
+---
+
+## 🚀 What's New in Version 4.1?
+
+* **📖 Codicological Parts (Neubauer):**
+  Full support for Oxford Bodleian Library manuscripts with proper Neubauer catalog integration.
+  * **Part-Based Browsing:** View manuscripts as complete codicological units, not just individual folios.
+  * **Oxford Metadata:** Display catalog information directly from the Bodleian Hebrew manuscripts database.
+  * **Dual Navigation:** Toggle between navigating by Parts (codicological units) or by Folios (individual pages).
+  * **Autocomplete:** Search for Parts using the "(neubauer)" suffix in the shelfmark field.
+  * **Image Integration:** Direct access to high-resolution Oxford manuscript images.
 
 ---
 
@@ -87,12 +99,24 @@ The software is distributed under the **MIT** License.
 The dataset is distributed under **CC BY 4.0**.
 ---
 
-# 📜 Genizah Search Pro 4.0 (עברית)
+# 📜 Genizah Search Pro 4.1 (עברית)
 
 **כלי מחקר לגניזה הקהירית**
 
 Genizah Search Pro היא תוכנה לחיפוש ולמחקר בכתבי היד של הגניזה הקהירית, המבוססת על התעתיקים האוטומטיים של פרויקט MiDRASH.
-**גרסה 4.0** הופכת את התוכנה לסביבת מחקר עצמאית, וכוללת צפיין תמונות מובנה ומנוע חיפוש אלגוריתמי ("מצב מעבדה").
+**גרסה 4.1** מוסיפה תמיכה ביחידות קודיקולוגיות (Parts לפי קטלוג נויבאואר) של ספריית הבודליאנה באוקספורד, ומשפרת את העיון בכתבי היד עם זיהוי נכון של כתבי יד שלמים.
+
+---
+
+## 🚀 מה חדש בגרסה 4.1?
+
+* **📖 חלקים קודיקולוגיים (נויבאואר):**
+  תמיכה מלאה בכתבי היד של ספריית הבודליאנה באוקספורד עם שילוב קטלוג נויבאואר.
+  * **עיון לפי Part:** צפייה בכתבי יד כיחידות קודיקולוגיות שלמות, לא רק לפי דפים בודדים.
+  * **מטא-דאטה מאוקספורד:** הצגת מידע קטלוגי ישירות ממאגר כתבי היד העבריים של הבודליאנה.
+  * **ניווט כפול:** מעבר בין ניווט לפי Parts (יחידות קודיקולוגיות) לבין ניווט לפי פוליואים (דפים בודדים).
+  * **השלמה אוטומטית:** חיפוש Parts באמצעות הסיומת "(neubauer)" בשדה מספר המדף.
+  * **שילוב תמונות:** גישה ישירה לתמונות ברזולוציה גבוהה מאוקספורד.
 
 ---
 

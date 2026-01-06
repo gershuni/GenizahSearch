@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem)
+                         QStandardItemModel, QStandardItem, QPalette)
 
 from version import APP_VERSION
 
@@ -776,8 +776,15 @@ class ManuscriptViewerWidget(QWidget):
             return "cambridge"
 
         for img in meta.get('images_ext', []) or []:
-            if "cudl.lib.cam.ac.uk" in (img.get('url', '').lower()):
+            img_url = (img.get('url', '').lower())
+            if "cudl.lib.cam.ac.uk" in img_url:
                 return "cambridge"
+            if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
+                return "oxford"
+
+        # Check for Oxford Part ID
+        if meta.get('oxford_part_id'):
+            return "oxford"
 
         return None
 
@@ -816,7 +823,12 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.clear()
 
         if self.images_ext:
-            ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
+            if self.external_provider == "cambridge":
+                ext_label = "Cambridge"
+            elif self.external_provider == "oxford":
+                ext_label = "Oxford"
+            else:
+                ext_label = "External"
             self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
@@ -882,6 +894,20 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def _load_thumbnail(self, thumb_url):
+        """Load thumbnail synchronously for quick display while full image loads."""
+        try:
+            import urllib.request
+            req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = response.read()
+                image = QImage()
+                if image.loadFromData(data):
+                    pix = QPixmap.fromImage(image)
+                    self.scroll_area.set_image(pix)
+        except Exception:
+            pass  # Thumbnail load failed, full image will replace it
+
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
@@ -896,11 +922,18 @@ class ManuscriptViewerWidget(QWidget):
         img_data = self.active_list[index]
         base_url = img_data['url']
 
+        # Check for thumbnail URL (Oxford images have this)
+        thumb_url = img_data.get('thumb_url', '')
+
         self.scroll_area.set_status_message(tr("Loading..."))
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
             self.loader_thread.wait()
+
+        # Load thumbnail first if available (for quick display)
+        if thumb_url:
+            self._load_thumbnail(thumb_url)
 
         final_url = self._resolve_url(base_url)
 
@@ -1796,7 +1829,7 @@ class ResultDialog(QDialog):
             # Jump by number (user typed in box)
             try: p = int(target)
             except: p = 1
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
+            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True)
         else:
             # Relative Navigation (Next/Prev)
             # Use internal index if we have it, otherwise rely on p_num
@@ -1807,12 +1840,17 @@ class ResultDialog(QDialog):
                 self.current_sys_id, 
                 p_num=p_arg, 
                 next_prev=offset,
-                absolute_index=idx_arg # <--- THIS FIXES THE BUG
+                absolute_index=idx_arg, # <--- THIS FIXES THE BUG
+                allow_cross=True
             )
             
         if not page_data: return
 
         # --- UPDATE STATE ---
+        new_sys = page_data.get('sys_id', self.current_sys_id)
+        if new_sys and new_sys != self.current_sys_id:
+            self.current_sys_id = new_sys
+
         self.current_p_num = page_data['p_num']
         self.current_internal_idx = page_data['internal_index'] # <--- SAVE IT
         
@@ -1821,6 +1859,15 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
+
+        # Keep the dialog's data object aligned with the currently displayed folio
+        if self.data is not None:
+            self.data['raw_header'] = page_data.get('full_header', self.data.get('raw_header', ''))
+            self.data['uid'] = page_data.get('uid', self.data.get('uid'))
+            self.data['full_text'] = page_data.get('text', self.data.get('full_text', ''))
+            display_block = self.data.get('display', {})
+            display_block['id'] = self.current_sys_id
+            self.data['display'] = display_block
 
         # Update Info Label
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
@@ -1942,11 +1989,53 @@ class ResultDialog(QDialog):
 
         # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})
-        if not marc and not meta.get('physical_desc'):
+
+        # Check for Oxford Part metadata
+        oxford_part_id = meta.get('oxford_part_id')
+        part_meta = None
+        if oxford_part_id:
+            part_meta = self.meta_mgr.get_part_metadata(oxford_part_id)
+        elif self.current_sys_id:
+            # Check if this folio belongs to a Part
+            part_id = self.meta_mgr.get_part_for_folio(self.current_sys_id)
+            if part_id:
+                oxford_part_id = part_id
+                part_meta = self.meta_mgr.get_part_metadata(part_id)
+
+        if not marc and not meta.get('physical_desc') and not part_meta:
             self.btn_ext_info.setVisible(False)
             return
 
-        html = "<div style='font-family:Arial;'>"
+        palette = self.txt_extended_info.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+        part_bg = QColor(base_color).lighter(115).name()
+
+        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
+
+        # Oxford Part metadata section
+        if part_meta:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
+            html += f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
+            html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
+
+            folio_range = part_meta.get('folio_range', [])
+            if len(folio_range) == 2:
+                if folio_range[0] == folio_range[1]:
+                    html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
+                else:
+                    html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+
+            part_title = part_meta.get('title', '')
+            if part_title:
+                html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+
+            part_contents = part_meta.get('contents', '')
+            if part_contents:
+                html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+
+            html += "</div>"
+
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
 
@@ -1983,6 +2072,11 @@ class ResultDialog(QDialog):
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
+            # Add Part info to shelfmark if available
+            if oxford_part_id:
+                part_label = self.meta_mgr.codico_mgr.get_part_label(oxford_part_id)
+                if part_label:
+                    shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)
 
     def sync_external_view(self):
@@ -2204,6 +2298,10 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        # Codicological Parts (Neubauer) browsing state
+        self.current_browse_part_id = None
+        self.current_browse_part_folios = []
+        self.current_browse_part_folio_idx = 0
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -2306,7 +2404,7 @@ class GenizahGUI(QMainWindow):
         # If libraries.csv is missing, csv_bank remains empty, so this never setups. That's acceptable.
 
     def setup_shelfmark_completer(self):
-        """Initialize the shelfmark autocomplete with data from csv_bank."""
+        """Initialize the shelfmark autocomplete with data from csv_bank and Parts."""
         if not self.meta_mgr: return False
 
         # 1. Extract unique shelfmarks (Protected against background updates)
@@ -2322,12 +2420,30 @@ class GenizahGUI(QMainWindow):
         self.shelf_model = QStandardItemModel()
         self.valid_shelf_keys = set()
 
+        # Add regular shelfmarks
         for s in shelfmarks:
             item = QStandardItem(s)
             norm = ShelfmarkCompleter.normalize(s)
             self.valid_shelf_keys.add(norm)
             item.setData(norm, Qt.ItemDataRole.UserRole)
             self.shelf_model.appendRow(item)
+
+        # 2b. Add Codicological Parts (Neubauer) with (neubauer) suffix
+        try:
+            part_list = self.meta_mgr.get_part_autocomplete_list()
+            for part_info in part_list:
+                display = part_info['display']  # e.g., "MS. Heb. d. 29/2 (neubauer)"
+                normalized = part_info['normalized']
+
+                item = QStandardItem(display)
+                item.setData(normalized, Qt.ItemDataRole.UserRole)
+                # Store part_id for later retrieval
+                item.setData(part_info['part_id'], Qt.ItemDataRole.UserRole + 1)
+                self.valid_shelf_keys.add(normalized)
+                self.shelf_model.appendRow(item)
+        except Exception as e:
+            # Parts might not be loaded yet, that's OK
+            pass
 
         # 3. Setup Completer
         # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
@@ -2761,7 +2877,7 @@ class GenizahGUI(QMainWindow):
         self.btn_next_ms.setToolTip(tr("Next Manuscript (File Order)"))
         self.btn_next_ms.setFixedWidth(25)
         self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
-        
+
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
@@ -2795,9 +2911,9 @@ class GenizahGUI(QMainWindow):
         self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
         self.btn_b_all.setEnabled(False)
         
-        row1.addWidget(self.btn_prev_ms)    
-        row1.addWidget(QLabel(tr("System ID:")))        
-        row1.addWidget(self.browse_sys_input)    
+        row1.addWidget(self.btn_prev_ms)
+        row1.addWidget(QLabel(tr("System ID:")))
+        row1.addWidget(self.browse_sys_input)
         row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
         row1.addWidget(self.btn_next_ms)
         row1.addSpacing(10)
@@ -2820,7 +2936,7 @@ class GenizahGUI(QMainWindow):
         # Row 2: Metadata Display (Compact)
         self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
         self.browse_info_lbl.setWordWrap(True)
-        self.browse_info_lbl.setStyleSheet("font-size: 12px; color: #2c3e50;")
+        self.browse_info_lbl.setStyleSheet("font-size: 12px;")
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
@@ -2866,6 +2982,8 @@ class GenizahGUI(QMainWindow):
         self.browse_text = QTextBrowser()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
+        self.browse_text.setOpenExternalLinks(False)
+        self.browse_text.anchorClicked.connect(self._on_browse_link_clicked)
         text_layout.addWidget(self.browse_text)
         
         # Right: Image Viewer
@@ -2898,9 +3016,44 @@ class GenizahGUI(QMainWindow):
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
 
-        label_text = f"<b>{shelf or ''}</b>"
-        if title: label_text += f" | {title}"
-        if meta.get('physical_desc'): label_text += f" | {meta['physical_desc']}"
+        # Check for Oxford Part metadata - integrated into shelfmark
+        part_id = self.current_browse_part_id
+        if not part_id:
+            part_id = self.meta_mgr.get_part_for_folio(sid)
+
+        if part_id:
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)" or "fol. 14" for single
+            shelf_with_part = f"{shelf or ''}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            label_text = f"<b>{shelf_with_part}</b>"
+            if oxford_title:
+                label_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+            if title and title != oxford_title:
+                label_text += f"<br/>{title}"
+            if meta.get('physical_desc'):
+                label_text += f" | {meta['physical_desc']}"
+        else:
+            label_text = f"<b>{shelf or ''}</b>"
+            if title:
+                label_text += f" | {title}"
+            if meta.get('physical_desc'):
+                label_text += f" | {meta['physical_desc']}"
+
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
@@ -2917,6 +3070,31 @@ class GenizahGUI(QMainWindow):
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
+
+    def _on_browse_link_clicked(self, url):
+        """Handle clicks on internal links in browse text (View All mode)."""
+        url_str = url.toString()
+        if url_str.startswith("genizah://load/"):
+            # Extract system ID from URL
+            sid = url_str.replace("genizah://load/", "")
+            if sid:
+                # Exit View All mode
+                self.btn_b_all.setChecked(False)
+                self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+                self.btn_b_toggle_img.setEnabled(True)
+
+                # Clear Part state and load the specific folio
+                self.current_browse_part_id = None
+                self.current_browse_part_folios = []
+                self.current_browse_part_folio_idx = 0
+
+                # Load the folio
+                self.browse_sys_input.setText(sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load()
 
     def toggle_browse_view_all(self, checked):
         if checked:
@@ -2998,54 +3176,147 @@ class GenizahGUI(QMainWindow):
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
         if not self.current_browse_sid: return
-        
+
         self.browse_text.setText(tr("Loading full manuscript..."))
         QApplication.processEvents() # Refresh UI
-        
-        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-        if not pages:
+
+        html_content = []
+
+        # If browsing a Part, load all folios in the Part
+        if self.current_browse_part_id and self.current_browse_part_folios:
+            # Get Oxford images for image labels
+            part_images = self.meta_mgr.get_part_images(self.current_browse_part_id)
+            image_idx = 0
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(self.current_browse_part_id)
+
+            for folio_idx, sid in enumerate(self.current_browse_part_folios):
+                pages = self.searcher.get_full_manuscript(sid)
+                if not pages:
+                    continue
+
+                # Get shelfmark for linking
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if not shelf or shelf == "Unknown":
+                    shelf = sid
+                shelf_display = shelf
+                if part_display:
+                    shelf_display = f"{part_display} | {shelf}"
+
+                for p in pages:
+                    # Get image label from Oxford images
+                    img_label = ""
+                    if part_images and image_idx < len(part_images):
+                        img_label = part_images[image_idx].get('label', '')
+                        image_idx += 1
+
+                    # Anchor for scrolling
+                    anchor = f'<a name="img_{image_idx}"></a>'
+
+                    # Create clickable link separator using image label
+                    # The link will load this specific shelfmark when clicked
+                    link_text = f"image {img_label}" if img_label else f"image {image_idx}"
+                    # Use custom URL scheme for internal navigation
+                    link_href = f"genizah://load/{sid}"
+
+                    separator = f"""
+                    <div style='background-color: #f5f5f5; color: #333; padding: 6px 10px; margin-top: 20px; border-bottom: 1px solid #ddd;'>
+                        <a href="{link_href}" style='color: #2980b9; text-decoration: none; font-weight: bold;'>
+                            {link_text}
+                        </a>
+                        <span style='font-size: 0.85em; color: #777; margin-left: 10px;'>{shelf_display}</span>
+                    </div>
+                    """
+
+                    # Content with line breaks preserved
+                    content = p['text'].replace("\n", "<br>")
+
+                    html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+        else:
+            # Single folio mode (original behavior)
+            pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+            if not pages:
+                QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
+                return
+
+            # Get enriched map if available
+            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+            canvas_map = meta.get('canvas_map', {})
+
+            for p in pages:
+                # Anchor for scrolling
+                anchor = f'<a name="page_{p["p_num"]}"></a>'
+
+                # Visual Separator
+                img_lbl = tr("Image")
+                fl_id = p.get('fl_id')
+
+                # Resolve Label
+                fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+                label = canvas_map.get(fl_digits, "")
+
+                fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+                label_suffix = f" - {label}" if label else ""
+
+                separator = f"""
+                <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
+                    <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
+                </div>
+                """
+
+                # Content with line breaks preserved
+                content = p['text'].replace("\n", "<br>")
+
+                html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+
+        if not html_content:
             QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
-        # Get enriched map if available
-        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-        canvas_map = meta.get('canvas_map', {})
-
-        html_content = []
-        for p in pages:
-            # Anchor for scrolling
-            anchor = f'<a name="page_{p["p_num"]}"></a>'
-            
-            # Visual Separator
-            img_lbl = tr("Image")
-            fl_id = p.get('fl_id')
-
-            # Resolve Label
-            fl_digits = re.sub(r"\D", "", str(fl_id or ""))
-            label = canvas_map.get(fl_digits, "")
-
-            fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
-            label_suffix = f" - {label}" if label else ""
-
-            separator = f"""
-            <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
-            </div>
-            """
-            
-            # Content with line breaks preserved
-            content = p['text'].replace("\n", "<br>")
-            
-            html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
-        
         full_html = "".join(html_content)
         self.browse_text.setHtml(full_html)
-        
+
+        # Update info label with Oxford Part info in View All mode
+        part_id = self.current_browse_part_id
+        if not part_id and self.current_browse_sid:
+            part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
+
+        if part_id:
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+            # Get shelfmark for first folio in part
+            shelf = ""
+            if self.current_browse_part_folios:
+                first_sid = self.current_browse_part_folios[0]
+                shelf, _ = self.meta_mgr.get_meta_for_id(first_sid)
+            if not shelf or shelf == "Unknown":
+                shelf = part_id
+
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82) - View All"
+            shelf_with_part = f"{shelf}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            info_text = f"<b>{shelf_with_part}</b> - View All"
+            if oxford_title:
+                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+            self.browse_info_lbl.setText(info_text)
+
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
         self.combo_browse_page.setEnabled(False)
-        
+
         # Scroll to the page we were looking at
         if self.current_browse_p:
             self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
@@ -4180,7 +4451,11 @@ class GenizahGUI(QMainWindow):
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
+                if item.get('type') == 'part':
+                    # For Parts, collect all folios
+                    folios = item.get('folios', [])
+                    all_ids.extend(folios)
+                elif item.get('type') == 'manuscript' and item.get('sys_id'):
                     all_ids.append(item['sys_id'])
                 else:
                     sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
@@ -4254,23 +4529,53 @@ class GenizahGUI(QMainWindow):
         # ==========================================
         if fmt in ['xlsx', 'csv']:
             table_rows = []
-            
+
             def add_rows(items, category, group_name=""):
                 for ms_item in items:
-                    if ms_item.get('type') == 'manuscript':
+                    item_type = ms_item.get('type', '')
+                    if item_type == 'part':
+                        # For Parts, use Part display name and Oxford title
+                        part_display = ms_item.get('part_display', '')
+                        oxford_title = ms_item.get('oxford_title', '')
+                        sid = ms_item.get('sys_id', '')
+                        shelf = f"📖 {part_display}" if part_display else sid
+                        title = oxford_title or ""
+                        ms_score = ms_item.get('score', 0)
+
+                        for page in ms_item.get('pages', []):
+                             p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+
+                             # Show both Part and folio info
+                             display_shelf = f"{shelf} [{p_shelf}]" if p_shelf else shelf
+
+                             table_rows.append([
+                                category,
+                                group_name,
+                                p_sid or sid or "",
+                                display_shelf or "",
+                                title or "",
+                                str(p_num or ""),
+                                f"{ms_score} (P:{page.get('score',0)})",
+                                src_clean,
+                                ms_clean
+                             ])
+                    elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
                         if not shelf or shelf == "Unknown":
                              shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        
+
                         ms_score = ms_item.get('score', 0)
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             
+
                              src_clean = _clean_and_marker(page.get('source_ctx', ''))
                              ms_clean = _clean_and_marker(page.get('text', ''))
-                             
+
                              table_rows.append([
                                 category,
                                 group_name,
@@ -4278,7 +4583,7 @@ class GenizahGUI(QMainWindow):
                                 shelf or "",
                                 title or "",
                                 str(p_num or ""),
-                                f"{ms_score} (P:{page.get('score',0)})", 
+                                f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
                              ])
@@ -4287,7 +4592,7 @@ class GenizahGUI(QMainWindow):
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                         src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
                         ms_clean = _clean_and_marker(ms_item.get('text', ''))
-                        
+
                         table_rows.append([
                             category,
                             group_name,
@@ -4410,7 +4715,23 @@ class GenizahGUI(QMainWindow):
                 total_count = len(c_main) + appendix_count + known_count + filtered_total
 
                 def _fmt_ms_entry(ms_item):
-                    if ms_item.get('type') == 'manuscript':
+                    item_type = ms_item.get('type', '')
+                    if item_type == 'part':
+                        part_display = ms_item.get('part_display', '')
+                        oxford_title = ms_item.get('oxford_title', '')
+                        sid = ms_item.get('sys_id', '')
+                        ms_block = [sep, f"📖 PART: {part_display} | {oxford_title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
+
+                        for page in ms_item.get('pages', []):
+                             p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+                             folio_info = f" [{p_shelf}]" if p_shelf else ""
+                             ms_block.append(f"\n--- Page {p_num}{folio_info} (Score: {page.get('score',0)}) ---")
+                             ms_block.append(tr("Source Context") + ":\n" + src_clean)
+                             ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
+                        return ms_block
+                    elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
                         if not shelf or shelf == "Unknown":
@@ -4925,7 +5246,12 @@ class GenizahGUI(QMainWindow):
         sid = None
         shelf = None
         title = None
-        if item.get('type') == 'manuscript' and item.get('sys_id'):
+        item_type = item.get('type', '')
+        if item_type == 'part':
+            sid = item.get('sys_id')
+            shelf = item.get('part_display', '')
+            title = item.get('oxford_title', '')
+        elif item_type == 'manuscript' and item.get('sys_id'):
             sid = item['sys_id']
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
             if not shelf or shelf == "Unknown":
@@ -5122,7 +5448,51 @@ class GenizahGUI(QMainWindow):
             node.setCheckState(0, Qt.CheckState.Unchecked)
 
         def add_manuscript_node(parent, ms_item):
-            if ms_item.get('type') == 'manuscript':
+            item_type = ms_item.get('type', '')
+            if item_type == 'part':
+                # Part node - show Part display name with 📖 icon
+                part_display = ms_item.get('part_display', '')
+                oxford_title = ms_item.get('oxford_title', '')
+                sid = ms_item.get('sys_id', '')
+                shelf = f"📖 {part_display}" if part_display else sid
+                t = oxford_title or ""
+
+                ms_node = QTreeWidgetItem(parent)
+                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(ms_node, 1, shelf)
+                self._set_comp_tree_text(ms_node, 2, t)
+                self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
+                make_checkable(ms_node)
+                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+                pages = ms_item.get('pages', [])
+                folios = ms_item.get('folios', [])
+                if len(pages) == 1:
+                    p_item = pages[0]
+                    p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                    folio_info = f" [{p_shelf}]" if p_shelf else ""
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                else:
+                    if pages:
+                        p0 = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
+                        self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+
+                    for p_item in pages:
+                        p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                        folio_info = f" [{p_shelf}]" if p_shelf else ""
+                        page_node = QTreeWidgetItem(ms_node)
+                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
+                        self._set_comp_tree_text(page_node, 2, "")
+                        self._set_comp_tree_text(page_node, 3, p_sid or "")
+                        make_checkable(page_node)
+                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+            elif item_type == 'manuscript':
                 sid = ms_item['sys_id']
                 shelf, t = self.meta_mgr.get_meta_for_id(sid)
                 if not shelf or shelf == "Unknown":
@@ -5530,7 +5900,7 @@ class GenizahGUI(QMainWindow):
         def visit(node):
             data = node.data(0, Qt.ItemDataRole.UserRole)
             if data:
-                if data.get('type') == 'manuscript':
+                if data.get('type') in ('manuscript', 'part'):
                     if node.childCount() > 0:
                         for i in range(node.childCount()):
                             visit(node.child(i))
@@ -5558,7 +5928,7 @@ class GenizahGUI(QMainWindow):
         uids = set()
 
         def add_from_item(item):
-            if item.get('type') == 'manuscript':
+            if item.get('type') in ('manuscript', 'part'):
                 for page in item.get('pages', []):
                     uid = page.get('uid')
                     if uid:
@@ -5610,9 +5980,9 @@ class GenizahGUI(QMainWindow):
         flat_list = []
         clicked_index = -1
         
-        # If user clicked a Manuscript Node (top level), check if it's single page or multi
+        # If user clicked a Manuscript/Part Node (top level), check if it's single page or multi
         target_item = item
-        if data.get('type') == 'manuscript':
+        if data.get('type') in ('manuscript', 'part'):
             if item.childCount() > 0:
                 # Multi-page: Auto-select first child
                 target_item = item.child(0)
@@ -5620,10 +5990,10 @@ class GenizahGUI(QMainWindow):
                 # Single-page: The manuscript node IS the target
                 pass
 
-        # Helper to process a page node or a single-page manuscript
+        # Helper to process a page node or a single-page manuscript/part
         def process_page_data(node_data, node_ref):
-            # If it's a manuscript node (single page), extract the single page data
-            if node_data.get('type') == 'manuscript':
+            # If it's a manuscript/part node (single page), extract the single page data
+            if node_data.get('type') in ('manuscript', 'part'):
                 pages = node_data.get('pages', [])
                 if len(pages) == 1:
                     node_data = pages[0]
@@ -5663,8 +6033,8 @@ class GenizahGUI(QMainWindow):
 
                 if sub_node.childCount() > 0:
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
-                    if d and d.get('type') == 'manuscript':
-                        # It is a Manuscript with multiple pages
+                    if d and d.get('type') in ('manuscript', 'part'):
+                        # It is a Manuscript/Part with multiple pages
                         for k in range(sub_node.childCount()):
                             page_node = sub_node.child(k)
                             process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
@@ -5678,12 +6048,12 @@ class GenizahGUI(QMainWindow):
                                     page_node = ms_node.child(m)
                                     process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
                             else:
-                                # Single page manuscript in Appendix
+                                # Single page manuscript/part in Appendix
                                 process_page_data(ms_node.data(0, Qt.ItemDataRole.UserRole), ms_node)
                 else:
-                    # Leaf Manuscript (Single Page) in Main
+                    # Leaf Manuscript/Part (Single Page) in Main
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
-                    if d and d.get('type') == 'manuscript':
+                    if d and d.get('type') in ('manuscript', 'part'):
                         process_page_data(d, sub_node)
 
         if clicked_index == -1: return
@@ -5815,6 +6185,20 @@ class GenizahGUI(QMainWindow):
 
         return sys_id, page, shelf_lbl, title_lbl
 
+    def _update_part_state_for_sid(self, sid):
+        """Refresh Part context (Neubauer) for the given system ID."""
+        part_id = self.meta_mgr.get_part_for_folio(sid) if self.meta_mgr else None
+        if part_id:
+            folios = self.meta_mgr.get_folios_for_part(part_id) or []
+            self.current_browse_part_id = part_id
+            self.current_browse_part_folios = folios
+            self.current_browse_part_folio_idx = folios.index(sid) if sid in folios else 0
+        else:
+            self.current_browse_part_id = None
+            self.current_browse_part_folios = []
+            self.current_browse_part_folio_idx = 0
+        return part_id
+
     def browse_load(self):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
@@ -5827,6 +6211,12 @@ class GenizahGUI(QMainWindow):
         self.browse_viewer.load_images({}) # Clear viewer
 
         page_data = None
+
+        # Check if this is a Part identifier (Neubauer)
+        part_id, is_part = self.meta_mgr.parse_part_identifier(shelf_query)
+        if is_part:
+            self._browse_load_part(part_id)
+            return
 
         # Determine priority based on last edited field (default: shelfmark > system ID > FL)
         priority = []
@@ -5917,6 +6307,12 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Error"), msg)
             return
 
+        # If this folio belongs to an Oxford Part, load the Part context directly
+        part_for_sid = self.meta_mgr.get_part_for_folio(sid)
+        if part_for_sid:
+            self._browse_load_part(part_for_sid, target_folio=sid)
+            return
+
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
@@ -5937,6 +6333,121 @@ class GenizahGUI(QMainWindow):
         elif self.current_browse_sid:
             self.browse_load_page()
 
+    def _browse_load_part(self, part_id, from_end=False, target_folio=None):
+        """
+        Load a Codicological Part (Neubauer) for browsing.
+
+        Args:
+            part_id: The Part ID to load
+            from_end: If True, start at the last folio (for backwards navigation)
+            target_folio: If provided, position at this specific folio within the Part
+        """
+        if not self.searcher or not self.meta_mgr:
+            return
+
+        # Get all folios in this Part
+        folios = self.meta_mgr.get_folios_for_part(part_id)
+        if not folios:
+            QMessageBox.warning(self, tr("Error"), tr("No folios found for this Part."))
+            return
+
+        # Get Part metadata from Oxford
+        part_meta = self.meta_mgr.get_part_metadata(part_id)
+
+        # Store Part browsing state
+        self.current_browse_part_id = part_id
+        self.current_browse_part_folios = folios
+
+        # Determine starting folio index
+        if target_folio and target_folio in folios:
+            folio_idx = folios.index(target_folio)
+        elif from_end:
+            folio_idx = len(folios) - 1
+        else:
+            folio_idx = 0
+
+        self.current_browse_part_folio_idx = folio_idx
+
+        # Load the selected folio
+        target_sid = folios[folio_idx]
+        self.current_browse_sid = target_sid
+        self.current_browse_p = None
+        self.current_browse_internal_idx = None
+
+        # Update UI fields
+        self.browse_sys_input.setText(target_sid)
+        # Use the display format: "heb. d. 29 part 2"
+        display_name = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+        self.browse_shelf_input.setText(display_name)
+
+        # Display Part metadata in info label
+        part_title = part_meta.get('title', '') if part_meta else ''
+        part_contents = part_meta.get('contents', '') if part_meta else ''
+
+        # Get our CSV title if available (for Hebrew)
+        shelf, csv_title = self.meta_mgr.get_meta_for_id(target_sid)
+
+        # Format folio range info
+        folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+        # Build info label with Part info integrated into shelfmark
+        # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+        part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+        # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+        shelf_with_part = f"{shelf or target_sid}"
+        if part_num:
+            shelf_with_part += f" (part {part_num}"
+            if len(folio_range) == 2:
+                if folio_range[0] == folio_range[1]:
+                    shelf_with_part += f": fol. {folio_range[0]}"
+                else:
+                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+            shelf_with_part += ")"
+
+        info_text = f"<b>{shelf_with_part}</b>"
+        if part_title:
+            info_text += f"<br/><span style='font-size: 11px;'>{part_title}</span>"
+        if csv_title and csv_title != part_title:
+            info_text += f"<br/>{csv_title}"
+
+        self.browse_info_lbl.setText(info_text)
+
+        # Disable controls until loaded
+        self.btn_b_catalog.setEnabled(False)
+        self.btn_b_save.setEnabled(False)
+        self.btn_b_toggle_img.setEnabled(False)
+
+        # Load images from Part directly (Oxford images)
+        part_images = self.meta_mgr.get_part_images(part_id)
+        if part_images:
+            # Convert Part images to format expected by viewer (include thumb_url)
+            images_ext = [{
+                'label': img.get('label', ''),
+                'url': img.get('full_url', ''),
+                'thumb_url': img.get('thumb_url', '')
+            } for img in part_images]
+            self.browse_viewer.load_images({
+                'images_nli': [],
+                'images_ext': images_ext,
+                'oxford_part_id': part_id,  # For provider detection
+                'attribution': "From the collections of the Bodleian Libraries, Oxford",
+            })
+            # Position at the correct image for the selected folio
+            image_idx = folio_idx * 2  # Assuming 2 images per folio
+            if image_idx < len(images_ext):
+                self.browse_viewer.set_page(image_idx)
+            else:
+                self.browse_viewer.set_page(0)
+
+        # Load text for the selected folio
+        self.browse_load_page()
+
+        # Enable controls
+        self.btn_b_catalog.setEnabled(True)
+        self.btn_b_save.setEnabled(True)
+        self.btn_b_toggle_img.setEnabled(True)
+
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
@@ -5951,15 +6462,39 @@ class GenizahGUI(QMainWindow):
             self.current_browse_sid, 
             p_num=p_arg, 
             next_prev=d,
-            absolute_index=idx_arg
+            absolute_index=idx_arg,
+            allow_cross=True
         )
 
-        if page_data:
-            self.browse_render_page(page_data)
-        else:
+        if not page_data:
             QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
+            return
+
+        new_sid = page_data.get('sys_id', self.current_browse_sid)
+        if new_sid != self.current_browse_sid:
+            self.current_browse_sid = new_sid
+            self.browse_sys_input.setText(new_sid)
+            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+            if shelf and shelf != "Unknown":
+                self.browse_shelf_input.setText(shelf)
+            self._set_last_browse_field("sys")
+            # Refresh Part context
+            self._update_part_state_for_sid(new_sid)
+            # Kick off metadata enrichment for new manuscript
+            cached_meta = self.meta_mgr.nli_cache.get(new_sid)
+            if cached_meta:
+                self.on_browse_enriched_loaded(new_sid, cached_meta)
+            else:
+                self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
+                self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+                self.enrich_browse_worker.start()
+
+        self.browse_render_page(page_data)
     
     def browse_render_page(self, pd):
+        if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:
+            self.current_browse_sid = pd['sys_id']
+
         self.current_browse_p = pd['p_num']
         
         if 'internal_index' in pd:
@@ -5987,7 +6522,41 @@ class GenizahGUI(QMainWindow):
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
-        info_text = f"<b>{shelf}</b><br>{title or ''}"
+
+        # Add Oxford Part info if available - integrated into shelfmark
+        part_id = self.current_browse_part_id
+        if not part_id and self.current_browse_sid:
+            part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
+
+        if part_id:
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+            # Build combined shelfmark: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+            shelf_with_part = f"{shelf}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            info_text = f"<b>{shelf_with_part}</b>"
+            if oxford_title:
+                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+            if title and title != oxford_title:
+                info_text += f"<br/>{title}"
+        else:
+            info_text = f"<b>{shelf}</b>"
+            if title:
+                info_text += f"<br/>{title}"
+
         self.browse_info_lbl.setText(info_text)
         if shelf:
             self.browse_shelf_input.setText(shelf)
@@ -6250,26 +6819,40 @@ class GenizahGUI(QMainWindow):
     
     def _add_single_comp_node(self, parent, ms_item):
         """Adds a node to the composition tree with parent/child logic."""
+        item_type = ms_item.get('type', 'manuscript')
+        is_part = item_type == 'part'
+
         sid = ms_item.get('sys_id')
         if not sid:
             sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
-        
-        shelf, t = self.meta_mgr.get_meta_for_id(sid)
-        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
-        
+
+        # For Parts, use Part display name; for regular manuscripts, use shelfmark
+        if is_part:
+            part_display = ms_item.get('part_display', '')
+            oxford_title = ms_item.get('oxford_title', '')
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            # Combine Part display with title
+            display_shelf = f"📖 {part_display}" if part_display else (shelf or sid or "Loading...")
+            # Prefer Oxford title, fallback to CSV title
+            display_title = oxford_title if oxford_title else (t or "")
+        else:
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+            display_title = t or ""
+
         pages = ms_item.get('pages', [])
         best_snippet = ""
         best_ctx = ""
         if pages:
-            best_snippet = pages[0].get('text', '') 
+            best_snippet = pages[0].get('text', '')
             best_ctx = pages[0].get('source_ctx', '')
 
         node = QTreeWidgetItem(parent)
         self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
         self._set_comp_tree_text(node, 1, display_shelf)
-        self._set_comp_tree_text(node, 2, t or "")
-        self._set_comp_tree_text(node, 3, sid)
-        
+        self._set_comp_tree_text(node, 2, display_title)
+        self._set_comp_tree_text(node, 3, ms_item.get('part_id', '') if is_part else sid)
+
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -6279,8 +6862,17 @@ class GenizahGUI(QMainWindow):
         pattern = pages[0].get('highlight_pattern') if pages else None
         self._set_comp_node_previews(node, best_ctx, best_snippet, pattern)
 
+        # For Parts with multiple folios, show folio count; otherwise show match count
+        if is_part:
+            folios = ms_item.get('folios', [])
+            if len(folios) > 1:
+                node.setText(1, f"{display_shelf} ({len(folios)} folios, {len(pages)} matches)")
+            elif len(pages) > 1:
+                node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+
         if len(pages) > 1:
-            node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+            if not is_part:
+                node.setText(1, f"{display_shelf} ({len(pages)} matches)")
             for p_item in pages:
                 p_num_str = "Page Match"
                 raw_h = p_item.get('raw_header', '')
@@ -6290,13 +6882,21 @@ class GenizahGUI(QMainWindow):
                 else:
                     _, p_num_ex, _, _ = self._get_meta_for_header(raw_h)
                     if p_num_ex: p_num_str = f"Image {p_num_ex}"
-                
+
+                # For Parts, also show which folio this match is from
+                if is_part:
+                    p_sid, _ = self.meta_mgr.parse_header_smart(raw_h)
+                    if p_sid:
+                        p_shelf, _ = self.meta_mgr.get_meta_for_id(p_sid)
+                        if p_shelf and p_shelf != "Unknown":
+                            p_num_str = f"{p_shelf} - {p_num_str}"
+
                 child = QTreeWidgetItem(node)
                 self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
                 child.setText(1, p_num_str)
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
                 self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-        
+
         elif len(pages) == 1:
             p_item = pages[0]
             p_suffix = ""
@@ -6319,7 +6919,7 @@ class GenizahGUI(QMainWindow):
                 item_data = item.data(0, Qt.ItemDataRole.UserRole)
                 pattern = None
                 if item_data:
-                    if item_data.get('type') == 'manuscript':
+                    if item_data.get('type') in ('manuscript', 'part'):
                         pages = item_data.get('pages', [])
                         if pages:
                             pattern = pages[0].get('highlight_pattern')
@@ -6341,14 +6941,14 @@ class GenizahGUI(QMainWindow):
         
         clicked_node = item
         
-        if data.get('type') == 'manuscript' and item.childCount() > 0:
+        if data.get('type') in ('manuscript', 'part') and item.childCount() > 0:
             clicked_node = item.child(0)
 
         def collect_node_data(node):
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
             if not node_data: return
 
-            if node_data.get('type') == 'manuscript' and node.childCount() > 0:
+            if node_data.get('type') in ('manuscript', 'part') and node.childCount() > 0:
                 for i in range(node.childCount()):
                     collect_node_data(node.child(i))
                 return
@@ -6401,23 +7001,70 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
     def navigate_manuscript(self, direction):
-        """Move to prev/next manuscript based on FILE ORDER."""
+        """Navigate to prev/next manuscript by file order, crossing Part boundaries."""
         current = self.current_browse_sid
-        
-        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
-        
-        if new_sid:
-            self.browse_sys_input.setText(new_sid)
-            
-            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
-            if shelf and shelf != "Unknown":
-                self.browse_shelf_input.setText(shelf)
+        if not current:
+            return
 
-            # נותן עדיפות ל-System ID וטוען
-            self._set_last_browse_field("sys")
-            self.browse_load()
+        # If browsing within a Part, navigate within the Part first
+        if self.current_browse_part_id and self.current_browse_part_folios:
+            new_idx = self.current_browse_part_folio_idx + direction
+            if 0 <= new_idx < len(self.current_browse_part_folios):
+                # Move within Part
+                self.current_browse_part_folio_idx = new_idx
+                new_sid = self.current_browse_part_folios[new_idx]
+                self.current_browse_sid = new_sid
+                self.browse_sys_input.setText(new_sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load_page()
+                # Update images to show current folio's pages
+                self._update_part_image_for_folio(new_idx)
+                return
+            else:
+                # Crossed Part boundary - move to adjacent Part
+                current_part = self.current_browse_part_id
+                adjacent_part = self.meta_mgr.codico_mgr.get_adjacent_part(current_part, direction)
+                if adjacent_part:
+                    self._browse_load_part(adjacent_part, from_end=(direction < 0))
+                    return
+                else:
+                    QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
+                    return
+
+        # Standard file order navigation
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        if new_sid:
+            # Check if new folio belongs to a Part
+            new_part = self.meta_mgr.get_part_for_folio(new_sid)
+            if new_part:
+                # Load the Part but position at this folio
+                self._browse_load_part(new_part, target_folio=new_sid)
+            else:
+                # No Part - just load the folio
+                self.current_browse_part_id = None
+                self.current_browse_part_folios = []
+                self.current_browse_part_folio_idx = 0
+                self.browse_sys_input.setText(new_sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load()
         else:
             QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+
+    def _update_part_image_for_folio(self, folio_idx):
+        """Update image viewer to show the current folio's images within a Part."""
+        if not self.current_browse_part_id:
+            return
+        # Each folio typically has 2 images (recto/verso)
+        # Calculate which image index corresponds to this folio
+        image_idx = folio_idx * 2  # Assuming 2 images per folio
+        if self.browse_viewer.active_list and image_idx < len(self.browse_viewer.active_list):
+            self.browse_viewer.set_page(image_idx)
     
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
