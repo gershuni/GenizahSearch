@@ -6167,7 +6167,8 @@ class GenizahGUI(QMainWindow):
         part_contents = part_meta.get('contents', '') if part_meta else ''
 
         # Get our CSV title if available (for Hebrew)
-        shelf, csv_title = self.meta_mgr.get_meta_for_id(first_sid)
+        # --- תיקון: שימוש ב-target_sid במקום first_sid שלא היה קיים ---
+        shelf, csv_title = self.meta_mgr.get_meta_for_id(target_sid)
         combined_title = csv_title if csv_title else part_title
 
         # Format folio range info
