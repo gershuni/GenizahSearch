@@ -2433,8 +2433,12 @@ class MetadataManager:
             if part_id:
                 part_images = self.get_part_images(part_id)
                 if part_images:
-                    # Convert Oxford Part images to the expected format
-                    images_ext = [{'label': img.get('label', ''), 'url': img.get('full_url', '')} for img in part_images]
+                    # Convert Oxford Part images to the expected format (include thumb_url)
+                    images_ext = [{
+                        'label': img.get('label', ''),
+                        'url': img.get('full_url', ''),
+                        'thumb_url': img.get('thumb_url', '')
+                    } for img in part_images]
                     current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
                     current_meta['oxford_part_id'] = part_id
                     # Add Part metadata

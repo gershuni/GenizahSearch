@@ -894,6 +894,20 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def _load_thumbnail(self, thumb_url):
+        """Load thumbnail synchronously for quick display while full image loads."""
+        try:
+            import urllib.request
+            req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = response.read()
+                image = QImage()
+                if image.loadFromData(data):
+                    pix = QPixmap.fromImage(image)
+                    self.scroll_area.set_image(pix)
+        except Exception:
+            pass  # Thumbnail load failed, full image will replace it
+
     def set_page(self, index):
         if not self.active_list:
             self.scroll_area.set_image(None)
@@ -908,11 +922,18 @@ class ManuscriptViewerWidget(QWidget):
         img_data = self.active_list[index]
         base_url = img_data['url']
 
+        # Check for thumbnail URL (Oxford images have this)
+        thumb_url = img_data.get('thumb_url', '')
+
         self.scroll_area.set_status_message(tr("Loading..."))
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
             self.loader_thread.wait()
+
+        # Load thumbnail first if available (for quick display)
+        if thumb_url:
+            self._load_thumbnail(thumb_url)
 
         final_url = self._resolve_url(base_url)
 
@@ -2797,11 +2818,11 @@ class GenizahGUI(QMainWindow):
         self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
 
         # Toggle for Parts vs Folios navigation
-        self.btn_nav_mode = QPushButton(tr("Parts"))
-        self.btn_nav_mode.setToolTip(tr("Toggle navigation mode: Parts (Neubauer) / Folios"))
+        self.btn_nav_mode = QPushButton(tr("▤ Folios"))
+        self.btn_nav_mode.setToolTip(tr("Navigation: By Folios (individual pages). Click to switch to Parts (Neubauer codicological units)."))
         self.btn_nav_mode.setCheckable(True)
         self.btn_nav_mode.setChecked(False)
-        self.btn_nav_mode.setFixedWidth(50)
+        self.btn_nav_mode.setFixedWidth(70)
         self.btn_nav_mode.clicked.connect(self._toggle_nav_mode)
         
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
@@ -3041,57 +3062,112 @@ class GenizahGUI(QMainWindow):
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
         if not self.current_browse_sid: return
-        
+
         self.browse_text.setText(tr("Loading full manuscript..."))
         QApplication.processEvents() # Refresh UI
-        
-        pages = self.searcher.get_full_manuscript(self.current_browse_sid)
-        if not pages:
+
+        html_content = []
+
+        # If browsing a Part, load all folios in the Part
+        if self.current_browse_part_id and self.current_browse_part_folios:
+            for folio_idx, sid in enumerate(self.current_browse_part_folios):
+                pages = self.searcher.get_full_manuscript(sid)
+                if not pages:
+                    continue
+
+                # Get enriched map for this folio
+                meta = self.meta_mgr.nli_cache.get(sid, {})
+                canvas_map = meta.get('canvas_map', {})
+                shelfmark = meta.get('shelfmark', sid)
+
+                # Add folio header separator
+                folio_header = f"""
+                <div style='background-color: #3498db; color: white; padding: 8px; margin-top: 25px; border-radius: 4px;'>
+                    <b>📄 {tr("Folio")}: {shelfmark}</b> <span style='font-size:0.9em'>({tr("System ID")}: {sid})</span>
+                </div>
+                """
+                html_content.append(folio_header)
+
+                for p in pages:
+                    # Anchor for scrolling (include folio index for uniqueness)
+                    anchor = f'<a name="folio_{folio_idx}_page_{p["p_num"]}"></a>'
+
+                    # Visual Separator
+                    img_lbl = tr("Image")
+                    fl_id = p.get('fl_id')
+
+                    # Resolve Label
+                    fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+                    label = canvas_map.get(fl_digits, "")
+
+                    fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+                    label_suffix = f" - {label}" if label else ""
+
+                    separator = f"""
+                    <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 15px; border-bottom: 2px solid #ccc;'>
+                        <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
+                    </div>
+                    """
+
+                    # Content with line breaks preserved
+                    content = p['text'].replace("\n", "<br>")
+
+                    html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+        else:
+            # Single folio mode (original behavior)
+            pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+            if not pages:
+                QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
+                return
+
+            # Get enriched map if available
+            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+            canvas_map = meta.get('canvas_map', {})
+
+            for p in pages:
+                # Anchor for scrolling
+                anchor = f'<a name="page_{p["p_num"]}"></a>'
+
+                # Visual Separator
+                img_lbl = tr("Image")
+                fl_id = p.get('fl_id')
+
+                # Resolve Label
+                fl_digits = re.sub(r"\D", "", str(fl_id or ""))
+                label = canvas_map.get(fl_digits, "")
+
+                fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
+                label_suffix = f" - {label}" if label else ""
+
+                separator = f"""
+                <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
+                    <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
+                </div>
+                """
+
+                # Content with line breaks preserved
+                content = p['text'].replace("\n", "<br>")
+
+                html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+
+        if not html_content:
             QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
-        # Get enriched map if available
-        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-        canvas_map = meta.get('canvas_map', {})
-
-        html_content = []
-        for p in pages:
-            # Anchor for scrolling
-            anchor = f'<a name="page_{p["p_num"]}"></a>'
-            
-            # Visual Separator
-            img_lbl = tr("Image")
-            fl_id = p.get('fl_id')
-
-            # Resolve Label
-            fl_digits = re.sub(r"\D", "", str(fl_id or ""))
-            label = canvas_map.get(fl_digits, "")
-
-            fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
-            label_suffix = f" - {label}" if label else ""
-
-            separator = f"""
-            <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 20px; border-bottom: 2px solid #ccc;'>
-                <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
-            </div>
-            """
-            
-            # Content with line breaks preserved
-            content = p['text'].replace("\n", "<br>")
-            
-            html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
-        
         full_html = "".join(html_content)
         self.browse_text.setHtml(full_html)
-        
+
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
         self.btn_b_next.setEnabled(False)
         self.combo_browse_page.setEnabled(False)
-        
+
         # Scroll to the page we were looking at
         if self.current_browse_p:
-            self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
+            if self.current_browse_part_id:
+                self.browse_text.scrollToAnchor(f"folio_{self.current_browse_part_folio_idx}_page_{self.current_browse_p}")
+            else:
+                self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
 
     def browse_save_full(self):
         if not self.current_browse_sid: return
@@ -6046,8 +6122,12 @@ class GenizahGUI(QMainWindow):
         # Load images from Part directly (Oxford images)
         part_images = self.meta_mgr.get_part_images(part_id)
         if part_images:
-            # Convert Part images to format expected by viewer
-            images_ext = [{'label': img.get('label', ''), 'url': img.get('full_url', '')} for img in part_images]
+            # Convert Part images to format expected by viewer (include thumb_url)
+            images_ext = [{
+                'label': img.get('label', ''),
+                'url': img.get('full_url', ''),
+                'thumb_url': img.get('thumb_url', '')
+            } for img in part_images]
             self.browse_viewer.load_images({
                 'images_nli': [],
                 'images_ext': images_ext,
@@ -6528,24 +6608,33 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
     def _toggle_nav_mode(self):
-        """Toggle between Parts and Folios navigation mode."""
+        """Toggle between Parts and Folios navigation mode.
+
+        isChecked = True: Parts mode (Neubauer codicological units)
+        isChecked = False: Folios mode (individual pages)
+        """
         if self.btn_nav_mode.isChecked():
-            self.btn_nav_mode.setText(tr("Folios"))
-            self.btn_nav_mode.setToolTip(tr("Currently: Navigate by Folios. Click to switch to Parts."))
-            self.btn_prev_ms.setToolTip(tr("Previous Folio"))
-            self.btn_next_ms.setToolTip(tr("Next Folio"))
-        else:
-            self.btn_nav_mode.setText(tr("Parts"))
-            self.btn_nav_mode.setToolTip(tr("Currently: Navigate by Parts (Neubauer). Click to switch to Folios."))
+            # Parts mode active
+            self.btn_nav_mode.setText(tr("📖 Parts"))
+            self.btn_nav_mode.setToolTip(tr("Navigation: By Parts (Neubauer codicological units). Click to switch to Folios."))
             self.btn_prev_ms.setToolTip(tr("Previous Part (Neubauer)"))
             self.btn_next_ms.setToolTip(tr("Next Part (Neubauer)"))
+        else:
+            # Folios mode active
+            self.btn_nav_mode.setText(tr("▤ Folios"))
+            self.btn_nav_mode.setToolTip(tr("Navigation: By Folios (individual pages). Click to switch to Parts (Neubauer)."))
+            self.btn_prev_ms.setToolTip(tr("Previous Folio (File Order)"))
+            self.btn_next_ms.setToolTip(tr("Next Folio (File Order)"))
 
     def navigate_manuscript(self, direction):
         """Move to prev/next manuscript based on navigation mode."""
         current = self.current_browse_sid
 
-        # Check if we're in Parts navigation mode
+        # isChecked = True means Parts mode, False means Folios mode
         if self.btn_nav_mode.isChecked():
+            # Navigate by Parts (Neubauer codicological units)
+            self._navigate_by_part(direction)
+        else:
             # Navigate by Folios (file order)
             new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
 
@@ -6565,9 +6654,6 @@ class GenizahGUI(QMainWindow):
                 self.browse_load()
             else:
                 QMessageBox.information(self, tr("Nav"), tr("End of file list."))
-        else:
-            # Navigate by Parts (Neubauer)
-            self._navigate_by_part(direction)
 
     def _navigate_by_part(self, direction):
         """Navigate to next/previous Part (Neubauer codicological unit)."""
