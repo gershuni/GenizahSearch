@@ -2418,7 +2418,7 @@ class MetadataManager:
         images_nli = []
         images_ext = []
 
-        # 2a. Fetch External IIIF
+        # 2a. Fetch External IIIF (Cambridge)
         if ext_link:
             ext_data = self.fetch_external_iiif_data(ext_link)
             if ext_data.get('canvases'):
@@ -2426,6 +2426,23 @@ class MetadataManager:
                 external_meta = ext_data.get('metadata', {})
                 if not marc_attribution:
                     current_meta['attribution'] = ext_data.get('attribution')
+
+        # 2a2. Check for Oxford Part images (if no Cambridge images)
+        if not images_ext:
+            part_id = self.get_part_for_folio(system_id)
+            if part_id:
+                part_images = self.get_part_images(part_id)
+                if part_images:
+                    # Convert Oxford Part images to the expected format
+                    images_ext = [{'label': img.get('label', ''), 'url': img.get('full_url', '')} for img in part_images]
+                    current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
+                    current_meta['oxford_part_id'] = part_id
+                    # Add Part metadata
+                    part_meta = self.get_part_metadata(part_id)
+                    if part_meta:
+                        current_meta['oxford_part_metadata'] = part_meta
+                        if not current_meta.get('title') and part_meta.get('title'):
+                            current_meta['title'] = part_meta['title']
 
         # 2b. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)

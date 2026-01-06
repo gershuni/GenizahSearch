@@ -776,8 +776,15 @@ class ManuscriptViewerWidget(QWidget):
             return "cambridge"
 
         for img in meta.get('images_ext', []) or []:
-            if "cudl.lib.cam.ac.uk" in (img.get('url', '').lower()):
+            img_url = (img.get('url', '').lower())
+            if "cudl.lib.cam.ac.uk" in img_url:
                 return "cambridge"
+            if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
+                return "oxford"
+
+        # Check for Oxford Part ID
+        if meta.get('oxford_part_id'):
+            return "oxford"
 
         return None
 
@@ -816,7 +823,12 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.clear()
 
         if self.images_ext:
-            ext_label = "Cambridge" if self.external_provider == "cambridge" else "External"
+            if self.external_provider == "cambridge":
+                ext_label = "Cambridge"
+            elif self.external_provider == "oxford":
+                ext_label = "Oxford"
+            else:
+                ext_label = "External"
             self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
             if self.images_nli:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
@@ -6039,7 +6051,8 @@ class GenizahGUI(QMainWindow):
             self.browse_viewer.load_images({
                 'images_nli': [],
                 'images_ext': images_ext,
-                'provider': 'Oxford (Bodleian)',
+                'oxford_part_id': part_id,  # For provider detection
+                'attribution': "From the collections of the Bodleian Libraries, Oxford",
             })
             self.browse_viewer.set_page(0)
 
