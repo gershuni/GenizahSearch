@@ -2021,7 +2021,10 @@ class ResultDialog(QDialog):
 
             folio_range = part_meta.get('folio_range', [])
             if len(folio_range) == 2:
-                html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+                if folio_range[0] == folio_range[1]:
+                    html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
+                else:
+                    html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
 
             part_title = part_meta.get('title', '')
             if part_title:
@@ -2932,7 +2935,7 @@ class GenizahGUI(QMainWindow):
         # Row 2: Metadata Display (Compact)
         self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
         self.browse_info_lbl.setWordWrap(True)
-        self.browse_info_lbl.setStyleSheet("font-size: 12px; color: #2c3e50;")
+        self.browse_info_lbl.setStyleSheet("font-size: 12px;")
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
@@ -3025,12 +3028,15 @@ class GenizahGUI(QMainWindow):
             # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
             part_num = part_id.split('/')[-1] if '/' in part_id else ''
 
-            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)" or "fol. 14" for single
             shelf_with_part = f"{shelf or ''}"
             if part_num:
                 shelf_with_part += f" (part {part_num}"
                 if len(folio_range) == 2:
-                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
                 shelf_with_part += ")"
 
             label_text = f"<b>{shelf_with_part}</b>"
@@ -3294,7 +3300,10 @@ class GenizahGUI(QMainWindow):
             if part_num:
                 shelf_with_part += f" (part {part_num}"
                 if len(folio_range) == 2:
-                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
                 shelf_with_part += ")"
 
             info_text = f"<b>{shelf_with_part}</b> - View All"
@@ -6379,9 +6388,6 @@ class GenizahGUI(QMainWindow):
 
         # Format folio range info
         folio_range = part_meta.get('folio_range', []) if part_meta else []
-        range_str = ""
-        if len(folio_range) == 2:
-            range_str = f" (fols. {folio_range[0]}-{folio_range[1]})"
 
         # Build info label with Part info integrated into shelfmark
         # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
@@ -6392,7 +6398,10 @@ class GenizahGUI(QMainWindow):
         if part_num:
             shelf_with_part += f" (part {part_num}"
             if len(folio_range) == 2:
-                shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                if folio_range[0] == folio_range[1]:
+                    shelf_with_part += f": fol. {folio_range[0]}"
+                else:
+                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
             shelf_with_part += ")"
 
         info_text = f"<b>{shelf_with_part}</b>"
@@ -6531,7 +6540,10 @@ class GenizahGUI(QMainWindow):
             if part_num:
                 shelf_with_part += f" (part {part_num}"
                 if len(folio_range) == 2:
-                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                    if folio_range[0] == folio_range[1]:
+                        shelf_with_part += f": fol. {folio_range[0]}"
+                    else:
+                        shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
                 shelf_with_part += ")"
 
             info_text = f"<b>{shelf_with_part}</b>"

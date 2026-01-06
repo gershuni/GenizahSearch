@@ -1832,7 +1832,8 @@ class CodicologicalManager:
         """Get display name for a Part (with 'part X' suffix)."""
         if part_id in self.part_metadata:
             # Convert "MS. Heb. d. 29/2" to "heb. d. 29 part 2"
-            match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)/(\d+)$', part_id, re.IGNORECASE)
+            # Also handles letter parts like "MS. Heb. d. 25/C" -> "heb. d. 25 part C"
+            match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)/([A-Za-z0-9]+)$', part_id, re.IGNORECASE)
             if match:
                 letter, volume, part_num = match.groups()
                 return f"heb. {letter}. {volume} part {part_num}"
