@@ -2947,6 +2947,8 @@ class Indexer:
         total_docs = 0
         browse_map = defaultdict(list)
         system_pages = defaultdict(list)
+        # Preserve file-order sequencing for continuous documents
+        global_seq_index = 0 
 
         # Ensure metadata (including Oxford parts) is loaded for continuous scopes
         try:
@@ -2983,16 +2985,19 @@ class Indexer:
                                 scope="page", boundaries=""
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
-                            if parsed['sys_id'] and parsed['p_num']:
-                                browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                            if parsed['sys_id']:
+                                if parsed['p_num']:
+                                    browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
                                 system_pages[parsed['sys_id']].append({
-                                    'p_num': int(parsed['p_num']),
+                                    'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
                                     'uid': cid,
                                     'full_header': chead,
                                     'source': label,
                                     'content': "\n".join(ctext),
-                                    'sys_id': parsed['sys_id']
+                                    'sys_id': parsed['sys_id'],
+                                    'seq_index': global_seq_index
                                 })
+                                global_seq_index += 1
                             total_docs += 1
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
@@ -3009,23 +3014,26 @@ class Indexer:
                         scope="page", boundaries=""
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
-                    if parsed['sys_id'] and parsed['p_num']:
-                        browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                    if parsed['sys_id']:
+                        if parsed['p_num']:
+                            browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
                         system_pages[parsed['sys_id']].append({
-                            'p_num': int(parsed['p_num']),
+                            'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
                             'uid': cid,
                             'full_header': chead,
                             'source': label,
                             'content': " ".join(ctext),
-                            'sys_id': parsed['sys_id']
+                            'sys_id': parsed['sys_id'],
+                            'seq_index': global_seq_index
                         })
+                        global_seq_index += 1
                     total_docs += 1
 
         # Build continuous documents per System ID
         for sid, pages in system_pages.items():
             if not pages:
                 continue
-            pages.sort(key=lambda p: p['p_num'])
+            pages.sort(key=lambda p: p['seq_index'])
             self._add_continuous_document(writer, pages, scope="system", unique_id=f"sys:{sid}")
 
         # Build continuous documents per Codicological Part (Oxford)
@@ -3039,7 +3047,9 @@ class Indexer:
 
                 part_pages = []
                 for folio_sid in folios:
-                    part_pages.extend(system_pages.get(folio_sid, []))
+                    sys_p = system_pages.get(folio_sid, [])
+                    sys_p.sort(key=lambda p: p['seq_index'])
+                    part_pages.extend(sys_p)
 
                 if not part_pages:
                     continue
@@ -3048,7 +3058,6 @@ class Indexer:
                     LOGGER.warning("Skipping massive part '%s' with %d pages (likely data error).", part_id, len(part_pages))
                     continue
 
-                part_pages.sort(key=lambda p: (p.get('sys_id', ''), p['p_num']))
                 self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
 
         LOGGER.info("Committing index (this may take a moment)...")
@@ -3442,10 +3451,13 @@ class SearchEngine:
                 content = self._get_field(doc, 'content', [""])[0]
                 scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
                 scope = scope_list[0]
-                boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+
+                # Check for match before any heavy parsing
                 match_obj = regex.search(content)
                 if not match_obj:
                     continue
+
+                boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                 span = match_obj.span()
                 if boundaries:
                     span_map = self._map_span_to_pages(span, boundaries)
