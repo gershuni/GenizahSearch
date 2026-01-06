@@ -2942,7 +2942,7 @@ class Indexer:
         schema = builder.build()
         
         index = tantivy.Index(schema, path=db_path)
-        writer = index.writer(heap_size=30_000_000)
+        writer = index.writer(heap_size=150_000_000)
         
         total_docs = 0
         browse_map = defaultdict(list)
@@ -3030,15 +3030,28 @@ class Indexer:
 
         # Build continuous documents per Codicological Part (Oxford)
         if self.meta_mgr.codico_mgr.part_to_folios:
-            for part_id, folios in self.meta_mgr.codico_mgr.part_to_folios.items():
+            total_parts = len(self.meta_mgr.codico_mgr.part_to_folios)
+            LOGGER.info("Indexing %d Codicological Parts...", total_parts)
+
+            for idx, (part_id, folios) in enumerate(self.meta_mgr.codico_mgr.part_to_folios.items()):
+                if idx % 500 == 0:
+                    LOGGER.info("Processing Part %d/%d...", idx, total_parts)
+
                 part_pages = []
                 for folio_sid in folios:
                     part_pages.extend(system_pages.get(folio_sid, []))
+
                 if not part_pages:
                     continue
+
+                if len(part_pages) > 400:
+                    LOGGER.warning("Skipping massive part '%s' with %d pages (likely data error).", part_id, len(part_pages))
+                    continue
+
                 part_pages.sort(key=lambda p: (p.get('sys_id', ''), p['p_num']))
                 self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
 
+        LOGGER.info("Committing index (this may take a moment)...")
         writer.commit()
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
 
