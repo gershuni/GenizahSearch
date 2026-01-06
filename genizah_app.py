@@ -3012,9 +3012,30 @@ class GenizahGUI(QMainWindow):
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
 
+        # Check for Oxford Part metadata
+        part_id = self.current_browse_part_id
+        if not part_id:
+            part_id = self.meta_mgr.get_part_for_folio(sid)
+
+        part_info = ""
+        if part_id:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+            part_meta = self.meta_mgr.get_part_metadata(part_id)
+            oxford_title = part_meta.get('title', '') if part_meta else ''
+            oxford_contents = part_meta.get('contents', '') if part_meta else ''
+            folio_range = part_meta.get('folio_range', []) if part_meta else []
+
+            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
+            if len(folio_range) == 2:
+                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
+            part_info += "</span>"
+            if oxford_title:
+                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
+
         label_text = f"<b>{shelf or ''}</b>"
         if title: label_text += f" | {title}"
         if meta.get('physical_desc'): label_text += f" | {meta['physical_desc']}"
+        label_text += part_info
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
@@ -6309,9 +6330,7 @@ class GenizahGUI(QMainWindow):
         part_contents = part_meta.get('contents', '') if part_meta else ''
 
         # Get our CSV title if available (for Hebrew)
-        # --- תיקון: שימוש ב-target_sid במקום first_sid שלא היה קיים ---
         shelf, csv_title = self.meta_mgr.get_meta_for_id(target_sid)
-        combined_title = csv_title if csv_title else part_title
 
         # Format folio range info
         folio_range = part_meta.get('folio_range', []) if part_meta else []
@@ -6319,9 +6338,15 @@ class GenizahGUI(QMainWindow):
         if len(folio_range) == 2:
             range_str = f" (fols. {folio_range[0]}-{folio_range[1]})"
 
-        info_text = f"<b>{part_id}</b>{range_str}"
-        if combined_title:
-            info_text += f"<br/>{combined_title}"
+        # Build info label with Part info prominently displayed
+        info_text = f"<b>{shelf or target_sid}</b>"
+        if csv_title:
+            info_text += f" | {csv_title}"
+
+        # Add Part info
+        info_text += f"<br/><span style='color: #2980b9;'>📖 <b>{display_name}</b>{range_str}</span>"
+        if part_title:
+            info_text += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{part_title}</span>"
 
         self.browse_info_lbl.setText(info_text)
 
