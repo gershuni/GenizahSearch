@@ -1753,6 +1753,28 @@ class ResultDialog(QDialog):
         t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
         return f"<div dir='rtl'>{t}</div>"
 
+    def _apply_manual_highlights_to_text(self, text, uid):
+        if not text or not uid:
+            return text
+        spans = []
+        for ph in self.data.get('page_highlights', []) if self.data else []:
+            if ph.get('uid') == uid:
+                span = ph.get('span')
+                if span and len(span) == 2:
+                    spans.append(span)
+        if not spans:
+            return text
+        # Apply in reverse order to keep indices stable
+        spans.sort(key=lambda s: s[0], reverse=True)
+        for s, e in spans:
+            if s is None or e is None:
+                continue
+            if s < 0 or e > len(text) or s >= e:
+                continue
+            text = text[:e] + "*" + text[e:]
+            text = text[:s] + "*" + text[s:]
+        return text
+
     def load_result_by_index(self, idx):
         data = self.all_results[idx]
         if not data.get('full_text'):
@@ -1883,6 +1905,7 @@ class ResultDialog(QDialog):
 
         # --- Render Text ---
         raw_text = page_data['text']
+        raw_text = self._apply_manual_highlights_to_text(raw_text, self.current_page_uid)
         pattern_str = self.data.get('highlight_pattern')
         
         if pattern_str:
@@ -2298,6 +2321,8 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        self.browse_highlight_data = []
+        self.browse_highlight_pattern = None
         # Codicological Parts (Neubauer) browsing state
         self.current_browse_part_id = None
         self.current_browse_part_folios = []
@@ -3172,6 +3197,25 @@ class GenizahGUI(QMainWindow):
             return
 
         self.browse_render_page(page_data)
+
+    def _apply_browse_highlights(self, text, uid):
+        if not text or not uid:
+            return text
+        spans = []
+        for ph in self.browse_highlight_data or []:
+            if ph.get('uid') == uid and ph.get('span'):
+                span = ph.get('span')
+                if span and len(span) == 2:
+                    spans.append(tuple(span))
+        if not spans:
+            return text
+        spans.sort(key=lambda s: s[0], reverse=True)
+        for s, e in spans:
+            if s < 0 or e > len(text) or s >= e:
+                continue
+            text = text[:e] + "*" + text[e:]
+            text = text[:s] + "*" + text[s:]
+        return text
 
     def browse_load_all(self):
         """Load all pages into the text browser for continuous scrolling."""
@@ -4179,6 +4223,10 @@ class GenizahGUI(QMainWindow):
         if not sid:
             QMessageBox.warning(self, tr("Error"), tr("No System ID found for this result."))
             return
+
+        # Persist highlight data for browse pane
+        self.browse_highlight_data = res.get('page_highlights', []) if isinstance(res, dict) else []
+        self.browse_highlight_pattern = res.get('highlight_pattern') if isinstance(res, dict) else None
 
         derived_fl_id = fl_id or self._extract_fl_id(res)
         if shelfmark:
@@ -6201,6 +6249,8 @@ class GenizahGUI(QMainWindow):
 
     def browse_load(self):
         if not self.searcher: return
+        self.browse_highlight_data = []
+        self.browse_highlight_pattern = None
         sid = self.browse_sys_input.text().strip()
         shelf_query = self.browse_shelf_input.text().strip()
         fl_id = self.browse_fl_input.text().strip()
@@ -6517,7 +6567,16 @@ class GenizahGUI(QMainWindow):
         if self.current_browse_sid:
             self.btn_b_catalog.setEnabled(True)
 
-        browse_html_text = pd['text'].replace('\n', '<br>')
+        # Apply highlights (manual spans first, then pattern)
+        page_text = pd['text']
+        page_text = self._apply_browse_highlights(page_text, pd.get('uid'))
+        if self.browse_highlight_pattern:
+            try:
+                regex = re.compile(self.browse_highlight_pattern, re.IGNORECASE)
+                page_text = regex.sub(r'*\g<0>*', page_text)
+            except Exception:
+                pass
+        browse_html_text = page_text.replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         
         full_header = pd.get('full_header', '')
