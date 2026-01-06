@@ -1975,11 +1975,45 @@ class ResultDialog(QDialog):
 
         # 3. Build Extended Info HTML (Text)
         marc = meta.get('marc', {})
-        if not marc and not meta.get('physical_desc'):
+
+        # Check for Oxford Part metadata
+        oxford_part_id = meta.get('oxford_part_id')
+        part_meta = None
+        if oxford_part_id:
+            part_meta = self.meta_mgr.get_part_metadata(oxford_part_id)
+        elif self.current_sys_id:
+            # Check if this folio belongs to a Part
+            part_id = self.meta_mgr.get_part_for_folio(self.current_sys_id)
+            if part_id:
+                oxford_part_id = part_id
+                part_meta = self.meta_mgr.get_part_metadata(part_id)
+
+        if not marc and not meta.get('physical_desc') and not part_meta:
             self.btn_ext_info.setVisible(False)
             return
 
         html = "<div style='font-family:Arial;'>"
+
+        # Oxford Part metadata section
+        if part_meta:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
+            html += f"<div style='background-color: #e8f4f8; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
+            html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
+
+            folio_range = part_meta.get('folio_range', [])
+            if len(folio_range) == 2:
+                html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+
+            part_title = part_meta.get('title', '')
+            if part_title:
+                html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+
+            part_contents = part_meta.get('contents', '')
+            if part_contents:
+                html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+
+            html += "</div>"
+
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
 
@@ -2016,6 +2050,10 @@ class ResultDialog(QDialog):
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
+            # Add Part info to shelfmark if available
+            if oxford_part_id:
+                part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
+                shelf = f"{shelf} [{part_display}]"
             self.lbl_shelf.setText(shelf)
 
     def sync_external_view(self):
@@ -2817,14 +2855,6 @@ class GenizahGUI(QMainWindow):
         self.btn_next_ms.setFixedWidth(25)
         self.btn_next_ms.clicked.connect(lambda: self.navigate_manuscript(1))
 
-        # Toggle for Parts vs Folios navigation
-        self.btn_nav_mode = QPushButton(tr("▤ Folios"))
-        self.btn_nav_mode.setToolTip(tr("Navigation: By Folios (individual pages). Click to switch to Parts (Neubauer codicological units)."))
-        self.btn_nav_mode.setCheckable(True)
-        self.btn_nav_mode.setChecked(False)
-        self.btn_nav_mode.setFixedWidth(70)
-        self.btn_nav_mode.clicked.connect(self._toggle_nav_mode)
-        
         self.browse_sys_input = QLineEdit(); self.browse_sys_input.setPlaceholderText(tr("Enter System ID..."))
         self.browse_shelf_input = QLineEdit(); self.browse_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
         self.browse_fl_input = QLineEdit(); self.browse_fl_input.setPlaceholderText(tr("Enter FL ID..."))
@@ -2863,7 +2893,6 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.browse_sys_input)
         row1.addWidget(QLabel(tr("Shelfmark:"))); row1.addWidget(self.browse_shelf_input)
         row1.addWidget(self.btn_next_ms)
-        row1.addWidget(self.btn_nav_mode)
         row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
@@ -2930,6 +2959,8 @@ class GenizahGUI(QMainWindow):
         self.browse_text = QTextBrowser()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
+        self.browse_text.setOpenExternalLinks(False)
+        self.browse_text.anchorClicked.connect(self._on_browse_link_clicked)
         text_layout.addWidget(self.browse_text)
         
         # Right: Image Viewer
@@ -2981,6 +3012,31 @@ class GenizahGUI(QMainWindow):
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
+
+    def _on_browse_link_clicked(self, url):
+        """Handle clicks on internal links in browse text (View All mode)."""
+        url_str = url.toString()
+        if url_str.startswith("genizah://load/"):
+            # Extract system ID from URL
+            sid = url_str.replace("genizah://load/", "")
+            if sid:
+                # Exit View All mode
+                self.btn_b_all.setChecked(False)
+                self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+                self.btn_b_toggle_img.setEnabled(True)
+
+                # Clear Part state and load the specific folio
+                self.current_browse_part_id = None
+                self.current_browse_part_folios = []
+                self.current_browse_part_folio_idx = 0
+
+                # Load the folio
+                self.browse_sys_input.setText(sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load()
 
     def toggle_browse_view_all(self, checked):
         if checked:
@@ -3070,42 +3126,42 @@ class GenizahGUI(QMainWindow):
 
         # If browsing a Part, load all folios in the Part
         if self.current_browse_part_id and self.current_browse_part_folios:
+            # Get Oxford images for image labels
+            part_images = self.meta_mgr.get_part_images(self.current_browse_part_id)
+            image_idx = 0
+
             for folio_idx, sid in enumerate(self.current_browse_part_folios):
                 pages = self.searcher.get_full_manuscript(sid)
                 if not pages:
                     continue
 
-                # Get enriched map for this folio
-                meta = self.meta_mgr.nli_cache.get(sid, {})
-                canvas_map = meta.get('canvas_map', {})
-                shelfmark = meta.get('shelfmark', sid)
-
-                # Add folio header separator
-                folio_header = f"""
-                <div style='background-color: #3498db; color: white; padding: 8px; margin-top: 25px; border-radius: 4px;'>
-                    <b>📄 {tr("Folio")}: {shelfmark}</b> <span style='font-size:0.9em'>({tr("System ID")}: {sid})</span>
-                </div>
-                """
-                html_content.append(folio_header)
+                # Get shelfmark for linking
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if not shelf or shelf == "Unknown":
+                    shelf = sid
 
                 for p in pages:
-                    # Anchor for scrolling (include folio index for uniqueness)
-                    anchor = f'<a name="folio_{folio_idx}_page_{p["p_num"]}"></a>'
+                    # Get image label from Oxford images
+                    img_label = ""
+                    if part_images and image_idx < len(part_images):
+                        img_label = part_images[image_idx].get('label', '')
+                        image_idx += 1
 
-                    # Visual Separator
-                    img_lbl = tr("Image")
-                    fl_id = p.get('fl_id')
+                    # Anchor for scrolling
+                    anchor = f'<a name="img_{image_idx}"></a>'
 
-                    # Resolve Label
-                    fl_digits = re.sub(r"\D", "", str(fl_id or ""))
-                    label = canvas_map.get(fl_digits, "")
-
-                    fl_suffix = f" ({tr('FL')}: {fl_id})" if fl_id else ""
-                    label_suffix = f" - {label}" if label else ""
+                    # Create clickable link separator using image label
+                    # The link will load this specific shelfmark when clicked
+                    link_text = f"image {img_label}" if img_label else f"image {image_idx}"
+                    # Use custom URL scheme for internal navigation
+                    link_href = f"genizah://load/{sid}"
 
                     separator = f"""
-                    <div style='background-color: #f0f0f0; color: #555; padding: 5px; margin-top: 15px; border-bottom: 2px solid #ccc;'>
-                        <b>{img_lbl}: {p['p_num']}{label_suffix}</b> <span style='font-size:0.8em'>{fl_suffix}</span>
+                    <div style='background-color: #f5f5f5; color: #333; padding: 6px 10px; margin-top: 20px; border-bottom: 1px solid #ddd;'>
+                        <a href="{link_href}" style='color: #2980b9; text-decoration: none; font-weight: bold;'>
+                            {link_text}
+                        </a>
+                        <span style='font-size: 0.85em; color: #777; margin-left: 10px;'>{shelf}</span>
                     </div>
                     """
 
@@ -3164,10 +3220,7 @@ class GenizahGUI(QMainWindow):
 
         # Scroll to the page we were looking at
         if self.current_browse_p:
-            if self.current_browse_part_id:
-                self.browse_text.scrollToAnchor(f"folio_{self.current_browse_part_folio_idx}_page_{self.current_browse_p}")
-            else:
-                self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
+            self.browse_text.scrollToAnchor(f"page_{self.current_browse_p}")
 
     def browse_save_full(self):
         if not self.current_browse_sid: return
@@ -6062,10 +6115,14 @@ class GenizahGUI(QMainWindow):
         elif self.current_browse_sid:
             self.browse_load_page()
 
-    def _browse_load_part(self, part_id):
+    def _browse_load_part(self, part_id, from_end=False, target_folio=None):
         """
         Load a Codicological Part (Neubauer) for browsing.
-        A Part may contain multiple folios - we load the first one and enable Part navigation.
+
+        Args:
+            part_id: The Part ID to load
+            from_end: If True, start at the last folio (for backwards navigation)
+            target_folio: If provided, position at this specific folio within the Part
         """
         if not self.searcher or not self.meta_mgr:
             return
@@ -6082,17 +6139,28 @@ class GenizahGUI(QMainWindow):
         # Store Part browsing state
         self.current_browse_part_id = part_id
         self.current_browse_part_folios = folios
-        self.current_browse_part_folio_idx = 0  # Start with first folio
 
-        # Load first folio
-        first_sid = folios[0]
-        self.current_browse_sid = first_sid
+        # Determine starting folio index
+        if target_folio and target_folio in folios:
+            folio_idx = folios.index(target_folio)
+        elif from_end:
+            folio_idx = len(folios) - 1
+        else:
+            folio_idx = 0
+
+        self.current_browse_part_folio_idx = folio_idx
+
+        # Load the selected folio
+        target_sid = folios[folio_idx]
+        self.current_browse_sid = target_sid
         self.current_browse_p = None
         self.current_browse_internal_idx = None
 
         # Update UI fields
-        self.browse_sys_input.setText(first_sid)
-        self.browse_shelf_input.setText(f"{part_id} (neubauer)")
+        self.browse_sys_input.setText(target_sid)
+        # Use the display format: "heb. d. 29 part 2"
+        display_name = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+        self.browse_shelf_input.setText(display_name)
 
         # Display Part metadata in info label
         part_title = part_meta.get('title', '') if part_meta else ''
@@ -6134,9 +6202,14 @@ class GenizahGUI(QMainWindow):
                 'oxford_part_id': part_id,  # For provider detection
                 'attribution': "From the collections of the Bodleian Libraries, Oxford",
             })
-            self.browse_viewer.set_page(0)
+            # Position at the correct image for the selected folio
+            image_idx = folio_idx * 2  # Assuming 2 images per folio
+            if image_idx < len(images_ext):
+                self.browse_viewer.set_page(image_idx)
+            else:
+                self.browse_viewer.set_page(0)
 
-        # Load first page text
+        # Load text for the selected folio
         self.browse_load_page()
 
         # Enable controls
@@ -6607,77 +6680,71 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
-    def _toggle_nav_mode(self):
-        """Toggle between Parts and Folios navigation mode.
-
-        isChecked = True: Parts mode (Neubauer codicological units)
-        isChecked = False: Folios mode (individual pages)
-        """
-        if self.btn_nav_mode.isChecked():
-            # Parts mode active
-            self.btn_nav_mode.setText(tr("📖 Parts"))
-            self.btn_nav_mode.setToolTip(tr("Navigation: By Parts (Neubauer codicological units). Click to switch to Folios."))
-            self.btn_prev_ms.setToolTip(tr("Previous Part (Neubauer)"))
-            self.btn_next_ms.setToolTip(tr("Next Part (Neubauer)"))
-        else:
-            # Folios mode active
-            self.btn_nav_mode.setText(tr("▤ Folios"))
-            self.btn_nav_mode.setToolTip(tr("Navigation: By Folios (individual pages). Click to switch to Parts (Neubauer)."))
-            self.btn_prev_ms.setToolTip(tr("Previous Folio (File Order)"))
-            self.btn_next_ms.setToolTip(tr("Next Folio (File Order)"))
-
     def navigate_manuscript(self, direction):
-        """Move to prev/next manuscript based on navigation mode."""
+        """Navigate to prev/next manuscript by file order, crossing Part boundaries."""
         current = self.current_browse_sid
+        if not current:
+            return
 
-        # isChecked = True means Parts mode, False means Folios mode
-        if self.btn_nav_mode.isChecked():
-            # Navigate by Parts (Neubauer codicological units)
-            self._navigate_by_part(direction)
-        else:
-            # Navigate by Folios (file order)
-            new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
-
-            if new_sid:
-                # Clear Part state when navigating by folios
-                self.current_browse_part_id = None
-                self.current_browse_part_folios = []
-                self.current_browse_part_folio_idx = 0
-
+        # If browsing within a Part, navigate within the Part first
+        if self.current_browse_part_id and self.current_browse_part_folios:
+            new_idx = self.current_browse_part_folio_idx + direction
+            if 0 <= new_idx < len(self.current_browse_part_folios):
+                # Move within Part
+                self.current_browse_part_folio_idx = new_idx
+                new_sid = self.current_browse_part_folios[new_idx]
+                self.current_browse_sid = new_sid
                 self.browse_sys_input.setText(new_sid)
-
                 shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
                 if shelf and shelf != "Unknown":
                     self.browse_shelf_input.setText(shelf)
-
                 self._set_last_browse_field("sys")
-                self.browse_load()
-            else:
-                QMessageBox.information(self, tr("Nav"), tr("End of file list."))
-
-    def _navigate_by_part(self, direction):
-        """Navigate to next/previous Part (Neubauer codicological unit)."""
-        current_sid = self.current_browse_sid
-        if not current_sid:
-            return
-
-        # Get current Part
-        current_part = self.current_browse_part_id
-        if not current_part:
-            # Try to find Part for current folio
-            current_part = self.meta_mgr.get_part_for_folio(current_sid)
-
-        if current_part:
-            # Get adjacent Part
-            adjacent_part = self.meta_mgr.codico_mgr.get_adjacent_part(current_part, direction)
-            if adjacent_part:
-                self._browse_load_part(adjacent_part)
+                self.browse_load_page()
+                # Update images to show current folio's pages
+                self._update_part_image_for_folio(new_idx)
                 return
             else:
-                QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
+                # Crossed Part boundary - move to adjacent Part
+                current_part = self.current_browse_part_id
+                adjacent_part = self.meta_mgr.codico_mgr.get_adjacent_part(current_part, direction)
+                if adjacent_part:
+                    self._browse_load_part(adjacent_part, from_end=(direction < 0))
+                    return
+                else:
+                    QMessageBox.information(self, tr("Nav"), tr("End of Parts in this volume."))
+                    return
+
+        # Standard file order navigation
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        if new_sid:
+            # Check if new folio belongs to a Part
+            new_part = self.meta_mgr.get_part_for_folio(new_sid)
+            if new_part:
+                # Load the Part but position at this folio
+                self._browse_load_part(new_part, target_folio=new_sid)
+            else:
+                # No Part - just load the folio
+                self.current_browse_part_id = None
+                self.current_browse_part_folios = []
+                self.current_browse_part_folio_idx = 0
+                self.browse_sys_input.setText(new_sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load()
         else:
-            # No Part found for current folio - fallback to file order
-            QMessageBox.information(self, tr("Nav"), tr("No Part found for current manuscript."))
+            QMessageBox.information(self, tr("Nav"), tr("End of file list."))
+
+    def _update_part_image_for_folio(self, folio_idx):
+        """Update image viewer to show the current folio's images within a Part."""
+        if not self.current_browse_part_id:
+            return
+        # Each folio typically has 2 images (recto/verso)
+        # Calculate which image index corresponds to this folio
+        image_idx = folio_idx * 2  # Assuming 2 images per folio
+        if self.browse_viewer.active_list and image_idx < len(self.browse_viewer.active_list):
+            self.browse_viewer.set_page(image_idx)
     
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """

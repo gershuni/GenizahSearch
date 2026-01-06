@@ -1779,15 +1779,23 @@ class CodicologicalManager:
         return int(match.group(1)) if match else 0
 
     def _build_autocomplete_list(self):
-        """Build autocomplete entries for Parts with (neubauer) suffix."""
+        """Build autocomplete entries for Parts with 'part X' suffix."""
         self.part_autocomplete = []
 
         for part_id, metadata in self.part_metadata.items():
-            # Display format: "MS. Heb. d. 29/2 (neubauer)"
-            display = f"{part_id} (neubauer)"
+            # Part ID format: "MS. Heb. d. 29/2" -> "heb. d. 29 part 2"
+            # Parse the Part ID
+            match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)/(\d+)$', part_id, re.IGNORECASE)
+            if match:
+                letter, volume, part_num = match.groups()
+                # Display format: "heb. d. 29 part 2"
+                display = f"heb. {letter}. {volume} part {part_num}"
+            else:
+                # Fallback for non-standard Part IDs
+                display = f"{part_id} part"
 
             # Normalized for matching (lowercase, no dots/spaces)
-            normalized = re.sub(r'[\s.]', '', part_id.lower()) + "neubauer"
+            normalized = re.sub(r'[\s.]', '', display.lower())
 
             title = metadata.get('title', '')
 
@@ -1821,17 +1829,25 @@ class CodicologicalManager:
         return metadata.get('images', [])
 
     def get_part_display_name(self, part_id):
-        """Get display name for a Part (with neubauer suffix)."""
+        """Get display name for a Part (with 'part X' suffix)."""
         if part_id in self.part_metadata:
-            return f"{part_id} (neubauer)"
+            # Convert "MS. Heb. d. 29/2" to "heb. d. 29 part 2"
+            match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)/(\d+)$', part_id, re.IGNORECASE)
+            if match:
+                letter, volume, part_num = match.groups()
+                return f"heb. {letter}. {volume} part {part_num}"
+            return f"{part_id} part"
         return part_id
 
     def is_part_id(self, identifier):
         """Check if an identifier is a Part ID (vs a regular shelfmark)."""
-        # Part IDs contain "(neubauer)" or are in our part_metadata
+        # Check for "part" suffix (new format)
+        if re.search(r'\bpart\s*\d*\s*$', identifier, re.IGNORECASE):
+            return True
+        # Legacy: check for "(neubauer)" suffix
         if "(neubauer)" in identifier.lower():
             return True
-        # Also check clean version
+        # Also check if it's directly in our metadata
         clean = identifier.strip()
         return clean in self.part_metadata
 
@@ -1839,12 +1855,33 @@ class CodicologicalManager:
         """
         Parse an identifier that might be a Part.
         Returns (part_id, is_part) tuple.
+
+        Handles formats:
+        - "heb. d. 29 part 2" -> "MS. Heb. d. 29/2"
+        - "MS. Heb. d. 29/2 (neubauer)" -> "MS. Heb. d. 29/2"
+        - "MS. Heb. d. 29/2" -> "MS. Heb. d. 29/2"
         """
         if not identifier:
             return None, False
 
-        # Remove "(neubauer)" suffix if present
+        # Check for new format: "heb. d. 29 part 2"
+        match = re.match(r'^(?:ms\.?\s*)?heb\.?\s*([a-z])\.?\s*(\d+)\s+part\s*(\d+)\s*$',
+                         identifier, re.IGNORECASE)
+        if match:
+            letter, volume, part_num = match.groups()
+            # Convert to canonical Part ID format
+            part_id = f"MS. Heb. {letter}. {volume}/{part_num}"
+            if part_id in self.part_metadata:
+                return part_id, True
+            # Try with uppercase letter
+            part_id_upper = f"MS. Heb. {letter.upper()}. {volume}/{part_num}"
+            if part_id_upper in self.part_metadata:
+                return part_id_upper, True
+
+        # Legacy: remove "(neubauer)" suffix if present
         clean = re.sub(r'\s*\(neubauer\)\s*$', '', identifier, flags=re.IGNORECASE).strip()
+        # Also remove " part" suffix without number
+        clean = re.sub(r'\s+part\s*$', '', clean, flags=re.IGNORECASE).strip()
 
         if clean in self.part_metadata:
             return clean, True
