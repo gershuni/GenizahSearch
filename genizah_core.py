@@ -3412,41 +3412,82 @@ class SearchEngine:
         return {'main': main_list, 'filtered': filtered_list}
     
     def group_pages_by_manuscript(self, pages_list):
-        """Aggregate individual page results into manuscript-level items."""
-        grouped = defaultdict(list)
+        """Aggregate individual page results into manuscript-level items.
 
-        # 1. Bucket pages by System ID
+        Groups by Codicological Part (Neubauer) when available, otherwise by System ID.
+        """
+        grouped = defaultdict(list)
+        part_info = {}  # Track Part metadata for grouped items
+
+        # 1. Bucket pages by Part ID (if available) or System ID
         for p in pages_list:
             sid, _ = self.meta_mgr.parse_header_smart(p['raw_header'])
             if sid:
-                grouped[sid].append(p)
+                # Check if this folio belongs to a Part
+                part_id = self.meta_mgr.get_part_for_folio(sid)
+                if part_id:
+                    # Group by Part ID
+                    grouped[f"PART:{part_id}"].append(p)
+                    if part_id not in part_info:
+                        part_info[part_id] = {
+                            'part_id': part_id,
+                            'folios': set()
+                        }
+                    part_info[part_id]['folios'].add(sid)
+                else:
+                    grouped[sid].append(p)
             else:
                 # Fallback for pages without valid ID (should be rare)
                 grouped["UNKNOWN"].append(p)
 
         manuscripts = []
 
-        for sid, pages in grouped.items():
+        for group_key, pages in grouped.items():
             if not pages: continue
 
             # Aggregate Score
             total_score = sum(p['score'] for p in pages)
 
-            # Use the first page's header as the representative one for metadata parsing
-            # (Ideally find the best page or just use the first)
+            # Use the highest-scoring page as representative
             pages.sort(key=lambda x: x['score'], reverse=True)
             rep_page = pages[0]
 
-            manuscript_item = {
-                'type': 'manuscript',
-                'sys_id': sid,
-                'score': total_score,
-                'pages': pages, # Keep all pages as children
-                'raw_header': rep_page['raw_header'], # For metadata compatibility
-                'text': rep_page['text'], # Representative text
-                'source_ctx': rep_page.get('source_ctx', ''),
-                'highlight_pattern': rep_page.get('highlight_pattern', '')
-            }
+            # Check if this is a Part grouping
+            is_part = group_key.startswith("PART:")
+            if is_part:
+                part_id = group_key[5:]  # Remove "PART:" prefix
+                part_meta = self.meta_mgr.get_part_metadata(part_id)
+                folios = self.meta_mgr.get_folios_for_part(part_id) or []
+
+                # Get Part display name
+                part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
+
+                manuscript_item = {
+                    'type': 'part',
+                    'part_id': part_id,
+                    'part_display': part_display,
+                    'sys_id': folios[0] if folios else None,  # First folio as representative
+                    'folios': folios,
+                    'score': total_score,
+                    'pages': pages,
+                    'raw_header': rep_page['raw_header'],
+                    'text': rep_page['text'],
+                    'source_ctx': rep_page.get('source_ctx', ''),
+                    'highlight_pattern': rep_page.get('highlight_pattern', ''),
+                    'oxford_title': part_meta.get('title', '') if part_meta else '',
+                    'oxford_contents': part_meta.get('contents', '') if part_meta else '',
+                }
+            else:
+                manuscript_item = {
+                    'type': 'manuscript',
+                    'sys_id': group_key,
+                    'score': total_score,
+                    'pages': pages,
+                    'raw_header': rep_page['raw_header'],
+                    'text': rep_page['text'],
+                    'source_ctx': rep_page.get('source_ctx', ''),
+                    'highlight_pattern': rep_page.get('highlight_pattern', '')
+                }
             manuscripts.append(manuscript_item)
 
         # Sort manuscripts by aggregated score

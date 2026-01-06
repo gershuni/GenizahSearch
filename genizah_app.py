@@ -4375,7 +4375,11 @@ class GenizahGUI(QMainWindow):
         all_ids = []
         def collect_ids(item_list):
             for item in item_list:
-                if item.get('type') == 'manuscript' and item.get('sys_id'):
+                if item.get('type') == 'part':
+                    # For Parts, collect all folios
+                    folios = item.get('folios', [])
+                    all_ids.extend(folios)
+                elif item.get('type') == 'manuscript' and item.get('sys_id'):
                     all_ids.append(item['sys_id'])
                 else:
                     sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
@@ -4449,23 +4453,53 @@ class GenizahGUI(QMainWindow):
         # ==========================================
         if fmt in ['xlsx', 'csv']:
             table_rows = []
-            
+
             def add_rows(items, category, group_name=""):
                 for ms_item in items:
-                    if ms_item.get('type') == 'manuscript':
+                    item_type = ms_item.get('type', '')
+                    if item_type == 'part':
+                        # For Parts, use Part display name and Oxford title
+                        part_display = ms_item.get('part_display', '')
+                        oxford_title = ms_item.get('oxford_title', '')
+                        sid = ms_item.get('sys_id', '')
+                        shelf = f"📖 {part_display}" if part_display else sid
+                        title = oxford_title or ""
+                        ms_score = ms_item.get('score', 0)
+
+                        for page in ms_item.get('pages', []):
+                             p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+
+                             # Show both Part and folio info
+                             display_shelf = f"{shelf} [{p_shelf}]" if p_shelf else shelf
+
+                             table_rows.append([
+                                category,
+                                group_name,
+                                p_sid or sid or "",
+                                display_shelf or "",
+                                title or "",
+                                str(p_num or ""),
+                                f"{ms_score} (P:{page.get('score',0)})",
+                                src_clean,
+                                ms_clean
+                             ])
+                    elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
                         if not shelf or shelf == "Unknown":
                              shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        
+
                         ms_score = ms_item.get('score', 0)
 
                         for page in ms_item.get('pages', []):
                              _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
-                             
+
                              src_clean = _clean_and_marker(page.get('source_ctx', ''))
                              ms_clean = _clean_and_marker(page.get('text', ''))
-                             
+
                              table_rows.append([
                                 category,
                                 group_name,
@@ -4473,7 +4507,7 @@ class GenizahGUI(QMainWindow):
                                 shelf or "",
                                 title or "",
                                 str(p_num or ""),
-                                f"{ms_score} (P:{page.get('score',0)})", 
+                                f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
                              ])
@@ -4482,7 +4516,7 @@ class GenizahGUI(QMainWindow):
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                         src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
                         ms_clean = _clean_and_marker(ms_item.get('text', ''))
-                        
+
                         table_rows.append([
                             category,
                             group_name,
@@ -4605,7 +4639,23 @@ class GenizahGUI(QMainWindow):
                 total_count = len(c_main) + appendix_count + known_count + filtered_total
 
                 def _fmt_ms_entry(ms_item):
-                    if ms_item.get('type') == 'manuscript':
+                    item_type = ms_item.get('type', '')
+                    if item_type == 'part':
+                        part_display = ms_item.get('part_display', '')
+                        oxford_title = ms_item.get('oxford_title', '')
+                        sid = ms_item.get('sys_id', '')
+                        ms_block = [sep, f"📖 PART: {part_display} | {oxford_title} (ID: {sid}) | Total Score: {ms_item.get('score', 0)}", sep]
+
+                        for page in ms_item.get('pages', []):
+                             p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+                             src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                             ms_clean = _clean_and_marker(page.get('text', ''))
+                             folio_info = f" [{p_shelf}]" if p_shelf else ""
+                             ms_block.append(f"\n--- Page {p_num}{folio_info} (Score: {page.get('score',0)}) ---")
+                             ms_block.append(tr("Source Context") + ":\n" + src_clean)
+                             ms_block.append(tr("Manuscript") + ":\n" + ms_clean)
+                        return ms_block
+                    elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
                         if not shelf or shelf == "Unknown":
@@ -5120,7 +5170,12 @@ class GenizahGUI(QMainWindow):
         sid = None
         shelf = None
         title = None
-        if item.get('type') == 'manuscript' and item.get('sys_id'):
+        item_type = item.get('type', '')
+        if item_type == 'part':
+            sid = item.get('sys_id')
+            shelf = item.get('part_display', '')
+            title = item.get('oxford_title', '')
+        elif item_type == 'manuscript' and item.get('sys_id'):
             sid = item['sys_id']
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
             if not shelf or shelf == "Unknown":
@@ -5317,7 +5372,51 @@ class GenizahGUI(QMainWindow):
             node.setCheckState(0, Qt.CheckState.Unchecked)
 
         def add_manuscript_node(parent, ms_item):
-            if ms_item.get('type') == 'manuscript':
+            item_type = ms_item.get('type', '')
+            if item_type == 'part':
+                # Part node - show Part display name with 📖 icon
+                part_display = ms_item.get('part_display', '')
+                oxford_title = ms_item.get('oxford_title', '')
+                sid = ms_item.get('sys_id', '')
+                shelf = f"📖 {part_display}" if part_display else sid
+                t = oxford_title or ""
+
+                ms_node = QTreeWidgetItem(parent)
+                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(ms_node, 1, shelf)
+                self._set_comp_tree_text(ms_node, 2, t)
+                self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
+                make_checkable(ms_node)
+                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+                pages = ms_item.get('pages', [])
+                folios = ms_item.get('folios', [])
+                if len(pages) == 1:
+                    p_item = pages[0]
+                    p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                    folio_info = f" [{p_shelf}]" if p_shelf else ""
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                else:
+                    if pages:
+                        p0 = pages[0]
+                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                        folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
+                        self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+
+                    for p_item in pages:
+                        p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                        folio_info = f" [{p_shelf}]" if p_shelf else ""
+                        page_node = QTreeWidgetItem(ms_node)
+                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
+                        self._set_comp_tree_text(page_node, 2, "")
+                        self._set_comp_tree_text(page_node, 3, p_sid or "")
+                        make_checkable(page_node)
+                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+            elif item_type == 'manuscript':
                 sid = ms_item['sys_id']
                 shelf, t = self.meta_mgr.get_meta_for_id(sid)
                 if not shelf or shelf == "Unknown":
@@ -5725,7 +5824,7 @@ class GenizahGUI(QMainWindow):
         def visit(node):
             data = node.data(0, Qt.ItemDataRole.UserRole)
             if data:
-                if data.get('type') == 'manuscript':
+                if data.get('type') in ('manuscript', 'part'):
                     if node.childCount() > 0:
                         for i in range(node.childCount()):
                             visit(node.child(i))
@@ -5753,7 +5852,7 @@ class GenizahGUI(QMainWindow):
         uids = set()
 
         def add_from_item(item):
-            if item.get('type') == 'manuscript':
+            if item.get('type') in ('manuscript', 'part'):
                 for page in item.get('pages', []):
                     uid = page.get('uid')
                     if uid:
@@ -5805,9 +5904,9 @@ class GenizahGUI(QMainWindow):
         flat_list = []
         clicked_index = -1
         
-        # If user clicked a Manuscript Node (top level), check if it's single page or multi
+        # If user clicked a Manuscript/Part Node (top level), check if it's single page or multi
         target_item = item
-        if data.get('type') == 'manuscript':
+        if data.get('type') in ('manuscript', 'part'):
             if item.childCount() > 0:
                 # Multi-page: Auto-select first child
                 target_item = item.child(0)
@@ -5815,10 +5914,10 @@ class GenizahGUI(QMainWindow):
                 # Single-page: The manuscript node IS the target
                 pass
 
-        # Helper to process a page node or a single-page manuscript
+        # Helper to process a page node or a single-page manuscript/part
         def process_page_data(node_data, node_ref):
-            # If it's a manuscript node (single page), extract the single page data
-            if node_data.get('type') == 'manuscript':
+            # If it's a manuscript/part node (single page), extract the single page data
+            if node_data.get('type') in ('manuscript', 'part'):
                 pages = node_data.get('pages', [])
                 if len(pages) == 1:
                     node_data = pages[0]
@@ -5858,8 +5957,8 @@ class GenizahGUI(QMainWindow):
 
                 if sub_node.childCount() > 0:
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
-                    if d and d.get('type') == 'manuscript':
-                        # It is a Manuscript with multiple pages
+                    if d and d.get('type') in ('manuscript', 'part'):
+                        # It is a Manuscript/Part with multiple pages
                         for k in range(sub_node.childCount()):
                             page_node = sub_node.child(k)
                             process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
@@ -5873,12 +5972,12 @@ class GenizahGUI(QMainWindow):
                                     page_node = ms_node.child(m)
                                     process_page_data(page_node.data(0, Qt.ItemDataRole.UserRole), page_node)
                             else:
-                                # Single page manuscript in Appendix
+                                # Single page manuscript/part in Appendix
                                 process_page_data(ms_node.data(0, Qt.ItemDataRole.UserRole), ms_node)
                 else:
-                    # Leaf Manuscript (Single Page) in Main
+                    # Leaf Manuscript/Part (Single Page) in Main
                     d = sub_node.data(0, Qt.ItemDataRole.UserRole)
-                    if d and d.get('type') == 'manuscript':
+                    if d and d.get('type') in ('manuscript', 'part'):
                         process_page_data(d, sub_node)
 
         if clicked_index == -1: return
@@ -6598,26 +6697,40 @@ class GenizahGUI(QMainWindow):
     
     def _add_single_comp_node(self, parent, ms_item):
         """Adds a node to the composition tree with parent/child logic."""
+        item_type = ms_item.get('type', 'manuscript')
+        is_part = item_type == 'part'
+
         sid = ms_item.get('sys_id')
         if not sid:
             sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
-        
-        shelf, t = self.meta_mgr.get_meta_for_id(sid)
-        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
-        
+
+        # For Parts, use Part display name; for regular manuscripts, use shelfmark
+        if is_part:
+            part_display = ms_item.get('part_display', '')
+            oxford_title = ms_item.get('oxford_title', '')
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            # Combine Part display with title
+            display_shelf = f"📖 {part_display}" if part_display else (shelf or sid or "Loading...")
+            # Prefer Oxford title, fallback to CSV title
+            display_title = oxford_title if oxford_title else (t or "")
+        else:
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
+            display_title = t or ""
+
         pages = ms_item.get('pages', [])
         best_snippet = ""
         best_ctx = ""
         if pages:
-            best_snippet = pages[0].get('text', '') 
+            best_snippet = pages[0].get('text', '')
             best_ctx = pages[0].get('source_ctx', '')
 
         node = QTreeWidgetItem(parent)
         self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
         self._set_comp_tree_text(node, 1, display_shelf)
-        self._set_comp_tree_text(node, 2, t or "")
-        self._set_comp_tree_text(node, 3, sid)
-        
+        self._set_comp_tree_text(node, 2, display_title)
+        self._set_comp_tree_text(node, 3, ms_item.get('part_id', '') if is_part else sid)
+
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -6627,8 +6740,17 @@ class GenizahGUI(QMainWindow):
         pattern = pages[0].get('highlight_pattern') if pages else None
         self._set_comp_node_previews(node, best_ctx, best_snippet, pattern)
 
+        # For Parts with multiple folios, show folio count; otherwise show match count
+        if is_part:
+            folios = ms_item.get('folios', [])
+            if len(folios) > 1:
+                node.setText(1, f"{display_shelf} ({len(folios)} folios, {len(pages)} matches)")
+            elif len(pages) > 1:
+                node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+
         if len(pages) > 1:
-            node.setText(1, f"{display_shelf} ({len(pages)} matches)")
+            if not is_part:
+                node.setText(1, f"{display_shelf} ({len(pages)} matches)")
             for p_item in pages:
                 p_num_str = "Page Match"
                 raw_h = p_item.get('raw_header', '')
@@ -6638,13 +6760,21 @@ class GenizahGUI(QMainWindow):
                 else:
                     _, p_num_ex, _, _ = self._get_meta_for_header(raw_h)
                     if p_num_ex: p_num_str = f"Image {p_num_ex}"
-                
+
+                # For Parts, also show which folio this match is from
+                if is_part:
+                    p_sid, _ = self.meta_mgr.parse_header_smart(raw_h)
+                    if p_sid:
+                        p_shelf, _ = self.meta_mgr.get_meta_for_id(p_sid)
+                        if p_shelf and p_shelf != "Unknown":
+                            p_num_str = f"{p_shelf} - {p_num_str}"
+
                 child = QTreeWidgetItem(node)
                 self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
                 child.setText(1, p_num_str)
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
                 self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-        
+
         elif len(pages) == 1:
             p_item = pages[0]
             p_suffix = ""
@@ -6667,7 +6797,7 @@ class GenizahGUI(QMainWindow):
                 item_data = item.data(0, Qt.ItemDataRole.UserRole)
                 pattern = None
                 if item_data:
-                    if item_data.get('type') == 'manuscript':
+                    if item_data.get('type') in ('manuscript', 'part'):
                         pages = item_data.get('pages', [])
                         if pages:
                             pattern = pages[0].get('highlight_pattern')
@@ -6689,14 +6819,14 @@ class GenizahGUI(QMainWindow):
         
         clicked_node = item
         
-        if data.get('type') == 'manuscript' and item.childCount() > 0:
+        if data.get('type') in ('manuscript', 'part') and item.childCount() > 0:
             clicked_node = item.child(0)
 
         def collect_node_data(node):
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
             if not node_data: return
 
-            if node_data.get('type') == 'manuscript' and node.childCount() > 0:
+            if node_data.get('type') in ('manuscript', 'part') and node.childCount() > 0:
                 for i in range(node.childCount()):
                     collect_node_data(node.child(i))
                 return
