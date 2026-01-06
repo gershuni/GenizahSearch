@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem)
+                         QStandardItemModel, QStandardItem, QPalette)
 
 from version import APP_VERSION
 
@@ -1829,7 +1829,7 @@ class ResultDialog(QDialog):
             # Jump by number (user typed in box)
             try: p = int(target)
             except: p = 1
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0)
+            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True)
         else:
             # Relative Navigation (Next/Prev)
             # Use internal index if we have it, otherwise rely on p_num
@@ -1840,12 +1840,17 @@ class ResultDialog(QDialog):
                 self.current_sys_id, 
                 p_num=p_arg, 
                 next_prev=offset,
-                absolute_index=idx_arg # <--- THIS FIXES THE BUG
+                absolute_index=idx_arg, # <--- THIS FIXES THE BUG
+                allow_cross=True
             )
             
         if not page_data: return
 
         # --- UPDATE STATE ---
+        new_sys = page_data.get('sys_id', self.current_sys_id)
+        if new_sys and new_sys != self.current_sys_id:
+            self.current_sys_id = new_sys
+
         self.current_p_num = page_data['p_num']
         self.current_internal_idx = page_data['internal_index'] # <--- SAVE IT
         
@@ -1854,6 +1859,15 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
+
+        # Keep the dialog's data object aligned with the currently displayed folio
+        if self.data is not None:
+            self.data['raw_header'] = page_data.get('full_header', self.data.get('raw_header', ''))
+            self.data['uid'] = page_data.get('uid', self.data.get('uid'))
+            self.data['full_text'] = page_data.get('text', self.data.get('full_text', ''))
+            display_block = self.data.get('display', {})
+            display_block['id'] = self.current_sys_id
+            self.data['display'] = display_block
 
         # Update Info Label
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
@@ -1992,12 +2006,17 @@ class ResultDialog(QDialog):
             self.btn_ext_info.setVisible(False)
             return
 
-        html = "<div style='font-family:Arial;'>"
+        palette = self.txt_extended_info.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+        part_bg = QColor(base_color).lighter(115).name()
+
+        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
 
         # Oxford Part metadata section
         if part_meta:
             part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
-            html += f"<div style='background-color: #e8f4f8; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
+            html += f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
             html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
 
             folio_range = part_meta.get('folio_range', [])
@@ -3129,6 +3148,7 @@ class GenizahGUI(QMainWindow):
             # Get Oxford images for image labels
             part_images = self.meta_mgr.get_part_images(self.current_browse_part_id)
             image_idx = 0
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(self.current_browse_part_id)
 
             for folio_idx, sid in enumerate(self.current_browse_part_folios):
                 pages = self.searcher.get_full_manuscript(sid)
@@ -3139,6 +3159,9 @@ class GenizahGUI(QMainWindow):
                 shelf, _ = self.meta_mgr.get_meta_for_id(sid)
                 if not shelf or shelf == "Unknown":
                     shelf = sid
+                shelf_display = shelf
+                if part_display:
+                    shelf_display = f"{part_display} | {shelf}"
 
                 for p in pages:
                     # Get image label from Oxford images
@@ -3161,7 +3184,7 @@ class GenizahGUI(QMainWindow):
                         <a href="{link_href}" style='color: #2980b9; text-decoration: none; font-weight: bold;'>
                             {link_text}
                         </a>
-                        <span style='font-size: 0.85em; color: #777; margin-left: 10px;'>{shelf}</span>
+                        <span style='font-size: 0.85em; color: #777; margin-left: 10px;'>{shelf_display}</span>
                     </div>
                     """
 
@@ -5987,6 +6010,20 @@ class GenizahGUI(QMainWindow):
 
         return sys_id, page, shelf_lbl, title_lbl
 
+    def _update_part_state_for_sid(self, sid):
+        """Refresh Part context (Neubauer) for the given system ID."""
+        part_id = self.meta_mgr.get_part_for_folio(sid) if self.meta_mgr else None
+        if part_id:
+            folios = self.meta_mgr.get_folios_for_part(part_id) or []
+            self.current_browse_part_id = part_id
+            self.current_browse_part_folios = folios
+            self.current_browse_part_folio_idx = folios.index(sid) if sid in folios else 0
+        else:
+            self.current_browse_part_id = None
+            self.current_browse_part_folios = []
+            self.current_browse_part_folio_idx = 0
+        return part_id
+
     def browse_load(self):
         if not self.searcher: return
         sid = self.browse_sys_input.text().strip()
@@ -6093,6 +6130,12 @@ class GenizahGUI(QMainWindow):
             if shelf_query:
                 msg = tr("Shelfmark not found.")
             QMessageBox.warning(self, tr("Error"), msg)
+            return
+
+        # If this folio belongs to an Oxford Part, load the Part context directly
+        part_for_sid = self.meta_mgr.get_part_for_folio(sid)
+        if part_for_sid:
+            self._browse_load_part(part_for_sid, target_folio=sid)
             return
 
         self.current_browse_sid = sid
@@ -6232,15 +6275,39 @@ class GenizahGUI(QMainWindow):
             self.current_browse_sid, 
             p_num=p_arg, 
             next_prev=d,
-            absolute_index=idx_arg
+            absolute_index=idx_arg,
+            allow_cross=True
         )
 
-        if page_data:
-            self.browse_render_page(page_data)
-        else:
+        if not page_data:
             QMessageBox.warning(self, tr("Nav"), tr("Not found or end."))
+            return
+
+        new_sid = page_data.get('sys_id', self.current_browse_sid)
+        if new_sid != self.current_browse_sid:
+            self.current_browse_sid = new_sid
+            self.browse_sys_input.setText(new_sid)
+            shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
+            if shelf and shelf != "Unknown":
+                self.browse_shelf_input.setText(shelf)
+            self._set_last_browse_field("sys")
+            # Refresh Part context
+            self._update_part_state_for_sid(new_sid)
+            # Kick off metadata enrichment for new manuscript
+            cached_meta = self.meta_mgr.nli_cache.get(new_sid)
+            if cached_meta:
+                self.on_browse_enriched_loaded(new_sid, cached_meta)
+            else:
+                self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
+                self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+                self.enrich_browse_worker.start()
+
+        self.browse_render_page(page_data)
     
     def browse_render_page(self, pd):
+        if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:
+            self.current_browse_sid = pd['sys_id']
+
         self.current_browse_p = pd['p_num']
         
         if 'internal_index' in pd:

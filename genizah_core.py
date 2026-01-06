@@ -3581,9 +3581,13 @@ class SearchEngine:
                 })
         return full_content
         
-    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None):
+    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False):
         browse_map = self._load_browse_map()
         if not browse_map: return None
+
+        # Prepare ordered list for cross-manuscript navigation
+        if allow_cross and (not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids):
+            self._ordered_sys_ids = list(browse_map.keys())
 
         if sys_id not in browse_map: return None
         pages = browse_map[sys_id]
@@ -3623,6 +3627,20 @@ class SearchEngine:
         # Calculate New Index
         new_idx = target_idx + next_prev
         
+        # Handle crossing to adjacent manuscripts when requested
+        if (new_idx < 0 or new_idx >= len(pages)) and allow_cross and next_prev != 0:
+            direction = 1 if next_prev > 0 else -1
+            adjacent_id = self.get_adjacent_sys_id_by_file_order(sys_id, direction)
+            while adjacent_id:
+                if adjacent_id in browse_map and browse_map[adjacent_id]:
+                    pages = browse_map[adjacent_id]
+                    sys_id = adjacent_id
+                    new_idx = 0 if direction > 0 else len(pages) - 1
+                    break
+                adjacent_id = self.get_adjacent_sys_id_by_file_order(adjacent_id, direction)
+            else:
+                return None
+
         if new_idx < 0 or new_idx >= len(pages): return None
         
         target_page = pages[new_idx]
@@ -3635,7 +3653,8 @@ class SearchEngine:
             'text': text,
             'total_pages': len(pages), 
             'current_idx': new_idx + 1, # Display is 1-based
-            'internal_index': new_idx   # 0-based for logic (NEW)
+            'internal_index': new_idx,  # 0-based for logic (NEW)
+            'sys_id': sys_id
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
