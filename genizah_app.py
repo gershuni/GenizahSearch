@@ -3012,30 +3012,41 @@ class GenizahGUI(QMainWindow):
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
 
-        # Check for Oxford Part metadata
+        # Check for Oxford Part metadata - integrated into shelfmark
         part_id = self.current_browse_part_id
         if not part_id:
             part_id = self.meta_mgr.get_part_for_folio(sid)
 
-        part_info = ""
         if part_id:
-            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
             part_meta = self.meta_mgr.get_part_metadata(part_id)
             oxford_title = part_meta.get('title', '') if part_meta else ''
-            oxford_contents = part_meta.get('contents', '') if part_meta else ''
             folio_range = part_meta.get('folio_range', []) if part_meta else []
 
-            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
-            if len(folio_range) == 2:
-                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
-            part_info += "</span>"
-            if oxford_title:
-                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
 
-        label_text = f"<b>{shelf or ''}</b>"
-        if title: label_text += f" | {title}"
-        if meta.get('physical_desc'): label_text += f" | {meta['physical_desc']}"
-        label_text += part_info
+            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+            shelf_with_part = f"{shelf or ''}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            label_text = f"<b>{shelf_with_part}</b>"
+            if oxford_title:
+                label_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+            if title and title != oxford_title:
+                label_text += f"<br/>{title}"
+            if meta.get('physical_desc'):
+                label_text += f" | {meta['physical_desc']}"
+        else:
+            label_text = f"<b>{shelf or ''}</b>"
+            if title:
+                label_text += f" | {title}"
+            if meta.get('physical_desc'):
+                label_text += f" | {meta['physical_desc']}"
+
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
@@ -3263,19 +3274,32 @@ class GenizahGUI(QMainWindow):
             part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
 
         if part_id:
-            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
             part_meta = self.meta_mgr.get_part_metadata(part_id)
             oxford_title = part_meta.get('title', '') if part_meta else ''
             folio_range = part_meta.get('folio_range', []) if part_meta else []
 
-            info_text = f"<b>{part_display}</b> - View All"
-            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
-            if len(folio_range) == 2:
-                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
-            part_info += "</span>"
+            # Get shelfmark for first folio in part
+            shelf = ""
+            if self.current_browse_part_folios:
+                first_sid = self.current_browse_part_folios[0]
+                shelf, _ = self.meta_mgr.get_meta_for_id(first_sid)
+            if not shelf or shelf == "Unknown":
+                shelf = part_id
+
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+            # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82) - View All"
+            shelf_with_part = f"{shelf}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            info_text = f"<b>{shelf_with_part}</b> - View All"
             if oxford_title:
-                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
-            info_text += part_info
+                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
             self.browse_info_lbl.setText(info_text)
 
         # Disable paging buttons since we are showing everything
@@ -6359,15 +6383,23 @@ class GenizahGUI(QMainWindow):
         if len(folio_range) == 2:
             range_str = f" (fols. {folio_range[0]}-{folio_range[1]})"
 
-        # Build info label with Part info prominently displayed
-        info_text = f"<b>{shelf or target_sid}</b>"
-        if csv_title:
-            info_text += f" | {csv_title}"
+        # Build info label with Part info integrated into shelfmark
+        # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+        part_num = part_id.split('/')[-1] if '/' in part_id else ''
 
-        # Add Part info
-        info_text += f"<br/><span style='color: #2980b9;'>📖 <b>{display_name}</b>{range_str}</span>"
+        # Build combined: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+        shelf_with_part = f"{shelf or target_sid}"
+        if part_num:
+            shelf_with_part += f" (part {part_num}"
+            if len(folio_range) == 2:
+                shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+            shelf_with_part += ")"
+
+        info_text = f"<b>{shelf_with_part}</b>"
         if part_title:
-            info_text += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{part_title}</span>"
+            info_text += f"<br/><span style='font-size: 11px;'>{part_title}</span>"
+        if csv_title and csv_title != part_title:
+            info_text += f"<br/>{csv_title}"
 
         self.browse_info_lbl.setText(info_text)
 
@@ -6480,26 +6512,37 @@ class GenizahGUI(QMainWindow):
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
-        info_text = f"<b>{shelf}</b><br>{title or ''}"
 
-        # Add Oxford Part info if available
+        # Add Oxford Part info if available - integrated into shelfmark
         part_id = self.current_browse_part_id
         if not part_id and self.current_browse_sid:
             part_id = self.meta_mgr.get_part_for_folio(self.current_browse_sid)
 
         if part_id:
-            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id)
             part_meta = self.meta_mgr.get_part_metadata(part_id)
-            oxford_title = part_meta.get('title', '') if part_meta else ''
             folio_range = part_meta.get('folio_range', []) if part_meta else []
+            oxford_title = part_meta.get('title', '') if part_meta else ''
 
-            part_info = f"<br/><span style='color: #2980b9;'>📖 <b>{part_display}</b>"
-            if len(folio_range) == 2:
-                part_info += f" (fols. {folio_range[0]}-{folio_range[1]})"
-            part_info += "</span>"
+            # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
+            part_num = part_id.split('/')[-1] if '/' in part_id else ''
+
+            # Build combined shelfmark: "MS heb. b. 10/79 (part 43: fols. 79-82)"
+            shelf_with_part = f"{shelf}"
+            if part_num:
+                shelf_with_part += f" (part {part_num}"
+                if len(folio_range) == 2:
+                    shelf_with_part += f": fols. {folio_range[0]}–{folio_range[1]}"
+                shelf_with_part += ")"
+
+            info_text = f"<b>{shelf_with_part}</b>"
             if oxford_title:
-                part_info += f"<br/><span style='color: #7f8c8d; font-size: 11px;'>{oxford_title}</span>"
-            info_text += part_info
+                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+            if title and title != oxford_title:
+                info_text += f"<br/>{title}"
+        else:
+            info_text = f"<b>{shelf}</b>"
+            if title:
+                info_text += f"<br/>{title}"
 
         self.browse_info_lbl.setText(info_text)
         if shelf:
