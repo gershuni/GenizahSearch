@@ -2949,6 +2949,7 @@ class Indexer:
         system_pages = defaultdict(list)
         # Preserve file-order sequencing for continuous documents
         global_seq_index = 0 
+        word_pattern = re.compile(Config.WORD_TOKEN_PATTERN)
 
         # Ensure metadata (including Oxford parts) is loaded for continuous scopes
         try:
@@ -3058,7 +3059,18 @@ class Indexer:
                     LOGGER.warning("Skipping massive part '%s' with %d pages (likely data error).", part_id, len(part_pages))
                     continue
 
-                self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
+                total_words = sum(len(word_pattern.findall(p.get('content', '') or "")) for p in part_pages)
+                if total_words > 4000:
+                    num_chunks = self._add_chunked_continuous_documents(
+                        writer, part_pages, scope="part", unique_id=f"part:{part_id}",
+                        word_limit=4000, word_pattern=word_pattern
+                    )
+                    LOGGER.warning(
+                        "Part '%s' split into %d chunk(s) due to %d words (limit=4000).",
+                        part_id, num_chunks, total_words
+                    )
+                else:
+                    self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
 
         LOGGER.info("Committing index (this may take a moment)...")
         writer.commit()
@@ -3113,6 +3125,33 @@ class Indexer:
             scope=str(scope),
             boundaries=json.dumps(boundaries, ensure_ascii=False)
         ))
+
+    def _add_chunked_continuous_documents(self, writer, pages, scope, unique_id, word_limit, word_pattern):
+        """
+        Split a large aggregated document into multiple chunks to avoid massive allocations.
+        Returns the number of chunks created.
+        """
+        chunks = []
+        current = []
+        current_words = 0
+
+        for page in pages:
+            page_words = len(word_pattern.findall(page.get('content', '') or ""))
+            if current and current_words + page_words > word_limit:
+                chunks.append(current)
+                current = []
+                current_words = 0
+            current.append(page)
+            current_words += page_words
+
+        if current:
+            chunks.append(current)
+
+        for idx, chunk_pages in enumerate(chunks, start=1):
+            uid = unique_id if idx == 1 else f"{unique_id}#chunk{idx}"
+            self._add_continuous_document(writer, chunk_pages, scope=scope, unique_id=uid)
+
+        return len(chunks)
 
 # ==============================================================================
 #  SEARCH ENGINE
