@@ -2068,7 +2068,7 @@ class ResultDialog(QDialog):
         self.btn_ext_info.setVisible(True)
 
         self.lbl_title.setText(meta.get('title', ''))
-            shelf = meta.get('shelfmark')
+        shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
             if library: shelf = f"{library} | {shelf}"
