@@ -4422,13 +4422,6 @@ class GenizahGUI(QMainWindow):
             r['display']['title'] = title
 
         self._apply_results_table_filters()
-        else:
-            # Fallback
-            for r in self.last_results:
-                 if r['display']['id'] == sid:
-                     r['display']['shelfmark'] = shelf
-                     r['display']['title'] = title
-                     break
 
     def on_meta_finished(self, cancelled):
         total_loaded = self.meta_cached_count + self.meta_progress_current
