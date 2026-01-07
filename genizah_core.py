@@ -3268,6 +3268,7 @@ class SearchEngine:
     def __init__(self, meta_mgr, variants_mgr):
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
+        self.lab_settings = None  # Set by main app after lab_engine is created
         self.index = None
         self.searcher = None
         self.reload_index()
@@ -3306,21 +3307,30 @@ class SearchEngine:
             regex_str = terms[0]
             candidates = re.findall(r'[\u0590-\u05FF]{2,}', regex_str)
             if candidates: return " AND ".join(candidates)
-            else: return "*" 
+            else: return "*"
+
+        # Get custom variants from lab_settings if enabled
+        custom_vars = None
+        max_changes = None
+        if self.lab_settings and self.lab_settings.use_custom_variants:
+            custom_vars = self.lab_settings.custom_variants
+            max_changes = self.lab_settings.max_char_changes
 
         parts = []
         for term in terms:
             if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
                 parts.append(term)
                 continue
-                
+
             if mode == 'fuzzy':
-                if len(term) < 3: parts.append(f'"{term}"') 
+                if len(term) < 3: parts.append(f'"{term}"')
                 elif len(term) < 5: parts.append(f'"{term}"~1')
                 else: parts.append(f'"{term}"~2')
             else:
                 # 1. Get variants (limit 200 is usually enough if quality is good)
-                all_vars = self.var_mgr.get_variants(term, mode, limit=200)
+                all_vars = self.var_mgr.get_variants(term, mode, limit=200,
+                                                     custom_variants=custom_vars,
+                                                     max_char_changes=max_changes)
                 
                 # 2. Prepare list
                 clean_vars = []
@@ -3350,12 +3360,21 @@ class SearchEngine:
             try: return re.compile(" ".join(terms), re.IGNORECASE)
             except: return None
 
+        # Get custom variants from lab_settings if enabled
+        custom_vars = None
+        max_changes = None
+        if self.lab_settings and self.lab_settings.use_custom_variants:
+            custom_vars = self.lab_settings.custom_variants
+            max_changes = self.lab_settings.max_char_changes
+
         parts = []
         for term in terms:
             regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
-            
+
             # 1. Get variants
-            vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT)
+            vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT,
+                                                  custom_variants=custom_vars,
+                                                  max_char_changes=max_changes)
             
             # 2. Ensure exact term
             if term not in vars_list:

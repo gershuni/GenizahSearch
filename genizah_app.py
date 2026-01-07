@@ -2756,6 +2756,9 @@ class GenizahGUI(QMainWindow):
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
 
+            # Connect lab settings to search engine for custom variants support
+            self.searcher.lab_settings = self.lab_engine.settings
+
             # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
             if hasattr(self, 'lab_panel_search'):
                 self.lab_panel_search.set_engine(self.lab_engine)
