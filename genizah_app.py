@@ -2105,7 +2105,9 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(False)
 
             # Load images into widget
-            initial_idx = _get_initial_image_index(meta, self.current_p_num)
+            shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
+            folio_num = _get_folio_number_from_shelfmark(shelfmark)
+            initial_idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_p_num)
             self.ms_viewer.load_images(meta, initial_idx)
         else:
             self.external_pane.setVisible(False)
@@ -2259,7 +2261,9 @@ class ResultDialog(QDialog):
     def sync_external_view(self):
         # Determine index
         meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
-        idx = _get_initial_image_index(meta, self.current_p_num)
+        shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
+        folio_num = _get_folio_number_from_shelfmark(shelfmark)
+        idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_p_num)
         self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
@@ -6811,7 +6815,9 @@ class GenizahGUI(QMainWindow):
             meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
             if not meta.get('images_ext') and getattr(self.browse_viewer, 'images_ext', None):
                 meta = {'images_ext': self.browse_viewer.images_ext}
-            idx = _get_initial_image_index(meta, self.current_browse_p)
+            shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+            folio_num = _get_folio_number_from_shelfmark(shelfmark)
+            idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
             self.browse_viewer.set_page(idx)
         # -------------------------------
 
