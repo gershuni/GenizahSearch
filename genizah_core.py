@@ -1480,16 +1480,71 @@ class AIManager:
 #  VARIANTS LOGIC
 # ==============================================================================
 class VariantManager:
-    """Generate spelling variants for Hebrew search terms using multiple maps."""
+    """
+    Generate spelling variants for Hebrew search terms using hierarchical maps.
 
-    _BASIC_LIST = [
+    Improvements over original:
+    1. Hierarchical maps: extended builds on basic, maximum builds on extended
+    2. Single-pass generation instead of redundant multi-layer processing
+    3. Dynamic max_changes based on term length to prevent combinatorial explosion
+    4. LRU caching for frequently searched terms
+    5. Early termination with smarter limit handling
+    """
+
+    # === HIERARCHICAL PAIR DEFINITIONS ===
+    # Basic: High-confidence visual confusions in HTR
+    _BASIC_PAIRS = [
         ('ד', 'ר'), ('כ', 'ב'), ('ה', 'ח'),
         ('ו', 'ז'), ('ו', 'י'), ('ו', 'ן'),
         ('ט', 'ת'), ('ס', 'ש')
     ]
 
+    # Extended additions: Medium-confidence confusions
+    _EXTENDED_ADDITIONS = [
+        ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('א', 'י'), ('ה', 'ת'),
+        ('ר', 'י'), ('א', 'ח'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'),
+        ('ה', 'ו'), ('ו', 'א'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ל', 'ר'),
+        ('מ', 'י'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('א', 'ל'),
+        ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'), ('ב', 'י'),
+        ('ל', 'א'), ('ה', 'ם'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
+        ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'),
+        ('א', 'ש'), ('ש', 'י'), ('ס', 'ם'), ('ש', 'ו'), ('ב', 'נ'), ('ו', 'מ'),
+        ('מ', 'ש'), ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('מ', 'ל'), ('מ', 'ב'),
+        ('ד', 'י'), ('נ', 'ג'), ('ה', 'ד')
+    ]
+
+    # Maximum additions: Lower-confidence / aggressive confusions
+    _MAXIMUM_ADDITIONS = [
+        ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ם'), ('א', 'נ'),
+        ('א', 'ע'), ('א', 'ת'), ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ל'), ('ב', 'מ'),
+        ('ב', 'פ'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'),
+        ('ד', 'ו'), ('ד', 'כ'), ('ד', 'ל'), ('ה', 'ב'), ('ה', 'ך'), ('ה', 'כ'),
+        ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ק'), ('ה', 'ש'), ('ו', 'ג'), ('ו', 'ד'),
+        ('ו', 'ח'), ('ו', 'כ'), ('ו', 'ם'), ('ו', 'ע'), ('ו', 'ת'), ('ז', 'י'),
+        ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'), ('ט', 'ע'), ('ט', 'ש'),
+        ('י', 'ד'), ('י', 'ך'), ('י', 'כ'), ('י', 'ם'), ('י', 'ן'), ('י', 'ע'),
+        ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
+        ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'מ'), ('ל', 'ם'),
+        ('ל', 'ע'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
+        ('מ', 'ס'), ('מ', 'ר'), ('מ', 'ת'), ('נ', 'ל'), ('נ', 'פ'), ('נ', 'ר'),
+        ('נ', 'ת'), ('ס', 'מ'), ('ע', 'ל'), ('ע', 'מ'), ('ע', 'נ'), ('ע', 'ש'),
+        ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ר'), ('ר', 'ב'), ('ר', 'ך'),
+        ('ר', 'כ'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'), ('ר', 'ש'), ('ר', 'ת'),
+        ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ט'), ('ש', 'ל'), ('ש', 'מ'), ('ש', 'ע'),
+        ('ש', 'ר'), ('ת', 'ט'), ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'),
+        ('ת', 'נ')
+    ]
+
+    # Tier configuration for balanced flexibility vs explosion prevention
+    _TIER_CONFIG = {
+        'variants': {'max_changes': 1, 'per_term_limit': 50},
+        'variants_extended': {'max_changes': 2, 'per_term_limit': 150},
+        'variants_maximum': {'max_changes': 2, 'per_term_limit': 300},
+    }
+
     @staticmethod
     def make_multimap(pairs):
+        """Create bidirectional mapping from character pairs."""
         m = defaultdict(set)
         for a, b in pairs:
             m[a].add(b)
@@ -1497,114 +1552,153 @@ class VariantManager:
         return m
 
     def __init__(self):
-        self.basic_map = self.make_multimap(self._BASIC_LIST)
-        self.extended_map = self.make_multimap(self._BASIC_LIST + [
-            ('ה', 'ח'), ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('ל', 'י'), ('א', 'י'), ('ה', 'ת'),
-            ('ר', 'י'), ('א', 'ח'), ('י', 'א'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'), ('ה', 'ו'),
-            ('ו', 'א'), ('ו', 'נ'), ('ו', 'ל'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ו', 'ר'), ('ל', 'ר'),
-            ('מ', 'י'), ('ה', 'א'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('ו', 'ה'), ('ו', 'ן'),
-            ('ן', 'ו'), ('ח', 'ה'), ('א', 'ל'), ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'),
-            ('ב', 'י'), ('ל', 'א'), ('ה', 'ם'), ('י', 'ב'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
-            ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'), ('ו', 'ז'), ('א', 'ש'),
-            ('ש', 'י'), ('ס', 'ם'), ('ז', 'ו'), ('ש', 'ו'), ('ב', 'נ'), ('ח', 'א'), ('ו', 'מ'), ('מ', 'ש'),
-            ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('ו', 'ב'), ('מ', 'ל'), ('מ', 'ב'), ('ד', 'י'), ('נ', 'ג'),
-            ('ה', 'ד')
-        ])
+        # Build hierarchical maps (each level includes all previous)
+        self.basic_map = self.make_multimap(self._BASIC_PAIRS)
 
-        self.maximum_map = self.make_multimap([
-            ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ה'), ('א', 'ו'), ('א', 'ח'), ('א', 'י'),
-            ('א', 'ל'), ('א', 'מ'), ('א', 'ם'), ('א', 'נ'), ('א', 'ע'), ('א', 'ר'), ('א', 'ש'), ('א', 'ת'),
-            ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ו'), ('ב', 'י'), ('ב', 'כ'), ('ב', 'ל'), ('ב', 'מ'), ('ב', 'נ'),
-            ('ב', 'פ'), ('ב', 'ר'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'), ('ד', 'ו'),
-            ('ד', 'י'), ('ד', 'כ'), ('ד', 'ל'), ('ד', 'ר'), ('ה', 'ב'), ('ה', 'ד'), ('ה', 'ו'), ('ה', 'ח'),
-            ('ה', 'י'), ('ה', 'ך'), ('ה', 'כ'), ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ם'), ('ה', 'ק'), ('ה', 'ר'),
-            ('ה', 'ש'), ('ה', 'ת'), ('ו', 'ג'), ('ו', 'ד'), ('ו', 'ה'), ('ו', 'ז'), ('ו', 'ח'), ('ו', 'י'),
-            ('ו', 'כ'), ('ו', 'ל'), ('ו', 'מ'), ('ו', 'ם'), ('ו', 'נ'), ('ו', 'ע'), ('ו', 'ר'), ('ו', 'ש'),
-            ('ו', 'ת'), ('ז', 'י'), ('ח', 'א'), ('ח', 'ה'), ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'),
-            ('ט', 'ע'), ('ט', 'ש'), ('ט', 'ת'), ('י', 'ב'), ('י', 'ד'), ('י', 'ה'), ('י', 'ו'), ('י', 'ך'),
-            ('י', 'כ'), ('י', 'ל'), ('י', 'מ'), ('י', 'ם'), ('י', 'נ'), ('י', 'ן'), ('י', 'ע'), ('י', 'ר'),
-            ('י', 'ש'), ('י', 'ת'), ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
-            ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'ו'), ('ל', 'מ'), ('ל', 'ם'), ('ל', 'נ'),
-            ('ל', 'ע'), ('ל', 'ר'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ב'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
-            ('מ', 'ס'), ('מ', 'ע'), ('מ', 'ר'), ('מ', 'ש'), ('מ', 'ת'), ('נ', 'ג'), ('נ', 'ו'), ('נ', 'ל'),
-            ('נ', 'פ'), ('נ', 'ר'), ('נ', 'ת'), ('ס', 'ם'), ('ס', 'מ'), ('ס', 'ש'), ('ע', 'ל'), ('ע', 'מ'),
-            ('ע', 'נ'), ('ע', 'ש'), ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ה'), ('ק', 'ר'), ('ר', 'ב'),
-            ('ר', 'ה'), ('ר', 'ך'), ('ר', 'ח'), ('ר', 'כ'), ('ר', 'ל'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'),
-            ('ר', 'ש'), ('ר', 'ת'), ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ו'), ('ש', 'ט'), ('ש', 'י'), ('ש', 'ל'),
-            ('ש', 'מ'), ('ש', 'ע'), ('ש', 'ר'), ('ת', 'ה'), ('ת', 'ו'), ('ת', 'ח'), ('ת', 'ט'), ('ת', 'י'),
-            ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'), ('ת', 'נ')
-        ])
+        self.extended_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS
+        )
+
+        self.maximum_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS
+        )
+
+        # Cache for frequently searched terms
+        self._cache = {}
+        self._cache_max_size = 5000
+
+    def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
+        """
+        Dynamic max_changes based on term length to prevent combinatorial explosion.
+        Very short words (2-3 chars) get 1 change max.
+        Medium+ words (4+ chars) can have up to base_max changes.
+        """
+        if term_len <= 3:
+            # Very short words: only 1 change to avoid too many false positives
+            return 1
+        else:
+            # 4+ chars: allow full base_max (but still capped at 2 to prevent explosion)
+            return min(base_max, 2)
 
     def hamming_distance(self, term: str, variant: str) -> int:
+        """Calculate character difference count between term and variant."""
         if len(term) != len(variant):
-            # quite arbitrary, but ensures variants of different lengths are sorted last
             return len(term) + len(variant)
-        diff = sum(1 for a, b in zip(term, variant) if a != b)
-        return diff
+        return sum(1 for a, b in zip(term, variant) if a != b)
 
-    def generate_variants(self, term: str, mapping: Mapping[str, set[str]], max_changes: int, limit: int) -> set[str]:
-        indices = range(len(term))
+    def generate_variants(self, term: str, mapping: Mapping[str, set[str]],
+                          max_changes: int, limit: int) -> set[str]:
+        """
+        Generate variants with early termination and smart position filtering.
+        Only considers positions that actually have replacements in the mapping.
+        """
+        term_len = len(term)
         limit = min(limit, Config.VARIANT_GEN_LIMIT)
         result = set()
-        for number_of_changes in range(max_changes):
-            for positions_to_change in itertools.combinations(indices, number_of_changes + 1):
-                char_options_list = []
-                for i, char in enumerate(term):
-                    if i in positions_to_change:
-                        repls = mapping[char] - {char}
+
+        # Pre-filter: find positions that have possible replacements
+        replaceable_positions = []
+        for i, char in enumerate(term):
+            if char in mapping and mapping[char] - {char}:
+                replaceable_positions.append(i)
+
+        if not replaceable_positions:
+            return result
+
+        # Generate variants by number of changes (1 change first, then 2, etc.)
+        for num_changes in range(1, max_changes + 1):
+            if num_changes > len(replaceable_positions):
+                break
+
+            for positions in itertools.combinations(replaceable_positions, num_changes):
+                # Build character options for each position
+                char_options = []
+                valid = True
+
+                for i in range(term_len):
+                    if i in positions:
+                        repls = mapping[term[i]] - {term[i]}
                         if not repls:
+                            valid = False
                             break
-                        char_options_list.append(repls)
+                        char_options.append(repls)
                     else:
-                        char_options_list.append({char})
-                else:
-                    for p in itertools.product(*char_options_list):
-                        result.add("".join(p))
-                        if len(result) >= limit:
-                            return result
+                        char_options.append((term[i],))
+
+                if not valid:
+                    continue
+
+                # Generate all combinations for these positions
+                for combo in itertools.product(*char_options):
+                    result.add("".join(combo))
+                    if len(result) >= limit:
+                        return result
+
         return result
 
-    def get_variants(self, term: str, mode: str, limit: int = Config.VARIANT_GEN_LIMIT) -> list[str]:
-        """Generate spelling variants for Hebrew search terms using multiple maps."""
+    def get_variants(self, term: str, mode: str, limit: int = None) -> list[str]:
+        """
+        Generate spelling variants for Hebrew search terms.
+
+        Uses single-pass generation with the appropriate hierarchical map,
+        instead of redundant multi-layer processing.
+        """
         if len(term) < 2:
             return [term]
 
-        # Priority Queues logic
-        # Rank 0: Original Term
-        # Rank 1: Basic Variants
-        # Rank 2: Extended Variants
-        # Rank 3: Maximum Variants
+        # Get tier configuration
+        tier = self._TIER_CONFIG.get(mode)
+        if not tier:
+            return [term]
 
-        candidates = {term: 0}
+        # Apply limit from tier config if not specified
+        if limit is None:
+            limit = tier['per_term_limit']
+        else:
+            limit = min(limit, Config.VARIANT_GEN_LIMIT)
 
-        layers = []
+        # Check cache
+        cache_key = (term, mode, limit)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Select the appropriate map (hierarchical - includes all lower tiers)
         if mode == 'variants':
-            layers.append((self.basic_map, 1, 1))
+            mapping = self.basic_map
         elif mode == 'variants_extended':
-            layers.append((self.basic_map, 1, 1))
-            layers.append((self.extended_map, 2, 2))
+            mapping = self.extended_map
         elif mode == 'variants_maximum':
-            layers.append((self.basic_map, 1, 1))
-            layers.append((self.extended_map, 2, 2))
-            layers.append((self.maximum_map, 2, 3))
+            mapping = self.maximum_map
         else:
             return [term]
 
-        # Process layers
-        for mapping, max_changes, rank in layers:
-            layer_vars = self.generate_variants(term, mapping, max_changes, limit)
-            for v in layer_vars:
-                if v not in candidates:
-                    candidates[v] = rank
+        # Dynamic max_changes based on term length
+        base_max = tier['max_changes']
+        max_changes = self._get_max_changes_for_length(len(term), base_max)
 
-        # Sort by Rank then Hamming Distance
-        def sort_key(v):
-            return (candidates[v], self.hamming_distance(term, v))
+        # Generate variants in single pass
+        variants = self.generate_variants(term, mapping, max_changes, limit)
+        variants.add(term)  # Always include original
 
-        final_list = sorted(list(candidates.keys()), key=sort_key)
+        # Sort by hamming distance (original term first, then closest variants)
+        sorted_variants = sorted(
+            variants,
+            key=lambda v: (self.hamming_distance(term, v), v)
+        )[:limit]
 
-        # Clamp to limit
-        return final_list[:limit]
+        # Cache result (with size limit)
+        if len(self._cache) >= self._cache_max_size:
+            # Simple eviction: clear half the cache
+            keys_to_remove = list(self._cache.keys())[:self._cache_max_size // 2]
+            for k in keys_to_remove:
+                del self._cache[k]
+
+        self._cache[cache_key] = sorted_variants
+        return sorted_variants
+
+    def clear_cache(self):
+        """Clear the variant cache."""
+        self._cache.clear()
 
 # ==============================================================================
 #  CODICOLOGICAL MANAGER (Oxford Parts / Neubauer)
