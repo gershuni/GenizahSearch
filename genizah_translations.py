@@ -344,6 +344,7 @@ TRANSLATIONS = {
     "Order Tolerance": "סדר מילים",
     "Require N words to appear in the same order within a window of N+M words.": "דרוש הופעה של N מילים באותו סדר בתוך חלון של N+M מילים.",
     "Find": "מצא",
+    "Find:": "מצא:",
     "Find in text...": "חיפוש בטקסט...",
     "words in order out of": "מילים לפי סדר מתוך",
     "extra words (Window N+M)": "מילים נוספות (חלון N+M)",
