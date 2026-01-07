@@ -11,6 +11,8 @@ import requests
 import urllib3
 import csv
 import openpyxl
+from docx import Document
+from docx.shared import RGBColor
 from openpyxl.styles import Font, PatternFill
 from openpyxl.cell.rich_text import TextBlock, CellRichText
 from openpyxl.cell.text import InlineFont
@@ -2875,9 +2877,13 @@ class GenizahGUI(QMainWindow):
         self.btn_exp_txt = QPushButton("TXT")
         self.btn_exp_txt.clicked.connect(lambda: self.export_results('txt'))
         self.btn_exp_txt.setFixedWidth(50)
+
+        self.btn_exp_docx = QPushButton("DOCX")
+        self.btn_exp_docx.clicked.connect(lambda: self.export_results('docx'))
+        self.btn_exp_docx.setFixedWidth(60)
         
         # Track export buttons for bulk enable/disable
-        self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt]
+        self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt, self.btn_exp_docx]
         for b in self.export_buttons: b.setEnabled(False)
 
         # Add controls to status row
@@ -2889,6 +2895,7 @@ class GenizahGUI(QMainWindow):
         bot.addWidget(self.btn_exp_xlsx)
         bot.addWidget(self.btn_exp_csv)
         bot.addWidget(self.btn_exp_txt)
+        bot.addWidget(self.btn_exp_docx)
         
         layout.addLayout(bot)
         panel.setLayout(layout)
@@ -3060,14 +3067,18 @@ class GenizahGUI(QMainWindow):
         
         self.btn_comp_txt = QPushButton("TXT")
         self.btn_comp_txt.clicked.connect(lambda: self.export_comp_report('txt'))
+
+        self.btn_comp_docx = QPushButton("DOCX")
+        self.btn_comp_docx.clicked.connect(lambda: self.export_comp_report('docx'))
         
-        self.comp_export_buttons = [self.btn_comp_xlsx, self.btn_comp_csv, self.btn_comp_txt]
+        self.comp_export_buttons = [self.btn_comp_xlsx, self.btn_comp_csv, self.btn_comp_txt, self.btn_comp_docx]
         for b in self.comp_export_buttons:
             b.setEnabled(False) 
             
         exp_layout.addWidget(self.btn_comp_xlsx)
         exp_layout.addWidget(self.btn_comp_csv)
         exp_layout.addWidget(self.btn_comp_txt)
+        exp_layout.addWidget(self.btn_comp_docx)
         
         rl.addLayout(exp_layout)
         
@@ -4496,15 +4507,25 @@ class GenizahGUI(QMainWindow):
             t = t[:32700] + "..."
         return t
 
+    def _add_docx_highlighted_runs(self, paragraph, text):
+        parts = str(text or "").split('*')
+        for i, part in enumerate(parts):
+            if not part:
+                continue
+            run = paragraph.add_run(part)
+            if i % 2 == 1:
+                run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+                run.font.bold = True
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
-        fmt: 'xlsx', 'csv', or 'txt'
+        fmt: 'xlsx', 'csv', 'txt', or 'docx'
         """
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
 
-        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
+        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)", 'docx': "Word (*.docx)"}
         selected_filter = filters.get(fmt, "All Files (*.*)")
 
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
@@ -4660,6 +4681,39 @@ class GenizahGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
 
+        # --- DOCX ---
+        elif fmt == 'docx':
+            try:
+                doc = Document()
+                for line in credit_text.split('\n'):
+                    if not line.strip():
+                        continue
+                    p = doc.add_paragraph(line.strip())
+                    if p.runs:
+                        p.runs[0].font.bold = True
+                doc.add_paragraph("")
+
+                headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+                table = doc.add_table(rows=1, cols=len(headers))
+                hdr_cells = table.rows[0].cells
+                for idx, header in enumerate(headers):
+                    hdr_cells[idx].text = header
+
+                for row in data_rows:
+                    row_cells = table.add_row().cells
+                    for col_idx, val in enumerate(row):
+                        cell = row_cells[col_idx]
+                        if col_idx == 5:
+                            cell.text = ""
+                            self._add_docx_highlighted_runs(cell.paragraphs[0], val)
+                        else:
+                            cell.text = str(val).replace('*', '')
+
+                doc.save(path)
+                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+            except Exception as e:
+                QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
+
         # --- TXT ---
         else:
             try:
@@ -4728,7 +4782,7 @@ class GenizahGUI(QMainWindow):
         base_path = self._default_report_path(comp_title, tr("Composition_Report"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
         
-        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)"}
+        filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)", 'docx': "Word (*.docx)"}
         selected_filter = filters.get(fmt, "All Files (*.*)")
 
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
@@ -4778,7 +4832,7 @@ class GenizahGUI(QMainWindow):
         # ==========================================
         #  XLSX & CSV Logic
         # ==========================================
-        if fmt in ['xlsx', 'csv']:
+        if fmt in ['xlsx', 'csv', 'docx']:
             table_rows = []
 
             def add_rows(items, category, group_name=""):
@@ -4921,6 +4975,7 @@ class GenizahGUI(QMainWindow):
                         c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
                     curr_row += 1
 
+                    category_ranges = {}
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
@@ -4929,7 +4984,18 @@ class GenizahGUI(QMainWindow):
                                 write_rich_cell(curr_row, idx, val_str)
                             else: 
                                 ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
+
+                        category = row_data[0]
+                        if category not in category_ranges:
+                            category_ranges[category] = [curr_row, curr_row]
+                        else:
+                            category_ranges[category][1] = curr_row
                         curr_row += 1
+
+                    for start, end in category_ranges.values():
+                        if end > start:
+                            ws.row_dimensions.group(start, end, outline_level=1, hidden=False)
+                    ws.sheet_properties.outlinePr.summaryBelow = True
 
                     dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
                     for col, width in dims.items():
@@ -4955,6 +5021,40 @@ class GenizahGUI(QMainWindow):
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
+
+            # --- DOCX ---
+            elif fmt == 'docx':
+                try:
+                    doc = Document()
+                    for line in credit_text.split('\n'):
+                        clean_line = line.strip()
+                        if not clean_line or "====" in clean_line:
+                            continue
+                        p = doc.add_paragraph(clean_line)
+                        if p.runs:
+                            p.runs[0].font.bold = True
+                    doc.add_paragraph("")
+
+                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    table = doc.add_table(rows=1, cols=len(headers))
+                    hdr_cells = table.rows[0].cells
+                    for idx, header in enumerate(headers):
+                        hdr_cells[idx].text = header
+
+                    for row in table_rows:
+                        row_cells = table.add_row().cells
+                        for col_idx, val in enumerate(row):
+                            cell = row_cells[col_idx]
+                            if col_idx in (7, 8):
+                                cell.text = ""
+                                self._add_docx_highlighted_runs(cell.paragraphs[0], val)
+                            else:
+                                cell.text = str(val).replace('*', '')
+
+                    doc.save(path)
+                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                except Exception as e:
+                    QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{e}")
 
         # --- TXT ---
         else:

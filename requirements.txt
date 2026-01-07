@@ -5,3 +5,4 @@ google-generativeai
 tqdm
 colorama
 openpyxl
+python-docx
