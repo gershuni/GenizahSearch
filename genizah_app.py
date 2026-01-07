@@ -75,6 +75,76 @@ def apply_find_highlight(text_browser, query):
         selections.append(selection)
     text_browser.setExtraSelections(selections)
 
+def _get_initial_image_index(meta, page_num):
+    if page_num is None:
+        return 0
+    try:
+        p_num = int(page_num)
+    except (TypeError, ValueError):
+        return 0
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    folio_entries = []
+    for idx, img in enumerate(images):
+        folio_num = img.get('folio_num')
+        if folio_num is None:
+            continue
+        try:
+            folio_entries.append((idx, int(folio_num)))
+        except (TypeError, ValueError):
+            continue
+
+    if not folio_entries:
+        return max(p_num - 1, 0)
+
+    for idx, folio_num in folio_entries:
+        if folio_num == p_num:
+            return idx
+
+    prior = [(idx, folio_num) for idx, folio_num in folio_entries if folio_num <= p_num]
+    if prior:
+        return max(prior, key=lambda pair: pair[1])[0]
+
+    return min(folio_entries, key=lambda pair: pair[1])[0]
+
+def _get_folio_number_from_shelfmark(shelfmark):
+    if not shelfmark:
+        return None
+    match = re.search(r'[/.](\d+)\s*$', shelfmark)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+def _get_folio_image_index(meta, folio_num, side_offset=0):
+    base_idx = _get_initial_image_index(meta, folio_num)
+    if side_offset <= 0:
+        return base_idx
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    if not images or base_idx >= len(images):
+        return base_idx
+
+    target_folio = images[base_idx].get('folio_num')
+    if target_folio is None:
+        return base_idx
+
+    label = str(images[base_idx].get('label', '')).lower()
+    if label.endswith('b'):
+        return base_idx
+
+    next_idx = base_idx + 1
+    if next_idx < len(images) and images[next_idx].get('folio_num') == target_folio:
+        return next_idx
+
+    for idx, img in enumerate(images):
+        if img.get('folio_num') == target_folio and str(img.get('label', '')).lower().endswith('b'):
+            return idx
+
+    return base_idx
+
 class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
 
@@ -2062,9 +2132,14 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(False)
 
             # Load images into widget
-            try: initial_idx = int(self.current_p_num) - 1
-            except: initial_idx = 0
-
+            shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
+            folio_num = _get_folio_number_from_shelfmark(shelfmark)
+            side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
+            initial_idx = _get_folio_image_index(
+                meta,
+                folio_num if folio_num is not None else self.current_p_num,
+                side_offset=side_offset
+            )
             self.ms_viewer.load_images(meta, initial_idx)
         else:
             self.external_pane.setVisible(False)
@@ -2217,8 +2292,15 @@ class ResultDialog(QDialog):
 
     def sync_external_view(self):
         # Determine index
-        try: idx = int(self.current_p_num) - 1
-        except: idx = 0
+        meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
+        shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
+        folio_num = _get_folio_number_from_shelfmark(shelfmark)
+        side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
+        idx = _get_folio_image_index(
+            meta,
+            folio_num if folio_num is not None else self.current_p_num,
+            side_offset=side_offset
+        )
         self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
@@ -3203,8 +3285,7 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
+        idx = _get_initial_image_index(meta, self.current_browse_p)
         self.browse_viewer.load_images(meta, idx)
 
         # 3. Enable buttons
@@ -6597,7 +6678,8 @@ class GenizahGUI(QMainWindow):
             images_ext = [{
                 'label': img.get('label', ''),
                 'url': img.get('full_url', ''),
-                'thumb_url': img.get('thumb_url', '')
+                'thumb_url': img.get('thumb_url', ''),
+                'folio_num': img.get('folio_num')
             } for img in part_images]
             self.browse_viewer.load_images({
                 'images_nli': [],
@@ -6606,11 +6688,10 @@ class GenizahGUI(QMainWindow):
                 'attribution': "From the collections of the Bodleian Libraries, Oxford",
             })
             # Position at the correct image for the selected folio
-            image_idx = folio_idx * 2  # Assuming 2 images per folio
-            if image_idx < len(images_ext):
-                self.browse_viewer.set_page(image_idx)
-            else:
-                self.browse_viewer.set_page(0)
+            shelf_for_folio, _ = self.meta_mgr.get_meta_for_id(target_sid)
+            folio_num = _get_folio_number_from_shelfmark(shelf_for_folio)
+            image_idx = _get_initial_image_index({'images_ext': images_ext}, folio_num)
+            self.browse_viewer.set_page(image_idx)
 
         # Load text for the selected folio
         self.browse_load_page()
@@ -6768,11 +6849,17 @@ class GenizahGUI(QMainWindow):
             
         # This tells the large image viewer on the right to jump to the correct index
         if hasattr(self, 'browse_viewer') and self.browse_viewer.isVisible():
-            try: 
-                # p_num is 1-based, array index is 0-based
-                idx = int(self.current_browse_p) - 1
-            except: 
-                idx = 0
+            meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+            if not meta.get('images_ext') and getattr(self.browse_viewer, 'images_ext', None):
+                meta = {'images_ext': self.browse_viewer.images_ext}
+            shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+            folio_num = _get_folio_number_from_shelfmark(shelfmark)
+            side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
+            idx = _get_folio_image_index(
+                meta,
+                folio_num if folio_num is not None else self.current_browse_p,
+                side_offset=side_offset
+            )
             self.browse_viewer.set_page(idx)
         # -------------------------------
 
@@ -7242,10 +7329,12 @@ class GenizahGUI(QMainWindow):
         """Update image viewer to show the current folio's images within a Part."""
         if not self.current_browse_part_id:
             return
-        # Each folio typically has 2 images (recto/verso)
-        # Calculate which image index corresponds to this folio
-        image_idx = folio_idx * 2  # Assuming 2 images per folio
-        if self.browse_viewer.active_list and image_idx < len(self.browse_viewer.active_list):
+        shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+        folio_num = _get_folio_number_from_shelfmark(shelfmark)
+        meta = {'images_ext': getattr(self.browse_viewer, 'images_ext', [])}
+        side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
+        image_idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
+        if self.browse_viewer.active_list:
             self.browse_viewer.set_page(image_idx)
     
 def resource_path(relative_path):
