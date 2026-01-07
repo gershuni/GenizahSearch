@@ -876,11 +876,16 @@ class ManuscriptViewerWidget(QWidget):
 
         # External Link
         marc = meta.get('marc', {})
-        self.external_url = marc.get('external_iiif_link')
+        self.external_url = meta.get('external_url') or marc.get('external_iiif_link')
         if self.external_url:
-            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+            if self.external_provider == "cambridge":
+                btn_label = tr("Cambridge Website")
+            elif self.external_provider == "oxford":
+                btn_label = tr("Oxford Website")
+            else:
+                btn_label = tr("External Website")
             self.btn_external.setText(btn_label)
-        self.btn_external.setVisible(bool(self.external_url))
+        self.btn_external.setVisible(False)
 
         # Set Page
         self.set_page(initial_idx)
@@ -1575,6 +1580,7 @@ class ResultDialog(QDialog):
         
         self.current_meta_request = 0
         self.extended_info_visible = False
+        self.external_url = None
 
         # External Viewer State
         self.ext_data = None
@@ -1612,10 +1618,13 @@ class ResultDialog(QDialog):
         # Controls Row
         info_row = QHBoxLayout()
         self.btn_img = QPushButton(tr("Go to Ktiv")); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_catalog); self.btn_img.setFixedWidth(100)
+        self.btn_external_link = QPushButton(tr("External Website"))
+        self.btn_external_link.setVisible(False)
+        self.btn_external_link.clicked.connect(self.open_external_link)
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
         
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -1785,6 +1794,10 @@ class ResultDialog(QDialog):
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
         apply_find_highlight(self.text_src, self.find_src_input.text().strip())
+
+    def open_external_link(self):
+        if self.external_url:
+            QDesktopServices.openUrl(QUrl(self.external_url))
 
     def _htmlify(self, text):
         if not text: return ""
@@ -2022,39 +2035,6 @@ class ResultDialog(QDialog):
         label = canvas_map.get(fl_digits)
         self.lbl_img_label.setText(f"({label})" if label else "")
 
-        # 2. Populate External / Image Viewer
-        has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
-
-        self.btn_toggle_image.setVisible(has_images)
-
-        if has_images:
-            # Show viewer by default
-            self.external_pane.setVisible(True)
-            self.btn_toggle_image.setChecked(True)
-
-            # Metadata for side pane
-            ext_meta = meta.get('external_meta', {})
-
-            self.lbl_ext_attr.setVisible(False)
-
-            meta_html = ""
-            for k, v in ext_meta.items():
-                meta_html += f"<b>{k}:</b> {v}<br>"
-            self.txt_ext_meta.setHtml(meta_html)
-            self.txt_ext_meta.setVisible(bool(meta_html))
-
-            # Load images into widget
-            try: initial_idx = int(self.current_p_num) - 1
-            except: initial_idx = 0
-
-            self.ms_viewer.load_images(meta, initial_idx)
-        else:
-            self.external_pane.setVisible(False)
-            self.btn_toggle_image.setChecked(False)
-
-        # 3. Build Extended Info HTML (Text)
-        marc = meta.get('marc', {})
-
         # Check for Oxford Part metadata
         oxford_part_id = meta.get('oxford_part_id')
         part_meta = None
@@ -2067,7 +2047,47 @@ class ResultDialog(QDialog):
                 oxford_part_id = part_id
                 part_meta = self.meta_mgr.get_part_metadata(part_id)
 
-        if not marc and not meta.get('physical_desc') and not part_meta:
+        # 2. Populate External / Image Viewer
+        has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
+
+        self.btn_toggle_image.setVisible(has_images)
+
+        if has_images:
+            # Show viewer by default
+            self.external_pane.setVisible(True)
+            self.btn_toggle_image.setChecked(True)
+
+            self.lbl_ext_attr.setVisible(False)
+            self.txt_ext_meta.setHtml("")
+            self.txt_ext_meta.setVisible(False)
+
+            # Load images into widget
+            try: initial_idx = int(self.current_p_num) - 1
+            except: initial_idx = 0
+
+            self.ms_viewer.load_images(meta, initial_idx)
+        else:
+            self.external_pane.setVisible(False)
+            self.btn_toggle_image.setChecked(False)
+
+        self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        if self.external_url:
+            if oxford_part_id:
+                btn_label = tr("Oxford Website")
+            elif "cudl.lib.cam.ac.uk" in (self.external_url or "").lower():
+                btn_label = tr("Cambridge Website")
+            else:
+                btn_label = tr("External Website")
+            self.btn_external_link.setText(btn_label)
+            self.btn_external_link.setVisible(True)
+        else:
+            self.btn_external_link.setVisible(False)
+
+        # 3. Build Extended Info HTML (Text)
+        marc = meta.get('marc', {})
+
+        external_meta = meta.get('external_meta', {})
+        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta:
             self.btn_ext_info.setVisible(False)
             return
 
@@ -2076,57 +2096,104 @@ class ResultDialog(QDialog):
         base_color = palette.color(QPalette.ColorRole.Base).name()
         part_bg = QColor(base_color).lighter(115).name()
 
-        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
+        kti_html = ""
+        date_val = marc.get('date')
+        if date_val:
+            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
 
-        # Oxford Part metadata section
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys:
+            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        eng_title = marc.get('english_title')
+        if eng_title:
+            kti_html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+
+        subjects = marc.get('subjects', [])
+        if subjects:
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+
+        notes = marc.get('notes', [])
+        if notes:
+            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for n in notes:
+                kti_html += f"<li>{n}</li>"
+            kti_html += "</ul></p>"
+
+        people = marc.get('people', [])
+        if people:
+            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+
+        bib = marc.get('bibliography', [])
+        if bib:
+            kti_html += f"<p><b>{tr('Bibliography')}:</b><ul>"
+            for b in bib:
+                kti_html += f"<li>{b}</li>"
+            kti_html += "</ul></p>"
+
+        external_html = ""
         if part_meta:
             part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
-            html += f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
-            html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
+            external_html += (
+                f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; "
+                "margin-bottom: 10px; border-left: 3px solid #3498db; text-align: left;' dir='ltr'>"
+            )
+            external_html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
 
             folio_range = part_meta.get('folio_range', [])
             if len(folio_range) == 2:
                 if folio_range[0] == folio_range[1]:
-                    html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
+                    external_html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
                 else:
-                    html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+                    external_html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
 
             part_title = part_meta.get('title', '')
             if part_title:
-                html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+                external_html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
 
             part_contents = part_meta.get('contents', '')
             if part_contents:
-                html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+                external_html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
 
-            html += "</div>"
+            external_html += "</div>"
 
-        date_val = marc.get('date');
-        if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+        if external_meta:
+            external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
+            for k, v in external_meta.items():
+                external_html += f"<li><b>{k}:</b> {v}</li>"
+            external_html += "</ul></div>"
 
-        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
-        if dims or phys: html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+        is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        dir_attr = "rtl" if is_rtl else "ltr"
+        header_align = "right" if is_rtl else "left"
+        kti_header = tr("Ktiv Info")
+        if oxford_part_id:
+            external_header = tr("Oxford Info")
+        else:
+            external_header = tr("Cambridge Info")
 
-        eng_title = marc.get('english_title')
-        if eng_title: html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
+        if external_html:
+            if is_rtl:
+                first_title, first_html = kti_header, kti_html
+                second_title, second_html = external_header, external_html
+            else:
+                first_title, first_html = external_header, external_html
+                second_title, second_html = kti_header, kti_html
 
-        subjects = marc.get('subjects', [])
-        if subjects: html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
-
-        notes = marc.get('notes', [])
-        if notes:
-            html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for n in notes: html += f"<li>{n}</li>"
-            html += "</ul></p>"
-
-        people = marc.get('people', [])
-        if people: html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
-
-        bib = marc.get('bibliography', [])
-        if bib:
-            html += f"<p><b>{tr('Bibliography')}:</b><ul>"
-            for b in bib: html += f"<li>{b}</li>"
-            html += "</ul></p>"
+            html += (
+                f"<table style='width:100%; border-collapse:collapse;' dir='{dir_attr}'>"
+                f"<tr>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{first_title}</th>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{second_title}</th>"
+                f"</tr>"
+                f"<tr>"
+                f"<td style='vertical-align:top; padding:6px;'>{first_html}</td>"
+                f"<td style='vertical-align:top; padding:6px;'>{second_html}</td>"
+                f"</tr></table>"
+            )
+        else:
+            html += kti_html
 
         html += "</div>"
         self.txt_extended_info.setHtml(html)
@@ -2143,6 +2210,10 @@ class ResultDialog(QDialog):
                 if part_label:
                     shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)
+
+        thumb_url = meta.get('thumb_url')
+        if thumb_url and thumb_url != getattr(self, 'current_thumb_url', None):
+            self.fetch_image(self.current_sys_id, meta)
 
     def sync_external_view(self):
         # Determine index

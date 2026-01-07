@@ -2462,6 +2462,8 @@ class MetadataManager:
 
         # Check for External Link from MARC (e.g. CUDL)
         ext_link = marc_data.get('external_iiif_link')
+        if ext_link:
+            current_meta['external_url'] = ext_link
 
         # Lists for multiple sources
         images_nli = []
@@ -2480,6 +2482,15 @@ class MetadataManager:
         if not images_ext:
             part_id = self.get_part_for_folio(system_id)
             if part_id:
+                current_meta['oxford_part_id'] = part_id
+                part_meta = self.get_part_metadata(part_id)
+                if part_meta:
+                    current_meta['oxford_part_metadata'] = part_meta
+                    if not current_meta.get('title') and part_meta.get('title'):
+                        current_meta['title'] = part_meta['title']
+                    if part_meta.get('direct_link'):
+                        current_meta['external_url'] = part_meta['direct_link']
+
                 part_images = self.get_part_images(part_id)
                 if part_images:
                     # Convert Oxford Part images to the expected format (include thumb_url)
@@ -2489,13 +2500,7 @@ class MetadataManager:
                         'thumb_url': img.get('thumb_url', '')
                     } for img in part_images]
                     current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
-                    current_meta['oxford_part_id'] = part_id
-                    # Add Part metadata
-                    part_meta = self.get_part_metadata(part_id)
-                    if part_meta:
-                        current_meta['oxford_part_metadata'] = part_meta
-                        if not current_meta.get('title') and part_meta.get('title'):
-                            current_meta['title'] = part_meta['title']
+                    current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
         # 2b. Always Fetch NLI IIIF (for fallback or toggle)
         nli_iiif_data = self.fetch_iiif_manifest(system_id)
