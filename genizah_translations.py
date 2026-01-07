@@ -103,6 +103,8 @@ TRANSLATIONS = {
     "Hide Extended Info": "הסתר מידע מורחב",
     "External Website": "אתר חיצוני",
     "Cambridge Website": "אתר קיימברידג'",
+    "Oxford Website": "אתר אוקספורד",
+    "External Metadata": "מידע חיצוני",
     "No System ID found for this result.": "לא נמצא מספר מערכת עבור תוצאה זו.",
     "Image": "תמונה",
     "Toggle Image Pane": "הצג/הסתר תמונה",

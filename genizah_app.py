@@ -876,9 +876,14 @@ class ManuscriptViewerWidget(QWidget):
 
         # External Link
         marc = meta.get('marc', {})
-        self.external_url = marc.get('external_iiif_link')
+        self.external_url = meta.get('external_url') or marc.get('external_iiif_link')
         if self.external_url:
-            btn_label = tr("Cambridge Website") if self.external_provider == "cambridge" else tr("External Website")
+            if self.external_provider == "cambridge":
+                btn_label = tr("Cambridge Website")
+            elif self.external_provider == "oxford":
+                btn_label = tr("Oxford Website")
+            else:
+                btn_label = tr("External Website")
             self.btn_external.setText(btn_label)
         self.btn_external.setVisible(bool(self.external_url))
 
@@ -2032,16 +2037,9 @@ class ResultDialog(QDialog):
             self.external_pane.setVisible(True)
             self.btn_toggle_image.setChecked(True)
 
-            # Metadata for side pane
-            ext_meta = meta.get('external_meta', {})
-
             self.lbl_ext_attr.setVisible(False)
-
-            meta_html = ""
-            for k, v in ext_meta.items():
-                meta_html += f"<b>{k}:</b> {v}<br>"
-            self.txt_ext_meta.setHtml(meta_html)
-            self.txt_ext_meta.setVisible(bool(meta_html))
+            self.txt_ext_meta.setHtml("")
+            self.txt_ext_meta.setVisible(False)
 
             # Load images into widget
             try: initial_idx = int(self.current_p_num) - 1
@@ -2067,7 +2065,8 @@ class ResultDialog(QDialog):
                 oxford_part_id = part_id
                 part_meta = self.meta_mgr.get_part_metadata(part_id)
 
-        if not marc and not meta.get('physical_desc') and not part_meta:
+        external_meta = meta.get('external_meta', {})
+        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta:
             self.btn_ext_info.setVisible(False)
             return
 
@@ -2099,7 +2098,17 @@ class ResultDialog(QDialog):
             if part_contents:
                 html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
 
+            if part_meta.get('direct_link'):
+                html += f"<p><b>{tr('Oxford Website')}:</b> <a href='{part_meta['direct_link']}'>{part_meta['direct_link']}</a></p>"
+
             html += "</div>"
+
+        if external_meta:
+            html += f"<div style='margin-bottom: 10px;'>"
+            html += f"<p><b>{tr('External Metadata')}:</b></p><ul>"
+            for k, v in external_meta.items():
+                html += f"<li><b>{k}:</b> {v}</li>"
+            html += "</ul></div>"
 
         date_val = marc.get('date');
         if date_val: html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
@@ -2143,6 +2152,10 @@ class ResultDialog(QDialog):
                 if part_label:
                     shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)
+
+        thumb_url = meta.get('thumb_url')
+        if thumb_url and thumb_url != getattr(self, 'current_thumb_url', None):
+            self.fetch_image(self.current_sys_id, meta)
 
     def sync_external_view(self):
         # Determine index
