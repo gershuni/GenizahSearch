@@ -377,7 +377,8 @@ TRANSLATIONS = {
     "Points for common 3-letter words (e.g. 'ליה', 'הכי').": "נקודות למילים נפוצות בנות 3 אותיות (למשל 'ליה', 'הכי').",
 
     # --- Variant Search Settings ---
-    "Variant Search Limits:": "הגבלות חיפוש וריאנטים:",
+    "Standard Search - Variant Limits:": "חיפוש רגיל - הגבלות וריאנטים:",
+    "(Affects regular search modes: Variants (?), Extended (??), Maximum (???))": "(משפיע על מצבי חיפוש רגילים: וריאנטים (?), מורחב (??), מקסימלי (???))",
     "Limit Short Words (≤N chars):": "הגבל מילים קצרות (≤N תווים):",
     "Max Changes per Word:": "מקסימום שינויים למילה:",
     "Aggressive Mode (ignore word length limits)": "מצב אגרסיבי (התעלם מהגבלות אורך)",
