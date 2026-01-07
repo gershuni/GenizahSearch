@@ -3117,7 +3117,7 @@ class GenizahGUI(QMainWindow):
         # Use CheckBoxHeader for tree
         self.chk_comp_header = CheckBoxHeader(
             self.comp_tree,
-            filter_columns=[self.comp_col_context, self.comp_col_ms_context],
+            filter_columns=[1, 2, self.comp_col_context, self.comp_col_ms_context],
             filter_callback=self._open_comp_filter_dialog,
         )
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
@@ -4284,7 +4284,7 @@ class GenizahGUI(QMainWindow):
             self._apply_comp_tree_filters()
 
     def _update_comp_filter_indicators(self):
-        for column in (self.comp_col_context, self.comp_col_ms_context):
+        for column in (1, 2, self.comp_col_context, self.comp_col_ms_context):
             self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
 
     def _apply_comp_tree_filters(self):
@@ -4307,7 +4307,7 @@ class GenizahGUI(QMainWindow):
 
             data = node.data(0, Qt.ItemDataRole.UserRole + 1)
             if data:
-                matches = self._comp_data_matches_filters(data)
+                matches = self._comp_data_matches_filters(node, data)
                 node_visible = matches or visible_any
             else:
                 node_visible = visible_any
@@ -4318,9 +4318,17 @@ class GenizahGUI(QMainWindow):
         for i in range(root.childCount()):
             visit(root.child(i))
 
-    def _comp_data_matches_filters(self, data):
+    def _comp_data_matches_filters(self, node, data):
         for column, rule in self.comp_filters.items():
-            if column == self.comp_col_context:
+            if column == 1:
+                text = data.get("shelfmark", "")
+                if not text:
+                    text = node.text(1)
+            elif column == 2:
+                text = data.get("title", "")
+                if not text:
+                    text = node.text(2)
+            elif column == self.comp_col_context:
                 text = data.get("source_ctx", "")
             elif column == self.comp_col_ms_context:
                 text = data.get("ms_ctx", "")
