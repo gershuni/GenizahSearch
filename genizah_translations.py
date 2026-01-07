@@ -112,8 +112,6 @@ TRANSLATIONS = {
     "Image": "תמונה",
     "Toggle Image Pane": "הצג/הסתר תמונה",
     "Select Image": "בחר תמונה",
-    "Image": "תמונה",
-    "Toggle Image Pane": "הצג/הסתר תמונה",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
@@ -266,8 +264,7 @@ TRANSLATIONS = {
     "Next >>": "הבא <<",
     "<< Prev Page": "<< הדף הקודם",
     "Next Page >>": "הדף הבא >>",
-    "Page / Image": "עמוד / תמונה", 
-    "Image": "תמונה",
+    "Page / Image": "עמוד / תמונה",
     "Reset rotation": "אפס סיבוב",
     "Rotate image (0-360°)": "סובב תמונה (0-360°)",
     "Rotate Left 90°": "סובב שמאלה 90°",

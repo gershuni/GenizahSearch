@@ -115,14 +115,13 @@ class LabCompositionThread(QThread):
     scan_finished_signal = pyqtSignal(object) 
     error_signal = pyqtSignal(str)
 
-    # --- הוספנו כאן את excluded_ids ואת filter_text ---
     def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
         self.chunk_size = chunk_size
         self.mode = mode
-        self.excluded_ids = excluded_ids # שמירה
+        self.excluded_ids = excluded_ids
         self.filter_text = filter_text
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
@@ -137,8 +136,7 @@ class LabCompositionThread(QThread):
                     self.status_signal.emit(arg1)
                 elif isinstance(arg1, int) and arg2 is not None:
                     self.progress_signal.emit(arg1, arg2)
-            
-            # --- העברה למנוע ---
+
             result = self.lab_engine.lab_composition_search(
                 self.text,
                 mode=self.mode,
@@ -173,7 +171,6 @@ class GroupingThread(QThread):
             def check(): return self.isInterruptionRequested()
 
             # 1. Group Main Items
-            # תיקון: הוספת *args כדי להתעלם מהפרמטר השלישי (sid) אם נשלח
             def cb1(curr, total, *args): self.progress_signal.emit(curr, total)
             self.status_signal.emit("Grouping main results...")
 
@@ -189,7 +186,6 @@ class GroupingThread(QThread):
             filt_res, filt_appx, filt_summ = [], {}, {}
             if self.filtered_items:
                 self.status_signal.emit("Grouping filtered results...")
-                # תיקון: הוספת *args גם כאן
                 def cb2(curr, total, *args): self.progress_signal.emit(curr, total)
 
                 result_filt = self.searcher.group_composition_results(
@@ -228,15 +224,12 @@ class ShelfmarkLoaderThread(QThread):
                 self.finished_signal.emit(False) # Not cancelled (Success)
                 return
 
-            # הגדרת Callback שמקשר בין המנהל (Core) לבין ה-GUI (Signals)
             def update_gui(curr, tot, sid):
                 self.progress_signal.emit(curr, tot, sid)
 
             def check_cancel():
                 return self.isInterruptionRequested()
 
-            # שימוש בפונקציה היעילה החדשה שכתבנו ב-MetadataManager
-            # היא תטפל לבד בבדיקת CSV ובשימוש ב-20 ה-Threads לרשת
             self.meta_mgr.batch_fetch_shelfmarks(self.sids, progress_callback=update_gui, check_cancel=check_cancel)
             
             # If interrupted, emit True (Cancelled), else False (Success)
@@ -245,7 +238,6 @@ class ShelfmarkLoaderThread(QThread):
             else:
                 self.finished_signal.emit(False)
         except Exception as e:
-            # במקרה של שגיאה קריטית, נסיים בכל זאת כדי לא לתקוע את הממשק
             print(f"Error in background loader: {e}")
             self.finished_signal.emit(False)
 
