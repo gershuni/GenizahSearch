@@ -90,7 +90,9 @@ except ImportError:
 class LabSettings:
     """Manages configuration for the Lab Mode, including scoring weights."""
     def __init__(self):
-        self.custom_variants = {} 
+        self.custom_variants = {}
+        self.use_custom_variants = False
+        self.max_char_changes = 1
         self.candidate_limit = 5000
         self.min_should_match = 75
         self.gap_penalty = 2
@@ -128,6 +130,8 @@ class LabSettings:
                 with open(Config.LAB_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.custom_variants = data.get('custom_variants', {})
+                    self.use_custom_variants = data.get('use_custom_variants', False)
+                    self.max_char_changes = data.get('max_char_changes', 1)
                     self.use_dynamic_weights = data.get('use_dynamic_weights', False)
                     self.candidate_limit = data.get('candidate_limit', 2000)
                     self.min_should_match = data.get('min_should_match', 60)
@@ -158,6 +162,8 @@ class LabSettings:
             with open(Config.LAB_CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump({
                     'custom_variants': self.custom_variants,
+                    'use_custom_variants': self.use_custom_variants,
+                    'max_char_changes': self.max_char_changes,
                     'use_dynamic_weights': self.use_dynamic_weights,
                     'candidate_limit': self.candidate_limit,
                     'min_should_match': self.min_should_match,
@@ -209,6 +215,49 @@ class LabEngine:
                 pass
 
         self._reload_lab_index()
+
+    def _expand_with_custom_variants(self, text):
+        """Expand query text using custom variants from settings.
+
+        If custom variants are enabled and defined, generates additional
+        variants of the query by applying character/string substitutions.
+        Returns a list of query strings (original + variants).
+        """
+        if not self.settings.use_custom_variants or not self.settings.custom_variants:
+            return [text]
+
+        # Use VariantManager to expand each word
+        words = text.split()
+        if not words:
+            return [text]
+
+        # Get variants for each word
+        max_changes = self.settings.max_char_changes
+        custom_vars = self.settings.custom_variants
+
+        expanded_words_list = []
+        for word in words:
+            word_variants = self.var_mgr.get_variants(
+                word, 'literal',  # Base mode doesn't matter since we're using custom variants
+                limit=50,
+                custom_variants=custom_vars,
+                max_char_changes=max_changes
+            )
+            expanded_words_list.append(word_variants if word_variants else [word])
+
+        # Generate combinations (limit to avoid explosion)
+        import itertools
+        result_queries = set()
+        result_queries.add(text)  # Always include original
+
+        # For each word position, try different variants
+        for i, variants in enumerate(expanded_words_list):
+            for v in variants[:20]:  # Limit variants per word
+                new_words = words.copy()
+                new_words[i] = v
+                result_queries.add(' '.join(new_words))
+
+        return list(result_queries)[:100]  # Limit total queries
 
     def _close_index(self):
         self.lab_searcher = None
@@ -685,11 +734,21 @@ class LabEngine:
         target_field = "fingerprint_dyn" if use_dyn else self.LAB_FINGERPRINT_FIELD
         target_map = self.dynamic_rank_map if use_dyn else HEBREW_FREQ
 
-        # 1. Prepare Fingerprints
-        fp_str = text_to_fingerprint(query_str, freq_map=target_map)
-        if not fp_str: return []
-        
-        query_fp_list = fp_str.split()
+        # 1. Prepare Fingerprints (with custom variant expansion)
+        query_variants = self._expand_with_custom_variants(query_str)
+
+        # Collect fingerprints from all variants
+        all_fingerprints = set()
+        for variant_query in query_variants:
+            fp_str = text_to_fingerprint(variant_query, freq_map=target_map)
+            if fp_str:
+                all_fingerprints.update(fp_str.split())
+
+        if not all_fingerprints: return []
+
+        # Use combined fingerprints
+        fp_str = ' '.join(all_fingerprints)
+        query_fp_list = list(all_fingerprints)
         
         # 2. Fetch Candidates
         slop = max(50, int(self.settings.gap_penalty) * 10) 
@@ -839,11 +898,21 @@ class LabEngine:
             
             if self._is_phrase_statistically_weak(chunk_text): continue
 
-            fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
-            if not fp_str or len(chunk_tokens) < 4: continue
-            
-            fp_list = fp_str.split()
-            needed_unique_fps = set(fp_list) 
+            # Expand chunk with custom variants
+            chunk_variants = self._expand_with_custom_variants(chunk_text)
+
+            # Collect fingerprints from all variants
+            all_fps = set()
+            for variant_chunk in chunk_variants:
+                fp_var = text_to_fingerprint(variant_chunk, freq_map=target_map)
+                if fp_var:
+                    all_fps.update(fp_var.split())
+
+            if not all_fps or len(chunk_tokens) < 4: continue
+
+            fp_str = ' '.join(all_fps)
+            fp_list = list(all_fps)
+            needed_unique_fps = all_fps 
 
             # Query with Boost
             query_tokens = fp_str.split()
@@ -1564,8 +1633,17 @@ class VariantManager:
                             return result
         return result
 
-    def get_variants(self, term: str, mode: str, limit: int = Config.VARIANT_GEN_LIMIT) -> list[str]:
-        """Generate spelling variants for Hebrew search terms using multiple maps."""
+    def get_variants(self, term: str, mode: str, limit: int = Config.VARIANT_GEN_LIMIT,
+                      custom_variants: dict = None, max_char_changes: int = None) -> list[str]:
+        """Generate spelling variants for Hebrew search terms using multiple maps.
+
+        Args:
+            term: The search term to generate variants for
+            mode: Search mode ('variants', 'variants_extended', 'variants_maximum')
+            limit: Maximum number of variants to generate
+            custom_variants: Optional dict of custom bidirectional mappings {char: [replacements]}
+            max_char_changes: Optional max substitutions per word (overrides default per layer)
+        """
         if len(term) < 2:
             return [term]
 
@@ -1574,6 +1652,7 @@ class VariantManager:
         # Rank 1: Basic Variants
         # Rank 2: Extended Variants
         # Rank 3: Maximum Variants
+        # Rank 4: Custom Variants (highest priority for user-defined)
 
         candidates = {term: 0}
 
@@ -1588,11 +1667,30 @@ class VariantManager:
             layers.append((self.extended_map, 2, 2))
             layers.append((self.maximum_map, 2, 3))
         else:
+            # Even in literal mode, apply custom variants if provided
+            pass
+
+        # Add custom variants layer if provided
+        if custom_variants:
+            # Convert dict {a: [b,c]} to multimap format
+            custom_map = defaultdict(set)
+            for key, values in custom_variants.items():
+                for val in values:
+                    custom_map[key].add(val)
+                    custom_map[val].add(key)  # Bidirectional
+            if custom_map:
+                # Custom variants get rank 0 (highest priority, just after original term)
+                custom_max = max_char_changes if max_char_changes else 2
+                layers.insert(0, (custom_map, custom_max, 0))
+
+        if not layers:
             return [term]
 
         # Process layers
-        for mapping, max_changes, rank in layers:
-            layer_vars = self.generate_variants(term, mapping, max_changes, limit)
+        for mapping, layer_max_changes, rank in layers:
+            # If max_char_changes is specified, use it for all layers
+            effective_max = max_char_changes if max_char_changes else layer_max_changes
+            layer_vars = self.generate_variants(term, mapping, effective_max, limit)
             for v in layer_vars:
                 if v not in candidates:
                     candidates[v] = rank

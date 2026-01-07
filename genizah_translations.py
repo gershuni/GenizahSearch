@@ -389,6 +389,14 @@ TRANSLATIONS = {
     "Minimum score required for a chunk to be considered a match.": "ציון מינימלי הדרוש למקטע כדי להיחשב כהתאמה.",
     "Maximum number of results to display in the tree (prevents freezing). All results are exported.": "מספר מקסימלי של תוצאות להצגה בעץ (מונע קפיאה). כל התוצאות מיוצאות.",
 
+    # --- Custom Variants Dialog ---
+    "Custom Variants": "ווריאנטים מותאמים",
+    "Custom Variants...": "ווריאנטים מותאמים...",
+    "Define custom letter substitutions (e.g., כו=מ means כו and מ are interchangeable).": "הגדר החלפות אותיות מותאמות (למשל, כו=מ פירושו שכו ו-מ ניתנים להחלפה).",
+    "Enable searching with custom variant substitutions.": "אפשר חיפוש עם החלפות וריאנטים מותאמות.",
+    "Maximum number of character substitutions allowed per word (controls combinatorial explosion).": "מספר מקסימלי של החלפות תווים המותרות למילה (שולט בפיצוץ קומבינטורי).",
+    "Each line should contain a pair like: א=ב (both directions are searched automatically)": "כל שורה צריכה להכיל זוג כמו: א=ב (שני הכיוונים נחפשים אוטומטית)",
+
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
     "Result {} of {}": "תוצאה {} מתוך {}", 

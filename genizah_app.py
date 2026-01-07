@@ -306,6 +306,114 @@ class LabScoringDialog(QDialog):
         self.settings.save()
         self.accept()
 
+class CustomVariantsDialog(QDialog):
+    """Dialog for configuring custom letter/word variants and max substitutions per word."""
+    def __init__(self, parent, lab_engine):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Custom Variants"))
+        self.resize(500, 450)
+        self.lab_engine = lab_engine
+        self.settings = lab_engine.settings
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+
+        # Explanation
+        lbl_info = QLabel(tr("Define custom letter substitutions (e.g., כו=מ means כו and מ are interchangeable)."))
+        lbl_info.setWordWrap(True)
+        layout.addWidget(lbl_info)
+
+        # Enable checkbox
+        self.chk_use_custom = QCheckBox(tr("Use Custom Variants"))
+        self.chk_use_custom.setChecked(self.settings.use_custom_variants)
+        self.chk_use_custom.setToolTip(tr("Enable searching with custom variant substitutions."))
+        layout.addWidget(self.chk_use_custom)
+
+        # Max changes per word
+        hbox_max = QHBoxLayout()
+        hbox_max.addWidget(QLabel(tr("Max Changes per Word:")))
+        self.spin_max_changes = QSpinBox()
+        self.spin_max_changes.setRange(1, 5)
+        self.spin_max_changes.setValue(self.settings.max_char_changes)
+        self.spin_max_changes.setToolTip(tr("Maximum number of character substitutions allowed per word (controls combinatorial explosion)."))
+        hbox_max.addWidget(self.spin_max_changes)
+        hbox_max.addStretch()
+        layout.addLayout(hbox_max)
+
+        # Custom variants text
+        lbl_variants = QLabel(tr("Custom Variants (char=char, word=word):"))
+        lbl_variants.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(lbl_variants)
+
+        self.txt_variants = QPlainTextEdit()
+        self.txt_variants.setPlaceholderText("ד=ר\nכו=מ\nאי=י")
+        # Load existing variants
+        existing_text = self._variants_dict_to_text(self.settings.custom_variants)
+        self.txt_variants.setPlainText(existing_text)
+        layout.addWidget(self.txt_variants)
+
+        lbl_hint = QLabel(tr("Each line should contain a pair like: א=ב (both directions are searched automatically)"))
+        lbl_hint.setStyleSheet("color: gray; font-size: 10px;")
+        lbl_hint.setWordWrap(True)
+        layout.addWidget(lbl_hint)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_save = QPushButton(tr("Save & Close"))
+        self.btn_save.clicked.connect(self.save_and_close)
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_save)
+        layout.addLayout(btn_box)
+
+        self.setLayout(layout)
+
+    def _variants_dict_to_text(self, variants_dict):
+        """Convert variants dict {a: [b,c], b: [a]} to text format 'a=b\\na=c'."""
+        lines = []
+        seen = set()
+        for key, values in variants_dict.items():
+            for val in values:
+                pair = tuple(sorted([key, val]))
+                if pair not in seen:
+                    seen.add(pair)
+                    lines.append(f"{key}={val}")
+        return "\n".join(lines)
+
+    def _text_to_variants_dict(self, text):
+        """Convert text format 'a=b' to variants dict with bidirectional mapping."""
+        variants = {}
+        for line in text.strip().split('\n'):
+            line = line.strip()
+            if '=' not in line:
+                continue
+            parts = line.split('=', 1)
+            if len(parts) != 2:
+                continue
+            a, b = parts[0].strip(), parts[1].strip()
+            if not a or not b:
+                continue
+            # Bidirectional
+            if a not in variants:
+                variants[a] = []
+            if b not in variants[a]:
+                variants[a].append(b)
+            if b not in variants:
+                variants[b] = []
+            if a not in variants[b]:
+                variants[b].append(a)
+        return variants
+
+    def save_and_close(self):
+        self.settings.use_custom_variants = self.chk_use_custom.isChecked()
+        self.settings.max_char_changes = self.spin_max_changes.value()
+        self.settings.custom_variants = self._text_to_variants_dict(self.txt_variants.toPlainText())
+        self.settings.save()
+        self.accept()
+
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
         super().__init__(parent)
@@ -398,6 +506,12 @@ class LabPanel(QFrame):
 
             self.layout.addStretch()
 
+            # Custom Variants
+            self.btn_variants = QPushButton(tr("Custom Variants..."))
+            self.btn_variants.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
+            self.btn_variants.clicked.connect(self.open_variants)
+            self.layout.addWidget(self.btn_variants)
+
             # Advanced Scoring
             self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
             self.btn_scoring.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
@@ -432,6 +546,12 @@ class LabPanel(QFrame):
             self.layout.addWidget(self.spin_max_final)
 
             self.layout.addStretch()
+
+            # Custom Variants
+            self.btn_variants = QPushButton(tr("Custom Variants..."))
+            self.btn_variants.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; border-radius: 4px; padding: 4px;")
+            self.btn_variants.clicked.connect(self.open_variants)
+            self.layout.addWidget(self.btn_variants)
 
             # Advanced Scoring
             self.btn_scoring = QPushButton(tr("Advanced Scoring..."))
@@ -473,6 +593,11 @@ class LabPanel(QFrame):
     def open_scoring(self):
          if not self.lab_engine: return
          d = LabScoringDialog(self, self.lab_engine)
+         d.exec()
+
+    def open_variants(self):
+         if not self.lab_engine: return
+         d = CustomVariantsDialog(self, self.lab_engine)
          d.exec()
 
     def _mark_rebuild_required(self):
