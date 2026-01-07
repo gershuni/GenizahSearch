@@ -2134,7 +2134,10 @@ class ResultDialog(QDialog):
         external_html = ""
         if part_meta:
             part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
-            external_html += f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; margin-bottom: 10px; border-left: 3px solid #3498db;'>"
+            external_html += (
+                f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; "
+                "margin-bottom: 10px; border-left: 3px solid #3498db; text-align: left;' dir='ltr'>"
+            )
             external_html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
 
             folio_range = part_meta.get('folio_range', [])
@@ -2155,8 +2158,7 @@ class ResultDialog(QDialog):
             external_html += "</div>"
 
         if external_meta:
-            external_html += f"<div style='margin-bottom: 10px;'>"
-            external_html += f"<p><b>{tr('External Metadata')}:</b></p><ul>"
+            external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
             for k, v in external_meta.items():
                 external_html += f"<li><b>{k}:</b> {v}</li>"
             external_html += "</ul></div>"
