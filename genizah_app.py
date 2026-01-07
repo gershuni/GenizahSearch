@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat)
+                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath)
 
 from version import APP_VERSION
 
@@ -53,6 +53,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
 from filter_text_dialog import FilterTextDialog
+from column_filter_dialog import ColumnFilterDialog
 
 logger = get_logger(__name__)
 
@@ -585,11 +586,14 @@ class CheckBoxHeader(QHeaderView):
     """Custom HeaderView that draws a checkbox in the first section."""
     toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None, non_sortable_cols=None):
+    def __init__(self, parent=None, non_sortable_cols=None, filter_columns=None, filter_callback=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.isChecked = False
         self.setSectionsClickable(True)
         self.non_sortable_cols = non_sortable_cols if non_sortable_cols else []
+        self.filter_columns = set(filter_columns or [])
+        self.filter_callback = filter_callback
+        self.filter_states = {}
 
     def get_checkbox_rect(self, rect):
         box_size = 20
@@ -608,6 +612,10 @@ class CheckBoxHeader(QHeaderView):
         super().paintSection(painter, rect, logicalIndex)
         painter.restore()
 
+        if logicalIndex in self.filter_columns:
+            icon_rect = self._filter_icon_rect(rect)
+            self._draw_filter_icon(painter, icon_rect, self.filter_states.get(logicalIndex, False))
+
         if logicalIndex == 0:
             option = QStyleOptionButton()
             option.rect = self.get_checkbox_rect(rect)
@@ -621,6 +629,14 @@ class CheckBoxHeader(QHeaderView):
 
     def mousePressEvent(self, event):
         idx = self.logicalIndexAt(event.pos())
+        if idx in self.filter_columns and self.filter_callback:
+            sec_pos = self.sectionViewportPosition(idx)
+            sec_width = self.sectionSize(idx)
+            sec_rect = QRect(sec_pos, 0, sec_width, self.height())
+            if self._filter_icon_rect(sec_rect).contains(event.pos()):
+                self.filter_callback(idx)
+                return
+
         if idx == 0:
             sec_pos = self.sectionViewportPosition(0)
             sec_width = self.sectionSize(0)
@@ -647,6 +663,54 @@ class CheckBoxHeader(QHeaderView):
         if self.isChecked != checked:
             self.isChecked = checked
             self.viewport().update()
+
+    def _filter_icon_rect(self, rect):
+        icon_size = 12
+        padding = 6
+        y = rect.top() + (rect.height() - icon_size) // 2
+
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            x = rect.left() + padding
+        else:
+            x = rect.right() - icon_size - padding
+
+        return QRect(x, y, icon_size, icon_size)
+
+    def _draw_filter_icon(self, painter, rect, active):
+        painter.save()
+        color = self.palette().color(QPalette.ColorRole.Highlight if active else QPalette.ColorRole.Mid)
+        pen = QPen(color)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(color if active else Qt.BrushStyle.NoBrush))
+
+        x = rect.x()
+        y = rect.y()
+        w = rect.width()
+        h = rect.height()
+        top_h = int(h * 0.55)
+        stem_w = max(2, int(w * 0.3))
+        mid_x = x + w // 2
+        stem_left = mid_x - stem_w // 2
+        stem_right = stem_left + stem_w
+
+        path = QPainterPath()
+        path.moveTo(x, y)
+        path.lineTo(x + w, y)
+        path.lineTo(stem_right, y + top_h)
+        path.lineTo(stem_right, y + h)
+        path.lineTo(stem_left, y + h)
+        path.lineTo(stem_left, y + top_h)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.restore()
+
+    def set_filter_active(self, column, active):
+        if active:
+            self.filter_states[column] = True
+        else:
+            self.filter_states.pop(column, None)
+        self.viewport().update()
 
 class ZoomableScrollArea(QGraphicsView):
     """A GraphicsView that supports hand-panning and wheel-zooming."""
@@ -2511,6 +2575,8 @@ class GenizahGUI(QMainWindow):
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
         self.filter_text_content = ""
+        self.results_filters = {}
+        self.comp_filters = {}
         self.group_thread = None
         self.is_searching = False
         self.is_comp_running = False
@@ -2817,9 +2883,15 @@ class GenizahGUI(QMainWindow):
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (4)
-        self.chk_search_header = CheckBoxHeader(self.results_table, non_sortable_cols=[0, 1, 4])
+        self.chk_search_header = CheckBoxHeader(
+            self.results_table,
+            non_sortable_cols=[0, 1, 4],
+            filter_columns=[self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET],
+            filter_callback=self._open_results_filter_dialog,
+        )
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
+        self._update_results_filter_indicators()
 
         self.results_table.setColumnWidth(self.COL_CHECKBOX, 30) # Checkbox column
         self.results_table.setColumnWidth(self.COL_ACTIONS, 70)
@@ -3043,9 +3115,14 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
         # Use CheckBoxHeader for tree
-        self.chk_comp_header = CheckBoxHeader(self.comp_tree)
+        self.chk_comp_header = CheckBoxHeader(
+            self.comp_tree,
+            filter_columns=[self.comp_col_context, self.comp_col_ms_context],
+            filter_callback=self._open_comp_filter_dialog,
+        )
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
+        self._update_comp_filter_indicators()
         comp_header = self.comp_tree.header()
         comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
         comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
@@ -4083,6 +4160,7 @@ class GenizahGUI(QMainWindow):
             # Snippet
             html_snippet = self.render_asterisks_to_html(res.get('snippet', ''))
             lbl = QLabel(html_snippet)
+            lbl.setProperty("filter_text", res.get('snippet', ''))
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.results_table.setCellWidget(row_idx, self.COL_SNIPPET, lbl)
 
@@ -4093,6 +4171,7 @@ class GenizahGUI(QMainWindow):
 
         self.results_loaded = end_idx
         self.results_table.setSortingEnabled(True)
+        self._apply_results_table_filters()
 
         # Update Status
         self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)))
@@ -4135,6 +4214,132 @@ class GenizahGUI(QMainWindow):
 
         self.load_next_batch()
 
+    def _open_results_filter_dialog(self, column):
+        header_item = self.results_table.horizontalHeaderItem(column)
+        column_label = header_item.text() if header_item else str(column)
+        current = self.results_filters.get(column, {})
+        dlg = ColumnFilterDialog(
+            self,
+            column_label,
+            current_text=current.get("text", ""),
+            exclude=current.get("exclude", False),
+        )
+        if dlg.exec():
+            text = dlg.get_text().strip()
+            if text:
+                self.results_filters[column] = {"text": text, "exclude": dlg.is_exclude()}
+            else:
+                self.results_filters.pop(column, None)
+            self._update_results_filter_indicators()
+            self._apply_results_table_filters()
+
+    def _update_results_filter_indicators(self):
+        for column in (self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET):
+            self.chk_search_header.set_filter_active(column, column in self.results_filters)
+
+    def _results_filter_text_for_row(self, row, column):
+        if column == self.COL_SNIPPET:
+            widget = self.results_table.cellWidget(row, column)
+            if widget is not None:
+                raw = widget.property("filter_text")
+                if raw:
+                    return str(raw)
+                if hasattr(widget, "text"):
+                    return widget.text()
+        item = self.results_table.item(row, column)
+        return item.text() if item else ""
+
+    def _apply_results_table_filters(self):
+        if not self.results_filters:
+            for row in range(self.results_table.rowCount()):
+                self.results_table.setRowHidden(row, False)
+            return
+
+        for row in range(self.results_table.rowCount()):
+            visible = True
+            for column, rule in self.results_filters.items():
+                cell_text = self._results_filter_text_for_row(row, column)
+                if not self._text_matches_filter(cell_text, rule):
+                    visible = False
+                    break
+            self.results_table.setRowHidden(row, not visible)
+
+    def _open_comp_filter_dialog(self, column):
+        header_item = self.comp_tree.headerItem()
+        column_label = header_item.text(column) if header_item else str(column)
+        current = self.comp_filters.get(column, {})
+        dlg = ColumnFilterDialog(
+            self,
+            column_label,
+            current_text=current.get("text", ""),
+            exclude=current.get("exclude", False),
+        )
+        if dlg.exec():
+            text = dlg.get_text().strip()
+            if text:
+                self.comp_filters[column] = {"text": text, "exclude": dlg.is_exclude()}
+            else:
+                self.comp_filters.pop(column, None)
+            self._update_comp_filter_indicators()
+            self._apply_comp_tree_filters()
+
+    def _update_comp_filter_indicators(self):
+        for column in (self.comp_col_context, self.comp_col_ms_context):
+            self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
+
+    def _apply_comp_tree_filters(self):
+        root = self.comp_tree.invisibleRootItem()
+        if not self.comp_filters:
+            def unhide(node):
+                node.setHidden(False)
+                for j in range(node.childCount()):
+                    unhide(node.child(j))
+
+            for i in range(root.childCount()):
+                unhide(root.child(i))
+            return
+
+        def visit(node):
+            visible_any = False
+            for i in range(node.childCount()):
+                if visit(node.child(i)):
+                    visible_any = True
+
+            data = node.data(0, Qt.ItemDataRole.UserRole + 1)
+            if data:
+                matches = self._comp_data_matches_filters(data)
+                node_visible = matches or visible_any
+            else:
+                node_visible = visible_any
+
+            node.setHidden(not node_visible)
+            return node_visible
+
+        for i in range(root.childCount()):
+            visit(root.child(i))
+
+    def _comp_data_matches_filters(self, data):
+        for column, rule in self.comp_filters.items():
+            if column == self.comp_col_context:
+                text = data.get("source_ctx", "")
+            elif column == self.comp_col_ms_context:
+                text = data.get("ms_ctx", "")
+            else:
+                continue
+            if not self._text_matches_filter(text, rule):
+                return False
+        return True
+
+    def _text_matches_filter(self, text, rule):
+        needle = (rule.get("text") or "").strip()
+        if not needle:
+            return True
+        haystack = (text or "").lower()
+        contains = needle.lower() in haystack
+        if rule.get("exclude"):
+            return not contains
+        return contains
+
     def start_metadata_loading(self, ids):
         if not ids:
             return
@@ -4166,6 +4371,8 @@ class GenizahGUI(QMainWindow):
             if sid in self.title_items_by_sid and title:
                 self.title_items_by_sid[sid].setText(title)
                 res['display']['title'] = title
+
+        self._apply_results_table_filters()
 
         if self.meta_to_fetch_count == 0:
             self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
@@ -4213,6 +4420,8 @@ class GenizahGUI(QMainWindow):
             r = self._res_map_by_sid[sid]
             r['display']['shelfmark'] = shelf
             r['display']['title'] = title
+
+        self._apply_results_table_filters()
         else:
             # Fallback
             for r in self.last_results:
@@ -5969,6 +6178,8 @@ class GenizahGUI(QMainWindow):
                     add_manuscript_node(root_known, item)
 
         self.comp_tree.setUpdatesEnabled(True)
+        self._update_comp_filter_indicators()
+        self._apply_comp_tree_filters()
         self._update_recursive_button_state()
         
         if ids_to_fetch:
