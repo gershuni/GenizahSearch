@@ -3055,19 +3055,22 @@ class Indexer:
                 if not part_pages:
                     continue
 
-                if len(part_pages) > 400:
+                if len(part_pages) > 1000:
                     LOGGER.warning("Skipping massive part '%s' with %d pages (likely data error).", part_id, len(part_pages))
                     continue
 
-                total_words = sum(len(word_pattern.findall(p.get('content', '') or "")) for p in part_pages)
-                if total_words > 4000:
+                total_words = sum(len((p.get('content', '') or "").split()) for p in part_pages)
+                
+                WORD_LIMIT = 150_000
+
+                if total_words > WORD_LIMIT:
                     num_chunks = self._add_chunked_continuous_documents(
                         writer, part_pages, scope="part", unique_id=f"part:{part_id}",
-                        word_limit=4000, word_pattern=word_pattern
+                        word_limit=WORD_LIMIT, word_pattern=word_pattern
                     )
                     LOGGER.warning(
-                        "Part '%s' split into %d chunk(s) due to %d words (limit=4000).",
-                        part_id, num_chunks, total_words
+                        "Part '%s' split into %d chunk(s) due to %d words (limit=%d).",
+                        part_id, num_chunks, total_words, WORD_LIMIT
                     )
                 else:
                     self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
