@@ -75,6 +75,38 @@ def apply_find_highlight(text_browser, query):
         selections.append(selection)
     text_browser.setExtraSelections(selections)
 
+def _get_initial_image_index(meta, page_num):
+    if page_num is None:
+        return 0
+    try:
+        p_num = int(page_num)
+    except (TypeError, ValueError):
+        return 0
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    folio_entries = []
+    for idx, img in enumerate(images):
+        folio_num = img.get('folio_num')
+        if folio_num is None:
+            continue
+        try:
+            folio_entries.append((idx, int(folio_num)))
+        except (TypeError, ValueError):
+            continue
+
+    if not folio_entries:
+        return max(p_num - 1, 0)
+
+    for idx, folio_num in folio_entries:
+        if folio_num == p_num:
+            return idx
+
+    prior = [(idx, folio_num) for idx, folio_num in folio_entries if folio_num <= p_num]
+    if prior:
+        return max(prior, key=lambda pair: pair[1])[0]
+
+    return min(folio_entries, key=lambda pair: pair[1])[0]
+
 class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
 
@@ -2062,9 +2094,7 @@ class ResultDialog(QDialog):
             self.txt_ext_meta.setVisible(False)
 
             # Load images into widget
-            try: initial_idx = int(self.current_p_num) - 1
-            except: initial_idx = 0
-
+            initial_idx = _get_initial_image_index(meta, self.current_p_num)
             self.ms_viewer.load_images(meta, initial_idx)
         else:
             self.external_pane.setVisible(False)
@@ -3203,8 +3233,7 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
-        try: idx = int(self.current_browse_p) - 1
-        except: idx = 0
+        idx = _get_initial_image_index(meta, self.current_browse_p)
         self.browse_viewer.load_images(meta, idx)
 
         # 3. Enable buttons

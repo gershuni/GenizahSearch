@@ -2497,7 +2497,8 @@ class MetadataManager:
                     images_ext = [{
                         'label': img.get('label', ''),
                         'url': img.get('full_url', ''),
-                        'thumb_url': img.get('thumb_url', '')
+                        'thumb_url': img.get('thumb_url', ''),
+                        'folio_num': img.get('folio_num')
                     } for img in part_images]
                     current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
