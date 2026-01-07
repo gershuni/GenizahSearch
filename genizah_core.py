@@ -120,6 +120,11 @@ class LabSettings:
 
         self.use_dynamic_weights = False
 
+        # Variant Search Settings (affects standard search when using variants mode)
+        self.variant_min_word_len = 2      # Words <= this length get only 1 change
+        self.variant_max_changes = 2       # Max character changes per word
+        self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
+
         self.load()
 
     def load(self):
@@ -150,6 +155,11 @@ class LabSettings:
 
                     self.lab_scan_limit = data.get('lab_scan_limit', 50000)
                     self.lab_display_limit = data.get('lab_display_limit', 500)
+
+                    # Load variant settings
+                    self.variant_min_word_len = data.get('variant_min_word_len', 2)
+                    self.variant_max_changes = data.get('variant_max_changes', 2)
+                    self.variant_aggressive = data.get('variant_aggressive', False)
             except Exception: pass
 
     def save(self):
@@ -179,7 +189,12 @@ class LabSettings:
                     'comp_max_final_results': self.comp_max_final_results,
 
                     'lab_scan_limit': self.lab_scan_limit,
-                    'lab_display_limit': self.lab_display_limit
+                    'lab_display_limit': self.lab_display_limit,
+
+                    # Variant settings
+                    'variant_min_word_len': self.variant_min_word_len,
+                    'variant_max_changes': self.variant_max_changes,
+                    'variant_aggressive': self.variant_aggressive
                 }, f, indent=4)
         except Exception: pass
 
@@ -1551,7 +1566,7 @@ class VariantManager:
             m[b].add(a)
         return m
 
-    def __init__(self):
+    def __init__(self, settings=None):
         # Build hierarchical maps (each level includes all previous)
         self.basic_map = self.make_multimap(self._BASIC_PAIRS)
 
@@ -1567,18 +1582,37 @@ class VariantManager:
         self._cache = {}
         self._cache_max_size = 5000
 
+        # Settings reference (can be updated later via set_settings)
+        self._settings = settings
+
+    def set_settings(self, settings):
+        """Update settings reference and clear cache."""
+        self._settings = settings
+        self._cache.clear()
+
     def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
         """
         Dynamic max_changes based on term length to prevent combinatorial explosion.
-        Only very short words (2 chars) are limited to 1 change.
-        Words with 3+ chars can have up to base_max changes.
+        Respects settings if available (variant_min_word_len, variant_aggressive).
         """
-        if term_len <= 2:
-            # 2-char words: only 1 change (2 changes = completely different word)
+        # Check for aggressive mode (old behavior - no limits based on length)
+        if self._settings and getattr(self._settings, 'variant_aggressive', False):
+            return min(base_max, getattr(self._settings, 'variant_max_changes', 2))
+
+        # Get threshold from settings or use default
+        min_len = 2
+        if self._settings:
+            min_len = getattr(self._settings, 'variant_min_word_len', 2)
+
+        if term_len <= min_len:
+            # Short words: only 1 change
             return 1
         else:
-            # 3+ chars: allow full base_max (capped at 2 to prevent explosion)
-            return min(base_max, 2)
+            # Longer words: allow full base_max (capped by settings or 2)
+            max_cap = 2
+            if self._settings:
+                max_cap = getattr(self._settings, 'variant_max_changes', 2)
+            return min(base_max, max_cap)
 
     def hamming_distance(self, term: str, variant: str) -> int:
         """Calculate character difference count between term and variant."""

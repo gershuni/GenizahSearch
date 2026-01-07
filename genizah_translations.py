@@ -375,6 +375,16 @@ TRANSLATIONS = {
     "Adjust how the algorithm prioritizes results.": "כוונן כיצד האלגוריתם מתעדף תוצאות.",
     "Points given for very short words (<3 letters). Keep low to reduce noise.": "נקודות הניתנות למילים קצרות מאוד (פחות מ-3 אותיות). השאר נמוך להפחתת רעש.",
     "Points for common 3-letter words (e.g. 'ליה', 'הכי').": "נקודות למילים נפוצות בנות 3 אותיות (למשל 'ליה', 'הכי').",
+
+    # --- Variant Search Settings ---
+    "Variant Search Limits:": "הגבלות חיפוש וריאנטים:",
+    "Limit Short Words (≤N chars):": "הגבל מילים קצרות (≤N תווים):",
+    "Max Changes per Word:": "מקסימום שינויים למילה:",
+    "Aggressive Mode (ignore word length limits)": "מצב אגרסיבי (התעלם מהגבלות אורך)",
+    "Words with this length or less get only 1 character change. Increase to be more conservative.": "מילים באורך זה או פחות מקבלות רק שינוי תו אחד. הגדל להיות יותר שמרני.",
+    "Maximum character substitutions per word. Higher = more results but slower.": "מספר החלפות תווים מקסימלי למילה. גבוה יותר = יותר תוצאות אך איטי יותר.",
+    "Like old behavior: apply max changes to all words regardless of length. More results, more noise.": "כמו ההתנהגות הישנה: החל שינויים מקסימליים על כל המילים ללא קשר לאורך. יותר תוצאות, יותר רעש.",
+
     "Save & Close": "שמור וסגור",
     "Copied": "הועתק",
     "Configuration JSON copied to clipboard.": "קובץ תצורה JSON הועתק ללוח.",

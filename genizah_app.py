@@ -266,6 +266,33 @@ class LabScoringDialog(QDialog):
         self.spin_display_limit.setToolTip(tr("Lower values prevent the app from freezing. All results are still exported."))
         grid.addWidget(QLabel(tr("Max Results to Display:")), 10, 0); grid.addWidget(self.spin_display_limit, 10, 1)
 
+        # --- Variant Search Settings ---
+        lbl_variant = QLabel(tr("Variant Search Limits:"))
+        lbl_variant.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        grid.addWidget(lbl_variant, 11, 0, 1, 2)
+
+        # Min Word Length for limiting changes
+        self.spin_variant_min_len = QSpinBox()
+        self.spin_variant_min_len.setRange(1, 5)
+        self.spin_variant_min_len.setValue(getattr(self.settings, 'variant_min_word_len', 2))
+        self.spin_variant_min_len.setToolTip(tr("Words with this length or less get only 1 character change. Increase to be more conservative."))
+        grid.addWidget(QLabel(tr("Limit Short Words (≤N chars):")), 12, 0)
+        grid.addWidget(self.spin_variant_min_len, 12, 1)
+
+        # Max Changes
+        self.spin_variant_max_changes = QSpinBox()
+        self.spin_variant_max_changes.setRange(1, 3)
+        self.spin_variant_max_changes.setValue(getattr(self.settings, 'variant_max_changes', 2))
+        self.spin_variant_max_changes.setToolTip(tr("Maximum character substitutions per word. Higher = more results but slower."))
+        grid.addWidget(QLabel(tr("Max Changes per Word:")), 13, 0)
+        grid.addWidget(self.spin_variant_max_changes, 13, 1)
+
+        # Aggressive Mode
+        self.chk_variant_aggressive = QCheckBox(tr("Aggressive Mode (ignore word length limits)"))
+        self.chk_variant_aggressive.setChecked(getattr(self.settings, 'variant_aggressive', False))
+        self.chk_variant_aggressive.setToolTip(tr("Like old behavior: apply max changes to all words regardless of length. More results, more noise."))
+        grid.addWidget(self.chk_variant_aggressive, 14, 0, 1, 2)
+
         layout.addLayout(grid)
         layout.addStretch()
         
@@ -303,7 +330,21 @@ class LabScoringDialog(QDialog):
             self.settings.common_3char_score = self.spin_common3_score.value()
         
         self.settings.lab_display_limit = self.spin_display_limit.value()
+
+        # Save variant settings
+        self.settings.variant_min_word_len = self.spin_variant_min_len.value()
+        self.settings.variant_max_changes = self.spin_variant_max_changes.value()
+        self.settings.variant_aggressive = self.chk_variant_aggressive.isChecked()
+
         self.settings.save()
+
+        # Update VariantManager if available
+        main = self.parent()
+        while main and not hasattr(main, 'var_mgr'):
+            main = main.parent()
+        if main and main.var_mgr:
+            main.var_mgr.set_settings(self.settings)
+
         self.accept()
 
 class LabPanel(QFrame):
@@ -2630,6 +2671,10 @@ class GenizahGUI(QMainWindow):
 
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
+
+            # Connect VariantManager to Lab settings for variant search configuration
+            if self.var_mgr and self.lab_engine:
+                self.var_mgr.set_settings(self.lab_engine.settings)
 
             # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
             if hasattr(self, 'lab_panel_search'):
