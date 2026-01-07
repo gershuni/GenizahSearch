@@ -1,13 +1,13 @@
-## 📜 Genizah Search Pro 4.1
+## 📜 Genizah Search Pro 4.0
 
 **Research Tool for the Cairo Genizah**
 
 Genizah Search Pro is a software for searching and researching Cairo Genizah manuscripts, based on the automatic transcriptions from the MiDRASH Project.
-**Version 4.1** adds support for Oxford Bodleian Library's codicological units (Neubauer catalog Parts), enhancing manuscript browsing with proper manuscript identification.
+**Version 4.0** adds support for Oxford Bodleian Library's codicological units (Neubauer catalog Parts), enhancing manuscript browsing with proper manuscript identification.
 
 ---
 
-## 🚀 What's New in Version 4.1?
+## 🚀 What's New in Version 4.0?
 
 * **📖 Codicological Parts (Neubauer):**
   Full support for Oxford Bodleian Library manuscripts with proper Neubauer catalog integration.
@@ -16,10 +16,6 @@ Genizah Search Pro is a software for searching and researching Cairo Genizah man
   * **Dual Navigation:** Toggle between navigating by Parts (codicological units) or by Folios (individual pages).
   * **Autocomplete:** Search for Parts using the "(neubauer)" suffix in the shelfmark field.
   * **Image Integration:** Direct access to high-resolution Oxford manuscript images.
-
----
-
-## 🚀 What's New in Version 4.0?
 
 * **📚 Integrated Manuscript Viewer:**
   Allows viewing manuscript images directly within the software, independent of an external browser.
@@ -33,9 +29,15 @@ Genizah Search Pro is a software for searching and researching Cairo Genizah man
   * **Deep Scan:** Comprehensive scan for complex queries.
   * **Advanced Settings:** Control over scoring weights (density, word order, rarity).
 
+* **🔎 Cross-Page Search:**
+  Search now spans across page boundaries and manuscript sequences, keeping context even when matches cross folio edges.
+
+* **🔍 Find in Text:**
+  Quick in-pane search with highlighting in manuscript, source, and browse text views.
+
 * **⚡ Interface & Data Management:**
-  * **Custom Export:** Option to export only selected rows from results (Excel/CSV/TXT).
-  * **Filtering & Sorting:** Improved filtering and sorting tools in result tables.
+  * **Custom Export:** Option to export only selected rows from results (Excel/CSV/TXT/DOCX).
+  * **Filtering & Sorting:** Column-based filters and improved sorting in result tables.
   * **Quick Actions:** Unified "Actions" column allowing view or browse of a result with a single click.
 
 ---
@@ -99,16 +101,16 @@ The software is distributed under the **MIT** License.
 The dataset is distributed under **CC BY 4.0**.
 ---
 
-# 📜 Genizah Search Pro 4.1 (עברית)
+# 📜 Genizah Search Pro 4.0 (עברית)
 
 **כלי מחקר לגניזה הקהירית**
 
 Genizah Search Pro היא תוכנה לחיפוש ולמחקר בכתבי היד של הגניזה הקהירית, המבוססת על התעתיקים האוטומטיים של פרויקט MiDRASH.
-**גרסה 4.1** מוסיפה תמיכה ביחידות קודיקולוגיות (Parts לפי קטלוג נויבאואר) של ספריית הבודליאנה באוקספורד, ומשפרת את העיון בכתבי היד עם זיהוי נכון של כתבי יד שלמים.
+**גרסה 4.0** מוסיפה תמיכה ביחידות קודיקולוגיות (Parts לפי קטלוג נויבאואר) של ספריית הבודליאנה באוקספורד, ומשפרת את העיון בכתבי היד עם זיהוי נכון של כתבי יד שלמים.
 
 ---
 
-## 🚀 מה חדש בגרסה 4.1?
+## 🚀 מה חדש בגרסה 4.0?
 
 * **📖 חלקים קודיקולוגיים (נויבאואר):**
   תמיכה מלאה בכתבי היד של ספריית הבודליאנה באוקספורד עם שילוב קטלוג נויבאואר.
@@ -117,10 +119,6 @@ Genizah Search Pro היא תוכנה לחיפוש ולמחקר בכתבי היד
   * **ניווט כפול:** מעבר בין ניווט לפי Parts (יחידות קודיקולוגיות) לבין ניווט לפי פוליואים (דפים בודדים).
   * **השלמה אוטומטית:** חיפוש Parts באמצעות הסיומת "(neubauer)" בשדה מספר המדף.
   * **שילוב תמונות:** גישה ישירה לתמונות ברזולוציה גבוהה מאוקספורד.
-
----
-
-## 🚀 מה חדש בגרסה 4.0?
 
 * **📚 צפיין כתבי יד מובנה:**
   מאפשר עיון בתמונות כתבי היד ישירות בתוך התוכנה, ללא תלות בדפדפן חיצוני.
@@ -134,9 +132,15 @@ Genizah Search Pro היא תוכנה לחיפוש ולמחקר בכתבי היד
   * **סריקה עמוקה (Deep Scan):** סריקה מקיפה לשאילתות מורכבות.
   * **הגדרות מתקדמות:** שליטה במשקלי הניקוד (צפיפות, סדר מילים, נדירות).
 
+* **🔎 חיפוש חוצה-דפים:**
+  החיפוש עובר כעת בין גבולות דפים ורצפים של כתבי יד, כך שהקשר נשמר גם כשיש התאמה החוצה את קצה הדף.
+
+* **🔍 חיפוש בתוך הטקסט:**
+  חיפוש מהיר עם הדגשה בחלונות הטקסט של כתב היד, המקור וחלון העיון.
+
 * **⚡ ממשק וניהול נתונים:**
-  * **ייצוא מותאם:** אפשרות לייצוא שורות נבחרות בלבד מתוך התוצאות (Excel/CSV/TXT).
-  * **סינון ומיון:** שיפור כלי הסינון והמיון בטבלאות התוצאות.
+  * **ייצוא מותאם:** אפשרות לייצוא שורות נבחרות בלבד מתוך התוצאות (Excel/CSV/TXT/DOCX).
+  * **סינון ומיון:** סינון לפי עמודות ושיפור כלי המיון בטבלאות התוצאות.
   * **פעולות מהירות:** עמודת "פעולות" מאוחדת המאפשרת צפייה בתוצאה או מעבר לעיון בכתב היד בלחיצה אחת.
 
 ---
