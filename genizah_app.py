@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem, QPalette)
+                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat)
 
 from version import APP_VERSION
 
@@ -53,6 +53,27 @@ from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkL
 from filter_text_dialog import FilterTextDialog
 
 logger = get_logger(__name__)
+
+def apply_find_highlight(text_browser, query):
+    if not text_browser:
+        return
+    if not query:
+        text_browser.setExtraSelections([])
+        return
+    doc = text_browser.document()
+    cursor = QTextCursor(doc)
+    highlight_format = QTextCharFormat()
+    highlight_format.setBackground(QColor("#fff59d"))
+    selections = []
+    while True:
+        cursor = doc.find(query, cursor)
+        if cursor.isNull():
+            break
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format = highlight_format
+        selections.append(selection)
+    text_browser.setExtraSelections(selections)
 
 class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
@@ -1665,6 +1686,13 @@ class ResultDialog(QDialog):
         ms_widget = QWidget()
         ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
         ms_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
+        ms_find_row = QHBoxLayout()
+        ms_find_row.addWidget(QLabel(tr("Find:")))
+        self.find_ms_input = QLineEdit()
+        self.find_ms_input.setPlaceholderText(tr("Find in text..."))
+        self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
+        ms_find_row.addWidget(self.find_ms_input)
+        ms_layout.addLayout(ms_find_row)
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_layout.addWidget(self.text_ms)
         
@@ -1672,6 +1700,13 @@ class ResultDialog(QDialog):
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
         src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
+        src_find_row = QHBoxLayout()
+        src_find_row.addWidget(QLabel(tr("Find:")))
+        self.find_src_input = QLineEdit()
+        self.find_src_input.setPlaceholderText(tr("Find in text..."))
+        self.find_src_input.textChanged.connect(lambda text: apply_find_highlight(self.text_src, text.strip()))
+        src_find_row.addWidget(self.find_src_input)
+        src_layout.addLayout(src_find_row)
         self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         src_layout.addWidget(self.text_src)
 
@@ -1747,6 +1782,10 @@ class ResultDialog(QDialog):
             )
             self.close()
 
+    def _refresh_find_highlights(self):
+        apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
+        apply_find_highlight(self.text_src, self.find_src_input.text().strip())
+
     def _htmlify(self, text):
         if not text: return ""
         t = text.replace("\n", "<br>")
@@ -1806,6 +1845,7 @@ class ResultDialog(QDialog):
                 pass
 
         self.text_ms.setHtml(self._htmlify(ms_raw))
+        self._refresh_find_highlights()
         
         # 2. Source Context
         src_raw = data.get('source_ctx', '')
@@ -1814,6 +1854,7 @@ class ResultDialog(QDialog):
             self.text_src.setHtml(self._htmlify(src_raw))
         else:
             self.src_widget.setVisible(False)
+        self._refresh_find_highlights()
         
         # Load Page & Metadata
         self.load_page(target=p)
@@ -1916,6 +1957,7 @@ class ResultDialog(QDialog):
             except: pass
         
         self.text_ms.setHtml(self._htmlify(raw_text))
+        self._refresh_find_highlights()
 
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
@@ -3004,6 +3046,14 @@ class GenizahGUI(QMainWindow):
         nav_bar.addStretch()
         text_layout.addLayout(nav_bar)
 
+        browse_find_row = QHBoxLayout()
+        browse_find_row.addWidget(QLabel(tr("Find:")))
+        self.browse_find_input = QLineEdit()
+        self.browse_find_input.setPlaceholderText(tr("Find in text..."))
+        self.browse_find_input.textChanged.connect(lambda text: apply_find_highlight(self.browse_text, text.strip()))
+        browse_find_row.addWidget(self.browse_find_input)
+        text_layout.addLayout(browse_find_row)
+
         self.browse_text = QTextBrowser()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
@@ -3318,6 +3368,7 @@ class GenizahGUI(QMainWindow):
 
         full_html = "".join(html_content)
         self.browse_text.setHtml(full_html)
+        apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
         # Update info label with Oxford Part info in View All mode
         part_id = self.current_browse_part_id
@@ -6578,6 +6629,7 @@ class GenizahGUI(QMainWindow):
                 pass
         browse_html_text = page_text.replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
+        apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
