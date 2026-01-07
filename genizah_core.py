@@ -1570,14 +1570,14 @@ class VariantManager:
     def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
         """
         Dynamic max_changes based on term length to prevent combinatorial explosion.
-        Very short words (2-3 chars) get 1 change max.
-        Medium+ words (4+ chars) can have up to base_max changes.
+        Only very short words (2 chars) are limited to 1 change.
+        Words with 3+ chars can have up to base_max changes.
         """
-        if term_len <= 3:
-            # Very short words: only 1 change to avoid too many false positives
+        if term_len <= 2:
+            # 2-char words: only 1 change (2 changes = completely different word)
             return 1
         else:
-            # 4+ chars: allow full base_max (but still capped at 2 to prevent explosion)
+            # 3+ chars: allow full base_max (capped at 2 to prevent explosion)
             return min(base_max, 2)
 
     def hamming_distance(self, term: str, variant: str) -> int:
