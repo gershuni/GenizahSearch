@@ -2937,13 +2937,29 @@ class Indexer:
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
+        builder.add_text_field("scope", stored=True)
+        builder.add_text_field("boundaries", stored=True)
         schema = builder.build()
         
         index = tantivy.Index(schema, path=db_path)
-        writer = index.writer(heap_size=30_000_000)
+        writer = index.writer(heap_size=150_000_000)
         
         total_docs = 0
         browse_map = defaultdict(list)
+        system_pages = defaultdict(list)
+        # Preserve file-order sequencing for continuous documents
+        global_seq_index = 0 
+        word_pattern = re.compile(Config.WORD_TOKEN_PATTERN)
+
+        # Ensure metadata (including Oxford parts) is loaded for continuous scopes
+        try:
+            self.meta_mgr._load_csv_bank()
+        except Exception as e:
+            LOGGER.warning("Failed to load CSV bank before indexing: %s", e)
+        try:
+            self.meta_mgr.codico_mgr.load(csv_bank=self.meta_mgr.csv_bank)
+        except Exception as e:
+            LOGGER.warning("Failed to load codicological manager before indexing: %s", e)
         
         def count_lines(fname):
             if not os.path.exists(fname): return 0
@@ -2966,11 +2982,23 @@ class Indexer:
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid), content="\n".join(ctext), source=str(label),
-                                full_header=str(chead), shelfmark=str(shelfmark)
+                                full_header=str(chead), shelfmark=str(shelfmark),
+                                scope="page", boundaries=""
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
-                            if parsed['sys_id'] and parsed['p_num']:
-                                browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                            if parsed['sys_id']:
+                                if parsed['p_num']:
+                                    browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                                system_pages[parsed['sys_id']].append({
+                                    'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
+                                    'uid': cid,
+                                    'full_header': chead,
+                                    'source': label,
+                                    'content': "\n".join(ctext),
+                                    'sys_id': parsed['sys_id'],
+                                    'seq_index': global_seq_index
+                                })
+                                global_seq_index += 1
                             total_docs += 1
                         chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
                         cid = self.meta_mgr.extract_unique_id(line)
@@ -2983,13 +3011,71 @@ class Indexer:
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid), content=" ".join(ctext), source=str(label),
-                        full_header=str(chead), shelfmark=str(shelfmark)
+                        full_header=str(chead), shelfmark=str(shelfmark),
+                        scope="page", boundaries=""
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
-                    if parsed['sys_id'] and parsed['p_num']:
-                        browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                    if parsed['sys_id']:
+                        if parsed['p_num']:
+                            browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
+                        system_pages[parsed['sys_id']].append({
+                            'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
+                            'uid': cid,
+                            'full_header': chead,
+                            'source': label,
+                            'content': " ".join(ctext),
+                            'sys_id': parsed['sys_id'],
+                            'seq_index': global_seq_index
+                        })
+                        global_seq_index += 1
                     total_docs += 1
 
+        # Build continuous documents per System ID
+        for sid, pages in system_pages.items():
+            if not pages:
+                continue
+            pages.sort(key=lambda p: p['seq_index'])
+            self._add_continuous_document(writer, pages, scope="system", unique_id=f"sys:{sid}")
+
+        # Build continuous documents per Codicological Part (Oxford)
+        if self.meta_mgr.codico_mgr.part_to_folios:
+            total_parts = len(self.meta_mgr.codico_mgr.part_to_folios)
+            LOGGER.info("Indexing %d Codicological Parts...", total_parts)
+
+            for idx, (part_id, folios) in enumerate(self.meta_mgr.codico_mgr.part_to_folios.items()):
+                if idx % 500 == 0:
+                    LOGGER.info("Processing Part %d/%d...", idx, total_parts)
+
+                part_pages = []
+                for folio_sid in folios:
+                    sys_p = system_pages.get(folio_sid, [])
+                    sys_p.sort(key=lambda p: p['seq_index'])
+                    part_pages.extend(sys_p)
+
+                if not part_pages:
+                    continue
+
+                if len(part_pages) > 1000:
+                    LOGGER.warning("Skipping massive part '%s' with %d pages (likely data error).", part_id, len(part_pages))
+                    continue
+
+                total_words = sum(len((p.get('content', '') or "").split()) for p in part_pages)
+                
+                WORD_LIMIT = 150_000
+
+                if total_words > WORD_LIMIT:
+                    num_chunks = self._add_chunked_continuous_documents(
+                        writer, part_pages, scope="part", unique_id=f"part:{part_id}",
+                        word_limit=WORD_LIMIT, word_pattern=word_pattern
+                    )
+                    LOGGER.warning(
+                        "Part '%s' split into %d chunk(s) due to %d words (limit=%d).",
+                        part_id, num_chunks, total_words, WORD_LIMIT
+                    )
+                else:
+                    self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
+
+        LOGGER.info("Committing index (this may take a moment)...")
         writer.commit()
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
 
@@ -3002,6 +3088,73 @@ class Indexer:
 
         with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
         return total_docs
+
+    def _add_continuous_document(self, writer, pages, scope, unique_id):
+        """Add an aggregated document (system/part) with boundary metadata."""
+        if not pages:
+            return
+        assembled = []
+        boundaries = []
+        cursor = 0
+        for idx, page in enumerate(pages):
+            text = page.get('content', '') or ''
+            start = cursor
+            assembled.append(text)
+            cursor += len(text)
+            boundaries.append({
+                'uid': page.get('uid'),
+                'p_num': page.get('p_num'),
+                'full_header': page.get('full_header', ''),
+                'source': page.get('source', ''),
+                'sys_id': page.get('sys_id', '')
+            })
+            if idx != len(pages) - 1:
+                assembled.append("\n")
+                cursor += 1
+            boundaries[-1]['start'] = start
+            boundaries[-1]['end'] = cursor
+
+        content = "".join(assembled)
+        first_header = pages[0].get('full_header', '')
+        first_source = pages[0].get('source', '')
+        shelfmark = self.meta_mgr.get_shelfmark_from_header(first_header) or ""
+
+        writer.add_document(tantivy.Document(
+            unique_id=str(unique_id),
+            content=str(content),
+            source=str(first_source),
+            full_header=str(first_header),
+            shelfmark=str(shelfmark),
+            scope=str(scope),
+            boundaries=json.dumps(boundaries, ensure_ascii=False)
+        ))
+
+    def _add_chunked_continuous_documents(self, writer, pages, scope, unique_id, word_limit, word_pattern):
+        """
+        Split a large aggregated document into multiple chunks to avoid massive allocations.
+        Returns the number of chunks created.
+        """
+        chunks = []
+        current = []
+        current_words = 0
+
+        for page in pages:
+            page_words = len(word_pattern.findall(page.get('content', '') or ""))
+            if current and current_words + page_words > word_limit:
+                chunks.append(current)
+                current = []
+                current_words = 0
+            current.append(page)
+            current_words += page_words
+
+        if current:
+            chunks.append(current)
+
+        for idx, chunk_pages in enumerate(chunks, start=1):
+            uid = unique_id if idx == 1 else f"{unique_id}#chunk{idx}"
+            self._add_continuous_document(writer, chunk_pages, scope=scope, unique_id=uid)
+
+        return len(chunks)
 
 # ==============================================================================
 #  SEARCH ENGINE
@@ -3155,6 +3308,78 @@ class SearchEngine:
         # For File/Export: Keep newlines
         return hl_snippet
 
+    def _highlight_by_span(self, text, span, for_file=False):
+        """Return a highlighted snippet around a specific span."""
+        if not span:
+            return None
+        s, e = span
+        start = max(0, s - 60)
+        end = min(len(text), e + 60)
+
+        rel_s = s - start
+        rel_e = e - start
+
+        snippet = text[start:end]
+        snippet_safe = snippet.replace('*', ' ')
+        hl_snippet = snippet_safe[:rel_s] + f"*{snippet_safe[rel_s:rel_e]}*" + snippet_safe[rel_e:]
+
+        if not for_file:
+            return hl_snippet.replace('\n', ' ')
+        return hl_snippet
+
+    def _parse_boundaries(self, doc):
+        raw = self._get_field(doc, 'boundaries', [""])
+        if not raw or not raw[0]:
+            return []
+        try:
+            return json.loads(raw[0])
+        except Exception as e:
+            uid_val = None
+            try:
+                uid_val = doc['unique_id'][0]
+            except Exception:
+                uid_val = '?'
+            LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
+            return []
+
+    def _map_span_to_pages(self, span, boundaries):
+        """Return page overlaps and primary page for a match span."""
+        overlaps = []
+        primary = None
+        if not span:
+            return {'primary': primary, 'overlaps': overlaps, 'cross_page': False}
+
+        s, e = span
+        for b in boundaries:
+            b_start = b.get('start', 0)
+            b_end = b.get('end', 0)
+            if e <= b_start or s >= b_end:
+                continue
+            overlap_start = max(s, b_start)
+            overlap_end = min(e, b_end)
+            if overlap_start >= overlap_end:
+                continue
+            rel_start = overlap_start - b_start
+            rel_end = overlap_end - b_start
+            overlaps.append({
+                'uid': b.get('uid'),
+                'p_num': b.get('p_num'),
+                'full_header': b.get('full_header', ''),
+                'source': b.get('source', ''),
+                'sys_id': b.get('sys_id', ''),
+                'span': (rel_start, rel_end)
+            })
+            if not primary:
+                primary = b
+        cross_page = len({o.get('uid') for o in overlaps if o.get('uid')}) > 1
+        return {'primary': primary or (boundaries[0] if boundaries else None), 'overlaps': overlaps, 'cross_page': cross_page}
+
+    def _get_field(self, doc, field, default=None):
+        try:
+            return doc[field]
+        except Exception:
+            return default
+
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""
         if not self.searcher: return "", "", "", ""
@@ -3265,16 +3490,58 @@ class SearchEngine:
                 progress_callback(i, total_hits)
             try:
                 doc = self.searcher.doc(doc_addr)
-                content = doc['content'][0]
-                hl_c = self.highlight(content, regex, False)
-                hl_f = self.highlight(content, regex, True)
-                if hl_c:
-                    meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+                content = self._get_field(doc, 'content', [""])[0]
+                scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
+                scope = scope_list[0]
+
+                # Check for match before any heavy parsing
+                match_obj = regex.search(content)
+                if not match_obj:
+                    continue
+
+                boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                span = match_obj.span()
+                if boundaries:
+                    span_map = self._map_span_to_pages(span, boundaries)
+                    primary = span_map.get('primary') or {}
+                    display_header = primary.get('full_header', doc['full_header'][0])
+                    source_label = primary.get('source', doc['source'][0])
+                    hl_c = self._highlight_by_span(content, span, False)
+                    hl_f = self._highlight_by_span(content, span, True)
+                    meta = self.meta_mgr.get_display_data(display_header, source_label)
+                    page_highlights = []
+                    for ov in span_map.get('overlaps', []):
+                        if 'span' in ov and ov.get('uid'):
+                            page_highlights.append({
+                                'uid': ov.get('uid'),
+                                'p_num': ov.get('p_num'),
+                                'span': ov.get('span'),
+                                'full_header': ov.get('full_header', ''),
+                                'source': ov.get('source', '')
+                            })
                     results.append({
-                        'display': meta, 'snippet': hl_c, 'full_text': content,
-                        'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
-                        'raw_file_hl': hl_f, 'highlight_pattern': pattern_str
+                        'display': meta,
+                        'snippet': hl_c or "",
+                        'full_text': content,
+                        'uid': primary.get('uid') or doc['unique_id'][0],
+                        'raw_header': display_header,
+                        'raw_file_hl': hl_f or "",
+                        'highlight_pattern': pattern_str,
+                        'page_highlights': page_highlights,
+                        'cross_page': span_map.get('cross_page', False),
+                        'scope': scope
                     })
+                else:
+                    hl_c = self.highlight(content, regex, False)
+                    hl_f = self.highlight(content, regex, True)
+                    if hl_c:
+                        meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+                        results.append({
+                            'display': meta, 'snippet': hl_c, 'full_text': content,
+                            'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
+                            'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                            'scope': scope
+                        })
             except Exception as e:
                 LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         return self._deduplicate(results)
