@@ -118,6 +118,33 @@ def _get_folio_number_from_shelfmark(shelfmark):
     except (TypeError, ValueError):
         return None
 
+def _get_folio_image_index(meta, folio_num, side_offset=0):
+    base_idx = _get_initial_image_index(meta, folio_num)
+    if side_offset <= 0:
+        return base_idx
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    if not images or base_idx >= len(images):
+        return base_idx
+
+    target_folio = images[base_idx].get('folio_num')
+    if target_folio is None:
+        return base_idx
+
+    label = str(images[base_idx].get('label', '')).lower()
+    if label.endswith('b'):
+        return base_idx
+
+    next_idx = base_idx + 1
+    if next_idx < len(images) and images[next_idx].get('folio_num') == target_folio:
+        return next_idx
+
+    for idx, img in enumerate(images):
+        if img.get('folio_num') == target_folio and str(img.get('label', '')).lower().endswith('b'):
+            return idx
+
+    return base_idx
+
 class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
 
@@ -2107,7 +2134,12 @@ class ResultDialog(QDialog):
             # Load images into widget
             shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
-            initial_idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_p_num)
+            side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
+            initial_idx = _get_folio_image_index(
+                meta,
+                folio_num if folio_num is not None else self.current_p_num,
+                side_offset=side_offset
+            )
             self.ms_viewer.load_images(meta, initial_idx)
         else:
             self.external_pane.setVisible(False)
@@ -2263,7 +2295,12 @@ class ResultDialog(QDialog):
         meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
         shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
-        idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_p_num)
+        side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
+        idx = _get_folio_image_index(
+            meta,
+            folio_num if folio_num is not None else self.current_p_num,
+            side_offset=side_offset
+        )
         self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
@@ -6817,7 +6854,12 @@ class GenizahGUI(QMainWindow):
                 meta = {'images_ext': self.browse_viewer.images_ext}
             shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
-            idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
+            side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
+            idx = _get_folio_image_index(
+                meta,
+                folio_num if folio_num is not None else self.current_browse_p,
+                side_offset=side_offset
+            )
             self.browse_viewer.set_page(idx)
         # -------------------------------
 
@@ -7290,7 +7332,8 @@ class GenizahGUI(QMainWindow):
         shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
         meta = {'images_ext': getattr(self.browse_viewer, 'images_ext', [])}
-        image_idx = _get_initial_image_index(meta, folio_num)
+        side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
+        image_idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
         if self.browse_viewer.active_list:
             self.browse_viewer.set_page(image_idx)
     
