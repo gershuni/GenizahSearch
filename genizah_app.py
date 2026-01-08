@@ -14,6 +14,8 @@ import openpyxl
 from docx import Document
 from docx.enum.section import WD_ORIENTATION
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import RGBColor
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.cell.rich_text import TextBlock, CellRichText
@@ -4938,6 +4940,23 @@ class GenizahGUI(QMainWindow):
                 run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
                 run.font.bold = True
 
+    def _set_paragraph_rtl(self, paragraph):
+        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        ppr = paragraph._p.get_or_add_pPr()
+        bidi = ppr.find(qn("w:bidi"))
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            ppr.append(bidi)
+        bidi.set(qn("w:val"), "1")
+
+    def _set_table_rtl(self, table):
+        tbl_pr = table._tbl.tblPr
+        bidi_visual = tbl_pr.find(qn("w:bidiVisual"))
+        if bidi_visual is None:
+            bidi_visual = OxmlElement("w:bidiVisual")
+            tbl_pr.append(bidi_visual)
+        bidi_visual.set(qn("w:val"), "1")
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
@@ -5155,11 +5174,12 @@ class GenizahGUI(QMainWindow):
 
                 if CURRENT_LANG == "he":
                     for p in doc.paragraphs:
-                        p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                        self._set_paragraph_rtl(p)
+                    self._set_table_rtl(table)
                     for row in table.rows:
                         for cell in row.cells:
                             for p in cell.paragraphs:
-                                p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                                self._set_paragraph_rtl(p)
 
                 doc.save(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -5737,7 +5757,7 @@ class GenizahGUI(QMainWindow):
                     for idx, header in enumerate(headers):
                         hdr_cells[idx].text = header
                     available_width = section.page_width - section.left_margin - section.right_margin
-                    ratios = [0.05, 0.06, 0.07, 0.1, 0.12, 0.05, 0.05, 0.25, 0.25]
+                    ratios = [0.04, 0.05, 0.06, 0.08, 0.1, 0.05, 0.04, 0.29, 0.29]
                     for idx, ratio in enumerate(ratios):
                         width = int(available_width * ratio)
                         for cell in table.columns[idx].cells:
@@ -5798,16 +5818,18 @@ class GenizahGUI(QMainWindow):
 
                     if CURRENT_LANG == "he":
                         for p in doc.paragraphs:
-                            p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                            self._set_paragraph_rtl(p)
+                        self._set_table_rtl(table)
                         for row in table.rows:
                             for cell in row.cells:
                                 for p in cell.paragraphs:
-                                    p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                                    self._set_paragraph_rtl(p)
                         if excluded_table is not None:
+                            self._set_table_rtl(excluded_table)
                             for row in excluded_table.rows:
                                 for cell in row.cells:
                                     for p in cell.paragraphs:
-                                        p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                                        self._set_paragraph_rtl(p)
 
                     doc.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
