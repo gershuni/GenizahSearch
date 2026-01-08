@@ -5005,16 +5005,6 @@ class GenizahGUI(QMainWindow):
             ])
 
         credit_text = self._get_credit_header()
-        query_text = self.comp_text_area.toPlainText().strip()
-        comp_settings_lines = [
-            tr("Chunk") + f": {self.spin_chunk.value()}",
-            tr("Max Freq") + f": {self.spin_freq.value()}",
-            tr("Search Mode") + f": {self.comp_mode_combo.currentText()}",
-            tr("Filter >") + f": {self.spin_filter.value()}",
-            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle_comp.isChecked() else 'Off'}",
-        ]
-        if self.btn_lab_mode_toggle_comp.isChecked():
-            comp_settings_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep_comp.isChecked() else 'Off'}")
         search_info_lines = [
             tr("Search Query") + f": {self.last_search_query}",
             tr("Search Mode") + f": {self.mode_combo.currentText()}",
@@ -5240,6 +5230,16 @@ class GenizahGUI(QMainWindow):
         if not path: return
 
         credit_text = self._get_credit_header()
+        query_text = self.comp_text_area.toPlainText().strip()
+        comp_settings_lines = [
+            tr("Chunk") + f": {self.spin_chunk.value()}",
+            tr("Max Freq") + f": {self.spin_freq.value()}",
+            tr("Search Mode") + f": {self.comp_mode_combo.currentText()}",
+            tr("Filter >") + f": {self.spin_filter.value()}",
+            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle_comp.isChecked() else 'Off'}",
+        ]
+        if self.btn_lab_mode_toggle_comp.isChecked():
+            comp_settings_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep_comp.isChecked() else 'Off'}")
 
         illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
 
