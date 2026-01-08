@@ -6788,14 +6788,6 @@ class GenizahGUI(QMainWindow):
                     group_node.setData(0, Qt.ItemDataRole.UserRole + 200, items)  # Store items for lazy load
                     placeholder = QTreeWidgetItem(group_node, [tr("Loading...")])
                     placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
-                    # Show snippet from first item on the group node
-                    if items:
-                        sorted_items = self._sort_comp_items(items)
-                        first_item = sorted_items[0]
-                        pages = first_item.get('pages', [])
-                        if pages:
-                            p0 = pages[0]
-                            self._set_comp_node_previews(group_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
 
             # 3. Filtered 
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
@@ -6817,14 +6809,6 @@ class GenizahGUI(QMainWindow):
                     g_node.setData(0, Qt.ItemDataRole.UserRole + 200, items)
                     placeholder = QTreeWidgetItem(g_node, [tr("Loading...")])
                     placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
-                    # Show snippet from first item on the group node
-                    if items:
-                        sorted_items = self._sort_comp_items(items)
-                        first_item = sorted_items[0]
-                        pages = first_item.get('pages', [])
-                        if pages:
-                            p0 = pages[0]
-                            self._set_comp_node_previews(g_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
 
             # 4. Excluded
             if self.comp_known:
@@ -7253,7 +7237,7 @@ class GenizahGUI(QMainWindow):
             self.comp_tree.setUpdatesEnabled(False)
             sorted_items = self._sort_comp_items(virtual_items)
             for ms_item in sorted_items:
-                self._add_manuscript_node(item, ms_item)
+                self._add_manuscript_node(item, ms_item, defer_widgets=False)
             self.comp_tree.setUpdatesEnabled(True)
             self.comp_tree_updating = False
 
