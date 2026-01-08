@@ -7237,9 +7237,14 @@ class GenizahGUI(QMainWindow):
             self.comp_tree.setUpdatesEnabled(False)
             sorted_items = self._sort_comp_items(virtual_items)
             for ms_item in sorted_items:
-                self._add_manuscript_node(item, ms_item, defer_widgets=False)
+                self._add_manuscript_node(item, ms_item)  # defer_widgets=True (default)
             self.comp_tree.setUpdatesEnabled(True)
             self.comp_tree_updating = False
+
+            # Apply deferred preview widgets now that updates are enabled
+            for i in range(item.childCount()):
+                child = item.child(i)
+                self._apply_comp_node_previews(child)
 
             # Clear virtual data to prevent re-population
             item.setData(0, Qt.ItemDataRole.UserRole + 200, None)
