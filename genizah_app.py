@@ -2847,6 +2847,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
+        self.query_input.setToolTip(tr("query_prefix_tooltip"))
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
@@ -4070,9 +4071,48 @@ class GenizahGUI(QMainWindow):
         if self.is_searching: self.stop_search()
         else: self.start_search()
 
+    def _detect_query_prefix(self, query: str) -> tuple:
+        """
+        Detect search mode prefix in query and return (mode_override, clean_query).
+
+        Prefixes:
+          ???  -> variants_maximum
+          ??   -> variants_extended
+          ?    -> variants
+          ~    -> fuzzy
+          /    -> Regex
+
+        Returns (None, query) if no prefix found.
+        """
+        # Order matters: check longer prefixes first
+        prefix_map = [
+            ('???', 'variants_maximum', 3),
+            ('??', 'variants_extended', 2),
+            ('?', 'variants', 1),
+            ('~', 'fuzzy', 4),
+            ('/', 'Regex', 5),
+        ]
+
+        for prefix, mode, combo_idx in prefix_map:
+            if query.startswith(prefix):
+                clean_query = query[len(prefix):].lstrip()
+                if clean_query:  # Only if there's actual query after prefix
+                    return (mode, combo_idx, clean_query)
+
+        return (None, None, query)
+
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+
+        # Detect query prefix (?, ??, ???, ~, /)
+        mode_override, combo_idx, clean_query = self._detect_query_prefix(query)
+
+        if mode_override:
+            # Update combo to reflect detected mode
+            self.mode_combo.setCurrentIndex(combo_idx)
+            query = clean_query
+
         mode_idx = self.mode_combo.currentIndex()
         modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
         mode = modes[mode_idx]

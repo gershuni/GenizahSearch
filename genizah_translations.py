@@ -56,6 +56,7 @@ TRANSLATIONS = {
 
     # --- Main Search Tab ---
     "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
+    "query_prefix_tooltip": "קיצורי דרך לחיפוש:\n? = וריאנטים בסיסי\n?? = וריאנטים מורחב\n??? = וריאנטים מקסימלי\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n\nדוגמה: ?שלום עולם",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",
