@@ -5350,23 +5350,28 @@ class GenizahGUI(QMainWindow):
             if fmt == 'xlsx':
                 try:
                     wb = openpyxl.Workbook()
-                    ws = wb.active
-                    ws.title = "Composition Report"
-                    ws.sheet_view.rightToLeft = True
+                    ws_report = wb.active
+                    ws_report.title = "Report View"
+                    ws_report.sheet_view.rightToLeft = True
+
+                    ws_raw = wb.create_sheet("Raw Data")
+                    ws_raw.sheet_view.rightToLeft = True
 
                     font_red = InlineFont(color='FF0000', b=True)
                     font_normal = InlineFont(color='000000', b=False)
+                    header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+                    header_font = Font(bold=True)
 
-                    def write_rich_cell(row, col, text):
+                    def write_rich_cell(ws, row, col, text):
                         safe_text = sanitize_for_excel(text)
-                        
+
                         if '*' not in safe_text:
                             ws.cell(row=row, column=col, value=safe_text)
                             return
-                        
+
                         parts = safe_text.split('*')
                         rich_string = CellRichText()
-                        
+
                         for i, part in enumerate(parts):
                             if not part:
                                 continue
@@ -5374,51 +5379,182 @@ class GenizahGUI(QMainWindow):
                                 rich_string.append(TextBlock(font_red, part))
                             else:
                                 rich_string.append(TextBlock(font_normal, part))
-                                
+
                         ws.cell(row=row, column=col, value=rich_string)
 
-                    curr_row = 1
-                    for line in credit_text.split('\n'):
-                        clean_line = line.strip()
-                        if not clean_line or "====" in clean_line: continue
-                        
-                        c = ws.cell(row=curr_row, column=1, value=sanitize_for_excel(line))
-                        c.font = Font(bold=True, color="555555")
-                        curr_row += 1
-                    curr_row += 1
+                    def _write_credit_block(ws, start_row):
+                        curr = start_row
+                        for line in credit_text.split('\n'):
+                            clean_line = line.strip()
+                            if not clean_line or "====" in clean_line:
+                                continue
+                            c = ws.cell(row=curr, column=1, value=sanitize_for_excel(line))
+                            c.font = Font(bold=True, color="555555")
+                            curr += 1
+                        return curr + 1
+
+                    def _write_headers(ws, row_idx, headers):
+                        for idx, h in enumerate(headers, 1):
+                            c = ws.cell(row=row_idx, column=idx, value=h)
+                            c.font = Font(bold=True, color="FFFFFF")
+                            c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                        return row_idx + 1
+
+                    def _write_report_header(ws, row_idx, label):
+                        c = ws.cell(row=row_idx, column=1, value=label)
+                        c.font = header_font
+                        c.fill = header_fill
+                        return row_idx + 1
+
+                    def _write_report_row(ws, row_idx, row_data):
+                        for idx, val in enumerate(row_data, 1):
+                            val_str = str(val)
+                            if idx in (8, 9):
+                                write_rich_cell(ws, row_idx, idx, val_str)
+                            else:
+                                ws.cell(row=row_idx, column=idx, value=sanitize_for_excel(val_str))
+                        return row_idx + 1
 
                     headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
-                    for idx, h in enumerate(headers, 1):
-                        c = ws.cell(row=curr_row, column=idx, value=h)
-                        c.font = Font(bold=True, color="FFFFFF")
-                        c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-                    curr_row += 1
 
-                    category_ranges = {}
+                    # Raw Data sheet (flat)
+                    raw_row = _write_credit_block(ws_raw, 1)
+                    header_row = raw_row
+                    raw_row = _write_headers(ws_raw, raw_row, headers)
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            # Apply rich text to Source Context (8) and Manuscript Text (9)
                             if idx in (8, 9):
-                                write_rich_cell(curr_row, idx, val_str)
-                            else: 
-                                ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
+                                write_rich_cell(ws_raw, raw_row, idx, val_str)
+                            else:
+                                ws_raw.cell(row=raw_row, column=idx, value=sanitize_for_excel(val_str))
+                        raw_row += 1
+                    if table_rows:
+                        ws_raw.auto_filter.ref = f"A{header_row}:I{raw_row - 1}"
 
-                        category = row_data[0]
-                        if category not in category_ranges:
-                            category_ranges[category] = [curr_row, curr_row]
-                        else:
-                            category_ranges[category][1] = curr_row
-                        curr_row += 1
+                    # Report View sheet (hierarchical)
+                    report_row = _write_credit_block(ws_report, 1)
+                    report_row = _write_headers(ws_report, report_row, headers)
+                    data_start_row = report_row
 
-                    for start, end in category_ranges.values():
-                        if end > start:
-                            ws.row_dimensions.group(start, end, outline_level=1, hidden=False)
-                    ws.sheet_properties.outlinePr.summaryBelow = True
+                    def add_report_section(category_label, items, groups=None, outline_level=1):
+                        nonlocal report_row
+                        if not items and not groups:
+                            return
+                        section_start = report_row
+                        report_row = _write_report_header(ws_report, report_row, category_label)
+
+                        def add_items_with_group(group_name, group_items, group_level):
+                            nonlocal report_row
+                            if group_name:
+                                group_start = report_row
+                                report_row = _write_report_header(ws_report, report_row, group_name)
+                            ms_ranges = []
+                            for ms_item in group_items:
+                                ms_item_rows = []
+                                item_type = ms_item.get('type', '')
+                                if item_type == 'part':
+                                    part_display = ms_item.get('part_display', '')
+                                    oxford_title = ms_item.get('oxford_title', '')
+                                    sid = ms_item.get('sys_id', '')
+                                    shelf = f"📖 {part_display}" if part_display else sid
+                                    title = oxford_title or ""
+                                    ms_score = ms_item.get('score', 0)
+
+                                    for page in ms_item.get('pages', []):
+                                        p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+                                        src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                                        ms_clean = _clean_and_marker(page.get('text', ''))
+                                        display_shelf = f"{shelf} [{p_shelf}]" if p_shelf else shelf
+                                        ms_item_rows.append([
+                                            "",
+                                            "",
+                                            p_sid or sid or "",
+                                            display_shelf or "",
+                                            title or "",
+                                            str(p_num or ""),
+                                            f"{ms_score} (P:{page.get('score',0)})",
+                                            src_clean,
+                                            ms_clean
+                                        ])
+                                elif item_type == 'manuscript':
+                                    sid = ms_item['sys_id']
+                                    shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                                    if not shelf or shelf == "Unknown":
+                                        shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                                    ms_score = ms_item.get('score', 0)
+
+                                    for page in ms_item.get('pages', []):
+                                        _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                                        src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                                        ms_clean = _clean_and_marker(page.get('text', ''))
+                                        ms_item_rows.append([
+                                            "",
+                                            "",
+                                            sid or "",
+                                            shelf or "",
+                                            title or "",
+                                            str(p_num or ""),
+                                            f"{ms_score} (P:{page.get('score',0)})",
+                                            src_clean,
+                                            ms_clean
+                                        ])
+                                else:
+                                    sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                                    src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
+                                    ms_clean = _clean_and_marker(ms_item.get('text', ''))
+                                    ms_item_rows.append([
+                                        "",
+                                        "",
+                                        sid or "",
+                                        shelf or "",
+                                        title or "",
+                                        str(p_num or ""),
+                                        str(ms_item.get('score', 0)),
+                                        src_clean,
+                                        ms_clean
+                                    ])
+
+                                if ms_item_rows:
+                                    ms_start = report_row
+                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][3]} | {ms_item_rows[0][4]}")
+                                    for row_data in ms_item_rows:
+                                        report_row = _write_report_row(ws_report, report_row, row_data)
+                                    ms_end = report_row - 1
+                                    if ms_end >= ms_start + 1:
+                                        ws_report.row_dimensions.group(ms_start + 1, ms_end, outline_level=group_level + 1, hidden=False)
+                                    ms_ranges.append((ms_start, ms_end))
+
+                            if group_name and ms_ranges:
+                                group_end = report_row - 1
+                                if group_end >= group_start + 1:
+                                    ws_report.row_dimensions.group(group_start + 1, group_end, outline_level=group_level, hidden=False)
+
+                        if groups:
+                            for sig, group_items in groups:
+                                add_items_with_group(f"{sig} ({len(group_items)})", group_items, outline_level + 1)
+                        if items:
+                            add_items_with_group("", items, outline_level + 1)
+
+                        section_end = report_row - 1
+                        if section_end >= section_start + 1:
+                            ws_report.row_dimensions.group(section_start + 1, section_end, outline_level=outline_level, hidden=False)
+
+                    if self.chk_comp_flat.isChecked():
+                        add_report_section(tr("All Results"), self._sort_comp_items(all_items), outline_level=1)
+                    else:
+                        add_report_section(tr("Main Results"), self._sort_comp_items(c_main), outline_level=1)
+                        add_report_section(tr("Appendix - Grouped"), [], groups=sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
+                        add_report_section(tr("Filtered"), self._sort_comp_items(c_filt), groups=sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
+                        add_report_section(tr("Excluded"), self._sort_comp_items(c_known), outline_level=1)
+
+                    ws_report.sheet_properties.outlinePr.summaryBelow = True
 
                     dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
                     for col, width in dims.items():
-                        ws.column_dimensions[col].width = width
+                        ws_report.column_dimensions[col].width = width
+                        ws_raw.column_dimensions[col].width = width
 
                     wb.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
