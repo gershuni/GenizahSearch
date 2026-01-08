@@ -2712,6 +2712,8 @@ class GenizahGUI(QMainWindow):
         self.comp_worker = None
         self.hovered_row = -1
         self.results_loaded = 0
+        self.comp_lazy_loaders = {}
+        self.COMP_BATCH_SIZE = 50
 
 
         self.init_ui()
@@ -3203,6 +3205,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
+        self.comp_tree.verticalScrollBar().valueChanged.connect(self.check_comp_scroll_load)
         self.comp_tree_updating = False
         self.comp_tree.setStyleSheet(
             "QTreeWidget::indicator { width: 16px; height: 16px; }"
@@ -5945,6 +5948,10 @@ class GenizahGUI(QMainWindow):
         return all_items
 
     def on_comp_header_clicked(self, section):
+        """
+        Handle header clicks by re-sorting the data source and reloading the tree.
+        Crucial for Lazy Loading: We must resort the SOURCE list, then reset the loader.
+        """
         if section not in (0, 1, 2, 3):
             return
         mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id"}
@@ -5957,12 +5964,17 @@ class GenizahGUI(QMainWindow):
         order = Qt.SortOrder.DescendingOrder if self.comp_sort_reverse else Qt.SortOrder.AscendingOrder
         header = self.comp_tree.header()
         header.setSortIndicator(section, order)
+
         if self.is_comp_running or not self._has_comp_results():
             return
+
         if not self.chk_comp_flat.isChecked() and not self.comp_has_grouped_results:
             if self.comp_raw_items or self.comp_raw_filtered:
                 self.start_grouping(self.comp_raw_items or [], self.comp_raw_filtered or [])
                 return
+
+        # Reload with existing grouped data (display_comp_results sorts automatically based on mode)
+        # Note: We pass the stored grouped data.
         if self.comp_grouped_main or self.comp_grouped_filtered_main:
             self.display_comp_results(
                 self.comp_grouped_main,
@@ -6118,6 +6130,9 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
 
+        # Reset Lazy Loaders
+        self.comp_lazy_loaders = {}
+
         # Reset Select All Checkbox
         self.chk_comp_header.blockSignals(True)
         self.chk_comp_header.setChecked(False)
@@ -6151,162 +6166,63 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_appendix = clean_filt_appx
         self.comp_grouped_filtered_summary = filt_summ
 
-        # Display Limit Logic
         full_main_count = len(clean_main)
-        visible_main = clean_main
-
         msg_color = "black"
-        if len(visible_main) < full_main_count:
-            status_msg = tr("Showing top {} of {} results. (Export for full list)").format(len(visible_main), full_main_count)
-            msg_color = "#e67e22" # Orange
-        else:
-            status_msg = tr("Found {} results.").format(full_main_count)
+        status_msg = tr("Found {} results.").format(full_main_count)
 
         if hasattr(self, 'lbl_comp_status'):
             self.lbl_comp_status.setText(status_msg)
             self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
 
+        # --- Lazy Loading IDs Collection ---
         ids_to_fetch = set()
-        def _collect_id(item):
-            sid = item.get('sys_id')
-            if not sid:
-                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-            if sid and sid not in self.meta_mgr.nli_cache:
-                 ids_to_fetch.add(sid)
-
-        self.comp_tree.setUpdatesEnabled(False)
-        self.comp_tree.clear()
 
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
 
-        def add_manuscript_node(parent, ms_item):
-            item_type = ms_item.get('type', '')
-            if item_type == 'part':
-                # Part node - show Part display name with 📖 icon
-                part_display = ms_item.get('part_display', '')
-                oxford_title = ms_item.get('oxford_title', '')
-                sid = ms_item.get('sys_id', '')
-                shelf = f"📖 {part_display}" if part_display else sid
-                t = oxford_title or ""
+        self.comp_tree.setUpdatesEnabled(False)
+        self.comp_tree.clear()
 
-                ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
-                self._set_comp_tree_text(ms_node, 1, shelf)
-                self._set_comp_tree_text(ms_node, 2, t)
-                self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
-                make_checkable(ms_node)
-                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+        # --- Helper to register Lazy Loaders ---
+        def register_lazy_list(node, data, type_str='items'):
+            if not data: return
+            self.comp_lazy_loaders[id(node)] = {
+                'data': data,
+                'loaded_count': 0,
+                'type': type_str,
+                'parent_ref': node
+            }
+            # Load initial batch immediately
+            self._load_comp_batch(node)
 
-                pages = ms_item.get('pages', [])
-                folios = ms_item.get('folios', [])
-                if len(pages) == 1:
-                    p_item = pages[0]
-                    p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
-                    folio_info = f" [{p_shelf}]" if p_shelf else ""
-                    self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-                else:
-                    if pages:
-                        p0 = pages[0]
-                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
-                        self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
-
-                    for p_item in pages:
-                        p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
-                        folio_info = f" [{p_shelf}]" if p_shelf else ""
-                        page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
-                        self._set_comp_tree_text(page_node, 2, "")
-                        self._set_comp_tree_text(page_node, 3, p_sid or "")
-                        make_checkable(page_node)
-                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-            elif item_type == 'manuscript':
-                sid = ms_item['sys_id']
-                shelf, t = self.meta_mgr.get_meta_for_id(sid)
-                if not shelf or shelf == "Unknown":
-                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                    if header_shelf: shelf = header_shelf
-
-                ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
-                self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
-                self._set_comp_tree_text(ms_node, 2, t or "")
-                self._set_comp_tree_text(ms_node, 3, sid)
-                make_checkable(ms_node)
-                ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-
-                pages = ms_item.get('pages', [])
-                if len(pages) == 1:
-                    p_item = pages[0]
-                    _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                    self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-                else:
-                    if pages:
-                        p0 = pages[0]
-                        _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
-
-                    for p_item in pages:
-                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                        page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                        self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
-                        self._set_comp_tree_text(page_node, 2, "")
-                        self._set_comp_tree_text(page_node, 3, "")
-                        make_checkable(page_node)
-                        page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-            else:
-                # Fallback
-                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-                node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
-                self._set_comp_tree_text(node, 1, shelf)
-                self._set_comp_tree_text(node, 2, title)
-                self._set_comp_tree_text(node, 3, sid)
-                make_checkable(node)
-                node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
-            
-            _collect_id(ms_item)
-
+        # ----------------------------------------------------
+        #  Render Roots (Lazy)
+        # ----------------------------------------------------
 
         if self.chk_comp_flat.isChecked():
             all_flat = self._collect_comp_items(
                 clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
             )
             sorted_flat = self._sort_comp_items(all_flat)
-            visible_flat = sorted_flat
             
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
-            root.setExpanded(True)
-            make_checkable(root)
-            
-            for item in visible_flat:
-                add_manuscript_node(root, item)
+            if sorted_flat:
+                root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(sorted_flat))])
+                root.setExpanded(True)
+                make_checkable(root)
+                register_lazy_list(root, sorted_flat, 'items')
 
         else:
-            # 1. Main Results (Sliced)
+            # 1. Main Results (Lazy)
             sorted_main = self._sort_comp_items(clean_main)
-            visible_sorted_main = sorted_main
-
-            if visible_sorted_main:
-                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
+            if sorted_main:
+                root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(sorted_main))])
                 root_main.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_MAIN")
                 root_main.setExpanded(True)
                 make_checkable(root_main)
-                for item in visible_sorted_main:
-                    add_manuscript_node(root_main, item)
+                register_lazy_list(root_main, sorted_main, 'items')
 
-            # 2. Appendix
+            # 2. Appendix (Lazy Groups)
             if clean_appx:
                 total_appx = sum(len(v) for v in clean_appx.values())
                 root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
@@ -6314,15 +6230,11 @@ class GenizahGUI(QMainWindow):
                 root_appx.setExpanded(False)
                 make_checkable(root_appx)
                 
+                # Convert dict to list of (sig, items) for lazy loading
                 sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
-                for sig, items in sorted_groups:
-                    group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
-                    make_checkable(group_node)
-                    
-                    for item in self._sort_comp_items(items):
-                        add_manuscript_node(group_node, item)
+                register_lazy_list(root_appx, sorted_groups, 'groups')
 
-            # 3. Filtered 
+            # 3. Filtered (Lazy)
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
             if total_filt > 0:
                 root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
@@ -6331,35 +6243,133 @@ class GenizahGUI(QMainWindow):
                 make_checkable(root_filt)
                 
                 # Filtered Main
-                for item in self._sort_comp_items(clean_filt):
-                    add_manuscript_node(root_filt, item)
-                
-                # Filtered Appendix
-                for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
-                    make_checkable(g_node)
-                    for item in self._sort_comp_items(items):
-                        add_manuscript_node(g_node, item)
+                filt_flat = self._sort_comp_items(clean_filt)
+                # Filtered Appendix (Groups)
+                filt_groups = sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True)
 
-            # 4. Excluded
+                # To handle mixed types under one root, we can merge them or just add groups manually?
+                # Simpler: Add Filtered Main items first (Lazy), then Filtered Groups (Lazy)
+                # But a node can only have one loader in my simple design.
+                # Hack: Combine them into a single list of polymorphic items.
+
+                combined_filt = []
+                for item in filt_flat: combined_filt.append({'type_wrapper': 'item', 'val': item})
+                for grp in filt_groups: combined_filt.append({'type_wrapper': 'group', 'val': grp})
+                
+                register_lazy_list(root_filt, combined_filt, 'mixed')
+
+            # 4. Excluded (Lazy)
             if self.comp_known:
                 root_known = QTreeWidgetItem(self.comp_tree, [tr("Excluded ({})").format(len(self.comp_known))])
                 root_known.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_KNOWN")
                 root_known.setForeground(0, Qt.GlobalColor.darkGray)
                 make_checkable(root_known)
                 
-                for item in self._sort_comp_items(self.comp_known):
-                    add_manuscript_node(root_known, item)
+                sorted_known = self._sort_comp_items(self.comp_known)
+                register_lazy_list(root_known, sorted_known, 'items')
 
         self.comp_tree.setUpdatesEnabled(True)
         self._update_comp_filter_indicators()
         self._apply_comp_tree_filters()
         self._update_recursive_button_state()
         
+        # Trigger fetching for initial visible items
+        # (This is handled by individual node adds, but we can do a pass here if needed)
+        # Note: ids_to_fetch is not populated here anymore, handled in _add_single_comp_node
+
+    def _load_comp_batch(self, node):
+        """Loads the next batch of items for a lazy-loaded node."""
+        node_id = id(node)
+        loader = self.comp_lazy_loaders.get(node_id)
+        if not loader:
+            return
+
+        data = loader['data']
+        loaded = loader['loaded_count']
+        l_type = loader['type']
+
+        limit = self.COMP_BATCH_SIZE
+        # Slice data
+        batch = data[loaded : loaded + limit]
+        if not batch:
+            return
+
+        ids_to_fetch = set()
+
+        def _collect_id_lazy(item):
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+            if sid and sid not in self.meta_mgr.nli_cache:
+                 ids_to_fetch.add(sid)
+
+        # Check Parent State for Propagation (Visual consistency)
+        # If parent is Checked, children should be Checked.
+        # If parent is Unchecked, children Unchecked.
+        # If parent is PartiallyChecked, new children default to Unchecked? Or keep internal state?
+        # Standard logic: New items are unchecked unless parent is fully Checked.
+        parent_check_state = node.checkState(0)
+        child_state = Qt.CheckState.Unchecked
+        if parent_check_state == Qt.CheckState.Checked:
+            child_state = Qt.CheckState.Checked
+
+        def make_checkable(n):
+            n.setFlags(n.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            n.setCheckState(0, child_state)
+
+        self.comp_tree.setUpdatesEnabled(False)
+
+        for item in batch:
+            if l_type == 'items':
+                self._add_single_comp_node(node, item, initial_state=child_state)
+                _collect_id_lazy(item)
+
+            elif l_type == 'groups':
+                # item is (sig, list_of_items)
+                sig, group_items = item
+                group_node = QTreeWidgetItem(node, ["", "", f"{sig} ({len(group_items)})", ""])
+                make_checkable(group_node)
+
+                # Register lazy loader for this group's items
+                # Recursion for nested lazy loading
+                sorted_items = self._sort_comp_items(group_items)
+
+                self.comp_lazy_loaders[id(group_node)] = {
+                    'data': sorted_items,
+                    'loaded_count': 0,
+                    'type': 'items',
+                    'parent_ref': group_node
+                }
+                # Load first batch of the group immediately
+                self._load_comp_batch(group_node)
+
+            elif l_type == 'mixed':
+                # item is {'type_wrapper': ..., 'val': ...}
+                wrapper = item.get('type_wrapper')
+                val = item.get('val')
+                if wrapper == 'item':
+                    self._add_single_comp_node(node, val, initial_state=child_state)
+                    _collect_id_lazy(val)
+                elif wrapper == 'group':
+                    sig, group_items = val
+                    group_node = QTreeWidgetItem(node, ["", "", f"{sig} ({len(group_items)})", ""])
+                    make_checkable(group_node)
+                    sorted_items = self._sort_comp_items(group_items)
+                    self.comp_lazy_loaders[id(group_node)] = {
+                        'data': sorted_items,
+                        'loaded_count': 0,
+                        'type': 'items',
+                        'parent_ref': group_node
+                    }
+                    self._load_comp_batch(group_node)
+
+        loader['loaded_count'] += len(batch)
+        self.comp_tree.setUpdatesEnabled(True)
+
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
-    
-    def _add_single_node_to_tree(self, parent, ms_item):
+
+    def _add_single_comp_node(self, parent, ms_item, initial_state=Qt.CheckState.Unchecked):
         """Dedicated helper to add one row to the tree."""
         sid = ms_item.get('sys_id')
         if not sid:
@@ -6375,7 +6385,7 @@ class GenizahGUI(QMainWindow):
         self._set_comp_tree_text(node, 3, sid)
         
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setCheckState(0, initial_state)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
         pages = ms_item.get('pages', [])
@@ -6426,6 +6436,50 @@ class GenizahGUI(QMainWindow):
         if missing_ids:
             self.start_metadata_loading(list(missing_ids))
     
+    def check_comp_scroll_load(self):
+        """
+        Lazy load items when a parent node's end is visible.
+        Iterates through active loaders to check visibility, ensuring
+        items in the middle of the tree (like Main Results) load even
+        if Appendix is visible below them.
+        """
+        viewport_rect = self.comp_tree.viewport().rect()
+
+        # Iterate all lazy loaders to check if they need loading
+        # Use list() to avoid runtime error if dict changes size
+        for node_id in list(self.comp_lazy_loaders.keys()):
+            loader = self.comp_lazy_loaders[node_id]
+            node = loader['parent_ref']
+
+            # 1. Must be expanded to need loading
+            if not node.isExpanded():
+                continue
+
+            # 2. Check if we have more data to load
+            if loader['loaded_count'] >= len(loader['data']):
+                continue
+
+            # 3. Check if the "loading point" (last child) is visible
+            child_count = node.childCount()
+            if child_count == 0:
+                # If no children yet, check the node itself
+                rect = self.comp_tree.visualItemRect(node)
+            else:
+                # Check the last child
+                last_child = node.child(child_count - 1)
+                rect = self.comp_tree.visualItemRect(last_child)
+
+            # If the item is effectively visible in the viewport (or slightly above/below)
+            # visualItemRect is relative to viewport.
+            # We want to trigger if the bottom of the last item is visible or near visible
+            if rect.isValid():
+                # If top of item is within viewport OR bottom is within viewport
+                # Looser check: if item bottom is < viewport height + buffer
+                if rect.top() < viewport_rect.height() + 50:
+                    self._load_comp_batch(node)
+                    # Load one batch per scroll event is safer to prevent UI lockup
+                    return
+
     def on_comp_tree_item_changed(self, item, column):
         if self.comp_tree_updating or column != 0:
             return
@@ -6489,7 +6543,10 @@ class GenizahGUI(QMainWindow):
         """
         Collect checked items maintaining the structure (Main, Appendix, etc.)
         Returns: (main, appendix, filtered_main, filtered_appendix, known)
-        Only items that are CHECKED (or have checked descendants) are returned.
+
+        LAZY LOADING AWARE:
+        If a Root Node (or Group Node) is marked as Checked, we export the FULL internal list,
+        ignoring whether children are loaded or not.
         """
         sel_main = []
         sel_appx = {}
@@ -6497,8 +6554,16 @@ class GenizahGUI(QMainWindow):
         sel_filt_appx = {}
         sel_known = []
 
-        # Helper to collect checked children from a node
-        def collect_from_node(node):
+        # Helper: Extract full data from lazy loader if available
+        def get_full_data_for_node(node):
+            if id(node) in self.comp_lazy_loaders:
+                loader = self.comp_lazy_loaders[id(node)]
+                if loader['type'] == 'items':
+                    return loader['data']
+            return None
+
+        # Helper to collect checked children from a node (Visual)
+        def collect_from_node_visual(node):
             collected = []
             # If node is a leaf (Manuscript or Page)
             data = node.data(0, Qt.ItemDataRole.UserRole)
@@ -6513,7 +6578,7 @@ class GenizahGUI(QMainWindow):
                 child_data = child.data(0, Qt.ItemDataRole.UserRole)
                 if not child_data:
                     # Recursive group (e.g. Appendix group)
-                    res = collect_from_node(child)
+                    res = collect_from_node_visual(child)
                     collected.extend(res)
                     continue
 
@@ -6521,86 +6586,122 @@ class GenizahGUI(QMainWindow):
                 if child.checkState(0) == Qt.CheckState.Unchecked:
                     continue
 
-                # If fully checked or partially checked
                 if child.checkState(0) == Qt.CheckState.Checked:
-                    # Full manuscript selected
                     collected.append(child_data)
                 elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
-                    # Some pages selected
-                    # Clone item
                     import copy
                     new_item = copy.copy(child_data)
                     new_item['pages'] = []
-
-                    # Find checked pages
                     for p_idx in range(child.childCount()):
                         p_node = child.child(p_idx)
                         if p_node.checkState(0) == Qt.CheckState.Checked:
-                            p_data = p_node.data(0, Qt.ItemDataRole.UserRole)
-                            new_item['pages'].append(p_data)
-
+                            new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
                     if new_item['pages']:
                             collected.append(new_item)
             return collected
 
         root = self.comp_tree.invisibleRootItem()
 
-        # If Flat Mode:
-        if self.chk_comp_flat.isChecked():
-            # Root 0 is "All Results"
-            if root.childCount() > 0:
-                sel_main = collect_from_node(root.child(0))
-            return sel_main, {}, [], {}, []
-
-        # Use node data (UserRole+100) to identify categories
+        # Iterate Roots
         for i in range(root.childCount()):
             node = root.child(i)
-            node_type = node.data(0, Qt.ItemDataRole.UserRole + 100)
+            # Root Check State
+            state = node.checkState(0)
 
-            items = collect_from_node(node)
-            if not items: continue
+            # If Unchecked, skip entirely
+            if state == Qt.CheckState.Unchecked:
+                continue
+
+            # Determine Category
+            node_type = node.data(0, Qt.ItemDataRole.UserRole + 100)
+            if self.chk_comp_flat.isChecked():
+                # Flat mode - just one root
+                if state == Qt.CheckState.Checked:
+                    # Export ALL flat items
+                    # Reconstruct flat list from sources
+                    all_flat = self._collect_comp_items(
+                        self.comp_main, self.comp_appendix, self.comp_filtered_main,
+                        self.comp_filtered_appendix, self.comp_known
+                    )
+                    sel_main = self._sort_comp_items(all_flat)
+                else:
+                    sel_main = collect_from_node_visual(node)
+                return sel_main, {}, [], {}, []
+
+            # --- STANDARD MODE ---
 
             if node_type == "ROOT_MAIN":
-                 sel_main.extend(items)
-            elif node_type == "ROOT_APPX":
-                 # Custom traversal for Appendix to preserve grouping structure
-                 for k in range(node.childCount()):
-                     group_node = node.child(k)
-                     group_sig_full = group_node.text(2)
-                     group_sig = group_sig_full.rpartition(' (')[0] # Remove count
-
-                     group_items = collect_from_node(group_node)
-                     if group_items:
-                         sel_appx[group_sig] = group_items
-
-            elif node_type == "ROOT_FILT":
-                 # Iterate children to separate Main/Appendix in filtered
-                 for k in range(node.childCount()):
-                     child = node.child(k)
-                     c_data = child.data(0, Qt.ItemDataRole.UserRole)
-                     if c_data:
-                         # Direct item -> Filtered Main
-                         if child.checkState(0) == Qt.CheckState.Checked:
-                             sel_filt.append(c_data)
-                         elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
-                             # Reuse logic from helper
-                             import copy
-                             new_item = copy.copy(c_data)
-                             new_item['pages'] = []
-                             for p_idx in range(child.childCount()):
-                                 p_node = child.child(p_idx)
-                                 if p_node.checkState(0) == Qt.CheckState.Checked:
-                                     new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
-                             if new_item['pages']: sel_filt.append(new_item)
-                     else:
-                         # Group node -> Filtered Appendix
-                         g_sig = child.text(2).rpartition(' (')[0]
-                         g_items = collect_from_node(child)
-                         if g_items:
-                             sel_filt_appx[g_sig] = g_items
+                if state == Qt.CheckState.Checked:
+                    # Full export from memory
+                    sel_main = self._sort_comp_items(self.comp_main)
+                else:
+                    # Partial export from visible tree
+                    sel_main = collect_from_node_visual(node)
 
             elif node_type == "ROOT_KNOWN":
-                 sel_known.extend(items)
+                if state == Qt.CheckState.Checked:
+                    sel_known = self._sort_comp_items(self.comp_known)
+                else:
+                    sel_known = collect_from_node_visual(node)
+
+            elif node_type == "ROOT_APPX":
+                # Appendix is nested. It has Group Nodes.
+                # If Root is Checked -> All Appendix Groups are Checked.
+                if state == Qt.CheckState.Checked:
+                    # Export everything from self.comp_appendix
+                    for sig, items in self.comp_appendix.items():
+                        sel_appx[sig] = self._sort_comp_items(items)
+                else:
+                    # Root is Partial. Iterate visible Group Nodes.
+                    # Problem: Unloaded groups are not visible.
+                    # Assumption: If Root is Partial, user manually unchecked something visible.
+                    # Or user Checked Root, then unchecked a visible item.
+
+                    # We iterate visible children (Groups)
+                    for k in range(node.childCount()):
+                        g_node = node.child(k)
+                        g_state = g_node.checkState(0)
+                        if g_state == Qt.CheckState.Unchecked: continue
+
+                        # Extract signature from text: "Sig (Count)"
+                        g_sig_full = g_node.text(2)
+                        g_sig = g_sig_full.rpartition(' (')[0]
+
+                        if g_state == Qt.CheckState.Checked:
+                            # Whole group checked -> Export from memory
+                            if g_sig in self.comp_appendix:
+                                sel_appx[g_sig] = self._sort_comp_items(self.comp_appendix[g_sig])
+                        else:
+                            # Group Partial -> Export visible checked items
+                            g_items = collect_from_node_visual(g_node)
+                            if g_items:
+                                sel_appx[g_sig] = g_items
+
+            elif node_type == "ROOT_FILT":
+                # Filtered is complex because it contains both Main (flat) and Appendix (groups)
+                # But my display logic flattened them into one Lazy list?
+                # No, I registered a mixed list.
+                # If Root Checked -> Export all filtered from memory.
+                if state == Qt.CheckState.Checked:
+                    sel_filt = self._sort_comp_items(self.comp_filtered_main)
+                    for sig, items in self.comp_filtered_appendix.items():
+                        sel_filt_appx[sig] = self._sort_comp_items(items)
+                else:
+                    # Partial. Iterate visible children.
+                    # Visual collector will return a flat list of checked items.
+                    # We need to separate them back into Main vs Appendix?
+                    # Actually export_comp_report handles both lists.
+                    # The visual collector returns raw items. We can re-classify them.
+
+                    visual_items = collect_from_node_visual(node)
+                    # Re-bin
+                    # How to know if an item belongs to Main or Appendix?
+                    # Generally filtered_main vs filtered_appendix.
+                    # We can just put them all in sel_filt if structure doesn't matter much for export,
+                    # but to be precise we should check.
+                    # Simplified: Put all in sel_filt. The export logic iterates sel_filt_appx separately.
+                    # If we put everything in sel_filt, it works for rows.
+                    sel_filt = visual_items
 
         return sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known
 
