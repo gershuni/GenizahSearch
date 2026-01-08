@@ -6870,6 +6870,8 @@ class GenizahGUI(QMainWindow):
                 folio_info = f" [{p_shelf}]" if p_shelf else ""
                 self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+                # Store for collapse restore
+                ms_node.setData(1, Qt.ItemDataRole.UserRole, (p_item.get('source_ctx', ''), p_item.get('text', '')))
             else:
                 if pages:
                     p0 = pages[0]
@@ -6877,6 +6879,8 @@ class GenizahGUI(QMainWindow):
                     folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
                     self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
+                    # Store for collapse restore
+                    ms_node.setData(1, Qt.ItemDataRole.UserRole, (p0.get('source_ctx', ''), p0.get('text', '')))
 
                 for p_item in pages:
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6910,12 +6914,16 @@ class GenizahGUI(QMainWindow):
                 _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                 self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+                # Store for collapse restore
+                ms_node.setData(1, Qt.ItemDataRole.UserRole, (p_item.get('source_ctx', ''), p_item.get('text', '')))
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
+                    # Store for collapse restore
+                    ms_node.setData(1, Qt.ItemDataRole.UserRole, (p0.get('source_ctx', ''), p0.get('text', '')))
 
                 for p_item in pages:
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -7241,13 +7249,18 @@ class GenizahGUI(QMainWindow):
             self.comp_tree.setUpdatesEnabled(True)
             self.comp_tree_updating = False
 
-            # Apply deferred preview widgets now that updates are enabled
-            for i in range(item.childCount()):
-                child = item.child(i)
-                self._apply_comp_node_previews(child)
-
             # Clear virtual data to prevent re-population
             item.setData(0, Qt.ItemDataRole.UserRole + 200, None)
+
+            # Apply deferred preview widgets after Qt processes the tree update
+            def apply_previews():
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    self._apply_comp_node_previews(child)
+                    # Also apply to grandchildren (page nodes)
+                    for j in range(child.childCount()):
+                        self._apply_comp_node_previews(child.child(j))
+            QTimer.singleShot(0, apply_previews)
 
         if item.childCount() > 0:
             self._clear_comp_node_previews(item)
