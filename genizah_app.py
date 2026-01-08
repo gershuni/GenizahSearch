@@ -4942,6 +4942,7 @@ class GenizahGUI(QMainWindow):
 
     def _set_paragraph_rtl(self, paragraph):
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
         ppr = paragraph._p.get_or_add_pPr()
         bidi = ppr.find(qn("w:bidi"))
         if bidi is None:
@@ -5183,6 +5184,7 @@ class GenizahGUI(QMainWindow):
                             cell.text = str(val).replace('*', '')
 
                 if CURRENT_LANG == "he":
+                    doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
                     for p in doc.paragraphs:
                         self._set_paragraph_rtl(p)
                     self._set_table_rtl(table)
@@ -5829,6 +5831,7 @@ class GenizahGUI(QMainWindow):
                         doc.add_paragraph(tr("None"))
 
                     if CURRENT_LANG == "he":
+                        doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
                         for p in doc.paragraphs:
                             self._set_paragraph_rtl(p)
                         self._set_table_rtl(table)
