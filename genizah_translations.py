@@ -203,6 +203,8 @@ TRANSLATIONS = {
     "FILTERED": "מסוננים",
     "FILTERED APPENDIX": "נספח מסונן",
     "Excluded Manuscripts ({})": "כתבי יד מוחרגים ({})",
+    "Filtered Main": "ראשי מסונן",
+    "Filtered Appendix": "נספח מסונן",
     "Filtered Main ({})": "ראשי מסונן ({})",
     "Filtered Appendix ({})": "נספח מסונן ({})",
     "All Results ({})": "כל התוצאות ({})",
@@ -554,7 +556,32 @@ TRANSLATIONS = {
 
     "נדרש אתחול מחדש": "Restart Required",
     "אנא הפעילו מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף." : "Please restart the application for the language change to take effect.",
-    
+
+    # --- Export Labels ---
+    "Search Results": "תוצאות חיפוש",
+    "Report View": "תצוגת דו\"ח",
+    "Raw Data": "נתונים גולמיים",
+    "Query information": "מידע על השאילתה",
+    "Search Text": "טקסט החיפוש",
+    "Search Query": "שאילתת חיפוש",
+    "Search Mode": "מצב חיפוש",
+    "Gap": "מרווח",
+    "Report Summary": "תקציר דוח",
+    "System ID": "מספר מערכת",
+    "Shelfmark": "מספר מדף",
+    "Title": "כותרת",
+    "Image/Page": "תמונה/עמוד",
+    "Source": "מקור",
+    "Snippet": "קטע",
+    "Category": "קטגוריה",
+    "Group": "קבוצה",
+    "Image": "תמונה",
+    "Score": "ציון",
+    "Source Context": "הקשר חיפוש",
+    "Manuscript Text": "תוכן כתב יד",
+    "Appendix": "נספח",
+    "See Appendix for query information and excluded manuscripts.": "ראו נספח למידע על השאילתה וכתבי היד המוחרגים.",
+
     # --- Report Headers ---
     "REPORT_CREDIT_TXT": """הופק באמצעות Genizah Search Pro
 מקור הנתונים: תעתיקי MiDRASH (שטוקל בן עזרא ואח', 2025)

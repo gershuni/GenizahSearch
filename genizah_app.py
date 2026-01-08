@@ -12,8 +12,12 @@ import urllib3
 import csv
 import openpyxl
 from docx import Document
+from docx.enum.section import WD_ORIENTATION
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import RGBColor
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.cell.rich_text import TextBlock, CellRichText
 from openpyxl.cell.text import InlineFont
 
@@ -4936,6 +4940,33 @@ class GenizahGUI(QMainWindow):
                 run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
                 run.font.bold = True
 
+    def _set_paragraph_rtl(self, paragraph):
+        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        ppr = paragraph._p.get_or_add_pPr()
+        bidi = ppr.find(qn("w:bidi"))
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            ppr.append(bidi)
+        bidi.set(qn("w:val"), "1")
+
+    def _set_table_rtl(self, table):
+        tbl_pr = table._tbl.tblPr
+        bidi_visual = tbl_pr.find(qn("w:bidiVisual"))
+        if bidi_visual is None:
+            bidi_visual = OxmlElement("w:bidiVisual")
+            tbl_pr.append(bidi_visual)
+        bidi_visual.set(qn("w:val"), "1")
+
+    def _set_table_width_pct(self, table, pct=100):
+        tbl_pr = table._tbl.tblPr
+        tbl_w = tbl_pr.find(qn("w:tblW"))
+        if tbl_w is None:
+            tbl_w = OxmlElement("w:tblW")
+            tbl_pr.append(tbl_w)
+        tbl_w.set(qn("w:type"), "pct")
+        tbl_w.set(qn("w:w"), str(int(pct * 50)))
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
@@ -4951,7 +4982,7 @@ class GenizahGUI(QMainWindow):
         if not path: return
 
         # Prepare tabular data
-        headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+        headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
         data_rows = []
 
         # Collect results to export (Selected or All)
@@ -5004,13 +5035,25 @@ class GenizahGUI(QMainWindow):
             ])
 
         credit_text = self._get_credit_header()
+        def _strip_search_prefix(text):
+            return re.sub(r'^(\\?\\?\\?|\\?\\?|\\?|=|~|/|\\$|#)\\s*', '', text or "")
+        export_query = _strip_search_prefix(self.last_search_query)
+        search_info_lines = [
+            tr("Search Query") + f": {export_query}",
+            tr("Search Mode") + f": {self.mode_combo.currentText()}",
+            tr("Gap") + f": {self.gap_input.text()}",
+            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle.isChecked() else 'Off'}",
+        ]
+        if self.btn_lab_mode_toggle.isChecked():
+            search_info_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep.isChecked() else 'Off'}")
+        search_info_text = "\n".join(search_info_lines)
 
         # --- XLSX with inline highlighting ---
         if fmt == 'xlsx':
             try:
                 wb = openpyxl.Workbook()
                 ws = wb.active
-                ws.title = "Genizah Results"
+                ws.title = tr("Search Results")
                 ws.sheet_view.rightToLeft = True
 
                 # Fonts used for rich text snippets
@@ -5045,6 +5088,12 @@ class GenizahGUI(QMainWindow):
                 current_row = 1
                 for line in credit_text.split('\n'):
                     if not line.strip(): continue
+                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
+                    cell.font = Font(bold=True, color="555555")
+                    current_row += 1
+                for line in search_info_text.split('\n'):
+                    if not line.strip():
+                        continue
                     cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
                     cell.font = Font(bold=True, color="555555")
                     current_row += 1
@@ -5089,6 +5138,7 @@ class GenizahGUI(QMainWindow):
             try:
                 with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                     f.write(credit_text)
+                    f.write("\n" + search_info_text + "\n")
                     writer = csv.writer(f)
                     writer.writerow([])
                     writer.writerow(headers)
@@ -5110,10 +5160,15 @@ class GenizahGUI(QMainWindow):
                     p = doc.add_paragraph(line.strip())
                     if p.runs:
                         p.runs[0].font.bold = True
+                for line in search_info_text.split('\n'):
+                    if not line.strip():
+                        continue
+                    doc.add_paragraph(line.strip())
                 doc.add_paragraph("")
 
-                headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+                headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
                 table = doc.add_table(rows=1, cols=len(headers))
+                self._set_table_width_pct(table, 100)
                 hdr_cells = table.rows[0].cells
                 for idx, header in enumerate(headers):
                     hdr_cells[idx].text = header
@@ -5128,6 +5183,16 @@ class GenizahGUI(QMainWindow):
                         else:
                             cell.text = str(val).replace('*', '')
 
+                if CURRENT_LANG == "he":
+                    doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                    for p in doc.paragraphs:
+                        self._set_paragraph_rtl(p)
+                    self._set_table_rtl(table)
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for p in cell.paragraphs:
+                                self._set_paragraph_rtl(p)
+
                 doc.save(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
@@ -5138,6 +5203,7 @@ class GenizahGUI(QMainWindow):
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
+                    f.write("\n" + search_info_text + "\n\n")
                     for r in results_to_export:
                         # Clean snippet: remove newlines for single-line export
                         snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
@@ -5208,6 +5274,16 @@ class GenizahGUI(QMainWindow):
         if not path: return
 
         credit_text = self._get_credit_header()
+        query_text = self.comp_text_area.toPlainText().strip()
+        comp_settings_lines = [
+            tr("Chunk: ") + f"{self.spin_chunk.value()}",
+            tr("Max Freq: ") + f"{self.spin_freq.value()}",
+            tr("Search Mode") + f": {self.comp_mode_combo.currentText()}",
+            tr("Filter > ") + f"{self.spin_filter.value()}",
+            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle_comp.isChecked() else 'Off'}",
+        ]
+        if self.btn_lab_mode_toggle_comp.isChecked():
+            comp_settings_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep_comp.isChecked() else 'Off'}")
 
         illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
 
@@ -5251,6 +5327,11 @@ class GenizahGUI(QMainWindow):
         # ==========================================
         #  XLSX & CSV Logic
         # ==========================================
+        appendix_count = sum(len(v) for v in c_appx.values())
+        filtered_total = len(c_filt) + sum(len(v) for v in c_filt_appx.values())
+        known_count = len(c_known)
+        total_count = len(c_main) + appendix_count + known_count + filtered_total
+
         if fmt in ['xlsx', 'csv', 'docx']:
             table_rows = []
 
@@ -5338,35 +5419,42 @@ class GenizahGUI(QMainWindow):
                 flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
-                add_rows(c_main, "Main Manuscripts")
+                add_rows(c_main, tr("Main Manuscripts"))
                 for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Appendix", sig)
-                add_rows(c_filt, "Filtered Main")
+                    add_rows(items, tr("Appendix"), sig)
+                add_rows(c_filt, tr("Filtered Main"))
                 for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Filtered Appendix", sig)
-                add_rows(c_known, "Excluded Manuscripts")
+                    add_rows(items, tr("Filtered Appendix"), sig)
+                add_rows(c_known, tr("Excluded Manuscripts"))
 
             # --- XLSX ---
             if fmt == 'xlsx':
                 try:
                     wb = openpyxl.Workbook()
-                    ws = wb.active
-                    ws.title = "Composition Report"
-                    ws.sheet_view.rightToLeft = True
+                    ws_report = wb.active
+                    ws_report.title = tr("Report View")
+                    ws_report.sheet_view.rightToLeft = True
+
+                    ws_raw = wb.create_sheet(tr("Raw Data"))
+                    ws_raw.sheet_view.rightToLeft = True
+                    ws_query = wb.create_sheet(tr("Query information"))
+                    ws_query.sheet_view.rightToLeft = True
 
                     font_red = InlineFont(color='FF0000', b=True)
                     font_normal = InlineFont(color='000000', b=False)
+                    header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+                    header_font = Font(bold=True)
 
-                    def write_rich_cell(row, col, text):
+                    def write_rich_cell(ws, row, col, text):
                         safe_text = sanitize_for_excel(text)
-                        
+
                         if '*' not in safe_text:
                             ws.cell(row=row, column=col, value=safe_text)
                             return
-                        
+
                         parts = safe_text.split('*')
                         rich_string = CellRichText()
-                        
+
                         for i, part in enumerate(parts):
                             if not part:
                                 continue
@@ -5374,51 +5462,233 @@ class GenizahGUI(QMainWindow):
                                 rich_string.append(TextBlock(font_red, part))
                             else:
                                 rich_string.append(TextBlock(font_normal, part))
-                                
+
                         ws.cell(row=row, column=col, value=rich_string)
 
-                    curr_row = 1
-                    for line in credit_text.split('\n'):
-                        clean_line = line.strip()
-                        if not clean_line or "====" in clean_line: continue
-                        
-                        c = ws.cell(row=curr_row, column=1, value=sanitize_for_excel(line))
-                        c.font = Font(bold=True, color="555555")
-                        curr_row += 1
-                    curr_row += 1
+                    def _write_credit_block(ws, start_row):
+                        curr = start_row
+                        for line in credit_text.split('\n'):
+                            clean_line = line.strip()
+                            if not clean_line or "====" in clean_line:
+                                continue
+                            c = ws.cell(row=curr, column=1, value=sanitize_for_excel(line))
+                            c.font = Font(bold=True, color="555555")
+                            curr += 1
+                        return curr + 1
 
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
-                    for idx, h in enumerate(headers, 1):
-                        c = ws.cell(row=curr_row, column=idx, value=h)
-                        c.font = Font(bold=True, color="FFFFFF")
-                        c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-                    curr_row += 1
+                    def _write_headers(ws, row_idx, headers):
+                        for idx, h in enumerate(headers, 1):
+                            c = ws.cell(row=row_idx, column=idx, value=h)
+                            c.font = Font(bold=True, color="FFFFFF")
+                            c.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                        return row_idx + 1
 
-                    category_ranges = {}
+                    def _write_report_header(ws, row_idx, label):
+                        c = ws.cell(row=row_idx, column=1, value=label)
+                        c.font = header_font
+                        c.fill = header_fill
+                        return row_idx + 1
+
+                    def _write_report_row(ws, row_idx, row_data):
+                        for idx, val in enumerate(row_data, 1):
+                            val_str = str(val)
+                            if idx in (8, 9):
+                                write_rich_cell(ws, row_idx, idx, val_str)
+                            else:
+                                ws.cell(row=row_idx, column=idx, value=sanitize_for_excel(val_str))
+                        return row_idx + 1
+
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
+
+                    # Raw Data sheet (flat)
+                    raw_row = _write_credit_block(ws_raw, 1)
+                    header_row = raw_row
+                    raw_row = _write_headers(ws_raw, raw_row, headers)
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            # Apply rich text to Source Context (8) and Manuscript Text (9)
                             if idx in (8, 9):
-                                write_rich_cell(curr_row, idx, val_str)
-                            else: 
-                                ws.cell(row=curr_row, column=idx, value=sanitize_for_excel(val_str))
+                                write_rich_cell(ws_raw, raw_row, idx, val_str)
+                            else:
+                                ws_raw.cell(row=raw_row, column=idx, value=sanitize_for_excel(val_str))
+                        raw_row += 1
+                    if table_rows:
+                        ws_raw.auto_filter.ref = f"A{header_row}:I{raw_row - 1}"
 
-                        category = row_data[0]
-                        if category not in category_ranges:
-                            category_ranges[category] = [curr_row, curr_row]
-                        else:
-                            category_ranges[category][1] = curr_row
-                        curr_row += 1
+                    # Query Information sheet
+                    ws_query.column_dimensions['A'].width = 22
+                    ws_query.column_dimensions['B'].width = 120
+                    ws_query.append([tr("Search Text"), query_text])
+                    ws_query.append([])
+                    ws_query.append([tr("Search Settings"), ""])
+                    for line in comp_settings_lines:
+                        label, _, value = line.partition(":")
+                        ws_query.append([label.strip(), value.strip()])
+                    for row in ws_query.iter_rows(min_row=1, max_row=ws_query.max_row, min_col=1, max_col=2):
+                        for cell in row:
+                            cell.alignment = Alignment(wrap_text=True, vertical="top")
+                            if cell.column == 1 and cell.row in (1, 3):
+                                cell.font = Font(bold=True)
 
-                    for start, end in category_ranges.values():
-                        if end > start:
-                            ws.row_dimensions.group(start, end, outline_level=1, hidden=False)
-                    ws.sheet_properties.outlinePr.summaryBelow = True
+                    # Report View sheet (hierarchical)
+                    report_row = _write_credit_block(ws_report, 1)
+                    report_row = _write_headers(ws_report, report_row, headers)
+
+                    def add_report_section(category_label, items, groups=None, outline_level=1):
+                        nonlocal report_row
+                        if not items and not groups:
+                            return
+                        section_start = report_row
+                        report_row = _write_report_header(ws_report, report_row, category_label)
+
+                        def add_items_with_group(group_name, group_items, group_level):
+                            nonlocal report_row
+                            if group_name:
+                                group_start = report_row
+                                report_row = _write_report_header(ws_report, report_row, group_name)
+                            ms_ranges = []
+                            for ms_item in group_items:
+                                ms_item_rows = []
+                                item_type = ms_item.get('type', '')
+                                if item_type == 'part':
+                                    part_display = ms_item.get('part_display', '')
+                                    oxford_title = ms_item.get('oxford_title', '')
+                                    sid = ms_item.get('sys_id', '')
+                                    shelf = f"📖 {part_display}" if part_display else sid
+                                    title = oxford_title or ""
+                                    ms_score = ms_item.get('score', 0)
+
+                                    for page in ms_item.get('pages', []):
+                                        p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
+                                        src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                                        ms_clean = _clean_and_marker(page.get('text', ''))
+                                        display_shelf = f"{shelf} [{p_shelf}]" if p_shelf else shelf
+                                        ms_item_rows.append([
+                                            "",
+                                            "",
+                                            p_sid or sid or "",
+                                            display_shelf or "",
+                                            title or "",
+                                            str(p_num or ""),
+                                            f"{ms_score} (P:{page.get('score',0)})",
+                                            src_clean,
+                                            ms_clean
+                                        ])
+                                elif item_type == 'manuscript':
+                                    sid = ms_item['sys_id']
+                                    shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                                    if not shelf or shelf == "Unknown":
+                                        shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+
+                                    ms_score = ms_item.get('score', 0)
+
+                                    for page in ms_item.get('pages', []):
+                                        _, p_num, _, _ = self._get_meta_for_header(page['raw_header'])
+                                        src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                                        ms_clean = _clean_and_marker(page.get('text', ''))
+                                        ms_item_rows.append([
+                                            "",
+                                            "",
+                                            sid or "",
+                                            shelf or "",
+                                            title or "",
+                                            str(p_num or ""),
+                                            f"{ms_score} (P:{page.get('score',0)})",
+                                            src_clean,
+                                            ms_clean
+                                        ])
+                                else:
+                                    sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                                    src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
+                                    ms_clean = _clean_and_marker(ms_item.get('text', ''))
+                                    ms_item_rows.append([
+                                        "",
+                                        "",
+                                        sid or "",
+                                        shelf or "",
+                                        title or "",
+                                        str(p_num or ""),
+                                        str(ms_item.get('score', 0)),
+                                        src_clean,
+                                        ms_clean
+                                    ])
+
+                                if ms_item_rows:
+                                    ms_start = report_row
+                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][3]} | {ms_item_rows[0][4]}")
+                                    for row_data in ms_item_rows:
+                                        report_row = _write_report_row(ws_report, report_row, row_data)
+                                    ms_end = report_row - 1
+                                    if ms_end >= ms_start + 1:
+                                        ws_report.row_dimensions.group(ms_start + 1, ms_end, outline_level=group_level + 1, hidden=False)
+                                    ms_ranges.append((ms_start, ms_end))
+
+                            if group_name and ms_ranges:
+                                group_end = report_row - 1
+                                if group_end >= group_start + 1:
+                                    ws_report.row_dimensions.group(group_start + 1, group_end, outline_level=group_level, hidden=False)
+
+                        if groups:
+                            for sig, group_items in groups:
+                                add_items_with_group(f"{sig} ({len(group_items)})", group_items, outline_level + 1)
+                        if items:
+                            add_items_with_group("", items, outline_level + 1)
+
+                        section_end = report_row - 1
+                        if section_end >= section_start + 1:
+                            ws_report.row_dimensions.group(section_start + 1, section_end, outline_level=outline_level, hidden=False)
+
+                    if self.chk_comp_flat.isChecked():
+                        add_report_section(tr("All Results"), self._sort_comp_items(all_items), outline_level=1)
+                    else:
+                        add_report_section(tr("Main Results"), self._sort_comp_items(c_main), outline_level=1)
+                        add_report_section(tr("Appendix - Grouped"), [], groups=sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
+                        add_report_section(tr("Filtered"), self._sort_comp_items(c_filt), groups=sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
+                        add_report_section(tr("Excluded"), self._sort_comp_items(c_known), outline_level=1)
+
+                    ws_report.sheet_properties.outlinePr.summaryBelow = True
 
                     dims = {'D': 20, 'E': 30, 'H': 50, 'I': 60}
                     for col, width in dims.items():
-                        ws.column_dimensions[col].width = width
+                        ws_report.column_dimensions[col].width = width
+                        ws_raw.column_dimensions[col].width = width
+
+                    if c_known:
+                        ws_excluded = wb.create_sheet(tr("Excluded Manuscripts"))
+                        ws_excluded.sheet_view.rightToLeft = True
+                        ws_excluded.append([tr("System ID"), tr("Shelfmark"), tr("Title")])
+                        for cell in ws_excluded[1]:
+                            cell.font = Font(bold=True, color="FFFFFF")
+                            cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+
+                        def _excluded_row(item):
+                            item_type = item.get('type', '')
+                            if item_type == 'part':
+                                sid = item.get('sys_id', '')
+                                shelf = item.get('part_display', '')
+                                title = item.get('oxford_title', '')
+                                return [sid, shelf, title]
+                            if item_type == 'manuscript':
+                                sid = item.get('sys_id', '')
+                                shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                                if not shelf or shelf == "Unknown":
+                                    shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
+                                return [sid, shelf or "", title or ""]
+                            sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+                            return [sid or "", shelf or "", title or ""]
+
+                        for item in self._sort_comp_items(c_known):
+                            ws_excluded.append(_excluded_row(item))
 
                     wb.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -5428,7 +5698,17 @@ class GenizahGUI(QMainWindow):
             # --- CSV ---
             elif fmt == 'csv':
                 try:
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
                     with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
@@ -5445,6 +5725,12 @@ class GenizahGUI(QMainWindow):
             elif fmt == 'docx':
                 try:
                     doc = Document()
+                    section = doc.sections[-1]
+                    new_width, new_height = section.page_height, section.page_width
+                    section.orientation = WD_ORIENTATION.LANDSCAPE
+                    section.page_width = new_width
+                    section.page_height = new_height
+
                     for line in credit_text.split('\n'):
                         clean_line = line.strip()
                         if not clean_line or "====" in clean_line:
@@ -5453,12 +5739,42 @@ class GenizahGUI(QMainWindow):
                         if p.runs:
                             p.runs[0].font.bold = True
                     doc.add_paragraph("")
+                    doc.add_paragraph(tr("Report Summary"))
+                    stats_lines = [
+                        f"{tr('Total Manuscripts Found')}: {total_count}",
+                        f"{tr('Main Manuscripts')}: {len(c_main)}",
+                        f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                        f"{tr('Excluded Manuscripts')}: {known_count}",
+                    ]
+                    for line in stats_lines:
+                        doc.add_paragraph(line)
+                    doc.add_paragraph(tr("See Appendix for query information and excluded manuscripts."))
+                    doc.add_paragraph("")
 
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
                     table = doc.add_table(rows=1, cols=len(headers))
+                    table.autofit = False
+                    self._set_table_width_pct(table, 100)
                     hdr_cells = table.rows[0].cells
                     for idx, header in enumerate(headers):
                         hdr_cells[idx].text = header
+                    available_width = section.page_width - section.left_margin - section.right_margin
+                    ratios = [0.04, 0.05, 0.06, 0.08, 0.1, 0.05, 0.04, 0.29, 0.29]
+                    for idx, ratio in enumerate(ratios):
+                        width = int(available_width * ratio)
+                        for cell in table.columns[idx].cells:
+                            cell.width = width
 
                     for row in table_rows:
                         row_cells = table.add_row().cells
@@ -5469,6 +5785,66 @@ class GenizahGUI(QMainWindow):
                                 self._add_docx_highlighted_runs(cell.paragraphs[0], val)
                             else:
                                 cell.text = str(val).replace('*', '')
+
+                    doc.add_page_break()
+                    doc.add_heading(tr("Appendix"), level=1)
+                    doc.add_heading(tr("Query information"), level=2)
+                    doc.add_paragraph(tr("Search Text") + f": {query_text}")
+                    doc.add_paragraph("")
+                    doc.add_paragraph(tr("Search Settings"))
+                    for line in comp_settings_lines:
+                        doc.add_paragraph(line)
+
+                    doc.add_paragraph("")
+                    doc.add_heading(tr("Excluded Manuscripts"), level=2)
+                    excluded_table = None
+                    if c_known:
+                        excluded_table = doc.add_table(rows=1, cols=3)
+                        excluded_table.autofit = False
+                        self._set_table_width_pct(excluded_table, 100)
+                        excluded_hdr = excluded_table.rows[0].cells
+                        for idx, header in enumerate([tr("System ID"), tr("Shelfmark"), tr("Title")]):
+                            excluded_hdr[idx].text = header
+                        excluded_widths = [0.2, 0.3, 0.5]
+                        for idx, ratio in enumerate(excluded_widths):
+                            width = int(available_width * ratio)
+                            for cell in excluded_table.columns[idx].cells:
+                                cell.width = width
+                        for item in self._sort_comp_items(c_known):
+                            item_type = item.get('type', '')
+                            if item_type == 'part':
+                                sid = item.get('sys_id', '')
+                                shelf = item.get('part_display', '')
+                                title = item.get('oxford_title', '')
+                            elif item_type == 'manuscript':
+                                sid = item.get('sys_id', '')
+                                shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                                if not shelf or shelf == "Unknown":
+                                    shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
+                            else:
+                                sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+                            row_cells = excluded_table.add_row().cells
+                            row_cells[0].text = str(sid or "")
+                            row_cells[1].text = str(shelf or "")
+                            row_cells[2].text = str(title or "")
+                    else:
+                        doc.add_paragraph(tr("None"))
+
+                    if CURRENT_LANG == "he":
+                        doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                        for p in doc.paragraphs:
+                            self._set_paragraph_rtl(p)
+                        self._set_table_rtl(table)
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for p in cell.paragraphs:
+                                    self._set_paragraph_rtl(p)
+                        if excluded_table is not None:
+                            self._set_table_rtl(excluded_table)
+                            for row in excluded_table.rows:
+                                for cell in row.cells:
+                                    for p in cell.paragraphs:
+                                        self._set_paragraph_rtl(p)
 
                     doc.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
