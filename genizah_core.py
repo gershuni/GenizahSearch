@@ -1172,9 +1172,9 @@ class Config:
     HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
 
     # Settings
-    SEARCH_LIMIT = 5000
-    VARIANT_GEN_LIMIT = 5000
-    REGEX_VARIANTS_LIMIT = 3000
+    SEARCH_LIMIT = 50000
+    VARIANT_GEN_LIMIT = 8000
+    REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
