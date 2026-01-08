@@ -6112,6 +6112,11 @@ class GenizahGUI(QMainWindow):
         )
         self._apply_comp_node_previews(node)
 
+    def _get_comp_display_limit(self):
+        if self.lab_engine and getattr(self.lab_engine, "settings", None):
+            return getattr(self.lab_engine.settings, "comp_max_final_results", None)
+        return None
+
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # 1. איפוס וניקוי
         self.is_comp_running = False
@@ -6154,8 +6159,11 @@ class GenizahGUI(QMainWindow):
         self.comp_grouped_filtered_summary = filt_summ
 
         # Display Limit Logic
+        display_limit = self._get_comp_display_limit()
         full_main_count = len(clean_main)
         visible_main = clean_main
+        if display_limit:
+            visible_main = clean_main[:display_limit]
 
         msg_color = "black"
         if len(visible_main) < full_main_count:
@@ -6287,6 +6295,8 @@ class GenizahGUI(QMainWindow):
             )
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
+            if display_limit:
+                visible_flat = sorted_flat[:display_limit]
             
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
@@ -6299,6 +6309,8 @@ class GenizahGUI(QMainWindow):
             # 1. Main Results (Sliced)
             sorted_main = self._sort_comp_items(clean_main)
             visible_sorted_main = sorted_main
+            if display_limit:
+                visible_sorted_main = sorted_main[:display_limit]
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
