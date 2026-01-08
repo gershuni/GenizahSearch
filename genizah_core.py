@@ -120,6 +120,11 @@ class LabSettings:
 
         self.use_dynamic_weights = False
 
+        # Variant Search Settings (affects standard search when using variants mode)
+        self.variant_min_word_len = 2      # Words <= this length get only 1 change
+        self.variant_max_changes = 2       # Max character changes per word
+        self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
+
         self.load()
 
     def load(self):
@@ -150,6 +155,11 @@ class LabSettings:
 
                     self.lab_scan_limit = data.get('lab_scan_limit', 50000)
                     self.lab_display_limit = data.get('lab_display_limit', 500)
+
+                    # Load variant settings
+                    self.variant_min_word_len = data.get('variant_min_word_len', 2)
+                    self.variant_max_changes = data.get('variant_max_changes', 2)
+                    self.variant_aggressive = data.get('variant_aggressive', False)
             except Exception: pass
 
     def save(self):
@@ -179,7 +189,12 @@ class LabSettings:
                     'comp_max_final_results': self.comp_max_final_results,
 
                     'lab_scan_limit': self.lab_scan_limit,
-                    'lab_display_limit': self.lab_display_limit
+                    'lab_display_limit': self.lab_display_limit,
+
+                    # Variant settings
+                    'variant_min_word_len': self.variant_min_word_len,
+                    'variant_max_changes': self.variant_max_changes,
+                    'variant_aggressive': self.variant_aggressive
                 }, f, indent=4)
         except Exception: pass
 
@@ -1157,9 +1172,9 @@ class Config:
     HELP_FILE = os.path.join(INTERNAL_DIR, "Help.html")
 
     # Settings
-    SEARCH_LIMIT = 5000
-    VARIANT_GEN_LIMIT = 5000
-    REGEX_VARIANTS_LIMIT = 3000
+    SEARCH_LIMIT = 50000
+    VARIANT_GEN_LIMIT = 8000
+    REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -1480,131 +1495,326 @@ class AIManager:
 #  VARIANTS LOGIC
 # ==============================================================================
 class VariantManager:
-    """Generate spelling variants for Hebrew search terms using multiple maps."""
+    """
+    Generate spelling variants for Hebrew search terms using hierarchical maps.
 
-    _BASIC_LIST = [
+    Improvements over original:
+    1. Hierarchical maps: extended builds on basic, maximum builds on extended
+    2. Single-pass generation instead of redundant multi-layer processing
+    3. Dynamic max_changes based on term length to prevent combinatorial explosion
+    4. LRU caching for frequently searched terms
+    5. Early termination with smarter limit handling
+    """
+
+    # === HIERARCHICAL PAIR DEFINITIONS ===
+    # Basic: High-confidence visual confusions in HTR
+    _BASIC_PAIRS = [
         ('ד', 'ר'), ('כ', 'ב'), ('ה', 'ח'),
         ('ו', 'ז'), ('ו', 'י'), ('ו', 'ן'),
         ('ט', 'ת'), ('ס', 'ש')
     ]
 
+    # Extended additions: Medium-confidence confusions
+    _EXTENDED_ADDITIONS = [
+        ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('א', 'י'), ('ה', 'ת'),
+        ('ר', 'י'), ('א', 'ח'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'),
+        ('ה', 'ו'), ('ו', 'א'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ל', 'ר'),
+        ('מ', 'י'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('א', 'ל'),
+        ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'), ('ב', 'י'),
+        ('ל', 'א'), ('ה', 'ם'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
+        ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'),
+        ('א', 'ש'), ('ש', 'י'), ('ס', 'ם'), ('ש', 'ו'), ('ב', 'נ'), ('ו', 'מ'),
+        ('מ', 'ש'), ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('מ', 'ל'), ('מ', 'ב'),
+        ('ד', 'י'), ('נ', 'ג'), ('ה', 'ד')
+    ]
+
+    # Maximum additions: Lower-confidence / aggressive confusions
+    _MAXIMUM_ADDITIONS = [
+        ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ם'), ('א', 'נ'),
+        ('א', 'ע'), ('א', 'ת'), ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ל'), ('ב', 'מ'),
+        ('ב', 'פ'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'),
+        ('ד', 'ו'), ('ד', 'כ'), ('ד', 'ל'), ('ה', 'ב'), ('ה', 'ך'), ('ה', 'כ'),
+        ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ק'), ('ה', 'ש'), ('ו', 'ג'), ('ו', 'ד'),
+        ('ו', 'ח'), ('ו', 'כ'), ('ו', 'ם'), ('ו', 'ע'), ('ו', 'ת'), ('ז', 'י'),
+        ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'), ('ט', 'ע'), ('ט', 'ש'),
+        ('י', 'ד'), ('י', 'ך'), ('י', 'כ'), ('י', 'ם'), ('י', 'ן'), ('י', 'ע'),
+        ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
+        ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'מ'), ('ל', 'ם'),
+        ('ל', 'ע'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
+        ('מ', 'ס'), ('מ', 'ר'), ('מ', 'ת'), ('נ', 'ל'), ('נ', 'פ'), ('נ', 'ר'),
+        ('נ', 'ת'), ('ס', 'מ'), ('ע', 'ל'), ('ע', 'מ'), ('ע', 'נ'), ('ע', 'ש'),
+        ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ר'), ('ר', 'ב'), ('ר', 'ך'),
+        ('ר', 'כ'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'), ('ר', 'ש'), ('ר', 'ת'),
+        ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ט'), ('ש', 'ל'), ('ש', 'מ'), ('ש', 'ע'),
+        ('ש', 'ר'), ('ת', 'ט'), ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'),
+        ('ת', 'נ')
+    ]
+
+    # Tier configuration for balanced flexibility vs explosion prevention
+    _TIER_CONFIG = {
+        'variants': {'max_changes': 1, 'per_term_limit': 50},
+        'variants_extended': {'max_changes': 2, 'per_term_limit': 150},
+        'variants_maximum': {'max_changes': 2, 'per_term_limit': 300},
+    }
+
     @staticmethod
     def make_multimap(pairs):
+        """Create bidirectional mapping from character pairs."""
         m = defaultdict(set)
         for a, b in pairs:
             m[a].add(b)
             m[b].add(a)
         return m
 
-    def __init__(self):
-        self.basic_map = self.make_multimap(self._BASIC_LIST)
-        self.extended_map = self.make_multimap(self._BASIC_LIST + [
-            ('ה', 'ח'), ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('ל', 'י'), ('א', 'י'), ('ה', 'ת'),
-            ('ר', 'י'), ('א', 'ח'), ('י', 'א'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'), ('ה', 'ו'),
-            ('ו', 'א'), ('ו', 'נ'), ('ו', 'ל'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ו', 'ר'), ('ל', 'ר'),
-            ('מ', 'י'), ('ה', 'א'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('ו', 'ה'), ('ו', 'ן'),
-            ('ן', 'ו'), ('ח', 'ה'), ('א', 'ל'), ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'),
-            ('ב', 'י'), ('ל', 'א'), ('ה', 'ם'), ('י', 'ב'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
-            ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'), ('ו', 'ז'), ('א', 'ש'),
-            ('ש', 'י'), ('ס', 'ם'), ('ז', 'ו'), ('ש', 'ו'), ('ב', 'נ'), ('ח', 'א'), ('ו', 'מ'), ('מ', 'ש'),
-            ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('ו', 'ב'), ('מ', 'ל'), ('מ', 'ב'), ('ד', 'י'), ('נ', 'ג'),
-            ('ה', 'ד')
-        ])
+    def __init__(self, settings=None):
+        # Settings reference (can be updated later via set_settings)
+        self._settings = settings
 
-        self.maximum_map = self.make_multimap([
-            ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ה'), ('א', 'ו'), ('א', 'ח'), ('א', 'י'),
-            ('א', 'ל'), ('א', 'מ'), ('א', 'ם'), ('א', 'נ'), ('א', 'ע'), ('א', 'ר'), ('א', 'ש'), ('א', 'ת'),
-            ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ו'), ('ב', 'י'), ('ב', 'כ'), ('ב', 'ל'), ('ב', 'מ'), ('ב', 'נ'),
-            ('ב', 'פ'), ('ב', 'ר'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'), ('ד', 'ו'),
-            ('ד', 'י'), ('ד', 'כ'), ('ד', 'ל'), ('ד', 'ר'), ('ה', 'ב'), ('ה', 'ד'), ('ה', 'ו'), ('ה', 'ח'),
-            ('ה', 'י'), ('ה', 'ך'), ('ה', 'כ'), ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ם'), ('ה', 'ק'), ('ה', 'ר'),
-            ('ה', 'ש'), ('ה', 'ת'), ('ו', 'ג'), ('ו', 'ד'), ('ו', 'ה'), ('ו', 'ז'), ('ו', 'ח'), ('ו', 'י'),
-            ('ו', 'כ'), ('ו', 'ל'), ('ו', 'מ'), ('ו', 'ם'), ('ו', 'נ'), ('ו', 'ע'), ('ו', 'ר'), ('ו', 'ש'),
-            ('ו', 'ת'), ('ז', 'י'), ('ח', 'א'), ('ח', 'ה'), ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'),
-            ('ט', 'ע'), ('ט', 'ש'), ('ט', 'ת'), ('י', 'ב'), ('י', 'ד'), ('י', 'ה'), ('י', 'ו'), ('י', 'ך'),
-            ('י', 'כ'), ('י', 'ל'), ('י', 'מ'), ('י', 'ם'), ('י', 'נ'), ('י', 'ן'), ('י', 'ע'), ('י', 'ר'),
-            ('י', 'ש'), ('י', 'ת'), ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
-            ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'ו'), ('ל', 'מ'), ('ל', 'ם'), ('ל', 'נ'),
-            ('ל', 'ע'), ('ל', 'ר'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ב'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
-            ('מ', 'ס'), ('מ', 'ע'), ('מ', 'ר'), ('מ', 'ש'), ('מ', 'ת'), ('נ', 'ג'), ('נ', 'ו'), ('נ', 'ל'),
-            ('נ', 'פ'), ('נ', 'ר'), ('נ', 'ת'), ('ס', 'ם'), ('ס', 'מ'), ('ס', 'ש'), ('ע', 'ל'), ('ע', 'מ'),
-            ('ע', 'נ'), ('ע', 'ש'), ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ה'), ('ק', 'ר'), ('ר', 'ב'),
-            ('ר', 'ה'), ('ר', 'ך'), ('ר', 'ח'), ('ר', 'כ'), ('ר', 'ל'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'),
-            ('ר', 'ש'), ('ר', 'ת'), ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ו'), ('ש', 'ט'), ('ש', 'י'), ('ש', 'ל'),
-            ('ש', 'מ'), ('ש', 'ע'), ('ש', 'ר'), ('ת', 'ה'), ('ת', 'ו'), ('ת', 'ח'), ('ת', 'ט'), ('ת', 'י'),
-            ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'), ('ת', 'נ')
-        ])
+        # Cache for frequently searched terms
+        self._cache = {}
+        self._cache_max_size = 5000
+
+        # Build maps (will include custom variants if settings has them)
+        self._rebuild_maps()
+
+    def _get_custom_pairs(self) -> tuple:
+        """
+        Parse custom variants from settings.
+        Format: dict of 'a=b' style strings, e.g. {'ק=א': True, 'כו=מ': True}
+        Returns (single_char_pairs, multi_char_pairs) tuple.
+        Single-char pairs: both sides are 1 character (for regular variant maps)
+        Multi-char pairs: at least one side has >1 character (for string substitution)
+        """
+        if not self._settings:
+            return [], []
+
+        custom = getattr(self._settings, 'custom_variants', {})
+        if not custom:
+            return [], []
+
+        single_pairs = []
+        multi_pairs = []
+        for key in custom:
+            if '=' in key:
+                parts = key.split('=', 1)
+                if len(parts) == 2:
+                    a, b = parts[0].strip(), parts[1].strip()
+                    if a and b:
+                        if len(a) == 1 and len(b) == 1:
+                            single_pairs.append((a, b))
+                        else:
+                            multi_pairs.append((a, b))
+        return single_pairs, multi_pairs
+
+    def _generate_multichar_variants(self, term: str) -> set:
+        """
+        Generate variants using multi-character substitution pairs.
+        Each pair is applied as simple string replacement (bidirectional).
+        Returns set of variant terms (may have different lengths than original).
+        """
+        _, multi_pairs = self._get_custom_pairs()
+        if not multi_pairs:
+            return set()
+
+        variants = set()
+        for a, b in multi_pairs:
+            # a -> b substitution
+            if a in term:
+                variants.add(term.replace(a, b))
+            # b -> a substitution
+            if b in term:
+                variants.add(term.replace(b, a))
+
+        # Remove original term if present
+        variants.discard(term)
+        return variants
+
+    def _rebuild_maps(self):
+        """Build hierarchical maps including single-char custom variants from settings."""
+        single_char_pairs, _ = self._get_custom_pairs()
+
+        # Build hierarchical maps (each level includes all previous)
+        self.basic_map = self.make_multimap(self._BASIC_PAIRS + single_char_pairs)
+
+        self.extended_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + single_char_pairs
+        )
+
+        self.maximum_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS + single_char_pairs
+        )
+
+    def set_settings(self, settings):
+        """Update settings reference, rebuild maps, and clear cache."""
+        self._settings = settings
+        self._rebuild_maps()
+        self._cache.clear()
+
+    def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
+        """
+        Dynamic max_changes based on term length to prevent combinatorial explosion.
+        Respects settings if available (variant_min_word_len, variant_aggressive).
+        """
+        # Check for aggressive mode (old behavior - no limits based on length)
+        if self._settings and getattr(self._settings, 'variant_aggressive', False):
+            return min(base_max, getattr(self._settings, 'variant_max_changes', 2))
+
+        # Get threshold from settings or use default
+        min_len = 2
+        if self._settings:
+            min_len = getattr(self._settings, 'variant_min_word_len', 2)
+
+        if term_len <= min_len:
+            # Short words: only 1 change
+            return 1
+        else:
+            # Longer words: allow full base_max (capped by settings or 2)
+            max_cap = 2
+            if self._settings:
+                max_cap = getattr(self._settings, 'variant_max_changes', 2)
+            return min(base_max, max_cap)
 
     def hamming_distance(self, term: str, variant: str) -> int:
+        """Calculate character difference count between term and variant."""
         if len(term) != len(variant):
-            # quite arbitrary, but ensures variants of different lengths are sorted last
             return len(term) + len(variant)
-        diff = sum(1 for a, b in zip(term, variant) if a != b)
-        return diff
+        return sum(1 for a, b in zip(term, variant) if a != b)
 
-    def generate_variants(self, term: str, mapping: Mapping[str, set[str]], max_changes: int, limit: int) -> set[str]:
-        indices = range(len(term))
+    def generate_variants(self, term: str, mapping: Mapping[str, set[str]],
+                          max_changes: int, limit: int) -> set[str]:
+        """
+        Generate variants with early termination and smart position filtering.
+        Only considers positions that actually have replacements in the mapping.
+        """
+        term_len = len(term)
         limit = min(limit, Config.VARIANT_GEN_LIMIT)
         result = set()
-        for number_of_changes in range(max_changes):
-            for positions_to_change in itertools.combinations(indices, number_of_changes + 1):
-                char_options_list = []
-                for i, char in enumerate(term):
-                    if i in positions_to_change:
-                        repls = mapping[char] - {char}
+
+        # Pre-filter: find positions that have possible replacements
+        replaceable_positions = []
+        for i, char in enumerate(term):
+            if char in mapping and mapping[char] - {char}:
+                replaceable_positions.append(i)
+
+        if not replaceable_positions:
+            return result
+
+        # Generate variants by number of changes (1 change first, then 2, etc.)
+        for num_changes in range(1, max_changes + 1):
+            if num_changes > len(replaceable_positions):
+                break
+
+            for positions in itertools.combinations(replaceable_positions, num_changes):
+                # Build character options for each position
+                char_options = []
+                valid = True
+
+                for i in range(term_len):
+                    if i in positions:
+                        repls = mapping[term[i]] - {term[i]}
                         if not repls:
+                            valid = False
                             break
-                        char_options_list.append(repls)
+                        char_options.append(repls)
                     else:
-                        char_options_list.append({char})
-                else:
-                    for p in itertools.product(*char_options_list):
-                        result.add("".join(p))
-                        if len(result) >= limit:
-                            return result
+                        char_options.append((term[i],))
+
+                if not valid:
+                    continue
+
+                # Generate all combinations for these positions
+                for combo in itertools.product(*char_options):
+                    result.add("".join(combo))
+                    if len(result) >= limit:
+                        return result
+
         return result
 
-    def get_variants(self, term: str, mode: str, limit: int = Config.VARIANT_GEN_LIMIT) -> list[str]:
-        """Generate spelling variants for Hebrew search terms using multiple maps."""
+    def get_variants(self, term: str, mode: str, limit: int = None) -> list[str]:
+        """
+        Generate spelling variants for Hebrew search terms.
+
+        Uses single-pass generation with the appropriate hierarchical map,
+        instead of redundant multi-layer processing.
+
+        Also applies multi-character substitutions from custom variant pairs,
+        generating single-char variants for each multi-char substitution result.
+        """
         if len(term) < 2:
             return [term]
 
-        # Priority Queues logic
-        # Rank 0: Original Term
-        # Rank 1: Basic Variants
-        # Rank 2: Extended Variants
-        # Rank 3: Maximum Variants
+        # Get tier configuration
+        tier = self._TIER_CONFIG.get(mode)
+        if not tier:
+            return [term]
 
-        candidates = {term: 0}
+        # Apply limit from tier config if not specified
+        if limit is None:
+            limit = tier['per_term_limit']
+        else:
+            limit = min(limit, Config.VARIANT_GEN_LIMIT)
 
-        layers = []
+        # Check cache
+        cache_key = (term, mode, limit)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Select the appropriate map (hierarchical - includes all lower tiers)
         if mode == 'variants':
-            layers.append((self.basic_map, 1, 1))
+            mapping = self.basic_map
         elif mode == 'variants_extended':
-            layers.append((self.basic_map, 1, 1))
-            layers.append((self.extended_map, 2, 2))
+            mapping = self.extended_map
         elif mode == 'variants_maximum':
-            layers.append((self.basic_map, 1, 1))
-            layers.append((self.extended_map, 2, 2))
-            layers.append((self.maximum_map, 2, 3))
+            mapping = self.maximum_map
         else:
             return [term]
 
-        # Process layers
-        for mapping, max_changes, rank in layers:
-            layer_vars = self.generate_variants(term, mapping, max_changes, limit)
-            for v in layer_vars:
-                if v not in candidates:
-                    candidates[v] = rank
+        # Dynamic max_changes based on term length
+        base_max = tier['max_changes']
+        max_changes = self._get_max_changes_for_length(len(term), base_max)
 
-        # Sort by Rank then Hamming Distance
+        # Step 1: Generate multi-char substitution variants (e.g., כו=מ)
+        multichar_variants = self._generate_multichar_variants(term)
+
+        # Step 2: Generate single-char variants for original term
+        variants = self.generate_variants(term, mapping, max_changes, limit)
+        variants.add(term)  # Always include original
+
+        # Step 3: Generate single-char variants for each multi-char variant
+        for mc_variant in multichar_variants:
+            variants.add(mc_variant)
+            if len(variants) < limit and len(mc_variant) >= 2:
+                mc_max_changes = self._get_max_changes_for_length(len(mc_variant), base_max)
+                mc_single_variants = self.generate_variants(
+                    mc_variant, mapping, mc_max_changes,
+                    limit - len(variants)  # Remaining budget
+                )
+                variants.update(mc_single_variants)
+
+        # Sort: original term first, then by similarity
         def sort_key(v):
-            return (candidates[v], self.hamming_distance(term, v))
+            if v == term:
+                return (0, 0, v)
+            elif v in multichar_variants:
+                return (1, 0, v)  # Multi-char variants second
+            else:
+                return (2, self.hamming_distance(term, v) if len(v) == len(term) else 100, v)
 
-        final_list = sorted(list(candidates.keys()), key=sort_key)
+        sorted_variants = sorted(variants, key=sort_key)[:limit]
 
-        # Clamp to limit
-        return final_list[:limit]
+        # Cache result (with size limit)
+        if len(self._cache) >= self._cache_max_size:
+            # Simple eviction: clear half the cache
+            keys_to_remove = list(self._cache.keys())[:self._cache_max_size // 2]
+            for k in keys_to_remove:
+                del self._cache[k]
+
+        self._cache[cache_key] = sorted_variants
+        return sorted_variants
+
+    def clear_cache(self):
+        """Clear the variant cache."""
+        self._cache.clear()
 
 # ==============================================================================
 #  CODICOLOGICAL MANAGER (Oxford Parts / Neubauer)
@@ -3223,26 +3433,31 @@ class SearchEngine:
             else:
                 # 1. Get variants (limit 200 is usually enough if quality is good)
                 all_vars = self.var_mgr.get_variants(term, mode, limit=200)
-                
+
                 # 2. Prepare list
                 clean_vars = []
-                
+
                 # Add EXACT term with BOOST (^5)
                 # This tells Tantivy: "If you find the exact word, it's 5x more important"
                 clean_vars.append(f'"{term}"^5')
-                
+
                 # Add variants
                 for v in all_vars:
                     if v == term: continue # Skip exact (already added)
-                    
+
                     if len(term) > 1 and len(v) < 2:
                         continue
-                        
+
                     # Clean quotes
                     v_clean = v.replace('"', '')
                     if v_clean:
-                        clean_vars.append(f'"{v_clean}"')
-                
+                        # Multi-char variants (different length) get medium boost
+                        # This ensures they rank higher and don't get cut off at search limit
+                        if len(v_clean) != len(term):
+                            clean_vars.append(f'"{v_clean}"^3')
+                        else:
+                            clean_vars.append(f'"{v_clean}"')
+
                 parts.append(f'({" OR ".join(clean_vars)})')
                 
         return " AND ".join(parts)
@@ -3470,13 +3685,18 @@ class SearchEngine:
 
             return results
         
-        if mode == 'Regex': terms = [query_str] 
+        if mode == 'Regex': terms = [query_str]
         else: terms = query_str.split()
-            
+
         t_query_str = self.build_tantivy_query(terms, mode)
         regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
-        
+
+        # DEBUG: Log query and regex
+        LOGGER.info(f"[DEBUG] Mode: {mode}, Terms: {terms}")
+        LOGGER.info(f"[DEBUG] Tantivy query: {t_query_str[:500]}")
+        LOGGER.info(f"[DEBUG] Regex pattern: {regex.pattern[:500]}")
+
         # Save pattern string for passing to results
         pattern_str = regex.pattern
 
@@ -3489,7 +3709,9 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
+        LOGGER.info(f"[DEBUG] Tantivy returned {total_hits} hits")
         results = []
+        regex_filtered_count = 0
 
         for i, (score, doc_addr) in enumerate(hits):
             if progress_callback and i % 50 == 0:
@@ -3503,6 +3725,7 @@ class SearchEngine:
                 # Check for match before any heavy parsing
                 match_obj = regex.search(content)
                 if not match_obj:
+                    regex_filtered_count += 1
                     continue
 
                 boundaries = self._parse_boundaries(doc) if scope != 'page' else []
@@ -3550,7 +3773,10 @@ class SearchEngine:
                         })
             except Exception as e:
                 LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
-        return self._deduplicate(results)
+        LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}")
+        deduped = self._deduplicate(results)
+        LOGGER.info(f"[DEBUG] Results after dedup: {len(deduped)}")
+        return deduped
 
     def _deduplicate(self, results):
         v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}

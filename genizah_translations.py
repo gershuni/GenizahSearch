@@ -56,6 +56,7 @@ TRANSLATIONS = {
 
     # --- Main Search Tab ---
     "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
+    "query_prefix_tooltip": "קיצורי דרך לחיפוש:\n? = וריאנטים בסיסי\n?? = וריאנטים מורחב\n??? = וריאנטים מקסימלי\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\n\nדוגמה: ?שלום עולם",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",
@@ -330,6 +331,13 @@ TRANSLATIONS = {
     "Max Stage 1 candidates (default 2000, max 50000).": "מקסימום מועמדי שלב 1 (ברירת מחדל 2000, מקסימום 50000).",
     "Advanced Scoring...": "ניקוד מתקדם...",
     "Advanced Scoring": "ניקוד מתקדם",
+    "Search Settings": "הגדרות חיפוש",
+    "Configure variant search behavior for Standard Search modes.": "הגדר את התנהגות חיפוש הווריאנטים עבור מצבי החיפוש הרגיל.",
+    "Variant Search Limits:": "מגבלות חיפוש וריאנטים:",
+    "Variant search settings": "הגדרות חיפוש וריאנטים",
+    "Custom Variant Pairs:": "זוגות וריאנטים מותאמים אישית:",
+    "Add character pairs that should be treated as interchangeable (e.g. ק=א means ק↔א).": "הוסף זוגות תווים שיטופלו כברי-חילוף (למשל ק=א פירושו ק↔א).",
+    "Enter one pair per line:\nק=א\nכו=מ\nב=פ": "הזן זוג אחד בכל שורה:\nק=א\nכו=מ\nב=פ",
     "Minimum Match %:": "אחוז התאמה מינימלי:",
     "Minimum percent of query terms required for Stage 1 candidates.": "אחוז מינימלי של מונחי שאילתה הדרוש למועמדי שלב 1.",
     "Max Changes per Word:": "מקסימום שינויים למילה:",
@@ -375,6 +383,17 @@ TRANSLATIONS = {
     "Adjust how the algorithm prioritizes results.": "כוונן כיצד האלגוריתם מתעדף תוצאות.",
     "Points given for very short words (<3 letters). Keep low to reduce noise.": "נקודות הניתנות למילים קצרות מאוד (פחות מ-3 אותיות). השאר נמוך להפחתת רעש.",
     "Points for common 3-letter words (e.g. 'ליה', 'הכי').": "נקודות למילים נפוצות בנות 3 אותיות (למשל 'ליה', 'הכי').",
+
+    # --- Variant Search Settings ---
+    "Standard Search - Variant Limits:": "חיפוש רגיל - הגבלות וריאנטים:",
+    "(Affects regular search modes: Variants (?), Extended (??), Maximum (???))": "(משפיע על מצבי חיפוש רגילים: וריאנטים (?), מורחב (??), מקסימלי (???))",
+    "Limit Short Words (≤N chars):": "הגבל מילים קצרות (≤N תווים):",
+    "Max Changes per Word:": "מקסימום שינויים למילה:",
+    "Aggressive Mode (ignore word length limits)": "מצב אגרסיבי (התעלם מהגבלות אורך)",
+    "Words with this length or less get only 1 character change. Increase to be more conservative.": "מילים באורך זה או פחות מקבלות רק שינוי תו אחד. הגדל להיות יותר שמרני.",
+    "Maximum character substitutions per word. Higher = more results but slower.": "מספר החלפות תווים מקסימלי למילה. גבוה יותר = יותר תוצאות אך איטי יותר.",
+    "Like old behavior: apply max changes to all words regardless of length. More results, more noise.": "כמו ההתנהגות הישנה: החל שינויים מקסימליים על כל המילים ללא קשר לאורך. יותר תוצאות, יותר רעש.",
+
     "Save & Close": "שמור וסגור",
     "Copied": "הועתק",
     "Configuration JSON copied to clipboard.": "קובץ תצורה JSON הועתק ללוח.",

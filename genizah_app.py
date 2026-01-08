@@ -301,10 +301,120 @@ class LabScoringDialog(QDialog):
         if hasattr(self.settings, 'stop_word_score'):
             self.settings.stop_word_score = self.spin_stop_score.value()
             self.settings.common_3char_score = self.spin_common3_score.value()
-        
+
         self.settings.lab_display_limit = self.spin_display_limit.value()
         self.settings.save()
         self.accept()
+
+
+class SearchSettingsDialog(QDialog):
+    """Settings for Standard Search - Variant configuration and custom pairs."""
+    def __init__(self, parent, settings):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Search Settings"))
+        self.resize(450, 400)
+        self.settings = settings
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(tr("Configure variant search behavior for Standard Search modes.")))
+
+        grid = QGridLayout()
+
+        # --- Variant Limits Section ---
+        lbl_variant = QLabel(tr("Variant Search Limits:"))
+        lbl_variant.setStyleSheet("font-weight: bold; margin-top: 10px; color: #8e44ad;")
+        grid.addWidget(lbl_variant, 0, 0, 1, 2)
+
+        # Min Word Length for limiting changes
+        self.spin_variant_min_len = QSpinBox()
+        self.spin_variant_min_len.setRange(1, 5)
+        self.spin_variant_min_len.setValue(getattr(self.settings, 'variant_min_word_len', 2))
+        self.spin_variant_min_len.setToolTip(tr("Words with this length or less get only 1 character change. Increase to be more conservative."))
+        grid.addWidget(QLabel(tr("Limit Short Words (≤N chars):")), 1, 0)
+        grid.addWidget(self.spin_variant_min_len, 1, 1)
+
+        # Max Changes
+        self.spin_variant_max_changes = QSpinBox()
+        self.spin_variant_max_changes.setRange(1, 3)
+        self.spin_variant_max_changes.setValue(getattr(self.settings, 'variant_max_changes', 2))
+        self.spin_variant_max_changes.setToolTip(tr("Maximum character substitutions per word. Higher = more results but slower."))
+        grid.addWidget(QLabel(tr("Max Changes per Word:")), 2, 0)
+        grid.addWidget(self.spin_variant_max_changes, 2, 1)
+
+        # Aggressive Mode
+        self.chk_variant_aggressive = QCheckBox(tr("Aggressive Mode (ignore word length limits)"))
+        self.chk_variant_aggressive.setChecked(getattr(self.settings, 'variant_aggressive', False))
+        self.chk_variant_aggressive.setToolTip(tr("Like old behavior: apply max changes to all words regardless of length. More results, more noise."))
+        grid.addWidget(self.chk_variant_aggressive, 3, 0, 1, 2)
+
+        layout.addLayout(grid)
+
+        # --- Custom Variants Section ---
+        lbl_custom = QLabel(tr("Custom Variant Pairs:"))
+        lbl_custom.setStyleSheet("font-weight: bold; margin-top: 15px; color: #27ae60;")
+        layout.addWidget(lbl_custom)
+
+        lbl_custom_help = QLabel(tr("Add character pairs that should be treated as interchangeable (e.g. ק=א means ק↔א)."))
+        lbl_custom_help.setStyleSheet("font-size: 10px; color: gray; font-style: italic;")
+        lbl_custom_help.setWordWrap(True)
+        layout.addWidget(lbl_custom_help)
+
+        # Custom variants text edit
+        self.txt_custom_variants = QTextEdit()
+        self.txt_custom_variants.setPlaceholderText(tr("Enter one pair per line:\nק=א\nכו=מ\nב=פ"))
+        self.txt_custom_variants.setMaximumHeight(120)
+
+        # Load existing custom variants
+        custom = getattr(self.settings, 'custom_variants', {})
+        if custom:
+            lines = [k for k in custom.keys()]
+            self.txt_custom_variants.setPlainText('\n'.join(lines))
+
+        layout.addWidget(self.txt_custom_variants)
+
+        layout.addStretch()
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_save = QPushButton(tr("Save & Close"))
+        self.btn_save.clicked.connect(self.save_and_close)
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_save)
+        layout.addLayout(btn_box)
+        self.setLayout(layout)
+
+    def save_and_close(self):
+        # Save variant limits
+        self.settings.variant_min_word_len = self.spin_variant_min_len.value()
+        self.settings.variant_max_changes = self.spin_variant_max_changes.value()
+        self.settings.variant_aggressive = self.chk_variant_aggressive.isChecked()
+
+        # Parse custom variants
+        text = self.txt_custom_variants.toPlainText().strip()
+        custom = {}
+        if text:
+            for line in text.split('\n'):
+                line = line.strip()
+                if '=' in line:
+                    custom[line] = True
+        self.settings.custom_variants = custom
+
+        self.settings.save()
+
+        # Update VariantManager if available
+        main = self.parent()
+        while main and not hasattr(main, 'var_mgr'):
+            main = main.parent()
+        if main and main.var_mgr:
+            main.var_mgr.set_settings(self.settings)
+
+        self.accept()
+
 
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
@@ -2631,6 +2741,10 @@ class GenizahGUI(QMainWindow):
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
 
+            # Connect VariantManager to Lab settings for variant search configuration
+            if self.var_mgr and self.lab_engine:
+                self.var_mgr.set_settings(self.lab_engine.settings)
+
             # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
             if hasattr(self, 'lab_panel_search'):
                 self.lab_panel_search.set_engine(self.lab_engine)
@@ -2798,6 +2912,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
+        self.query_input.setToolTip(tr("query_prefix_tooltip"))
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
@@ -2831,7 +2946,14 @@ class GenizahGUI(QMainWindow):
         
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
-        
+
+        # Gear button for search settings
+        self.btn_search_settings = QPushButton("⚙")
+        self.btn_search_settings.setFixedWidth(30)
+        self.btn_search_settings.setToolTip(tr("Variant search settings"))
+        self.btn_search_settings.setStyleSheet("font-size: 14px;")
+        self.btn_search_settings.clicked.connect(self.open_search_settings)
+
         self.btn_lab_mode_toggle = QPushButton(tr("Lab Mode"))
         self.btn_lab_mode_toggle.setCheckable(True)
         self.btn_lab_mode_toggle.setToolTip(tr("Experimental search mode using advanced proximity scoring. WARNING: Can freeze the program. Use with caution."))
@@ -2853,6 +2975,7 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.mode_combo)
         row2.addWidget(QLabel(tr("Gap:")))
         row2.addWidget(self.gap_input)
+        row2.addWidget(self.btn_search_settings)
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
         row2.addStretch()
@@ -3959,6 +4082,13 @@ class GenizahGUI(QMainWindow):
         d = AIDialog(self, self.ai_mgr)
         if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
 
+    def open_search_settings(self):
+        """Open the Search Settings dialog for variant configuration."""
+        if not self.lab_engine:
+            return
+        d = SearchSettingsDialog(self, self.lab_engine.settings)
+        d.exec()
+
     def update_lab_ui_state(self, checked):
         """Disable standard controls when Lab Mode is active."""
         # Search Tab
@@ -4021,9 +4151,52 @@ class GenizahGUI(QMainWindow):
         if self.is_searching: self.stop_search()
         else: self.start_search()
 
+    def _detect_query_prefix(self, query: str) -> tuple:
+        """
+        Detect search mode prefix in query and return (mode_override, clean_query).
+
+        Prefixes:
+          ???  -> variants_maximum
+          ??   -> variants_extended
+          ?    -> variants
+          ~    -> fuzzy
+          /    -> Regex
+          $    -> Title
+          #    -> Shelfmark
+
+        Returns (None, query) if no prefix found.
+        """
+        # Order matters: check longer prefixes first
+        prefix_map = [
+            ('???', 'variants_maximum', 3),
+            ('??', 'variants_extended', 2),
+            ('?', 'variants', 1),
+            ('~', 'fuzzy', 4),
+            ('/', 'Regex', 5),
+            ('$', 'Title', 6),
+            ('#', 'Shelfmark', 7),
+        ]
+
+        for prefix, mode, combo_idx in prefix_map:
+            if query.startswith(prefix):
+                clean_query = query[len(prefix):].lstrip()
+                if clean_query:  # Only if there's actual query after prefix
+                    return (mode, combo_idx, clean_query)
+
+        return (None, None, query)
+
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+
+        # Detect query prefix (?, ??, ???, ~, /)
+        mode_override, combo_idx, clean_query = self._detect_query_prefix(query)
+
+        if mode_override:
+            # Update combo to reflect detected mode
+            self.mode_combo.setCurrentIndex(combo_idx)
+            query = clean_query
+
         mode_idx = self.mode_combo.currentIndex()
         modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
         mode = modes[mode_idx]
