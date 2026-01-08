@@ -1577,42 +1577,71 @@ class VariantManager:
         # Build maps (will include custom variants if settings has them)
         self._rebuild_maps()
 
-    def _get_custom_pairs(self) -> list:
+    def _get_custom_pairs(self) -> tuple:
         """
         Parse custom variants from settings.
         Format: dict of 'a=b' style strings, e.g. {'ק=א': True, 'כו=מ': True}
-        Returns list of bidirectional pairs.
+        Returns (single_char_pairs, multi_char_pairs) tuple.
+        Single-char pairs: both sides are 1 character (for regular variant maps)
+        Multi-char pairs: at least one side has >1 character (for string substitution)
         """
         if not self._settings:
-            return []
+            return [], []
 
         custom = getattr(self._settings, 'custom_variants', {})
         if not custom:
-            return []
+            return [], []
 
-        pairs = []
+        single_pairs = []
+        multi_pairs = []
         for key in custom:
             if '=' in key:
                 parts = key.split('=', 1)
                 if len(parts) == 2:
                     a, b = parts[0].strip(), parts[1].strip()
                     if a and b:
-                        pairs.append((a, b))
-        return pairs
+                        if len(a) == 1 and len(b) == 1:
+                            single_pairs.append((a, b))
+                        else:
+                            multi_pairs.append((a, b))
+        return single_pairs, multi_pairs
+
+    def _generate_multichar_variants(self, term: str) -> set:
+        """
+        Generate variants using multi-character substitution pairs.
+        Each pair is applied as simple string replacement (bidirectional).
+        Returns set of variant terms (may have different lengths than original).
+        """
+        _, multi_pairs = self._get_custom_pairs()
+        if not multi_pairs:
+            return set()
+
+        variants = set()
+        for a, b in multi_pairs:
+            # a -> b substitution
+            if a in term:
+                variants.add(term.replace(a, b))
+            # b -> a substitution
+            if b in term:
+                variants.add(term.replace(b, a))
+
+        # Remove original term if present
+        variants.discard(term)
+        return variants
 
     def _rebuild_maps(self):
-        """Build hierarchical maps including any custom variants from settings."""
-        custom_pairs = self._get_custom_pairs()
+        """Build hierarchical maps including single-char custom variants from settings."""
+        single_char_pairs, _ = self._get_custom_pairs()
 
         # Build hierarchical maps (each level includes all previous)
-        self.basic_map = self.make_multimap(self._BASIC_PAIRS + custom_pairs)
+        self.basic_map = self.make_multimap(self._BASIC_PAIRS + single_char_pairs)
 
         self.extended_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + custom_pairs
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + single_char_pairs
         )
 
         self.maximum_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS + custom_pairs
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS + single_char_pairs
         )
 
     def set_settings(self, settings):
@@ -1707,6 +1736,9 @@ class VariantManager:
 
         Uses single-pass generation with the appropriate hierarchical map,
         instead of redundant multi-layer processing.
+
+        Also applies multi-character substitutions from custom variant pairs,
+        generating single-char variants for each multi-char substitution result.
         """
         if len(term) < 2:
             return [term]
@@ -1741,15 +1773,34 @@ class VariantManager:
         base_max = tier['max_changes']
         max_changes = self._get_max_changes_for_length(len(term), base_max)
 
-        # Generate variants in single pass
+        # Step 1: Generate multi-char substitution variants (e.g., כו=מ)
+        multichar_variants = self._generate_multichar_variants(term)
+
+        # Step 2: Generate single-char variants for original term
         variants = self.generate_variants(term, mapping, max_changes, limit)
         variants.add(term)  # Always include original
 
-        # Sort by hamming distance (original term first, then closest variants)
-        sorted_variants = sorted(
-            variants,
-            key=lambda v: (self.hamming_distance(term, v), v)
-        )[:limit]
+        # Step 3: Generate single-char variants for each multi-char variant
+        for mc_variant in multichar_variants:
+            variants.add(mc_variant)
+            if len(variants) < limit and len(mc_variant) >= 2:
+                mc_max_changes = self._get_max_changes_for_length(len(mc_variant), base_max)
+                mc_single_variants = self.generate_variants(
+                    mc_variant, mapping, mc_max_changes,
+                    limit - len(variants)  # Remaining budget
+                )
+                variants.update(mc_single_variants)
+
+        # Sort: original term first, then by similarity
+        def sort_key(v):
+            if v == term:
+                return (0, 0, v)
+            elif v in multichar_variants:
+                return (1, 0, v)  # Multi-char variants second
+            else:
+                return (2, self.hamming_distance(term, v) if len(v) == len(term) else 100, v)
+
+        sorted_variants = sorted(variants, key=sort_key)[:limit]
 
         # Cache result (with size limit)
         if len(self._cache) >= self._cache_max_size:
