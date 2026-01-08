@@ -3680,13 +3680,18 @@ class SearchEngine:
 
             return results
         
-        if mode == 'Regex': terms = [query_str] 
+        if mode == 'Regex': terms = [query_str]
         else: terms = query_str.split()
-            
+
         t_query_str = self.build_tantivy_query(terms, mode)
         regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
-        
+
+        # DEBUG: Log query and regex
+        LOGGER.info(f"[DEBUG] Mode: {mode}, Terms: {terms}")
+        LOGGER.info(f"[DEBUG] Tantivy query: {t_query_str[:500]}")
+        LOGGER.info(f"[DEBUG] Regex pattern: {regex.pattern[:500]}")
+
         # Save pattern string for passing to results
         pattern_str = regex.pattern
 
@@ -3699,7 +3704,9 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
+        LOGGER.info(f"[DEBUG] Tantivy returned {total_hits} hits")
         results = []
+        regex_filtered_count = 0
 
         for i, (score, doc_addr) in enumerate(hits):
             if progress_callback and i % 50 == 0:
@@ -3713,6 +3720,7 @@ class SearchEngine:
                 # Check for match before any heavy parsing
                 match_obj = regex.search(content)
                 if not match_obj:
+                    regex_filtered_count += 1
                     continue
 
                 boundaries = self._parse_boundaries(doc) if scope != 'page' else []
@@ -3760,7 +3768,10 @@ class SearchEngine:
                         })
             except Exception as e:
                 LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
-        return self._deduplicate(results)
+        LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}")
+        deduped = self._deduplicate(results)
+        LOGGER.info(f"[DEBUG] Results after dedup: {len(deduped)}")
+        return deduped
 
     def _deduplicate(self, results):
         v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
