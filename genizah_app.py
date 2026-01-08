@@ -7013,28 +7013,50 @@ class GenizahGUI(QMainWindow):
     def _process_tree_batch(self):
         """Process one batch of items and schedule next batch."""
         if not hasattr(self, '_batch_queue') or self._batch_index >= len(self._batch_queue):
-            # Done loading - cleanup
+            # Done loading - cleanup and apply all deferred previews
+            parent = self._batch_parent
             self._batch_queue = None
             self._batch_parent = None
             self.comp_tree.setUpdatesEnabled(True)
             self.comp_tree_updating = False  # Re-enable itemChanged signal
             self._update_comp_filter_indicators()
             self._apply_comp_tree_filters()
+
+            # Apply deferred preview widgets to all loaded nodes
+            if parent:
+                def apply_all_previews():
+                    for i in range(parent.childCount()):
+                        child = parent.child(i)
+                        self._apply_comp_node_previews(child)
+                        for j in range(child.childCount()):
+                            self._apply_comp_node_previews(child.child(j))
+                QTimer.singleShot(0, apply_all_previews)
             return
 
         # Process batch
         self.comp_tree.setUpdatesEnabled(False)
         end_index = min(self._batch_index + self._batch_size, len(self._batch_queue))
+        start_index = self._batch_index
 
-        for i in range(self._batch_index, end_index):
+        for i in range(start_index, end_index):
             self._add_manuscript_node(self._batch_parent, self._batch_queue[i])
 
         self._batch_index = end_index
         self.comp_tree.setUpdatesEnabled(True)
 
+        # Apply previews for this batch
+        parent = self._batch_parent
+        def apply_batch_previews():
+            for i in range(start_index, min(end_index, parent.childCount())):
+                child = parent.child(i)
+                self._apply_comp_node_previews(child)
+                for j in range(child.childCount()):
+                    self._apply_comp_node_previews(child.child(j))
+        QTimer.singleShot(0, apply_batch_previews)
+
         # Schedule next batch with small delay to let UI breathe
         if self._batch_index < len(self._batch_queue):
-            QTimer.singleShot(0, self._process_tree_batch)
+            QTimer.singleShot(10, self._process_tree_batch)
 
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
