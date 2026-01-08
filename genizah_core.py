@@ -3433,26 +3433,31 @@ class SearchEngine:
             else:
                 # 1. Get variants (limit 200 is usually enough if quality is good)
                 all_vars = self.var_mgr.get_variants(term, mode, limit=200)
-                
+
                 # 2. Prepare list
                 clean_vars = []
-                
+
                 # Add EXACT term with BOOST (^5)
                 # This tells Tantivy: "If you find the exact word, it's 5x more important"
                 clean_vars.append(f'"{term}"^5')
-                
+
                 # Add variants
                 for v in all_vars:
                     if v == term: continue # Skip exact (already added)
-                    
+
                     if len(term) > 1 and len(v) < 2:
                         continue
-                        
+
                     # Clean quotes
                     v_clean = v.replace('"', '')
                     if v_clean:
-                        clean_vars.append(f'"{v_clean}"')
-                
+                        # Multi-char variants (different length) get medium boost
+                        # This ensures they rank higher and don't get cut off at search limit
+                        if len(v_clean) != len(term):
+                            clean_vars.append(f'"{v_clean}"^3')
+                        else:
+                            clean_vars.append(f'"{v_clean}"')
+
                 parts.append(f'({" OR ".join(clean_vars)})')
                 
         return " AND ".join(parts)
