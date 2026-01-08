@@ -6087,7 +6087,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_context, QLabel(""))
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
-    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None):
+    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None, defer_widgets=False):
         if highlight_pattern and source_text:
             try:
                 # Apply highlighting to Source Text if pattern exists
@@ -6100,7 +6100,7 @@ class GenizahGUI(QMainWindow):
 
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
-        
+
         node.setData(
             0,
             Qt.ItemDataRole.UserRole + 1,
@@ -6110,7 +6110,9 @@ class GenizahGUI(QMainWindow):
                 "anchor": anchor
             },
         )
-        self._apply_comp_node_previews(node)
+        # Defer widget creation during batch operations to prevent freeze
+        if not defer_widgets:
+            self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # 1. איפוס וניקוי
@@ -6176,6 +6178,8 @@ class GenizahGUI(QMainWindow):
             if sid and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
 
+        # Block itemChanged signal during tree population to prevent O(n²) updates
+        self.comp_tree_updating = True
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
 
@@ -6208,14 +6212,14 @@ class GenizahGUI(QMainWindow):
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
                     self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
                         self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
                         p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6227,7 +6231,7 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 3, p_sid or "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             elif item_type == 'manuscript':
                 sid = ms_item['sys_id']
                 shelf, t = self.meta_mgr.get_meta_for_id(sid)
@@ -6248,13 +6252,13 @@ class GenizahGUI(QMainWindow):
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6265,7 +6269,7 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 3, "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             else:
                 # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -6276,8 +6280,8 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, 3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
-            
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=True)
+
             _collect_id(ms_item)
 
 
@@ -6287,42 +6291,50 @@ class GenizahGUI(QMainWindow):
             )
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
-            
+
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
             make_checkable(root)
-            
-            for item in visible_flat:
-                add_manuscript_node(root, item)
+
+            # Use batched loading for flat view too
+            if visible_flat:
+                self.comp_tree.setUpdatesEnabled(True)
+                self._update_recursive_button_state()
+                self._start_batched_tree_load(root, visible_flat)
+                if ids_to_fetch:
+                    self.start_metadata_loading(list(ids_to_fetch))
+                return  # Early return - batched loading handles the rest
 
         else:
-            # 1. Main Results (Sliced)
+            # 1. Main Results - Using batched loading for performance
             sorted_main = self._sort_comp_items(clean_main)
             visible_sorted_main = sorted_main
+            root_main = None
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
                 root_main.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_MAIN")
                 root_main.setExpanded(True)
                 make_checkable(root_main)
-                for item in visible_sorted_main:
-                    add_manuscript_node(root_main, item)
+                # Store items for batched loading later
+                root_main.setData(0, Qt.ItemDataRole.UserRole + 202, visible_sorted_main)
 
-            # 2. Appendix
+            # 2. Appendix - Using Virtual Children for performance
             if clean_appx:
                 total_appx = sum(len(v) for v in clean_appx.values())
                 root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
                 root_appx.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_APPX")
                 root_appx.setExpanded(False)
                 make_checkable(root_appx)
-                
+
                 sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
                 for sig, items in sorted_groups:
                     group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
                     make_checkable(group_node)
-                    
-                    for item in self._sort_comp_items(items):
-                        add_manuscript_node(group_node, item)
+                    # Virtual children: store items data, add placeholder
+                    group_node.setData(0, Qt.ItemDataRole.UserRole + 200, items)  # Store items for lazy load
+                    placeholder = QTreeWidgetItem(group_node, [tr("Loading...")])
+                    placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
 
             # 3. Filtered 
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
@@ -6336,12 +6348,14 @@ class GenizahGUI(QMainWindow):
                 for item in self._sort_comp_items(clean_filt):
                     add_manuscript_node(root_filt, item)
                 
-                # Filtered Appendix
+                # Filtered Appendix - Using Virtual Children for performance
                 for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
                     make_checkable(g_node)
-                    for item in self._sort_comp_items(items):
-                        add_manuscript_node(g_node, item)
+                    # Virtual children: store items data, add placeholder
+                    g_node.setData(0, Qt.ItemDataRole.UserRole + 200, items)
+                    placeholder = QTreeWidgetItem(g_node, [tr("Loading...")])
+                    placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
 
             # 4. Excluded
             if self.comp_known:
@@ -6353,48 +6367,159 @@ class GenizahGUI(QMainWindow):
                 for item in self._sort_comp_items(self.comp_known):
                     add_manuscript_node(root_known, item)
 
+            # Start batched loading for Main Results (deferred to prevent freeze)
+            if root_main and visible_sorted_main:
+                self.comp_tree.setUpdatesEnabled(True)
+                self._update_recursive_button_state()
+                # Start batched loading - this will call filters when done
+                self._start_batched_tree_load(root_main, visible_sorted_main)
+                if ids_to_fetch:
+                    self.start_metadata_loading(list(ids_to_fetch))
+                return  # Early return - batched loading handles the rest
+
         self.comp_tree.setUpdatesEnabled(True)
+        self.comp_tree_updating = False  # Re-enable itemChanged signal
         self._update_comp_filter_indicators()
         self._apply_comp_tree_filters()
         self._update_recursive_button_state()
-        
+
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
-    
+
+    def _make_node_checkable(self, node):
+        """Make a tree node checkable."""
+        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        node.setCheckState(0, Qt.CheckState.Unchecked)
+
+    def _add_manuscript_node(self, parent, ms_item, defer_widgets=True):
+        """Add a manuscript/part node to the tree. Used for lazy/batched loading."""
+        item_type = ms_item.get('type', '')
+        if item_type == 'part':
+            part_display = ms_item.get('part_display', '')
+            oxford_title = ms_item.get('oxford_title', '')
+            sid = ms_item.get('sys_id', '')
+            shelf = f"📖 {part_display}" if part_display else sid
+            t = oxford_title or ""
+
+            ms_node = QTreeWidgetItem(parent)
+            self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+            self._set_comp_tree_text(ms_node, 1, shelf)
+            self._set_comp_tree_text(ms_node, 2, t)
+            self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
+            self._make_node_checkable(ms_node)
+            ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+            pages = ms_item.get('pages', [])
+            folios = ms_item.get('folios', [])
+            if len(pages) == 1:
+                p_item = pages[0]
+                p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                folio_info = f" [{p_shelf}]" if p_shelf else ""
+                self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+            else:
+                if pages:
+                    p0 = pages[0]
+                    _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                    folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
+                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
+
+                for p_item in pages:
+                    p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
+                    folio_info = f" [{p_shelf}]" if p_shelf else ""
+                    page_node = QTreeWidgetItem(ms_node)
+                    self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                    self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
+                    self._set_comp_tree_text(page_node, 2, "")
+                    self._set_comp_tree_text(page_node, 3, p_sid or "")
+                    self._make_node_checkable(page_node)
+                    page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+        elif item_type == 'manuscript':
+            sid = ms_item['sys_id']
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                if header_shelf: shelf = header_shelf
+
+            ms_node = QTreeWidgetItem(parent)
+            self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+            self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
+            self._set_comp_tree_text(ms_node, 2, t or "")
+            self._set_comp_tree_text(ms_node, 3, sid)
+            self._make_node_checkable(ms_node)
+            ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+
+            pages = ms_item.get('pages', [])
+            if len(pages) == 1:
+                p_item = pages[0]
+                _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+            else:
+                if pages:
+                    p0 = pages[0]
+                    _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
+                    self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
+
+                for p_item in pages:
+                    _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                    page_node = QTreeWidgetItem(ms_node)
+                    self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                    self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
+                    self._set_comp_tree_text(page_node, 2, "")
+                    self._set_comp_tree_text(page_node, 3, "")
+                    self._make_node_checkable(page_node)
+                    page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
+                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+        else:
+            # Fallback
+            sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+            node = QTreeWidgetItem(parent)
+            self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
+            self._set_comp_tree_text(node, 1, shelf)
+            self._set_comp_tree_text(node, 2, title)
+            self._set_comp_tree_text(node, 3, sid)
+            self._make_node_checkable(node)
+            node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+            self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+
     def _add_single_node_to_tree(self, parent, ms_item):
         """Dedicated helper to add one row to the tree."""
         sid = ms_item.get('sys_id')
         if not sid:
             sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
-        
+
         shelf, t = self.meta_mgr.get_meta_for_id(sid)
         display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
-        
+
         node = QTreeWidgetItem(parent)
         self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # עיגול הציון
         self._set_comp_tree_text(node, 1, display_shelf)
         self._set_comp_tree_text(node, 2, t or "")
         self._set_comp_tree_text(node, 3, sid)
-        
+
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
         pages = ms_item.get('pages', [])
-        
+
         if len(pages) == 1:
             p_item = pages[0]
             p_num = "Img"
             if 'raw_header' in p_item:
                 _, p_num_extracted, _, _ = self._get_meta_for_header(p_item['raw_header'])
                 if p_num_extracted: p_num = p_num_extracted
-            
+
             self._set_comp_tree_text(node, 1, f"{display_shelf} (Img {p_num})")
             self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-        
+
         elif len(pages) > 1:
              self._set_comp_tree_text(node, 1, f"{display_shelf} ({len(pages)} matches)")
-             
+
              if pages:
                  first_p = pages[0]
                  self._set_comp_node_previews(node, first_p.get('source_ctx', ''), first_p.get('text', ''), first_p.get('highlight_pattern'))
@@ -6403,17 +6528,53 @@ class GenizahGUI(QMainWindow):
              for p_item in pages:
                 child = QTreeWidgetItem(node)
                 self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
-                
+
                 p_num_child = "?"
                 if 'raw_header' in p_item:
                     _, p_val, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     if p_val: p_num_child = p_val
-                
-                child.setText(1, f"Img {p_num_child}") 
+
+                child.setText(1, f"Img {p_num_child}")
 
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
                 self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-    
+
+    # ========== Batched Tree Loading for Performance ==========
+    def _start_batched_tree_load(self, parent_node, items, batch_size=50):
+        """Start loading items into tree in batches to prevent UI freeze."""
+        self._batch_queue = list(items)  # Copy to avoid mutation issues
+        self._batch_parent = parent_node
+        self._batch_size = batch_size
+        self._batch_index = 0
+        # Start first batch immediately
+        self._process_tree_batch()
+
+    def _process_tree_batch(self):
+        """Process one batch of items and schedule next batch."""
+        if not hasattr(self, '_batch_queue') or self._batch_index >= len(self._batch_queue):
+            # Done loading - cleanup
+            self._batch_queue = None
+            self._batch_parent = None
+            self.comp_tree.setUpdatesEnabled(True)
+            self.comp_tree_updating = False  # Re-enable itemChanged signal
+            self._update_comp_filter_indicators()
+            self._apply_comp_tree_filters()
+            return
+
+        # Process batch
+        self.comp_tree.setUpdatesEnabled(False)
+        end_index = min(self._batch_index + self._batch_size, len(self._batch_queue))
+
+        for i in range(self._batch_index, end_index):
+            self._add_manuscript_node(self._batch_parent, self._batch_queue[i])
+
+        self._batch_index = end_index
+        self.comp_tree.setUpdatesEnabled(True)
+
+        # Schedule next batch with small delay to let UI breathe
+        if self._batch_index < len(self._batch_queue):
+            QTimer.singleShot(0, self._process_tree_batch)
+
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
         missing_ids = set()
@@ -6607,6 +6768,29 @@ class GenizahGUI(QMainWindow):
         return sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known
 
     def on_comp_tree_item_expanded(self, item):
+        # Check for virtual children (lazy loading)
+        virtual_items = item.data(0, Qt.ItemDataRole.UserRole + 200)
+        if virtual_items is not None:
+            # Remove placeholder child
+            while item.childCount() > 0:
+                child = item.child(0)
+                if child.data(0, Qt.ItemDataRole.UserRole + 201) == "PLACEHOLDER":
+                    item.removeChild(child)
+                else:
+                    break
+
+            # Populate real children - block itemChanged signal
+            self.comp_tree_updating = True
+            self.comp_tree.setUpdatesEnabled(False)
+            sorted_items = self._sort_comp_items(virtual_items)
+            for ms_item in sorted_items:
+                self._add_manuscript_node(item, ms_item)
+            self.comp_tree.setUpdatesEnabled(True)
+            self.comp_tree_updating = False
+
+            # Clear virtual data to prevent re-population
+            item.setData(0, Qt.ItemDataRole.UserRole + 200, None)
+
         if item.childCount() > 0:
             self._clear_comp_node_previews(item)
 
