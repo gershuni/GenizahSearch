@@ -2750,6 +2750,7 @@ class GenizahGUI(QMainWindow):
         self.comp_worker = None
         self.hovered_row = -1
         self.results_loaded = 0
+        self.snippet_queue = []
 
 
         self.init_ui()
@@ -6463,6 +6464,27 @@ class GenizahGUI(QMainWindow):
         node.setText(column, text)
         self._update_comp_tree_tooltip(node, column)
 
+    def _process_snippet_queue(self):
+        if not hasattr(self, 'snippet_queue') or not self.snippet_queue:
+            return
+
+        # Process a batch (e.g., 20)
+        count = 0
+        limit = 20
+
+        while self.snippet_queue and count < limit:
+            node = self.snippet_queue.pop(0)
+            try:
+                # Check if node is still valid (C++ object might be deleted)
+                if node.treeWidget():
+                    self._apply_comp_node_previews(node)
+            except RuntimeError:
+                pass # Node deleted
+            count += 1
+
+        if self.snippet_queue:
+            QTimer.singleShot(10, self._process_snippet_queue)
+
     def _update_comp_tree_tooltip(self, node, column):
         text = node.text(column)
         if not text:
@@ -6549,6 +6571,12 @@ class GenizahGUI(QMainWindow):
         # Defer widget creation during batch operations to prevent freeze
         if not defer_widgets:
             self._apply_comp_node_previews(node)
+        else:
+            if not hasattr(self, 'snippet_queue'):
+                self.snippet_queue = []
+            self.snippet_queue.append(node)
+            if len(self.snippet_queue) == 1:
+                 QTimer.singleShot(10, self._process_snippet_queue)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # 1. איפוס וניקוי
