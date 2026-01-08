@@ -6287,26 +6287,33 @@ class GenizahGUI(QMainWindow):
             )
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
-            
+
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
             make_checkable(root)
-            
-            for item in visible_flat:
-                add_manuscript_node(root, item)
+
+            # Use batched loading for flat view too
+            if visible_flat:
+                self.comp_tree.setUpdatesEnabled(True)
+                self._update_recursive_button_state()
+                self._start_batched_tree_load(root, visible_flat)
+                if ids_to_fetch:
+                    self.start_metadata_loading(list(ids_to_fetch))
+                return  # Early return - batched loading handles the rest
 
         else:
-            # 1. Main Results (Sliced)
+            # 1. Main Results - Using batched loading for performance
             sorted_main = self._sort_comp_items(clean_main)
             visible_sorted_main = sorted_main
+            root_main = None
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
                 root_main.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_MAIN")
                 root_main.setExpanded(True)
                 make_checkable(root_main)
-                for item in visible_sorted_main:
-                    add_manuscript_node(root_main, item)
+                # Store items for batched loading later
+                root_main.setData(0, Qt.ItemDataRole.UserRole + 202, visible_sorted_main)
 
             # 2. Appendix - Using Virtual Children for performance
             if clean_appx:
@@ -6356,11 +6363,21 @@ class GenizahGUI(QMainWindow):
                 for item in self._sort_comp_items(self.comp_known):
                     add_manuscript_node(root_known, item)
 
+            # Start batched loading for Main Results (deferred to prevent freeze)
+            if root_main and visible_sorted_main:
+                self.comp_tree.setUpdatesEnabled(True)
+                self._update_recursive_button_state()
+                # Start batched loading - this will call filters when done
+                self._start_batched_tree_load(root_main, visible_sorted_main)
+                if ids_to_fetch:
+                    self.start_metadata_loading(list(ids_to_fetch))
+                return  # Early return - batched loading handles the rest
+
         self.comp_tree.setUpdatesEnabled(True)
         self._update_comp_filter_indicators()
         self._apply_comp_tree_filters()
         self._update_recursive_button_state()
-        
+
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
     
@@ -6516,7 +6533,42 @@ class GenizahGUI(QMainWindow):
 
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
                 self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-    
+
+    # ========== Batched Tree Loading for Performance ==========
+    def _start_batched_tree_load(self, parent_node, items, batch_size=50):
+        """Start loading items into tree in batches to prevent UI freeze."""
+        self._batch_queue = list(items)  # Copy to avoid mutation issues
+        self._batch_parent = parent_node
+        self._batch_size = batch_size
+        self._batch_index = 0
+        # Start first batch immediately
+        self._process_tree_batch()
+
+    def _process_tree_batch(self):
+        """Process one batch of items and schedule next batch."""
+        if not hasattr(self, '_batch_queue') or self._batch_index >= len(self._batch_queue):
+            # Done loading - cleanup
+            self._batch_queue = None
+            self._batch_parent = None
+            self.comp_tree.setUpdatesEnabled(True)
+            self._update_comp_filter_indicators()
+            self._apply_comp_tree_filters()
+            return
+
+        # Process batch
+        self.comp_tree.setUpdatesEnabled(False)
+        end_index = min(self._batch_index + self._batch_size, len(self._batch_queue))
+
+        for i in range(self._batch_index, end_index):
+            self._add_manuscript_node(self._batch_parent, self._batch_queue[i])
+
+        self._batch_index = end_index
+        self.comp_tree.setUpdatesEnabled(True)
+
+        # Schedule next batch with small delay to let UI breathe
+        if self._batch_index < len(self._batch_queue):
+            QTimer.singleShot(0, self._process_tree_batch)
+
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
         missing_ids = set()
