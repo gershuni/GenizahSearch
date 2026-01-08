@@ -2806,7 +2806,17 @@ class MetadataManager:
                             img_id = service.get('@id') if service else resource.get('@id')
 
                             if img_id:
-                                result['canvases'].append({'label': lbl, 'url': img_id})
+                                # Extract folio_num from label for proper page indexing
+                                # Labels like "1", "1r", "1v", "2" etc. - extract leading number
+                                # Labels like "Binding", "Cover" etc. - no folio_num
+                                folio_num = None
+                                lbl_match = re.match(r'^(\d+)', str(lbl).strip())
+                                if lbl_match:
+                                    try:
+                                        folio_num = int(lbl_match.group(1))
+                                    except (TypeError, ValueError):
+                                        pass
+                                result['canvases'].append({'label': lbl, 'url': img_id, 'folio_num': folio_num})
 
             return result
         except Exception as e:

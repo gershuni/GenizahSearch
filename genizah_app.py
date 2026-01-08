@@ -111,7 +111,23 @@ def _get_initial_image_index(meta, page_num):
     return min(folio_entries, key=lambda pair: pair[1])[0]
 
 def _get_folio_number_from_shelfmark(shelfmark):
+    """Extract folio number from Oxford-style shelfmarks only.
+
+    Oxford shelfmarks like "MS. Heb. a. 1/1" or "Bodl. Or. 12/3" contain
+    actual folio numbers after the slash. Other libraries (Cambridge, NLI, etc.)
+    use classmarks where trailing numbers are not folio references.
+    """
     if not shelfmark:
+        return None
+    upper = shelfmark.upper()
+    # Only extract folio from Oxford-style shelfmarks (MS. Heb., Bodl., etc.)
+    is_oxford = (
+        'MS. HEB' in upper or
+        'MS HEB' in upper or
+        upper.startswith('BODL') or
+        'BODLEIAN' in upper
+    )
+    if not is_oxford:
         return None
     match = re.search(r'[/.](\d+)\s*$', shelfmark)
     if not match:
