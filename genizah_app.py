@@ -6255,7 +6255,7 @@ class GenizahGUI(QMainWindow):
                 combined_filt = []
                 for item in filt_flat: combined_filt.append({'type_wrapper': 'item', 'val': item})
                 for grp in filt_groups: combined_filt.append({'type_wrapper': 'group', 'val': grp})
-                
+
                 register_lazy_list(root_filt, combined_filt, 'mixed')
 
             # 4. Excluded (Lazy)
@@ -6369,59 +6369,6 @@ class GenizahGUI(QMainWindow):
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
 
-    def _add_single_comp_node(self, parent, ms_item, initial_state=Qt.CheckState.Unchecked):
-        """Dedicated helper to add one row to the tree."""
-        sid = ms_item.get('sys_id')
-        if not sid:
-            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
-        
-        shelf, t = self.meta_mgr.get_meta_for_id(sid)
-        display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
-        
-        node = QTreeWidgetItem(parent)
-        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # עיגול הציון
-        self._set_comp_tree_text(node, 1, display_shelf)
-        self._set_comp_tree_text(node, 2, t or "")
-        self._set_comp_tree_text(node, 3, sid)
-        
-        node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        node.setCheckState(0, initial_state)
-        node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-
-        pages = ms_item.get('pages', [])
-        
-        if len(pages) == 1:
-            p_item = pages[0]
-            p_num = "Img"
-            if 'raw_header' in p_item:
-                _, p_num_extracted, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                if p_num_extracted: p_num = p_num_extracted
-            
-            self._set_comp_tree_text(node, 1, f"{display_shelf} (Img {p_num})")
-            self._set_comp_node_previews(node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-        
-        elif len(pages) > 1:
-             self._set_comp_tree_text(node, 1, f"{display_shelf} ({len(pages)} matches)")
-             
-             if pages:
-                 first_p = pages[0]
-                 self._set_comp_node_previews(node, first_p.get('source_ctx', ''), first_p.get('text', ''), first_p.get('highlight_pattern'))
-             # ---------------------------------------------------------
-
-             for p_item in pages:
-                child = QTreeWidgetItem(node)
-                self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
-                
-                p_num_child = "?"
-                if 'raw_header' in p_item:
-                    _, p_val, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                    if p_val: p_num_child = p_val
-                
-                child.setText(1, f"Img {p_num_child}") 
-
-                child.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
-    
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
         missing_ids = set()
@@ -7672,7 +7619,7 @@ class GenizahGUI(QMainWindow):
         finally:
             super().closeEvent(event)
     
-    def _add_single_comp_node(self, parent, ms_item):
+    def _add_single_comp_node(self, parent, ms_item, initial_state=Qt.CheckState.Unchecked):
         """Adds a node to the composition tree with parent/child logic."""
         item_type = ms_item.get('type', 'manuscript')
         is_part = item_type == 'part'
@@ -7709,7 +7656,7 @@ class GenizahGUI(QMainWindow):
         self._set_comp_tree_text(node, 3, ms_item.get('part_id', '') if is_part else sid)
 
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        node.setCheckState(0, Qt.CheckState.Unchecked)
+        node.setCheckState(0, initial_state)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
         node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
@@ -7750,6 +7697,11 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(child, 0, str(int(p_item.get('score', 0))))
                 child.setText(1, p_num_str)
                 child.setData(0, Qt.ItemDataRole.UserRole, p_item)
+
+                # Check child state (if parent is checked, child should be checked)
+                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                child.setCheckState(0, initial_state)
+
                 self._set_comp_node_previews(child, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
 
         elif len(pages) == 1:
