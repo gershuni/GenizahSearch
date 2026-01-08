@@ -6176,6 +6176,8 @@ class GenizahGUI(QMainWindow):
             if sid and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
 
+        # Block itemChanged signal during tree population to prevent O(n²) updates
+        self.comp_tree_updating = True
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
 
@@ -6374,13 +6376,14 @@ class GenizahGUI(QMainWindow):
                 return  # Early return - batched loading handles the rest
 
         self.comp_tree.setUpdatesEnabled(True)
+        self.comp_tree_updating = False  # Re-enable itemChanged signal
         self._update_comp_filter_indicators()
         self._apply_comp_tree_filters()
         self._update_recursive_button_state()
 
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
-    
+
     def _make_node_checkable(self, node):
         """Make a tree node checkable."""
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -6551,6 +6554,7 @@ class GenizahGUI(QMainWindow):
             self._batch_queue = None
             self._batch_parent = None
             self.comp_tree.setUpdatesEnabled(True)
+            self.comp_tree_updating = False  # Re-enable itemChanged signal
             self._update_comp_filter_indicators()
             self._apply_comp_tree_filters()
             return
@@ -6773,12 +6777,14 @@ class GenizahGUI(QMainWindow):
                 else:
                     break
 
-            # Populate real children
+            # Populate real children - block itemChanged signal
+            self.comp_tree_updating = True
             self.comp_tree.setUpdatesEnabled(False)
             sorted_items = self._sort_comp_items(virtual_items)
             for ms_item in sorted_items:
                 self._add_manuscript_node(item, ms_item)
             self.comp_tree.setUpdatesEnabled(True)
+            self.comp_tree_updating = False
 
             # Clear virtual data to prevent re-population
             item.setData(0, Qt.ItemDataRole.UserRole + 200, None)
