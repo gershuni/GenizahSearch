@@ -13,7 +13,8 @@ import csv
 import openpyxl
 from docx import Document
 from docx.enum.section import WD_ORIENTATION
-from docx.shared import RGBColor, Inches
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.shared import RGBColor
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.cell.rich_text import TextBlock, CellRichText
 from openpyxl.cell.text import InlineFont
@@ -4952,7 +4953,7 @@ class GenizahGUI(QMainWindow):
         if not path: return
 
         # Prepare tabular data
-        headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+        headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
         data_rows = []
 
         # Collect results to export (Selected or All)
@@ -5005,8 +5006,11 @@ class GenizahGUI(QMainWindow):
             ])
 
         credit_text = self._get_credit_header()
+        def _strip_search_prefix(text):
+            return re.sub(r'^(\\?\\?\\?|\\?\\?|\\?|=|~|/|\\$|#)\\s*', '', text or "")
+        export_query = _strip_search_prefix(self.last_search_query)
         search_info_lines = [
-            tr("Search Query") + f": {self.last_search_query}",
+            tr("Search Query") + f": {export_query}",
             tr("Search Mode") + f": {self.mode_combo.currentText()}",
             tr("Gap") + f": {self.gap_input.text()}",
             tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle.isChecked() else 'Off'}",
@@ -5020,7 +5024,7 @@ class GenizahGUI(QMainWindow):
             try:
                 wb = openpyxl.Workbook()
                 ws = wb.active
-                ws.title = "Genizah Results"
+                ws.title = tr("Search Results")
                 ws.sheet_view.rightToLeft = True
 
                 # Fonts used for rich text snippets
@@ -5133,7 +5137,7 @@ class GenizahGUI(QMainWindow):
                     doc.add_paragraph(line.strip())
                 doc.add_paragraph("")
 
-                headers = ["System ID", "Shelfmark", "Title", "Image/Page", "Source", "Snippet"]
+                headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
                 table = doc.add_table(rows=1, cols=len(headers))
                 hdr_cells = table.rows[0].cells
                 for idx, header in enumerate(headers):
@@ -5148,6 +5152,14 @@ class GenizahGUI(QMainWindow):
                             self._add_docx_highlighted_runs(cell.paragraphs[0], val)
                         else:
                             cell.text = str(val).replace('*', '')
+
+                if CURRENT_LANG == "he":
+                    for p in doc.paragraphs:
+                        p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for p in cell.paragraphs:
+                                p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
 
                 doc.save(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -5232,10 +5244,10 @@ class GenizahGUI(QMainWindow):
         credit_text = self._get_credit_header()
         query_text = self.comp_text_area.toPlainText().strip()
         comp_settings_lines = [
-            tr("Chunk") + f": {self.spin_chunk.value()}",
-            tr("Max Freq") + f": {self.spin_freq.value()}",
+            tr("Chunk: ") + f"{self.spin_chunk.value()}",
+            tr("Max Freq: ") + f"{self.spin_freq.value()}",
             tr("Search Mode") + f": {self.comp_mode_combo.currentText()}",
-            tr("Filter >") + f": {self.spin_filter.value()}",
+            tr("Filter > ") + f"{self.spin_filter.value()}",
             tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle_comp.isChecked() else 'Off'}",
         ]
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -5388,12 +5400,12 @@ class GenizahGUI(QMainWindow):
                 try:
                     wb = openpyxl.Workbook()
                     ws_report = wb.active
-                    ws_report.title = "Report View"
+                    ws_report.title = tr("Report View")
                     ws_report.sheet_view.rightToLeft = True
 
-                    ws_raw = wb.create_sheet("Raw Data")
+                    ws_raw = wb.create_sheet(tr("Raw Data"))
                     ws_raw.sheet_view.rightToLeft = True
-                    ws_query = wb.create_sheet("Query information")
+                    ws_query = wb.create_sheet(tr("Query information"))
                     ws_query.sheet_view.rightToLeft = True
 
                     font_red = InlineFont(color='FF0000', b=True)
@@ -5454,7 +5466,17 @@ class GenizahGUI(QMainWindow):
                                 ws.cell(row=row_idx, column=idx, value=sanitize_for_excel(val_str))
                         return row_idx + 1
 
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
 
                     # Raw Data sheet (flat)
                     raw_row = _write_credit_block(ws_raw, 1)
@@ -5610,9 +5632,9 @@ class GenizahGUI(QMainWindow):
                         ws_raw.column_dimensions[col].width = width
 
                     if c_known:
-                        ws_excluded = wb.create_sheet("Excluded manuscripts")
+                        ws_excluded = wb.create_sheet(tr("Excluded Manuscripts"))
                         ws_excluded.sheet_view.rightToLeft = True
-                        ws_excluded.append(["System ID", "Shelfmark", "Title"])
+                        ws_excluded.append([tr("System ID"), tr("Shelfmark"), tr("Title")])
                         for cell in ws_excluded[1]:
                             cell.font = Font(bold=True, color="FFFFFF")
                             cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
@@ -5644,7 +5666,17 @@ class GenizahGUI(QMainWindow):
             # --- CSV ---
             elif fmt == 'csv':
                 try:
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
                     with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
@@ -5675,8 +5707,7 @@ class GenizahGUI(QMainWindow):
                         if p.runs:
                             p.runs[0].font.bold = True
                     doc.add_paragraph("")
-
-                    doc.add_paragraph(tr("Statistics"))
+                    doc.add_paragraph(tr("Report Summary"))
                     stats_lines = [
                         f"{tr('Total Manuscripts Found')}: {total_count}",
                         f"{tr('Main Manuscripts')}: {len(c_main)}",
@@ -5689,14 +5720,26 @@ class GenizahGUI(QMainWindow):
                     doc.add_paragraph(tr("See Appendix for query information and excluded manuscripts."))
                     doc.add_paragraph("")
 
-                    headers = ["Category", "Group", "System ID", "Shelfmark", "Title", "Image", "Score", "Source Context", "Manuscript Text"]
+                    headers = [
+                        tr("Category"),
+                        tr("Group"),
+                        tr("System ID"),
+                        tr("Shelfmark"),
+                        tr("Title"),
+                        tr("Image"),
+                        tr("Score"),
+                        tr("Source Context"),
+                        tr("Manuscript Text"),
+                    ]
                     table = doc.add_table(rows=1, cols=len(headers))
                     table.autofit = False
                     hdr_cells = table.rows[0].cells
                     for idx, header in enumerate(headers):
                         hdr_cells[idx].text = header
-                    col_widths = [Inches(1.0), Inches(1.2), Inches(1.2), Inches(1.6), Inches(2.0), Inches(1.0), Inches(1.0), Inches(3.5), Inches(3.5)]
-                    for idx, width in enumerate(col_widths):
+                    available_width = section.page_width - section.left_margin - section.right_margin
+                    ratios = [0.05, 0.06, 0.07, 0.1, 0.12, 0.05, 0.05, 0.25, 0.25]
+                    for idx, ratio in enumerate(ratios):
+                        width = int(available_width * ratio)
                         for cell in table.columns[idx].cells:
                             cell.width = width
 
@@ -5720,13 +5763,19 @@ class GenizahGUI(QMainWindow):
                         doc.add_paragraph(line)
 
                     doc.add_paragraph("")
-                    doc.add_heading(tr("Excluded manuscripts"), level=2)
+                    doc.add_heading(tr("Excluded Manuscripts"), level=2)
+                    excluded_table = None
                     if c_known:
                         excluded_table = doc.add_table(rows=1, cols=3)
                         excluded_table.autofit = False
                         excluded_hdr = excluded_table.rows[0].cells
-                        for idx, header in enumerate(["System ID", "Shelfmark", "Title"]):
+                        for idx, header in enumerate([tr("System ID"), tr("Shelfmark"), tr("Title")]):
                             excluded_hdr[idx].text = header
+                        excluded_widths = [0.2, 0.3, 0.5]
+                        for idx, ratio in enumerate(excluded_widths):
+                            width = int(available_width * ratio)
+                            for cell in excluded_table.columns[idx].cells:
+                                cell.width = width
                         for item in self._sort_comp_items(c_known):
                             item_type = item.get('type', '')
                             if item_type == 'part':
@@ -5746,6 +5795,19 @@ class GenizahGUI(QMainWindow):
                             row_cells[2].text = str(title or "")
                     else:
                         doc.add_paragraph(tr("None"))
+
+                    if CURRENT_LANG == "he":
+                        for p in doc.paragraphs:
+                            p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for p in cell.paragraphs:
+                                    p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+                        if excluded_table is not None:
+                            for row in excluded_table.rows:
+                                for cell in row.cells:
+                                    for p in cell.paragraphs:
+                                        p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
 
                     doc.save(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
