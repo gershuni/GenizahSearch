@@ -967,6 +967,7 @@ class ZoomableScrollArea(QGraphicsView):
 
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
+    _thumbnail_ready = pyqtSignal(QPixmap, int)  # pixmap, page_index
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -976,6 +977,7 @@ class ManuscriptViewerWidget(QWidget):
         self.current_idx = 0
         self.loader_thread = None
         self.external_provider = None
+        self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
 
     def init_ui(self):
@@ -1182,19 +1184,32 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
-    def _load_thumbnail(self, thumb_url):
-        """Load thumbnail synchronously for quick display while full image loads."""
-        try:
-            import urllib.request
-            req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
-            with urllib.request.urlopen(req, timeout=3) as response:
-                data = response.read()
-                image = QImage()
-                if image.loadFromData(data):
-                    pix = QPixmap.fromImage(image)
-                    self.scroll_area.set_image(pix)
-        except Exception:
-            pass  # Thumbnail load failed, full image will replace it
+    def _on_thumbnail_ready(self, pix, page_idx):
+        """Handle thumbnail loaded signal - only display if still on same page."""
+        if self.current_idx == page_idx and pix and not pix.isNull():
+            self.scroll_area.set_image(pix)
+
+    def _load_thumbnail_async(self, thumb_url):
+        """Load thumbnail asynchronously for quick display while full image loads."""
+        current_idx = self.current_idx  # Capture current state
+        signal = self._thumbnail_ready  # Capture signal reference for thread
+
+        def fetch_and_emit():
+            try:
+                import urllib.request
+                req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    data = response.read()
+                    if data:
+                        image = QImage()
+                        if image.loadFromData(data):
+                            pix = QPixmap.fromImage(image)
+                            signal.emit(pix, current_idx)
+            except Exception:
+                pass  # Thumbnail load failed, full image will replace it
+
+        # Run in background thread to avoid blocking UI
+        threading.Thread(target=fetch_and_emit, daemon=True).start()
 
     def set_page(self, index):
         if not self.active_list:
@@ -1217,11 +1232,12 @@ class ManuscriptViewerWidget(QWidget):
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
-            self.loader_thread.wait()
+            # Use short timeout to avoid blocking UI - thread will finish in background
+            self.loader_thread.wait(500)
 
-        # Load thumbnail first if available (for quick display)
+        # Load thumbnail asynchronously if available (for quick display)
         if thumb_url:
-            self._load_thumbnail(thumb_url)
+            self._load_thumbnail_async(thumb_url)
 
         final_url = self._resolve_url(base_url)
 
@@ -1422,7 +1438,7 @@ class ImageLoaderThread(QThread):
     def _download_bytes(self, target_url, headers):
         """Helper to download bytes safely."""
         try:
-            resp = requests.get(target_url, headers=headers, timeout=25, stream=True, verify=False)
+            resp = requests.get(target_url, headers=headers, timeout=10, stream=True, verify=False)
             if self._cancelled: return None
             if resp.status_code == 200:
                 return resp.content
@@ -2504,11 +2520,13 @@ class ResultDialog(QDialog):
         img_thread = getattr(self, 'img_thread', None)
         if img_thread and img_thread.isRunning():
             img_thread.cancel()
-            img_thread.wait()
+            # Use short timeout to avoid blocking UI - thread will finish in background
+            img_thread.wait(500)
 
         if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
             self.ext_img_thread.cancel()
-            self.ext_img_thread.wait()
+            # Use short timeout to avoid blocking UI - thread will finish in background
+            self.ext_img_thread.wait(500)
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
@@ -7602,7 +7620,8 @@ class GenizahGUI(QMainWindow):
     def cancel_browse_image_thread(self):
         if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
             self.browse_img_thread.cancel()
-            self.browse_img_thread.wait()
+            # Use short timeout to avoid blocking UI - thread will finish in background
+            self.browse_img_thread.wait(500)
 
     def fetch_browse_thumbnail(self, sys_id, meta=None):
         self.cancel_browse_image_thread()
