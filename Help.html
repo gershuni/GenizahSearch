@@ -99,6 +99,7 @@
         <li><a href="#composition">Composition Search</a></li>
         <li><a href="#browse">Browse Manuscript</a></li>
         <li><a href="#lab">Lab Mode</a></li>
+        <li><a href="#settings">Settings & About</a></li>
         <li><a href="#export">Exporting Data</a></li>
     </ul>
     </div>
@@ -119,7 +120,8 @@
         <li><b>Variants:</b> Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod).</li>
         <li><b>Extended / Maximum:</b> Allows for greater flexibility in letter substitutions (e.g., Qof/Kaf, Tet/Tav), but may return less relevant results ("noise") and take longer to search.</li>
         <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with decoding errors.</li>
-        <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph. You can ask an external AI for a suitable string, or use the built-in AI tool in the software, which requires providing an API key in Settings.</li>
+        <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
+        <li><b>AI Assistant (🤖):</b> Click the AI button to open a chat interface that helps generate regex patterns. Describe what you're looking for in plain language, and the AI will create the appropriate regex. Supports Google Gemini, OpenAI, and Anthropic Claude (configure your API key in the Settings tab).</li>
         <li><b>Title:</b> Searches within the catalog titles of compositions. Example: searching "Mishneh Torah" will retrieve all manuscripts identified as Maimonides' Mishneh Torah.</li>
         <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
     </ul>
@@ -130,6 +132,16 @@
         <li><b>Select All:</b> A checkbox at the top of the table allows you to select all results (or currently displayed results) for focused export.</li>
         <li><b>Preview:</b> Double-clicking a row opens the full Manuscript Viewer on that page. Clicking the "👁" button will lead to the same result.</li>
         <li><b>Browse Manuscript:</b> Clicking the "📖" icon will open the manuscript in the "Browse Manuscript" tab. A similar browse button is also found in the Manuscript Viewer.</li>
+        <li><b>Column Filtering:</b> Click on column headers (Shelfmark, Title, Snippet) to filter results by text. Check "Exclude" to hide matching results instead of showing them.</li>
+    </ul>
+
+    <h3>Search Settings (⚙)</h3>
+    <p>Click the gear icon to open advanced search settings:</p>
+    <ul>
+        <li><b>Limit Short Words:</b> Words with ≤ N characters receive only 1 character change in variant modes.</li>
+        <li><b>Max Changes per Word:</b> Maximum number of character substitutions allowed per word (default: 2).</li>
+        <li><b>Aggressive Mode:</b> Ignores word length limits for variant generation.</li>
+        <li><b>Custom Variant Pairs:</b> Define your own letter substitution pairs (e.g., "ק=א", one per line).</li>
     </ul>
     </div>
 
@@ -166,11 +178,14 @@
     <h2 id="browse">Browse Manuscript</h2>
     <p>This tab enables convenient continuous reading of a full manuscript, synchronized with source images.</p>
     <ul>
-        <li><b>Load:</b> Enter a System ID or Shelfmark. The search is flexible and ignores spaces or punctuation (e.g., <code>TS 13 15</code> finds <code>T-S 13.15</code>).</li>
+        <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS 13 15</code> finds <code>T-S 13.15</code>). Autocomplete is available for shelfmarks.</li>
         <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
         <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> at the top left to move to the previous or next manuscript in the database file order.</li>
-        <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge where supported).</li>
+        <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge where supported). Use 🖼️ to show/hide the image panel.</li>
         <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling and for saving as a text file.</li>
+        <li><b>Find in Text:</b> Type in the search field to highlight matching text in real-time within the current manuscript.</li>
+        <li><b>Find Parallels:</b> Sends the current page text to the Composition Search tab for finding parallels across the corpus.</li>
+        <li><b>View on Ktiv:</b> Opens the manuscript in the National Library of Israel's online catalog.</li>
     </ul>
     </div>
 
@@ -179,7 +194,6 @@
     <p>The "Lab Mode" button activates an experimental and more advanced search engine.</p>
     <ul>
         <li><b>Deep Scan:</b> A much deeper and thorough scan. Significantly slower, but recommended for finding rare phrases or ensuring nothing is missed.</li>
-        <li><b>Fingerprint Algorithm:</b> In this mode, the engine uses a different method for identifying words based on rare letters, allowing greater flexibility in identifying corruptions.</li>
     </ul>
 
     <h3>Lab Mode Parameters</h3>
@@ -213,12 +227,40 @@
     </div>
 
     <div class="section">
+    <h2 id="settings">Settings & About</h2>
+    <p>The Settings tab provides configuration options and information about the application.</p>
+
+    <h3>Data & Index</h3>
+    <ul>
+        <li><b>Download Transcriptions:</b> Opens a link to download the latest transcription data from Zenodo.</li>
+        <li><b>Build/Rebuild Index:</b> Creates or updates the search index from the Transcriptions.txt file. Required after downloading new transcriptions.</li>
+    </ul>
+
+    <h3>AI Configuration</h3>
+    <ul>
+        <li><b>Provider:</b> Select your AI provider (Google Gemini, OpenAI, or Anthropic Claude).</li>
+        <li><b>Model:</b> The model name to use (defaults are provided for each provider).</li>
+        <li><b>API Key:</b> Enter your API key for the selected provider.</li>
+    </ul>
+
+    <h3>Application</h3>
+    <ul>
+        <li><b>Version:</b> Displays the current application version.</li>
+        <li><b>Check for Updates:</b> Checks GitHub for new releases. When a new version is available, a notification bar appears at the top of the window.</li>
+    </ul>
+
+    <h3>About</h3>
+    <p>Contains information about the application, credits, data sources, and citation information. Use the "Copy" button to copy the recommended citation.</p>
+    </div>
+
+    <div class="section">
     <h2 id="export">Exporting Data</h2>
     <p>At any stage, you can export results for external use:</p>
     <ul>
         <li><b>XLSX (Excel):</b> Includes rich formatting and color highlighting of found words within context.</li>
         <li><b>CSV:</b> Raw data format, suitable for importing into other databases.</li>
         <li><b>TXT:</b> Simple readable text report.</li>
+        <li><b>DOCX (Word):</b> Microsoft Word document with formatted report.</li>
     </ul>
     <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
     </div>
@@ -240,6 +282,7 @@
         <li><a href="#composition">חיפוש חיבורים</a></li>
         <li><a href="#browse">עיון בכתב יד</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
+        <li><a href="#settings">הגדרות ואודות</a></li>
         <li><a href="#export">ייצוא נתונים</a></li>
     </ul>
     </div>
@@ -260,7 +303,8 @@
         <li><b>וריאנטים:</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י).</li>
         <li><b>מורחב / מקסימלי:</b> מאפשרים גמישות רבה יותר בחילופי אותיות (כגון ק/כ, ט/ת), אך עלולים להחזיר תוצאות פחות רלוונטיות ("רעש"), ולקחת יותר זמן חיפוש.</li>
         <li><b>עמום:</b> משתמש במרחק לווינשטיין (<bdi dir="ltr">Levenshtein distance</bdi>) למציאת מילים דומות גם אם יש שגיאות פענוח.</li>
-        <li><b>ביטוי רגולרי (<bdi dir="ltr">Regex</bdi>):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code><bdi dir="ltr">\bא[א-ת]{3}\b</bdi></code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li> ניתן לבקש מהבינה המלאכותית שבהישג ידכם מחרוזת מתאימה, או להשתמש בכלי הבינה המלאכותית בתוכנה, מה שמצריך שתספקו לו מפתח גישה מתאים בהגדרות.
+        <li><b>ביטוי רגולרי (<bdi dir="ltr">Regex</bdi>):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code><bdi dir="ltr">\bא[א-ת]{3}\b</bdi></code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li>
+        <li><b>עוזר בינה מלאכותית (🤖):</b> לחצו על כפתור ה-AI לפתיחת ממשק צ'אט שעוזר ליצור תבניות רגקס. תארו בשפה חופשית מה אתם מחפשים, והבינה המלאכותית תיצור את הביטוי הרגולרי המתאים. תומך ב-Google Gemini, OpenAI ו-Anthropic Claude (הגדירו את מפתח ה-API בלשונית ההגדרות).</li>
         <li><b>כותרת:</b> חיפוש בתוך המידע הקטלוגי של הכותרות. דוגמה: חיפוש "משנה תורה" יביא את כל כתבי היד המזוהים כמשנה תורה לרמב"ם.</li>
         <li><b>מספר מדף:</b> חיפוש מהיר של מספר מדף (למשל: "<bdi dir="ltr">T-S 13.15</bdi>").</li>
     </ul>
@@ -271,6 +315,16 @@
         <li><b>בחר הכל:</b> בראש הטבלה ישנה תיבת סימון המאפשרת לבחור את כל התוצאות (או את התוצאות המוצגות כרגע) לצורך ייצוא ממוקד.</li>
         <li><b>תצוגה מקדימה:</b> לחיצה כפולה על שורה תפתח את צפיין כתב היד המלא באותו עמוד. לחיצה על לחצן ה"👁" תוביל לאותה תוצאה.</li>
 		<li><b>עיון בכתב יד:</b> לחיצה על לחצן ה"📖" תוביל לפתיחת כתב היד בלשונית עיון בכתב יד. לחצן עיון דומה נמצא גם בצפיין כתב היד.</li>
+        <li><b>סינון עמודות:</b> לחיצה על כותרות העמודות (מספר מדף, כותרת, קטע) מאפשרת לסנן תוצאות לפי טקסט. סמנו "החרג" כדי להסתיר תוצאות תואמות במקום להציג אותן.</li>
+    </ul>
+
+    <h3>הגדרות חיפוש (⚙)</h3>
+    <p>לחצו על סמל גלגל השיניים לפתיחת הגדרות חיפוש מתקדמות:</p>
+    <ul>
+        <li><b>הגבלת מילים קצרות:</b> מילים עם ≤ N תווים יקבלו שינוי תו אחד בלבד במצבי וריאנטים.</li>
+        <li><b>מקסימום שינויים למילה:</b> מספר החלפות התווים המרבי המותר למילה (ברירת מחדל: 2).</li>
+        <li><b>מצב אגרסיבי:</b> מתעלם ממגבלות אורך מילה ביצירת וריאנטים.</li>
+        <li><b>זוגות וריאנטים מותאמים אישית:</b> הגדירו זוגות החלפת אותיות משלכם (למשל: "ק=א", אחד בכל שורה).</li>
     </ul>
     </div>
 
@@ -307,11 +361,14 @@
     <h2 id="browse">עיון בכתב יד</h2>
     <p>לשונית זו מאפשרת קריאה רציפה ונוחה של כתב יד שלם, עם סנכרון לתמונות המקור.</p>
     <ul>
-        <li><b>טעינה:</b> הזינו מספר מערכת או מספר מדף. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S 13.15</bdi></code>).</li>
+        <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
         <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
         <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">▶</span> <span style="border:1px solid #ccc; padding:0 4px;">◀</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
-        <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג' במקרים נתמכים).</li>
+        <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג' במקרים נתמכים). השתמשו ב-🖼️ כדי להציג/להסתיר את פאנל התמונות.</li>
         <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה ולשמירה כקובץ טקסט.</li>
+        <li><b>חיפוש בטקסט:</b> הקלידו בשדה החיפוש כדי להדגיש טקסט תואם בזמן אמת בתוך כתב היד הנוכחי.</li>
+        <li><b>מצא מקבילות:</b> שולח את טקסט העמוד הנוכחי ללשונית חיפוש חיבורים לאיתור מקבילות בכל הקורפוס.</li>
+        <li><b>צפה בכתיב:</b> פותח את כתב היד בקטלוג המקוון של הספרייה הלאומית.</li>
     </ul>
     </div>
 
@@ -320,7 +377,6 @@
     <p>כפתור "מצב מעבדה" מפעיל מנוע חיפוש ניסיוני ומתקדם יותר.</p>
     <ul>
         <li><b>סריקה עמוקה:</b> סריקה מעמיקה ויסודית יותר. איטית משמעותית, אך מומלצת לחיפוש ביטויים נדירים או כשרוצים לוודא שלא החמצתם כלום.</li>
-        <li><b>אלגוריתם טביעת אצבע:</b> המנוע במצב זה משתמש בשיטה שונה לזיהוי מילים, המבוססת על האותיות הנדירות במילה, מה שמאפשר גמישות רבה יותר בזיהוי שיבושים.</li>
     </ul>
 
     <h3>פרמטרים של מצב מעבדה</h3>
@@ -354,12 +410,40 @@
     </div>
 
     <div class="section">
+    <h2 id="settings">הגדרות ואודות</h2>
+    <p>לשונית ההגדרות מספקת אפשרויות תצורה ומידע על האפליקציה.</p>
+
+    <h3>נתונים ואינדקס</h3>
+    <ul>
+        <li><b>הורדת תעתוקים:</b> פותח קישור להורדת נתוני התעתוק העדכניים מ-Zenodo.</li>
+        <li><b>בניית/עדכון אינדקס:</b> יוצר או מעדכן את אינדקס החיפוש מקובץ Transcriptions.txt. נדרש לאחר הורדת תעתוקים חדשים.</li>
+    </ul>
+
+    <h3>הגדרת בינה מלאכותית</h3>
+    <ul>
+        <li><b>ספק:</b> בחרו את ספק ה-AI שלכם (Google Gemini, OpenAI או Anthropic Claude).</li>
+        <li><b>מודל:</b> שם המודל לשימוש (ברירות מחדל מסופקות לכל ספק).</li>
+        <li><b>מפתח API:</b> הזינו את מפתח ה-API של הספק שנבחר.</li>
+    </ul>
+
+    <h3>אפליקציה</h3>
+    <ul>
+        <li><b>גרסה:</b> מציג את גרסת האפליקציה הנוכחית.</li>
+        <li><b>בדיקת עדכונים:</b> בודק אם יש גרסאות חדשות ב-GitHub. כאשר גרסה חדשה זמינה, מופיעה התראה בראש החלון.</li>
+    </ul>
+
+    <h3>אודות</h3>
+    <p>מכיל מידע על האפליקציה, קרדיטים, מקורות נתונים ומידע לציטוט. השתמשו בכפתור "העתק" כדי להעתיק את הציטוט המומלץ.</p>
+    </div>
+
+    <div class="section">
     <h2 id="export">ייצוא נתונים</h2>
     <p>בכל שלב ניתן לייצא את התוצאות לשימוש חיצוני:</p>
     <ul>
         <li><b><bdi dir="ltr">XLSX</bdi> (אקסל):</b> כולל עיצוב עשיר וסימון בצבע של המילים שנמצאו בתוך הקשר המשפט.</li>
         <li><b><bdi dir="ltr">CSV</bdi>:</b> פורמט נתונים גולמי, מתאים לייבוא למסדי נתונים אחרים.</li>
         <li><b><bdi dir="ltr">TXT</bdi>:</b> דוח טקסט פשוט וקריא.</li>
+        <li><b><bdi dir="ltr">DOCX</bdi> (וורד):</b> מסמך מעוצב של מייקרוסופט וורד.</li>
     </ul>
     <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (באמצעות תיבות הסימון). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
     </div>
