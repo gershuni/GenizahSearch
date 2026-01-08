@@ -6009,6 +6009,18 @@ class GenizahGUI(QMainWindow):
         return sys_id, p_num, shelf, title
 
     def _item_matches_exclusion(self, item):
+        # For Part items, check all folios in the Part
+        item_type = item.get('type', '')
+        if item_type == 'part':
+            # Check sys_id field directly
+            direct_sid = item.get('sys_id')
+            if direct_sid and direct_sid in self.excluded_sys_ids:
+                return True
+            # Check all folios in the Part
+            for folio_sid in item.get('folios', []):
+                if folio_sid in self.excluded_sys_ids:
+                    return True
+
         sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
         if sys_id and sys_id in self.excluded_sys_ids:
             return True
@@ -6330,7 +6342,21 @@ class GenizahGUI(QMainWindow):
         if manual_known:
             if not self.comp_known:
                 self.comp_known = []
-            self.comp_known.extend(manual_known)
+            # Deduplicate by sys_id/part_id to avoid duplicate entries
+            existing_ids = set()
+            for item in self.comp_known:
+                if item.get('type') == 'part':
+                    existing_ids.add(f"PART:{item.get('part_id')}")
+                else:
+                    existing_ids.add(item.get('sys_id'))
+            for item in manual_known:
+                if item.get('type') == 'part':
+                    key = f"PART:{item.get('part_id')}"
+                else:
+                    key = item.get('sys_id')
+                if key and key not in existing_ids:
+                    self.comp_known.append(item)
+                    existing_ids.add(key)
             
         self.comp_grouped_filtered_main = filt_res or []
         self.comp_grouped_filtered_appendix = filt_appx or {}
@@ -6547,9 +6573,26 @@ class GenizahGUI(QMainWindow):
 
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
-        
+
         if not hasattr(self, 'comp_known'): self.comp_known = []
-        self.comp_known.extend(known_main + known_filt)
+
+        # Deduplicate by sys_id/part_id to avoid duplicate entries
+        new_known = known_main + known_filt
+        if new_known:
+            existing_ids = set()
+            for item in self.comp_known:
+                if item.get('type') == 'part':
+                    existing_ids.add(f"PART:{item.get('part_id')}")
+                else:
+                    existing_ids.add(item.get('sys_id'))
+            for item in new_known:
+                if item.get('type') == 'part':
+                    key = f"PART:{item.get('part_id')}"
+                else:
+                    key = item.get('sys_id')
+                if key and key not in existing_ids:
+                    self.comp_known.append(item)
+                    existing_ids.add(key)
 
         self.comp_main = clean_main
         self.comp_appendix = clean_appx
