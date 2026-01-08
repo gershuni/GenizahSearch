@@ -4162,6 +4162,7 @@ class GenizahGUI(QMainWindow):
           ???  -> variants_maximum
           ??   -> variants_extended
           ?    -> variants
+          ?    -> literal
           ~    -> fuzzy
           /    -> Regex
           $    -> Title
@@ -4174,6 +4175,7 @@ class GenizahGUI(QMainWindow):
             ('???', 'variants_maximum', 3),
             ('??', 'variants_extended', 2),
             ('?', 'variants', 1),
+            ('=', 'literal', 0),
             ('~', 'fuzzy', 4),
             ('/', 'Regex', 5),
             ('$', 'Title', 6),
