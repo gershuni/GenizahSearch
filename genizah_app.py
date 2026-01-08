@@ -2912,7 +2912,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
-        self.query_input.setToolTip(tr("query_prefix_tooltip"))
+        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Basic variants\n?? = Extended variants\n??? = Maximum variants\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
@@ -2933,7 +2933,7 @@ class GenizahGUI(QMainWindow):
         row2 = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems([tr("Exact"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex"), tr("Title"), tr("Shelfmark")])
+        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)")])
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Basic variants: ד/ר, ה/ח, ו/י/ן etc."))
@@ -4159,6 +4159,7 @@ class GenizahGUI(QMainWindow):
           ???  -> variants_maximum
           ??   -> variants_extended
           ?    -> variants
+          =    -> literal
           ~    -> fuzzy
           /    -> Regex
           $    -> Title
@@ -4171,6 +4172,7 @@ class GenizahGUI(QMainWindow):
             ('???', 'variants_maximum', 3),
             ('??', 'variants_extended', 2),
             ('?', 'variants', 1),
+            ('=', 'literal', 0),
             ('~', 'fuzzy', 4),
             ('/', 'Regex', 5),
             ('$', 'Title', 6),

@@ -56,7 +56,7 @@ TRANSLATIONS = {
 
     # --- Main Search Tab ---
     "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
-    "query_prefix_tooltip": "קיצורי דרך לחיפוש:\n? = וריאנטים בסיסי\n?? = וריאנטים מורחב\n??? = וריאנטים מקסימלי\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\n\nדוגמה: ?שלום עולם",
+    "Search Shortcuts:\n= = Exact match\n? = Basic variants\n?? = Extended variants\n??? = Maximum variants\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום": "קיצורי דרך לחיפוש:\n= = חיפוש מדויק\n? = וריאנטים בסיסי\n?? = וריאנטים מורחב\n??? = וריאנטים מקסימלי\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\n\nדוגמה: ?שלום",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",
@@ -116,6 +116,7 @@ TRANSLATIONS = {
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
+    "Exact (=)": "מדויק (=)",
     "Variants (?)": "וריאנטים (?)",
     "Variants": "וריאנטים",
     "Extended (??)": "מורחב (??)",
@@ -125,6 +126,9 @@ TRANSLATIONS = {
     "Fuzzy (~)": "עמום (~)",
     "Fuzzy": "עמום",
     "Regex": "ביטוי רגולרי",
+    "Regex (/)": "ביטוי רגולרי (/)",
+    "Title ($)": "כותרת ($)",
+    "Shelfmark (#)": "מספר מדף (#)",
     "Exact match": "התאמה מדויקת",
     "Basic variants": "וריאנטים בסיסיים",
     "Basic variants: ד/ר, ה/ח, ו/י/ן etc.": "וריאנטים בסיסיים: ד/ר, ה/ח, ו/י/ן וכו'",
