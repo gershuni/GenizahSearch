@@ -4957,6 +4957,15 @@ class GenizahGUI(QMainWindow):
             tbl_pr.append(bidi_visual)
         bidi_visual.set(qn("w:val"), "1")
 
+    def _set_table_width_pct(self, table, pct=100):
+        tbl_pr = table._tbl.tblPr
+        tbl_w = tbl_pr.find(qn("w:tblW"))
+        if tbl_w is None:
+            tbl_w = OxmlElement("w:tblW")
+            tbl_pr.append(tbl_w)
+        tbl_w.set(qn("w:type"), "pct")
+        tbl_w.set(qn("w:w"), str(int(pct * 50)))
+
     def export_results(self, fmt='xlsx'):
         """
         Export results handling specific formats directly.
@@ -5158,6 +5167,7 @@ class GenizahGUI(QMainWindow):
 
                 headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
                 table = doc.add_table(rows=1, cols=len(headers))
+                self._set_table_width_pct(table, 100)
                 hdr_cells = table.rows[0].cells
                 for idx, header in enumerate(headers):
                     hdr_cells[idx].text = header
@@ -5407,13 +5417,13 @@ class GenizahGUI(QMainWindow):
                 flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
-                add_rows(c_main, "Main Manuscripts")
+                add_rows(c_main, tr("Main Manuscripts"))
                 for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Appendix", sig)
-                add_rows(c_filt, "Filtered Main")
+                    add_rows(items, tr("Appendix"), sig)
+                add_rows(c_filt, tr("Filtered Main"))
                 for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
-                    add_rows(items, "Filtered Appendix", sig)
-                add_rows(c_known, "Excluded Manuscripts")
+                    add_rows(items, tr("Filtered Appendix"), sig)
+                add_rows(c_known, tr("Excluded Manuscripts"))
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -5753,6 +5763,7 @@ class GenizahGUI(QMainWindow):
                     ]
                     table = doc.add_table(rows=1, cols=len(headers))
                     table.autofit = False
+                    self._set_table_width_pct(table, 100)
                     hdr_cells = table.rows[0].cells
                     for idx, header in enumerate(headers):
                         hdr_cells[idx].text = header
@@ -5788,6 +5799,7 @@ class GenizahGUI(QMainWindow):
                     if c_known:
                         excluded_table = doc.add_table(rows=1, cols=3)
                         excluded_table.autofit = False
+                        self._set_table_width_pct(excluded_table, 100)
                         excluded_hdr = excluded_table.rows[0].cells
                         for idx, header in enumerate([tr("System ID"), tr("Shelfmark"), tr("Title")]):
                             excluded_hdr[idx].text = header

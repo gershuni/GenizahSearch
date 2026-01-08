@@ -203,6 +203,8 @@ TRANSLATIONS = {
     "FILTERED": "מסוננים",
     "FILTERED APPENDIX": "נספח מסונן",
     "Excluded Manuscripts ({})": "כתבי יד מוחרגים ({})",
+    "Filtered Main": "ראשי מסונן",
+    "Filtered Appendix": "נספח מסונן",
     "Filtered Main ({})": "ראשי מסונן ({})",
     "Filtered Appendix ({})": "נספח מסונן ({})",
     "All Results ({})": "כל התוצאות ({})",
