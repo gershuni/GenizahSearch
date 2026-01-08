@@ -6777,7 +6777,7 @@ class GenizahGUI(QMainWindow):
                 total_appx = sum(len(v) for v in clean_appx.values())
                 root_appx = QTreeWidgetItem(self.comp_tree, [tr("Appendix - Grouped ({})").format(total_appx)])
                 root_appx.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_APPX")
-                root_appx.setExpanded(False)
+                root_appx.setExpanded(True)
                 make_checkable(root_appx)
 
                 sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
@@ -6794,7 +6794,7 @@ class GenizahGUI(QMainWindow):
             if total_filt > 0:
                 root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
                 root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
-                root_filt.setForeground(0, Qt.GlobalColor.gray)
+                root_filt.setExpanded(True)
                 make_checkable(root_filt)
                 
                 # Filtered Main
