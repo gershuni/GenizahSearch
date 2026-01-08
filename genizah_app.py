@@ -6087,7 +6087,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_context, QLabel(""))
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
-    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None):
+    def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None, defer_widgets=False):
         if highlight_pattern and source_text:
             try:
                 # Apply highlighting to Source Text if pattern exists
@@ -6100,7 +6100,7 @@ class GenizahGUI(QMainWindow):
 
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
-        
+
         node.setData(
             0,
             Qt.ItemDataRole.UserRole + 1,
@@ -6110,7 +6110,9 @@ class GenizahGUI(QMainWindow):
                 "anchor": anchor
             },
         )
-        self._apply_comp_node_previews(node)
+        # Defer widget creation during batch operations to prevent freeze
+        if not defer_widgets:
+            self._apply_comp_node_previews(node)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # 1. איפוס וניקוי
@@ -6210,14 +6212,14 @@ class GenizahGUI(QMainWindow):
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
                     self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
                         self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
                         p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6229,7 +6231,7 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 3, p_sid or "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             elif item_type == 'manuscript':
                 sid = ms_item['sys_id']
                 shelf, t = self.meta_mgr.get_meta_for_id(sid)
@@ -6250,13 +6252,13 @@ class GenizahGUI(QMainWindow):
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                        self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6267,7 +6269,7 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 3, "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                        self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             else:
                 # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -6278,8 +6280,8 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, 3, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
-            
+                self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=True)
+
             _collect_id(ms_item)
 
 
@@ -6389,8 +6391,8 @@ class GenizahGUI(QMainWindow):
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
 
-    def _add_manuscript_node(self, parent, ms_item):
-        """Add a manuscript/part node to the tree. Used for lazy loading."""
+    def _add_manuscript_node(self, parent, ms_item, defer_widgets=True):
+        """Add a manuscript/part node to the tree. Used for lazy/batched loading."""
         item_type = ms_item.get('type', '')
         if item_type == 'part':
             part_display = ms_item.get('part_display', '')
@@ -6414,14 +6416,14 @@ class GenizahGUI(QMainWindow):
                 p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                 folio_info = f" [{p_shelf}]" if p_shelf else ""
                 self._set_comp_tree_text(ms_node, 1, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
-                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                     folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
                     self._set_comp_tree_text(ms_node, 1, f"{shelf} ({len(pages)} matches{folio_count})")
-                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6433,7 +6435,7 @@ class GenizahGUI(QMainWindow):
                     self._set_comp_tree_text(page_node, 3, p_sid or "")
                     self._make_node_checkable(page_node)
                     page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
         elif item_type == 'manuscript':
             sid = ms_item['sys_id']
             shelf, t = self.meta_mgr.get_meta_for_id(sid)
@@ -6454,13 +6456,13 @@ class GenizahGUI(QMainWindow):
                 p_item = pages[0]
                 _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                 self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
-                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                     self._set_comp_tree_text(ms_node, 1, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
-                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'))
+                    self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
@@ -6471,7 +6473,7 @@ class GenizahGUI(QMainWindow):
                     self._set_comp_tree_text(page_node, 3, "")
                     self._make_node_checkable(page_node)
                     page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
-                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'))
+                    self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
         else:
             # Fallback
             sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -6482,7 +6484,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(node, 3, sid)
             self._make_node_checkable(node)
             node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
-            self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'))
+            self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
 
     def _add_single_node_to_tree(self, parent, ms_item):
         """Dedicated helper to add one row to the tree."""
