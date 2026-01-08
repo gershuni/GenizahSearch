@@ -63,7 +63,7 @@
     }
     .rtl {
         direction: rtl;
-        text-align: left;
+        text-align: right;
         unicode-bidi: isolate;
     }
     .ltr {
@@ -107,7 +107,7 @@
     <div class="section">
     <h2 id="intro">Introduction: How it Works</h2>
     <p>Genizah Search Pro provides fast and advanced access to the transcription corpus of the "MiDRASH" project. The software is based on a high-speed search engine (Tantivy) and integrates unique algorithms to handle the Hebrew spelling variations typical of Genizah manuscripts.</p>
-    <p>The software runs locally on your computer but uses an internet connection to fetch metadata and images from the National Library of Israel and Cambridge University Library. It will work without an internet connection, but without images and some extended information. Note: If your connection is not a home network (such as a mobile hotspot), library servers may block your access.</p>
+    <p>The software runs locally on your computer but uses an internet connection to fetch metadata and images from the National Library of Israel, Oxford Bodlean Library and Cambridge University Library. It will work without an internet connection, but without images and some extended information. Note: If your connection is not a home network (such as a mobile hotspot), library servers may block your access.</p>
     </div>
 
     <div class="section">
@@ -141,7 +141,7 @@
         <li><b>Limit Short Words:</b> Words with ≤ N characters receive only 1 character change in variant modes.</li>
         <li><b>Max Changes per Word:</b> Maximum number of character substitutions allowed per word (default: 2).</li>
         <li><b>Aggressive Mode:</b> Ignores word length limits for variant generation.</li>
-        <li><b>Custom Variant Pairs:</b> Define your own letter substitution pairs (e.g., "ק=א", one per line).</li>
+        <li><b>Custom Variant Pairs:</b> Define your own letter substitution pairs (e.g., "מ=נו", one per line).</li>
     </ul>
     </div>
 
@@ -181,7 +181,7 @@
         <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS 13 15</code> finds <code>T-S 13.15</code>). Autocomplete is available for shelfmarks.</li>
         <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
         <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> at the top left to move to the previous or next manuscript in the database file order.</li>
-        <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge where supported). Use 🖼️ to show/hide the image panel.</li>
+        <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge/Oxford where supported). Use 🖼️ to show/hide the image panel.</li>
         <li><b>View All:</b> Displays all manuscript pages in one long sequence for easy scrolling and for saving as a text file.</li>
         <li><b>Find in Text:</b> Type in the search field to highlight matching text in real-time within the current manuscript.</li>
         <li><b>Find Parallels:</b> Sends the current page text to the Composition Search tab for finding parallels across the corpus.</li>
@@ -290,7 +290,7 @@
     <div class="section">
     <h2 id="intro">הקדמה: איך זה עובד?</h2>
     <p>תוכנת <bdi dir="ltr">Genizah Search Pro</bdi> מאפשרת גישה מהירה ומתקדמת לקורפוס התעתוקים של פרויקט "מדרש" (<bdi dir="ltr">MiDRASH</bdi>). התוכנה מבוססת על מנוע חיפוש מהיר (<bdi dir="ltr">Tantivy</bdi>) ומשלבת אלגוריתמים ייחודיים לטיפול בשונות הכתיב העברית המאפיינת את כתבי היד של הגניזה.</p>
-    <p>התוכנה פועלת באופן מקומי על המחשב שלכם, אך משתמשת בחיבור אינטרנט כדי למשוך מידע ותמונות מהספרייה הלאומית ומספריית האוניברסיטה של קימברידג'. בלי חיבור לאינטרנט היא תעבוד, אך ללא התמונות וללא חלק מהמידע המורחב. שימו לב: אם החיבור שלכם אינו ביתי (כמו נקודה חמה מהטלפון הנייד שלכם) שרתי הספרייה יכולים לחסום אתכם מלקבל מידע.</p>
+    <p>התוכנה פועלת באופן מקומי על המחשב שלכם, אך משתמשת בחיבור אינטרנט כדי למשוך מידע ותמונות מהספרייה הלאומית, מספריית אוקספורד ומספריית האוניברסיטה של קמברידג'. בלי חיבור לאינטרנט היא תעבוד, אך ללא התמונות וללא חלק מהמידע המורחב. שימו לב: אם החיבור שלכם אינו ביתי (כמו נקודה חמה מהטלפון הנייד שלכם) שרתי הספרייה יכולים לחסום אתכם מלקבל מידע.</p>
     </div>
 
     <div class="section">
@@ -324,7 +324,7 @@
         <li><b>הגבלת מילים קצרות:</b> מילים עם ≤ N תווים יקבלו שינוי תו אחד בלבד במצבי וריאנטים.</li>
         <li><b>מקסימום שינויים למילה:</b> מספר החלפות התווים המרבי המותר למילה (ברירת מחדל: 2).</li>
         <li><b>מצב אגרסיבי:</b> מתעלם ממגבלות אורך מילה ביצירת וריאנטים.</li>
-        <li><b>זוגות וריאנטים מותאמים אישית:</b> הגדירו זוגות החלפת אותיות משלכם (למשל: "ק=א", אחד בכל שורה).</li>
+        <li><b>זוגות וריאנטים מותאמים אישית:</b> הגדירו זוגות החלפת אותיות משלכם (למשל: "נו=מ", אחד בכל שורה).</li>
     </ul>
     </div>
 
@@ -364,7 +364,7 @@
         <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
         <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
         <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">▶</span> <span style="border:1px solid #ccc; padding:0 4px;">◀</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
-        <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג' במקרים נתמכים). השתמשו ב-🖼️ כדי להציג/להסתיר את פאנל התמונות.</li>
+        <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג'/אוקספורד במקרים נתמכים). השתמשו ב-🖼️ כדי להציג/להסתיר את פאנל התמונות.</li>
         <li><b>הכל:</b> כפתור המציג את כל עמודי כתב היד ברצף אחד ארוך לגלילה נוחה ולשמירה כקובץ טקסט.</li>
         <li><b>חיפוש בטקסט:</b> הקלידו בשדה החיפוש כדי להדגיש טקסט תואם בזמן אמת בתוך כתב היד הנוכחי.</li>
         <li><b>מצא מקבילות:</b> שולח את טקסט העמוד הנוכחי ללשונית חיפוש חיבורים לאיתור מקבילות בכל הקורפוס.</li>
