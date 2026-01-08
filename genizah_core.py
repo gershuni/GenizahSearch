@@ -1567,27 +1567,58 @@ class VariantManager:
         return m
 
     def __init__(self, settings=None):
-        # Build hierarchical maps (each level includes all previous)
-        self.basic_map = self.make_multimap(self._BASIC_PAIRS)
-
-        self.extended_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS
-        )
-
-        self.maximum_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS
-        )
+        # Settings reference (can be updated later via set_settings)
+        self._settings = settings
 
         # Cache for frequently searched terms
         self._cache = {}
         self._cache_max_size = 5000
 
-        # Settings reference (can be updated later via set_settings)
-        self._settings = settings
+        # Build maps (will include custom variants if settings has them)
+        self._rebuild_maps()
+
+    def _get_custom_pairs(self) -> list:
+        """
+        Parse custom variants from settings.
+        Format: dict of 'a=b' style strings, e.g. {'ק=א': True, 'כו=מ': True}
+        Returns list of bidirectional pairs.
+        """
+        if not self._settings:
+            return []
+
+        custom = getattr(self._settings, 'custom_variants', {})
+        if not custom:
+            return []
+
+        pairs = []
+        for key in custom:
+            if '=' in key:
+                parts = key.split('=', 1)
+                if len(parts) == 2:
+                    a, b = parts[0].strip(), parts[1].strip()
+                    if a and b:
+                        pairs.append((a, b))
+        return pairs
+
+    def _rebuild_maps(self):
+        """Build hierarchical maps including any custom variants from settings."""
+        custom_pairs = self._get_custom_pairs()
+
+        # Build hierarchical maps (each level includes all previous)
+        self.basic_map = self.make_multimap(self._BASIC_PAIRS + custom_pairs)
+
+        self.extended_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + custom_pairs
+        )
+
+        self.maximum_map = self.make_multimap(
+            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS + custom_pairs
+        )
 
     def set_settings(self, settings):
-        """Update settings reference and clear cache."""
+        """Update settings reference, rebuild maps, and clear cache."""
         self._settings = settings
+        self._rebuild_maps()
         self._cache.clear()
 
     def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
