@@ -3966,9 +3966,17 @@ class SearchEngine:
         for group_key, pages in grouped.items():
             if not pages: continue
 
+            # Filter out continuous document results (sys:/part:) - they use wrong
+            # raw_header (first page's header instead of actual match location).
+            # Individual page results are more accurate.
+            page_results = [p for p in pages if not str(p.get('uid', '')).startswith(('sys:', 'part:'))]
+            continuous_results = [p for p in pages if str(p.get('uid', '')).startswith(('sys:', 'part:'))]
+
+            # Use page results if available, otherwise fall back to continuous
+            pages = page_results if page_results else continuous_results
+
             # Deduplicate pages by p_num within this group.
-            # Same page can appear multiple times if matched in both individual page
-            # document and continuous (system/part) document. Keep highest-scoring.
+            # Same page can appear multiple times from V0.7 and V0.8.
             p_num_best = {}
             for p in pages:
                 _, p_num = self.meta_mgr.parse_header_smart(p['raw_header'])
