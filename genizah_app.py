@@ -4091,16 +4091,61 @@ class GenizahGUI(QMainWindow):
         clean = re.sub(r"\s+", "_", clean).strip("_")
         return clean or fallback
 
+    def _get_default_save_folder(self):
+        """Get the default folder for saving reports. Checks last used location first."""
+        # Check if user has a saved last location
+        cfg = load_app_config()
+        last_folder = cfg.get('last_save_folder')
+        if last_folder and os.path.isdir(last_folder):
+            return last_folder
+
+        # Default: My Documents\Genizah Search Pro
+        documents_folder = os.path.join(os.path.expanduser("~"), "Documents")
+        if not os.path.isdir(documents_folder):
+            # Fallback for systems without Documents folder
+            documents_folder = os.path.expanduser("~")
+
+        default_folder = os.path.join(documents_folder, "Genizah Search Pro")
+        try:
+            os.makedirs(default_folder, exist_ok=True)
+        except Exception:
+            # Fallback to old reports dir if we can't create the new one
+            return Config.REPORTS_DIR
+
+        return default_folder
+
+    def _get_unique_filepath(self, filepath):
+        """If file exists, add (1), (2), etc. until we find a unique name."""
+        if not os.path.exists(filepath):
+            return filepath
+
+        base, ext = os.path.splitext(filepath)
+        counter = 1
+        while True:
+            new_path = f"{base} ({counter}){ext}"
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+
+    def _save_last_folder(self, filepath):
+        """Remember the folder where user saved a file."""
+        folder = os.path.dirname(filepath)
+        if folder and os.path.isdir(folder):
+            save_app_config({'last_save_folder': folder})
+
     def _default_report_path(self, hint, fallback):
         filename = self._sanitize_filename(hint, fallback)
 
         # Lab Mode: save to Lab Dir
-        base_dir = Config.REPORTS_DIR
         if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked():
             base_dir = os.path.join(Config.BASE_DIR, "Reports")
+            os.makedirs(base_dir, exist_ok=True)
+        else:
+            # Use smart default folder (last used or My Documents\Genizah Search Pro)
+            base_dir = self._get_default_save_folder()
 
-        os.makedirs(base_dir, exist_ok=True)
-        return os.path.join(base_dir, f"{filename}.txt")
+        filepath = os.path.join(base_dir, f"{filename}.txt")
+        return self._get_unique_filepath(filepath)
 
     def _get_credit_header(self):
         english_text = (
@@ -5145,6 +5190,7 @@ class GenizahGUI(QMainWindow):
                 ws.column_dimensions['F'].width = 80  # Wider snippet column
 
                 wb.save(path)
+                self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
             except Exception as e:
@@ -5163,6 +5209,7 @@ class GenizahGUI(QMainWindow):
                         # Strip highlight markers for CSV
                         clean_row = [str(val).replace('*', '') for val in row]
                         writer.writerow(clean_row)
+                self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
@@ -5211,6 +5258,7 @@ class GenizahGUI(QMainWindow):
                                 self._set_paragraph_rtl(p)
 
                 doc.save(path)
+                self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
@@ -5225,6 +5273,7 @@ class GenizahGUI(QMainWindow):
                         # Clean snippet: remove newlines for single-line export
                         snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
                         f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
+                self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
@@ -5708,6 +5757,7 @@ class GenizahGUI(QMainWindow):
                             ws_excluded.append(_excluded_row(item))
 
                     wb.save(path)
+                    self._save_last_folder(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
@@ -5734,6 +5784,7 @@ class GenizahGUI(QMainWindow):
                         for row in table_rows:
                             clean_row = [str(val).replace('*', '') for val in row]
                             writer.writerow(clean_row)
+                    self._save_last_folder(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
@@ -5864,6 +5915,7 @@ class GenizahGUI(QMainWindow):
                                         self._set_paragraph_rtl(p)
 
                     doc.save(path)
+                    self._save_last_folder(path)
                     QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{e}")
@@ -5955,11 +6007,12 @@ class GenizahGUI(QMainWindow):
                     f.write(credit_text)
                     all_lines = summary_lines + detail_lines
                     f.write("\n".join(all_lines).strip() + "\n")
+                self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
-                
+
     # Composition & Browse
     def open_filter_dialog(self):
         dlg = FilterTextDialog(self, current_text=self.filter_text_content)
@@ -6113,6 +6166,14 @@ class GenizahGUI(QMainWindow):
         if not txt:
             QMessageBox.warning(self, tr("Error"), tr("Please enter text to search."))
             return
+
+        # Auto-fill title with first 4 words if empty
+        if not self.comp_title_input.text().strip():
+            words = txt.split()[:4]
+            auto_title = " ".join(words)
+            if len(txt.split()) > 4:
+                auto_title += "..."
+            self.comp_title_input.setText(auto_title)
 
         self.is_comp_running = True
         self.btn_comp_run.setText(tr("Stop"))
