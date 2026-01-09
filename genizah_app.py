@@ -6586,7 +6586,7 @@ class GenizahGUI(QMainWindow):
         ms_txt = data.get("ms_ctx", "")
         anchor = data.get("anchor")
 
-        src_widget = HiddenScrollArea(src_txt.replace("\n", " "))
+        src_widget = HiddenScrollArea(src_txt.replace("\n", " "), anchor_text=anchor)
         self.comp_tree.setItemWidget(node, self.comp_col_context, src_widget)
         
         ms_widget = HiddenScrollArea(ms_txt.replace("\n", " "), anchor_text=anchor)
