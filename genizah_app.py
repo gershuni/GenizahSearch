@@ -1994,7 +1994,7 @@ class ResultDialog(QDialog):
         self.text_src.setFont(QFont("SBL Hebrew", 16))
         self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         line_height = self.text_src.fontMetrics().lineSpacing()
-        self.text_src.setMinimumHeight(line_height + 8)
+        self.text_src.setMinimumHeight(line_height * 3 + 12)
         src_layout.addWidget(self.text_src)
 
         self.ms_text_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -2002,7 +2002,7 @@ class ResultDialog(QDialog):
         self.ms_text_splitter.addWidget(self.src_widget)
         self.ms_text_splitter.setStretchFactor(0, 5)
         self.ms_text_splitter.setStretchFactor(1, 1)
-        self.ms_text_splitter.setSizes([600, line_height + 8])
+        self.ms_text_splitter.setSizes([600, line_height * 3 + 12])
         ms_layout.addWidget(self.ms_text_splitter)
 
         self.main_splitter.addWidget(ms_widget)
@@ -2028,8 +2028,9 @@ class ResultDialog(QDialog):
         ext_layout.addWidget(self.ms_viewer, 1)
 
         self.main_splitter.addWidget(self.external_pane)
-        self.main_splitter.setStretchFactor(0, 3)
-        self.main_splitter.setStretchFactor(1, 7)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([650, 650])
 
         main_layout.addWidget(self.main_splitter, 1)
         
