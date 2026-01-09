@@ -4100,9 +4100,27 @@ class GenizahGUI(QMainWindow):
             return last_folder
 
         # Default: My Documents\Genizah Search Pro
-        documents_folder = os.path.join(os.path.expanduser("~"), "Documents")
-        if not os.path.isdir(documents_folder):
-            # Fallback for systems without Documents folder
+        # Use Windows Shell API to get the correct Documents folder
+        documents_folder = None
+        try:
+            import ctypes.wintypes
+            CSIDL_PERSONAL = 5  # My Documents
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buf)
+            if buf.value:
+                documents_folder = buf.value
+        except Exception:
+            pass
+
+        # Fallback: try common locations
+        if not documents_folder or not os.path.isdir(documents_folder):
+            for folder_name in ["Documents", "My Documents"]:
+                candidate = os.path.join(os.path.expanduser("~"), folder_name)
+                if os.path.isdir(candidate):
+                    documents_folder = candidate
+                    break
+
+        if not documents_folder or not os.path.isdir(documents_folder):
             documents_folder = os.path.expanduser("~")
 
         default_folder = os.path.join(documents_folder, "Genizah Search Pro")
