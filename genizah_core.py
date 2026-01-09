@@ -3966,6 +3966,22 @@ class SearchEngine:
         for group_key, pages in grouped.items():
             if not pages: continue
 
+            # Deduplicate pages by p_num within this group.
+            # Same page can appear multiple times if matched in both individual page
+            # document and continuous (system/part) document. Keep highest-scoring.
+            p_num_best = {}
+            for p in pages:
+                _, p_num = self.meta_mgr.parse_header_smart(p['raw_header'])
+                if p_num and p_num != "Unknown":
+                    if p_num not in p_num_best or p['score'] > p_num_best[p_num]['score']:
+                        p_num_best[p_num] = p
+                else:
+                    # Pages without valid p_num: use uid as fallback key
+                    uid_key = f"_uid_{p.get('uid', id(p))}"
+                    if uid_key not in p_num_best or p['score'] > p_num_best[uid_key]['score']:
+                        p_num_best[uid_key] = p
+            pages = list(p_num_best.values())
+
             # Aggregate Score
             total_score = sum(p['score'] for p in pages)
 
