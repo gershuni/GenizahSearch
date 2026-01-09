@@ -4123,7 +4123,7 @@ class GenizahGUI(QMainWindow):
         if not documents_folder or not os.path.isdir(documents_folder):
             documents_folder = os.path.expanduser("~")
 
-        default_folder = os.path.join(documents_folder, "Genizah Search Pro")
+        default_folder = os.path.join(documents_folder, "GenizahSearchPro")
         try:
             os.makedirs(default_folder, exist_ok=True)
         except Exception:
