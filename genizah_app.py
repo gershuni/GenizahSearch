@@ -1970,43 +1970,42 @@ class ResultDialog(QDialog):
         # --- SPLIT VIEW (Manuscript | Source | External) ---
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Inner Splitter for Text (Manuscript | Source)
-        self.text_splitter = QSplitter(Qt.Orientation.Horizontal)
-        
         # 1. Manuscript View (Left)
         ms_widget = QWidget()
         ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
-        ms_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
+        ms_text_widget = QWidget()
+        ms_text_layout = QVBoxLayout(ms_text_widget); ms_text_layout.setContentsMargins(0,0,0,0)
+        ms_text_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
         ms_find_row = QHBoxLayout()
         ms_find_row.addWidget(QLabel(tr("Find:")))
         self.find_ms_input = QLineEdit()
         self.find_ms_input.setPlaceholderText(tr("Find in text..."))
         self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
         ms_find_row.addWidget(self.find_ms_input)
-        ms_layout.addLayout(ms_find_row)
+        ms_text_layout.addLayout(ms_find_row)
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        ms_layout.addWidget(self.text_ms)
-        
-        # 2. Source Context View (Right)
+        ms_text_layout.addWidget(self.text_ms)
+
+        # 2. Source Context (Below Manuscript Text)
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
         src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
-        src_find_row = QHBoxLayout()
-        src_find_row.addWidget(QLabel(tr("Find:")))
-        self.find_src_input = QLineEdit()
-        self.find_src_input.setPlaceholderText(tr("Find in text..."))
-        self.find_src_input.textChanged.connect(lambda text: apply_find_highlight(self.text_src, text.strip()))
-        src_find_row.addWidget(self.find_src_input)
-        src_layout.addLayout(src_find_row)
-        self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.text_src = QTextBrowser()
+        self.text_src.setFont(QFont("SBL Hebrew", 16))
+        self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        line_height = self.text_src.fontMetrics().lineSpacing()
+        self.text_src.setMinimumHeight(line_height * 3 + 12)
         src_layout.addWidget(self.text_src)
 
-        self.text_splitter.addWidget(ms_widget)
-        self.text_splitter.addWidget(self.src_widget)
-        self.text_splitter.setStretchFactor(0, 2)
-        self.text_splitter.setStretchFactor(1, 1)
-        
-        self.main_splitter.addWidget(self.text_splitter)
+        self.ms_text_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.ms_text_splitter.addWidget(ms_text_widget)
+        self.ms_text_splitter.addWidget(self.src_widget)
+        self.ms_text_splitter.setStretchFactor(0, 5)
+        self.ms_text_splitter.setStretchFactor(1, 1)
+        self.ms_text_splitter.setSizes([600, line_height * 3 + 12])
+        ms_layout.addWidget(self.ms_text_splitter)
+
+        self.main_splitter.addWidget(ms_widget)
 
         # 3. External Viewer Pane (Initially Hidden)
         self.external_pane = QWidget()
@@ -2029,8 +2028,9 @@ class ResultDialog(QDialog):
         ext_layout.addWidget(self.ms_viewer, 1)
 
         self.main_splitter.addWidget(self.external_pane)
-        self.main_splitter.setStretchFactor(0, 3)
-        self.main_splitter.setStretchFactor(1, 7)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([650, 650])
 
         main_layout.addWidget(self.main_splitter, 1)
         
@@ -2075,7 +2075,17 @@ class ResultDialog(QDialog):
 
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
-        apply_find_highlight(self.text_src, self.find_src_input.text().strip())
+
+    def _apply_source_highlights(self, text, pattern_str):
+        if not text:
+            return ""
+        if pattern_str and '*' not in text:
+            try:
+                regex = re.compile(pattern_str, re.IGNORECASE)
+                text = regex.sub(r'*\g<0>*', text)
+            except:
+                pass
+        return text
 
     def open_external_link(self):
         if self.external_url:
@@ -2143,13 +2153,19 @@ class ResultDialog(QDialog):
         self._refresh_find_highlights()
         
         # 2. Source Context
-        src_raw = data.get('source_ctx', '')
-        if src_raw:
+        source_text = ""
+        parent = self.parent()
+        if parent and hasattr(parent, "comp_text_area"):
+            source_text = parent.comp_text_area.toPlainText().strip()
+        if not source_text:
+            source_text = data.get('source_ctx', '')
+        source_text = self._apply_source_highlights(source_text, pattern_str)
+        if source_text:
             self.src_widget.setVisible(True)
-            self.text_src.setHtml(self._htmlify(src_raw))
+            self.text_src.setHtml(self._htmlify(source_text))
         else:
             self.src_widget.setVisible(False)
-        self._refresh_find_highlights()
+            self.text_src.clear()
         
         # Load Page & Metadata
         self.load_page(target=p)
