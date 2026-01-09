@@ -3891,7 +3891,7 @@ class SearchEngine:
                             else:
                                 words_out.append(word)
                         
-                        src_snippets.append(f"... {' '.join(words_out)} ...")
+                        src_snippets.append(" ".join(words_out))
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
