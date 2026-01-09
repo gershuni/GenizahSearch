@@ -1843,13 +1843,14 @@ class ResultDialog(QDialog):
     metadata_loaded = pyqtSignal(int, dict)
     thumb_resolved = pyqtSignal(str, object)
 
-    def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
+    def __init__(self, parent, all_results, current_index, meta_mgr, searcher, show_source_context=True):
         super().__init__(parent)
         
         self.all_results = all_results
         self.current_result_idx = current_index
         self.meta_mgr = meta_mgr
         self.searcher = searcher
+        self.show_source_context = show_source_context
         self.thumb_resolved.connect(self._on_thumb_resolved)
         
         # State for internal browsing
@@ -1970,43 +1971,45 @@ class ResultDialog(QDialog):
         # --- SPLIT VIEW (Manuscript | Source | External) ---
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Inner Splitter for Text (Manuscript | Source)
-        self.text_splitter = QSplitter(Qt.Orientation.Horizontal)
-        
         # 1. Manuscript View (Left)
         ms_widget = QWidget()
         ms_layout = QVBoxLayout(ms_widget); ms_layout.setContentsMargins(0,0,0,0)
-        ms_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
+        ms_text_widget = QWidget()
+        ms_text_layout = QVBoxLayout(ms_text_widget); ms_text_layout.setContentsMargins(0,0,0,0)
+        ms_text_layout.addWidget(QLabel("<b>" + tr("Manuscript Text") + "</b>"))
         ms_find_row = QHBoxLayout()
         ms_find_row.addWidget(QLabel(tr("Find:")))
         self.find_ms_input = QLineEdit()
         self.find_ms_input.setPlaceholderText(tr("Find in text..."))
         self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
         ms_find_row.addWidget(self.find_ms_input)
-        ms_layout.addLayout(ms_find_row)
+        ms_text_layout.addLayout(ms_find_row)
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        ms_layout.addWidget(self.text_ms)
-        
-        # 2. Source Context View (Right)
+        ms_text_layout.addWidget(self.text_ms)
+
+        # 2. Source Context (Below Manuscript Text)
         self.src_widget = QWidget() # Container to hide/show easily
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
         src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
-        src_find_row = QHBoxLayout()
-        src_find_row.addWidget(QLabel(tr("Find:")))
-        self.find_src_input = QLineEdit()
-        self.find_src_input.setPlaceholderText(tr("Find in text..."))
-        self.find_src_input.textChanged.connect(lambda text: apply_find_highlight(self.text_src, text.strip()))
-        src_find_row.addWidget(self.find_src_input)
-        src_layout.addLayout(src_find_row)
-        self.text_src = QTextBrowser(); self.text_src.setFont(QFont("SBL Hebrew", 16)); self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.text_src = QTextBrowser()
+        self.text_src.setFont(QFont("SBL Hebrew", 16))
+        self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        line_height = self.text_src.fontMetrics().lineSpacing()
+        self.text_src.setMinimumHeight(line_height * 3 + 12)
         src_layout.addWidget(self.text_src)
 
-        self.text_splitter.addWidget(ms_widget)
-        self.text_splitter.addWidget(self.src_widget)
-        self.text_splitter.setStretchFactor(0, 2)
-        self.text_splitter.setStretchFactor(1, 1)
-        
-        self.main_splitter.addWidget(self.text_splitter)
+        self.ms_text_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.ms_text_splitter.addWidget(ms_text_widget)
+        self.ms_text_splitter.addWidget(self.src_widget)
+        self.ms_text_splitter.setStretchFactor(0, 5)
+        self.ms_text_splitter.setStretchFactor(1, 1)
+        self.ms_text_splitter.setSizes([600, line_height * 3 + 12])
+        if not self.show_source_context:
+            self.src_widget.setVisible(False)
+            self.ms_text_splitter.setSizes([1, 0])
+        ms_layout.addWidget(self.ms_text_splitter)
+
+        self.main_splitter.addWidget(ms_widget)
 
         # 3. External Viewer Pane (Initially Hidden)
         self.external_pane = QWidget()
@@ -2029,8 +2032,9 @@ class ResultDialog(QDialog):
         ext_layout.addWidget(self.ms_viewer, 1)
 
         self.main_splitter.addWidget(self.external_pane)
-        self.main_splitter.setStretchFactor(0, 3)
-        self.main_splitter.setStretchFactor(1, 7)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([650, 650])
 
         main_layout.addWidget(self.main_splitter, 1)
         
@@ -2075,7 +2079,17 @@ class ResultDialog(QDialog):
 
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
-        apply_find_highlight(self.text_src, self.find_src_input.text().strip())
+
+    def _apply_source_highlights(self, text, pattern_str):
+        if not text:
+            return ""
+        if pattern_str and '*' not in text:
+            try:
+                regex = re.compile(pattern_str, re.IGNORECASE)
+                text = regex.sub(r'*\g<0>*', text)
+            except:
+                pass
+        return text
 
     def open_external_link(self):
         if self.external_url:
@@ -2143,13 +2157,23 @@ class ResultDialog(QDialog):
         self._refresh_find_highlights()
         
         # 2. Source Context
-        src_raw = data.get('source_ctx', '')
-        if src_raw:
-            self.src_widget.setVisible(True)
-            self.text_src.setHtml(self._htmlify(src_raw))
+        if self.show_source_context:
+            source_text = ""
+            parent = self.parent()
+            if parent and hasattr(parent, "comp_text_area"):
+                source_text = parent.comp_text_area.toPlainText().strip()
+            if not source_text:
+                source_text = data.get('source_ctx', '')
+            source_text = self._apply_source_highlights(source_text, pattern_str)
+            if source_text:
+                self.src_widget.setVisible(True)
+                self.text_src.setHtml(self._htmlify(source_text))
+            else:
+                self.src_widget.setVisible(False)
+                self.text_src.clear()
         else:
             self.src_widget.setVisible(False)
-        self._refresh_find_highlights()
+            self.text_src.clear()
         
         # Load Page & Metadata
         self.load_page(target=p)
@@ -3842,10 +3866,14 @@ class GenizahGUI(QMainWindow):
         else:
             default_name = f"Manuscript_{self.current_browse_sid}.txt"
 
-        path, _ = QFileDialog.getSaveFileName(self, tr("Save Manuscript"),
-                                            os.path.join(Config.REPORTS_DIR, default_name), 
-                                            "Text (*.txt)")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("Save Manuscript"),
+            os.path.join(self._get_default_save_dir(), default_name),
+            "Text (*.txt)",
+        )
         if not path: return
+        self._remember_save_dir(path)
         
         pages = self.searcher.get_full_manuscript(self.current_browse_sid)
         if not pages: return
@@ -4075,14 +4103,33 @@ class GenizahGUI(QMainWindow):
         clean = re.sub(r"\s+", "_", clean).strip("_")
         return clean or fallback
 
+    def _get_default_save_dir(self):
+        cfg = load_app_config()
+        last_dir = cfg.get("last_save_dir")
+        if last_dir and os.path.isdir(last_dir):
+            return last_dir
+
+        home_dir = os.path.expanduser("~")
+        documents_dir = os.path.join(home_dir, "Documents")
+        my_documents_dir = os.path.join(home_dir, "My Documents")
+        base_documents = documents_dir if os.path.isdir(documents_dir) else my_documents_dir
+        if not os.path.isdir(base_documents):
+            base_documents = home_dir
+
+        target_dir = os.path.join(base_documents, "Genizah Search Pro")
+        os.makedirs(target_dir, exist_ok=True)
+        return target_dir
+
+    def _remember_save_dir(self, path):
+        if not path:
+            return
+        save_dir = os.path.dirname(path)
+        if save_dir:
+            save_app_config({"last_save_dir": save_dir})
+
     def _default_report_path(self, hint, fallback):
         filename = self._sanitize_filename(hint, fallback)
-
-        # Lab Mode: save to Lab Dir
-        base_dir = Config.REPORTS_DIR
-        if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked():
-            base_dir = os.path.join(Config.BASE_DIR, "Reports")
-
+        base_dir = self._get_default_save_dir()
         os.makedirs(base_dir, exist_ok=True)
         return os.path.join(base_dir, f"{filename}.txt")
 
@@ -4756,7 +4803,7 @@ class GenizahGUI(QMainWindow):
             return
         if row >= len(sorted_results):
             row = 0
-        ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+        ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher, show_source_context=False).exec()
 
     def show_full_text_for_result(self, res):
         if not res:
@@ -4772,7 +4819,7 @@ class GenizahGUI(QMainWindow):
             cand_id = candidate.get('display', {}).get('id')
             if cand_id and cand_id == res.get('display', {}).get('id'):
                 target_index = idx
-        ResultDialog(self, sorted_results, target_index, self.meta_mgr, self.searcher).exec()
+        ResultDialog(self, sorted_results, target_index, self.meta_mgr, self.searcher, show_source_context=False).exec()
 
     def open_result_in_browse_from_table(self, res):
         if not res:
@@ -4981,6 +5028,7 @@ class GenizahGUI(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
+        self._remember_save_dir(path)
 
         # Prepare tabular data
         headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
@@ -5273,6 +5321,7 @@ class GenizahGUI(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
         if not path: return
+        self._remember_save_dir(path)
 
         credit_text = self._get_credit_header()
         query_text = self.comp_text_area.toPlainText().strip()
@@ -6097,6 +6146,10 @@ class GenizahGUI(QMainWindow):
         if not txt:
             QMessageBox.warning(self, tr("Error"), tr("Please enter text to search."))
             return
+        if not self.comp_title_input.text().strip():
+            words = txt.split()
+            if words:
+                self.comp_title_input.setText(" ".join(words[:4]))
 
         self.is_comp_running = True
         self.btn_comp_run.setText(tr("Stop"))
@@ -7462,7 +7515,7 @@ class GenizahGUI(QMainWindow):
         if clicked_index == -1: return
 
         # 3. Open Dialog with List
-        ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
+        ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher, show_source_context=True).exec()
 
     def _refresh_comp_tree_metadata(self):
 
@@ -8417,7 +8470,7 @@ class GenizahGUI(QMainWindow):
         if target_index == -1: target_index = 0
 
         try:
-            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
+            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher, show_source_context=True)
             dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
