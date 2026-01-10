@@ -21,3 +21,4 @@ build/
 /Reports
 Genizah_Index/genizah.log
 genizah.log
+.claude/settings.local.json
