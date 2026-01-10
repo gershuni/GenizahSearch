@@ -4124,7 +4124,7 @@ class GenizahGUI(QMainWindow):
         if not documents_folder or not os.path.isdir(documents_folder):
             documents_folder = os.path.expanduser("~")
 
-        default_folder = os.path.join(documents_folder, "GenizahSearchPro")
+        default_folder = os.path.join(documents_folder, "GenizahSearchPro", "Reports")
         try:
             os.makedirs(default_folder, exist_ok=True)
         except Exception:
@@ -4157,8 +4157,7 @@ class GenizahGUI(QMainWindow):
 
         # Lab Mode: save to Lab Dir
         if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked():
-            base_dir = os.path.join(Config.BASE_DIR, "Reports")
-            os.makedirs(base_dir, exist_ok=True)
+            base_dir = Config.REPORTS_DIR
         else:
             # Use smart default folder (last used or My Documents\Genizah Search Pro)
             base_dir = self._get_default_save_folder()
