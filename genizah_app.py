@@ -2154,11 +2154,12 @@ class ResultDialog(QDialog):
         
         # 2. Source Context
         source_text = ""
-        parent = self.parent()
-        if parent and hasattr(parent, "comp_text_area"):
-            source_text = parent.comp_text_area.toPlainText().strip()
-        if not source_text:
-            source_text = data.get('source_ctx', '')
+        if 'source_ctx' in data:
+            parent = self.parent()
+            if parent and hasattr(parent, "comp_text_area"):
+                source_text = parent.comp_text_area.toPlainText().strip()
+            if not source_text:
+                source_text = data.get('source_ctx', '')
         source_text = self._apply_source_highlights(source_text, pattern_str)
         if source_text:
             self.src_widget.setVisible(True)
