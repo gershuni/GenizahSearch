@@ -1107,6 +1107,30 @@ class Config:
         os.makedirs(fallback, exist_ok=True)
         return fallback
 
+    @staticmethod
+    def _get_documents_dir() -> str:
+        """Best-effort Documents directory (Windows-aware), falling back to home."""
+        documents_dir = None
+        try:
+            import ctypes.wintypes
+
+            CSIDL_PERSONAL = 5  # My Documents
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buf)
+            if buf.value:
+                documents_dir = buf.value
+        except Exception:
+            pass
+
+        if not documents_dir or not os.path.isdir(documents_dir):
+            for folder_name in ["Documents", "My Documents"]:
+                candidate = os.path.join(os.path.expanduser("~"), folder_name)
+                if os.path.isdir(candidate):
+                    documents_dir = candidate
+                    break
+
+        return documents_dir if documents_dir and os.path.isdir(documents_dir) else os.path.expanduser("~")
+
     # 1. Determine Base Paths
     if getattr(sys, "frozen", False):
         BASE_DIR = os.path.dirname(sys.executable)
@@ -1143,9 +1167,9 @@ class Config:
         INDEX_DIR = _PORTABLE_INDEX_PATH
         os.makedirs(INDEX_DIR, exist_ok=True)
 
-    # 4. Output folders: try BASE_DIR first; fallback to INDEX_DIR
+    # 4. Output folders: always use Documents\GenizahSearchPro\Reports
     REPORTS_DIR = _pick_writable_dir(
-        os.path.join(BASE_DIR, "Reports"),
+        os.path.join(_get_documents_dir(), "GenizahSearchPro", "Reports"),
         os.path.join(INDEX_DIR, "Reports"),
     )
 
