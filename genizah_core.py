@@ -4449,3 +4449,637 @@ def calculate_smart_weights(file_path, sample_size=None):
         LAB_LOGGER.error(f"Failed to save lab weights JSON: {e}")
 
     return rank_map
+
+
+# ==============================================================================
+#  PERSONAL LISTS MANAGER
+# ==============================================================================
+
+class ListsManager:
+    """
+    Manages personal lists (starred/saved manuscripts) with tags and notes.
+
+    Features:
+    - Multiple named lists with colors
+    - Built-in "כללי" (General) default list
+    - Built-in "נצפו לאחרונה" (Recently Viewed) auto-populated list
+    - Tags and notes per item
+    - Export/import functionality
+    """
+
+    LISTS_FILE = os.path.join(Config.INDEX_DIR, "lists.pkl")
+    MAX_RECENT_ITEMS = 50
+
+    # Default colors for lists
+    DEFAULT_COLORS = [
+        '#FFD700',  # Gold (default)
+        '#4CAF50',  # Green
+        '#2196F3',  # Blue
+        '#9C27B0',  # Purple
+        '#FF5722',  # Deep Orange
+        '#00BCD4',  # Cyan
+        '#E91E63',  # Pink
+        '#795548',  # Brown
+        '#607D8B',  # Blue Grey
+        '#F44336',  # Red
+    ]
+
+    def __init__(self, meta_mgr=None):
+        """Initialize the lists manager."""
+        self.meta_mgr = meta_mgr
+        self.data = self._get_default_data()
+        self.load()
+
+    def _get_default_data(self):
+        """Return the default data structure."""
+        import time
+        return {
+            'lists': {
+                'default': {
+                    'name': 'כללי',
+                    'name_en': 'General',
+                    'color': '#FFD700',
+                    'created': time.time(),
+                    'is_default': True,
+                    'is_system': False
+                },
+                'recent': {
+                    'name': 'נצפו לאחרונה',
+                    'name_en': 'Recently Viewed',
+                    'color': '#9E9E9E',
+                    'is_system': True,
+                    'max_items': self.MAX_RECENT_ITEMS
+                }
+            },
+            'items': {},  # sys_id -> item data
+            'recent_items': [],  # ordered list of sys_ids (most recent first)
+            'all_tags': []  # for autocomplete
+        }
+
+    def load(self):
+        """Load lists from file."""
+        if os.path.exists(self.LISTS_FILE):
+            try:
+                with open(self.LISTS_FILE, 'rb') as f:
+                    loaded = pickle.load(f)
+                    # Merge with defaults to handle new fields
+                    defaults = self._get_default_data()
+                    for key in defaults:
+                        if key not in loaded:
+                            loaded[key] = defaults[key]
+                    # Ensure system lists exist
+                    if 'default' not in loaded['lists']:
+                        loaded['lists']['default'] = defaults['lists']['default']
+                    if 'recent' not in loaded['lists']:
+                        loaded['lists']['recent'] = defaults['lists']['recent']
+                    self.data = loaded
+            except Exception as e:
+                LOGGER.warning(f"Failed to load lists: {e}")
+                self.data = self._get_default_data()
+        else:
+            self.data = self._get_default_data()
+
+    def save(self):
+        """Save lists to file."""
+        try:
+            os.makedirs(Config.INDEX_DIR, exist_ok=True)
+            with open(self.LISTS_FILE, 'wb') as f:
+                pickle.dump(self.data, f)
+        except Exception as e:
+            LOGGER.error(f"Failed to save lists: {e}")
+
+    # --- List Management ---
+
+    def get_all_lists(self, include_recent=True):
+        """Get all lists sorted alphabetically (system lists have special handling)."""
+        lists = []
+        for list_id, list_data in self.data['lists'].items():
+            if list_id == 'recent' and not include_recent:
+                continue
+            lists.append({
+                'id': list_id,
+                **list_data,
+                'count': self._get_list_item_count(list_id)
+            })
+
+        # Sort: default first, then recent, then alphabetically by name
+        def sort_key(lst):
+            if lst['id'] == 'default':
+                return (0, '')
+            elif lst['id'] == 'recent':
+                return (1, '')
+            else:
+                return (2, lst.get('name', ''))
+
+        return sorted(lists, key=sort_key)
+
+    def _get_list_item_count(self, list_id):
+        """Get the number of items in a list."""
+        if list_id == 'recent':
+            return len(self.data.get('recent_items', []))
+
+        count = 0
+        for item in self.data['items'].values():
+            if list_id in item.get('lists', []):
+                count += 1
+        return count
+
+    def create_list(self, name, color=None):
+        """Create a new list. Returns the list ID."""
+        import time
+        import uuid
+
+        list_id = f"list_{uuid.uuid4().hex[:8]}"
+
+        if color is None:
+            # Pick next available color
+            used_colors = {lst.get('color') for lst in self.data['lists'].values()}
+            for c in self.DEFAULT_COLORS:
+                if c not in used_colors:
+                    color = c
+                    break
+            if color is None:
+                color = self.DEFAULT_COLORS[0]
+
+        self.data['lists'][list_id] = {
+            'name': name,
+            'color': color,
+            'created': time.time()
+        }
+        self.save()
+        return list_id
+
+    def update_list(self, list_id, name=None, color=None):
+        """Update list properties."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_system'):
+            return False  # Cannot edit system lists
+
+        if name is not None:
+            lst['name'] = name
+        if color is not None:
+            lst['color'] = color
+
+        self.save()
+        return True
+
+    def delete_list(self, list_id):
+        """Delete a list and all its items."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_default') or lst.get('is_system'):
+            return False  # Cannot delete system lists
+
+        # Remove list reference from all items
+        items_to_remove = []
+        for sys_id, item in self.data['items'].items():
+            if list_id in item.get('lists', []):
+                item['lists'].remove(list_id)
+                # If item has no more lists, mark for removal
+                if not item['lists']:
+                    items_to_remove.append(sys_id)
+
+        # Remove orphaned items
+        for sys_id in items_to_remove:
+            del self.data['items'][sys_id]
+
+        del self.data['lists'][list_id]
+        self.save()
+        return True
+
+    def duplicate_list(self, list_id, new_name=None):
+        """Duplicate a list with all its items."""
+        if list_id not in self.data['lists']:
+            return None
+
+        original = self.data['lists'][list_id]
+        if new_name is None:
+            new_name = f"{original.get('name', 'רשימה')} (עותק)"
+
+        new_list_id = self.create_list(new_name, original.get('color'))
+
+        # Copy items
+        for sys_id, item in self.data['items'].items():
+            if list_id in item.get('lists', []):
+                if new_list_id not in item['lists']:
+                    item['lists'].append(new_list_id)
+
+        self.save()
+        return new_list_id
+
+    def merge_lists(self, source_list_id, target_list_id, delete_source=True):
+        """Merge source list into target list."""
+        if source_list_id not in self.data['lists'] or target_list_id not in self.data['lists']:
+            return False
+
+        source = self.data['lists'][source_list_id]
+        if source.get('is_system'):
+            return False  # Cannot merge system lists
+
+        # Move items from source to target
+        for sys_id, item in self.data['items'].items():
+            if source_list_id in item.get('lists', []):
+                if target_list_id not in item['lists']:
+                    item['lists'].append(target_list_id)
+
+        if delete_source:
+            self.delete_list(source_list_id)
+        else:
+            self.save()
+
+        return True
+
+    # --- Item Management ---
+
+    def add_item(self, sys_id, list_id='default', note='', tags=None, source=''):
+        """Add an item to a list. Returns True if added, False if already exists."""
+        import time
+
+        if list_id not in self.data['lists']:
+            return False
+
+        if sys_id in self.data['items']:
+            # Item exists, add to list if not already
+            item = self.data['items'][sys_id]
+            if list_id in item.get('lists', []):
+                return False  # Already in this list
+            item['lists'].append(list_id)
+            item['modified'] = time.time()
+        else:
+            # New item
+            self.data['items'][sys_id] = {
+                'lists': [list_id],
+                'tags': tags or [],
+                'note': note,
+                'source': source,
+                'added': time.time(),
+                'modified': time.time(),
+                'shelfmark_override': None  # For unidentified items
+            }
+
+        # Update all_tags
+        if tags:
+            for tag in tags:
+                if tag not in self.data['all_tags']:
+                    self.data['all_tags'].append(tag)
+
+        self.save()
+        return True
+
+    def add_items_bulk(self, sys_ids, list_id='default', source=''):
+        """Add multiple items to a list at once."""
+        import time
+
+        if list_id not in self.data['lists']:
+            return 0
+
+        added = 0
+        for sys_id in sys_ids:
+            if sys_id in self.data['items']:
+                item = self.data['items'][sys_id]
+                if list_id not in item.get('lists', []):
+                    item['lists'].append(list_id)
+                    item['modified'] = time.time()
+                    added += 1
+            else:
+                self.data['items'][sys_id] = {
+                    'lists': [list_id],
+                    'tags': [],
+                    'note': '',
+                    'source': source,
+                    'added': time.time(),
+                    'modified': time.time(),
+                    'shelfmark_override': None
+                }
+                added += 1
+
+        self.save()
+        return added
+
+    def update_item(self, sys_id, note=None, tags=None, shelfmark_override=None):
+        """Update an item's properties."""
+        import time
+
+        if sys_id not in self.data['items']:
+            return False
+
+        item = self.data['items'][sys_id]
+
+        if note is not None:
+            item['note'] = note
+        if tags is not None:
+            item['tags'] = tags
+            # Update all_tags
+            for tag in tags:
+                if tag not in self.data['all_tags']:
+                    self.data['all_tags'].append(tag)
+        if shelfmark_override is not None:
+            item['shelfmark_override'] = shelfmark_override
+
+        item['modified'] = time.time()
+        self.save()
+        return True
+
+    def remove_item_from_list(self, sys_id, list_id):
+        """Remove an item from a specific list."""
+        if sys_id not in self.data['items']:
+            return False
+
+        item = self.data['items'][sys_id]
+        if list_id not in item.get('lists', []):
+            return False
+
+        item['lists'].remove(list_id)
+
+        # If item has no more lists, remove it entirely
+        if not item['lists']:
+            del self.data['items'][sys_id]
+
+        self.save()
+        return True
+
+    def move_items_to_list(self, sys_ids, from_list_id, to_list_id):
+        """Move items from one list to another."""
+        import time
+
+        for sys_id in sys_ids:
+            if sys_id in self.data['items']:
+                item = self.data['items'][sys_id]
+                if from_list_id in item.get('lists', []):
+                    item['lists'].remove(from_list_id)
+                if to_list_id not in item.get('lists', []):
+                    item['lists'].append(to_list_id)
+                item['modified'] = time.time()
+
+        self.save()
+
+    def get_items_in_list(self, list_id):
+        """Get all items in a list with their metadata."""
+        if list_id == 'recent':
+            items = []
+            for sys_id in self.data.get('recent_items', []):
+                item_data = self.data['items'].get(sys_id, {})
+                items.append({
+                    'sys_id': sys_id,
+                    **item_data
+                })
+            return items
+
+        items = []
+        for sys_id, item_data in self.data['items'].items():
+            if list_id in item_data.get('lists', []):
+                items.append({
+                    'sys_id': sys_id,
+                    **item_data
+                })
+        return items
+
+    def get_item(self, sys_id):
+        """Get a single item's data."""
+        if sys_id in self.data['items']:
+            return {'sys_id': sys_id, **self.data['items'][sys_id]}
+        return None
+
+    def is_item_in_any_list(self, sys_id):
+        """Check if an item is in any list (excluding recent)."""
+        return sys_id in self.data['items']
+
+    def get_item_lists(self, sys_id):
+        """Get list of lists an item belongs to."""
+        if sys_id not in self.data['items']:
+            return []
+        return self.data['items'][sys_id].get('lists', [])
+
+    # --- Recently Viewed ---
+
+    def add_to_recent(self, sys_id):
+        """Add an item to the recently viewed list."""
+        import time
+
+        recent = self.data.get('recent_items', [])
+
+        # Remove if already present (we'll add to front)
+        if sys_id in recent:
+            recent.remove(sys_id)
+
+        # Add to front
+        recent.insert(0, sys_id)
+
+        # Trim to max size
+        if len(recent) > self.MAX_RECENT_ITEMS:
+            recent = recent[:self.MAX_RECENT_ITEMS]
+
+        self.data['recent_items'] = recent
+
+        # Also ensure item exists in items dict for metadata
+        if sys_id not in self.data['items']:
+            self.data['items'][sys_id] = {
+                'lists': [],  # Not in any regular list, just recent
+                'tags': [],
+                'note': '',
+                'source': '',
+                'added': time.time(),
+                'modified': time.time(),
+                'shelfmark_override': None
+            }
+
+        self.save()
+
+    # --- Tags ---
+
+    def get_all_tags(self):
+        """Get all tags for autocomplete."""
+        return sorted(self.data.get('all_tags', []))
+
+    def add_tag_to_items(self, sys_ids, tag):
+        """Add a tag to multiple items."""
+        import time
+
+        for sys_id in sys_ids:
+            if sys_id in self.data['items']:
+                item = self.data['items'][sys_id]
+                if tag not in item.get('tags', []):
+                    if 'tags' not in item:
+                        item['tags'] = []
+                    item['tags'].append(tag)
+                    item['modified'] = time.time()
+
+        if tag not in self.data['all_tags']:
+            self.data['all_tags'].append(tag)
+
+        self.save()
+
+    # --- Export/Import ---
+
+    def export_list(self, list_id, include_metadata=True, include_snippets=False):
+        """Export a list to a dictionary suitable for JSON serialization."""
+        if list_id not in self.data['lists']:
+            return None
+
+        list_info = self.data['lists'][list_id]
+        items = self.get_items_in_list(list_id)
+
+        export_data = {
+            'version': 1,
+            'list_name': list_info.get('name', ''),
+            'list_color': list_info.get('color', ''),
+            'exported_at': time.time(),
+            'items': []
+        }
+
+        for item in items:
+            item_export = {
+                'sys_id': item['sys_id'],
+                'tags': item.get('tags', []),
+                'note': item.get('note', ''),
+                'source': item.get('source', ''),
+                'shelfmark_override': item.get('shelfmark_override')
+            }
+
+            if include_metadata and self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(item['sys_id'])
+                item_export['shelfmark'] = shelfmark
+                item_export['title'] = title
+
+            # Snippets would require access to the search engine - skip for now
+
+            export_data['items'].append(item_export)
+
+        return export_data
+
+    def import_list(self, import_data, list_name_override=None):
+        """Import a list from exported data. Returns (list_id, imported_count, unidentified_count)."""
+        if not import_data or 'items' not in import_data:
+            return None, 0, 0
+
+        list_name = list_name_override or import_data.get('list_name', 'רשימה מיובאת')
+        list_color = import_data.get('list_color')
+
+        list_id = self.create_list(list_name, list_color)
+
+        imported = 0
+        unidentified = 0
+
+        for item in import_data['items']:
+            sys_id = item.get('sys_id')
+            if not sys_id:
+                continue
+
+            # Check if this sys_id exists in our database
+            is_identified = True
+            if self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+                if not shelfmark or shelfmark == 'Unknown':
+                    is_identified = False
+                    unidentified += 1
+
+            self.add_item(
+                sys_id=sys_id,
+                list_id=list_id,
+                note=item.get('note', ''),
+                tags=item.get('tags', []),
+                source=item.get('source', '')
+            )
+
+            # Set shelfmark override for unidentified items
+            if not is_identified and item.get('shelfmark'):
+                self.update_item(sys_id, shelfmark_override=item.get('shelfmark'))
+
+            imported += 1
+
+        return list_id, imported, unidentified
+
+    # --- Sorting ---
+
+    @staticmethod
+    def shelfmark_sort_key(shelfmark):
+        """
+        Sort key for shelfmarks that handles dots correctly.
+        E.g., T-S K1.2 < T-S K1.10 (not lexicographic)
+        """
+        if not shelfmark:
+            return ('', [])
+
+        # Split into parts
+        parts = re.split(r'(\d+)', shelfmark)
+        result = []
+        for part in parts:
+            if part.isdigit():
+                result.append((0, int(part)))  # Numbers sort first by value
+            else:
+                result.append((1, part.lower()))  # Strings sort lexicographically
+        return result
+
+    def get_items_sorted(self, list_id, sort_by='shelfmark', reverse=False):
+        """Get items in a list, sorted by the specified field."""
+        items = self.get_items_in_list(list_id)
+
+        # Enrich with metadata
+        if self.meta_mgr:
+            for item in items:
+                sys_id = item['sys_id']
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+                item['shelfmark'] = item.get('shelfmark_override') or shelfmark or 'Unknown'
+                item['title'] = title or ''
+
+        if sort_by == 'shelfmark':
+            items.sort(key=lambda x: self.shelfmark_sort_key(x.get('shelfmark', '')), reverse=reverse)
+        elif sort_by == 'title':
+            items.sort(key=lambda x: x.get('title', '').lower(), reverse=reverse)
+        elif sort_by == 'added':
+            items.sort(key=lambda x: x.get('added', 0), reverse=not reverse)  # Default newest first
+        elif sort_by == 'modified':
+            items.sort(key=lambda x: x.get('modified', 0), reverse=not reverse)
+
+        return items
+
+    # --- Copy Info ---
+
+    def get_item_copy_text(self, sys_id, format_type='compact'):
+        """
+        Generate text for copying item info.
+        format_type: 'compact', 'detailed', 'with_link'
+        """
+        if sys_id not in self.data['items']:
+            return ''
+
+        item = self.data['items'][sys_id]
+
+        shelfmark = 'Unknown'
+        title = ''
+
+        if item.get('shelfmark_override'):
+            shelfmark = item['shelfmark_override']
+        elif self.meta_mgr:
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        if format_type == 'compact':
+            if title:
+                return f"{shelfmark} - {title}"
+            return shelfmark
+
+        elif format_type == 'detailed':
+            lines = [f"מספר מדף: {shelfmark}"]
+            if title:
+                lines.append(f"כותרת: {title}")
+            lines.append(f"מספר מערכת: {sys_id}")
+            if item.get('note'):
+                lines.append(f"הערה: {item['note']}")
+            return '\n'.join(lines)
+
+        elif format_type == 'with_link':
+            lines = [f"מספר מדף: {shelfmark}"]
+            if title:
+                lines.append(f"כותרת: {title}")
+            lines.append(f"מספר מערכת: {sys_id}")
+            # Add Ktiv link
+            ktiv_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={sys_id}"
+            lines.append(f"קישור: {ktiv_url}")
+            return '\n'.join(lines)
+
+        return shelfmark
