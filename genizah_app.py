@@ -4279,6 +4279,7 @@ class GenizahGUI(QMainWindow):
         if visible:
             self.lists_preview_panel.setMinimumWidth(250)
             self.lists_preview_panel.setMaximumWidth(16777215)
+            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
             if self.lists_preview_last_sizes:
                 self.lists_main_splitter.setSizes(self.lists_preview_last_sizes)
         else:
@@ -4296,6 +4297,7 @@ class GenizahGUI(QMainWindow):
                     else:
                         sizes[i] = collapsed_width
                 self.lists_main_splitter.setSizes(sizes)
+            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
             self.lists_preview_panel.setMinimumWidth(collapsed_width)
             self.lists_preview_panel.setMaximumWidth(collapsed_width)
 
