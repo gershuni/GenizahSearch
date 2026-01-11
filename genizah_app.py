@@ -4284,16 +4284,17 @@ class GenizahGUI(QMainWindow):
         else:
             self.lists_preview_last_sizes = self.lists_main_splitter.sizes()
             collapsed_width = 28
-            total = sum(self.lists_preview_last_sizes)
+            total = self.lists_main_splitter.width()
             if total <= 0:
-                total = max(self.lists_main_splitter.width(), collapsed_width * 2)
+                total = max(sum(self.lists_preview_last_sizes), collapsed_width * 2)
             sizes = self.lists_preview_last_sizes[:]
             if self.lists_preview_index < len(sizes):
                 sizes[self.lists_preview_index] = collapsed_width
                 for i in range(len(sizes)):
                     if i != self.lists_preview_index:
                         sizes[i] = max(1, total - collapsed_width)
-                        break
+                    else:
+                        sizes[i] = collapsed_width
                 self.lists_main_splitter.setSizes(sizes)
             self.lists_preview_panel.setMinimumWidth(collapsed_width)
             self.lists_preview_panel.setMaximumWidth(collapsed_width)
