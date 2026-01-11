@@ -4349,7 +4349,7 @@ class GenizahGUI(QMainWindow):
         
         self.lists_preview_contents.setVisible(visible)
         self.lists_preview_title.setVisible(visible)
-        self.btn_toggle_preview.setText("◀" if visible else "▶")
+        self.btn_toggle_preview.setText(tr("▶") if visible else tr("◀"))
 
         if not self.lists_main_splitter:
             return
