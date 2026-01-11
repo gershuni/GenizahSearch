@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
@@ -3956,49 +3956,84 @@ class GenizahGUI(QMainWindow):
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        # --- Left Sidebar: Lists ---
-        sidebar = QWidget()
-        sidebar.setFixedWidth(200)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(0, 0, 5, 0)
+        # Main splitter for preview panel and content
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Lists header
-        lists_header = QHBoxLayout()
-        lists_header.addWidget(QLabel(f"<b>{tr('Personal Lists')}</b>"))
-        lists_header.addStretch()
+        # --- Preview Panel (Left/Optional) ---
+        self.lists_preview_panel = QWidget()
+        preview_layout = QVBoxLayout(self.lists_preview_panel)
+        preview_layout.setContentsMargins(5, 5, 5, 5)
+        preview_layout.setSpacing(5)
 
-        # New list button
-        btn_new_list = QPushButton("+")
-        btn_new_list.setFixedSize(24, 24)
-        btn_new_list.setToolTip(tr("New List..."))
-        btn_new_list.clicked.connect(self.lists_create_new_list)
-        lists_header.addWidget(btn_new_list)
+        # Preview header with collapse button
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(QLabel(f"<b>{tr('Preview')}</b>"))
+        preview_header.addStretch()
+        preview_layout.addLayout(preview_header)
 
-        sidebar_layout.addLayout(lists_header)
+        # Text preview area
+        self.lists_preview_text = QTextEdit()
+        self.lists_preview_text.setReadOnly(True)
+        self.lists_preview_text.setPlaceholderText(tr("Select an item to preview"))
+        preview_layout.addWidget(self.lists_preview_text, 2)
 
-        # Lists tree
-        self.lists_tree = QTreeWidget()
-        self.lists_tree.setHeaderHidden(True)
-        self.lists_tree.setIndentation(0)
-        self.lists_tree.setRootIsDecorated(False)
-        self.lists_tree.itemClicked.connect(self.lists_on_list_selected)
-        self.lists_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.lists_tree.customContextMenuRequested.connect(self.lists_show_list_context_menu)
-        sidebar_layout.addWidget(self.lists_tree, 1)
+        # Image area
+        self.lists_preview_image = QLabel()
+        self.lists_preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lists_preview_image.setMinimumHeight(150)
+        self.lists_preview_image.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333;")
+        self.lists_preview_image.setText(tr("No image"))
+        preview_layout.addWidget(self.lists_preview_image, 1)
 
-        # Sidebar action buttons
-        sidebar_actions = QVBoxLayout()
-        sidebar_actions.setSpacing(2)
+        # Details section
+        details_group = QGroupBox(tr("Item Details"))
+        details_layout = QFormLayout(details_group)
+        details_layout.setContentsMargins(5, 10, 5, 5)
 
-        btn_duplicate = QPushButton(tr("Duplicate List"))
-        btn_duplicate.clicked.connect(self.lists_duplicate_selected_list)
-        sidebar_actions.addWidget(btn_duplicate)
+        self.lists_detail_shelfmark = QLabel()
+        self.lists_detail_shelfmark.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Shelfmark:"), self.lists_detail_shelfmark)
 
-        btn_merge = QPushButton(tr("Merge Lists"))
-        btn_merge.clicked.connect(self.lists_merge_lists)
-        sidebar_actions.addWidget(btn_merge)
+        self.lists_detail_title = QLabel()
+        self.lists_detail_title.setWordWrap(True)
+        self.lists_detail_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Title:"), self.lists_detail_title)
 
-        sidebar_layout.addLayout(sidebar_actions)
+        self.lists_detail_lists = QLabel()
+        details_layout.addRow(tr("Lists:"), self.lists_detail_lists)
+
+        # Tags with add button
+        tags_widget = QWidget()
+        self.lists_detail_tags_container = QHBoxLayout(tags_widget)
+        self.lists_detail_tags_container.setContentsMargins(0, 0, 0, 0)
+        self.lists_detail_tags_container.setSpacing(3)
+        details_layout.addRow(tr("Tags:"), tags_widget)
+
+        # Editable note
+        self.lists_detail_note = QLineEdit()
+        self.lists_detail_note.setPlaceholderText(tr("Add a note..."))
+        details_layout.addRow(tr("Note:"), self.lists_detail_note)
+
+        self.lists_detail_source = QLabel()
+        details_layout.addRow(tr("Source:"), self.lists_detail_source)
+
+        self.lists_detail_added = QLabel()
+        details_layout.addRow(tr("Added:"), self.lists_detail_added)
+
+        # Save button for note
+        self.btn_detail_save = QPushButton(tr("Save Changes"))
+        self.btn_detail_save.clicked.connect(self.lists_save_item_details)
+        details_layout.addRow("", self.btn_detail_save)
+
+        preview_layout.addWidget(details_group)
+
+        # --- Center Content Area ---
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Splitter for sidebar and main area
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # --- Main Area ---
         main_area = QWidget()
@@ -4013,6 +4048,13 @@ class GenizahGUI(QMainWindow):
         list_header.addWidget(self.lists_current_label)
 
         list_header.addStretch()
+
+        # Toggle preview button
+        self.btn_toggle_preview = QPushButton("◀")
+        self.btn_toggle_preview.setFixedSize(28, 28)
+        self.btn_toggle_preview.setToolTip(tr("Toggle Preview Panel"))
+        self.btn_toggle_preview.clicked.connect(self.lists_toggle_preview)
+        list_header.addWidget(self.btn_toggle_preview)
 
         # Edit/Delete buttons for current list
         self.btn_edit_list = QPushButton("✏️")
@@ -4063,127 +4105,112 @@ class GenizahGUI(QMainWindow):
         self.lists_items_table.itemChanged.connect(self.lists_on_item_checkbox_changed)
         main_layout.addWidget(self.lists_items_table, 1)
 
-        # Bulk actions bar
-        bulk_bar = QHBoxLayout()
+        # Single action bar
+        action_bar = QHBoxLayout()
 
         self.lists_selection_label = QLabel("")
-        bulk_bar.addWidget(self.lists_selection_label)
-
-        bulk_bar.addStretch()
+        action_bar.addWidget(self.lists_selection_label)
 
         btn_move = QPushButton(tr("Move to List..."))
         btn_move.clicked.connect(self.lists_move_selected_items)
-        bulk_bar.addWidget(btn_move)
+        action_bar.addWidget(btn_move)
 
         btn_add_tag = QPushButton(tr("Add Tag..."))
         btn_add_tag.clicked.connect(self.lists_add_tag_to_selected)
-        bulk_bar.addWidget(btn_add_tag)
+        action_bar.addWidget(btn_add_tag)
 
         btn_remove_selected = QPushButton(tr("Remove Selected"))
         btn_remove_selected.clicked.connect(self.lists_remove_selected_items)
-        bulk_bar.addWidget(btn_remove_selected)
+        action_bar.addWidget(btn_remove_selected)
 
-        main_layout.addLayout(bulk_bar)
-
-        # Export/Import bar
-        export_bar = QHBoxLayout()
+        action_bar.addStretch()
 
         btn_export = QPushButton(tr("Export List..."))
         btn_export.clicked.connect(self.lists_export_current_list)
-        export_bar.addWidget(btn_export)
-
-        export_bar.addStretch()
+        action_bar.addWidget(btn_export)
 
         btn_import = QPushButton(tr("Import List..."))
         btn_import.clicked.connect(self.lists_import_list)
-        export_bar.addWidget(btn_import)
+        action_bar.addWidget(btn_import)
 
-        main_layout.addLayout(export_bar)
+        main_layout.addLayout(action_bar)
 
-        # --- Item Details Panel ---
-        details_frame = QFrame()
-        details_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        details_layout = QVBoxLayout(details_frame)
-        details_layout.setContentsMargins(10, 10, 10, 10)
+        # --- Right Sidebar: Lists ---
+        sidebar = QWidget()
+        sidebar.setFixedWidth(200)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(5, 0, 0, 0)
 
-        details_header = QHBoxLayout()
-        details_header.addWidget(QLabel(f"<b>{tr('Item Details')}</b>"))
-        details_header.addStretch()
-        details_layout.addLayout(details_header)
+        # Lists header
+        lists_header = QHBoxLayout()
+        lists_header.addWidget(QLabel(f"<b>{tr('Personal Lists')}</b>"))
+        lists_header.addStretch()
 
-        # Item info grid
-        info_grid = QGridLayout()
+        # New list button
+        btn_new_list = QPushButton("+")
+        btn_new_list.setFixedSize(24, 24)
+        btn_new_list.setToolTip(tr("New List..."))
+        btn_new_list.clicked.connect(self.lists_create_new_list)
+        lists_header.addWidget(btn_new_list)
 
-        info_grid.addWidget(QLabel(tr("Shelfmark:")), 0, 0)
-        self.lists_detail_shelfmark = QLabel()
-        self.lists_detail_shelfmark.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        info_grid.addWidget(self.lists_detail_shelfmark, 0, 1)
+        sidebar_layout.addLayout(lists_header)
 
-        info_grid.addWidget(QLabel(tr("Title")), 0, 2)
-        self.lists_detail_title = QLabel()
-        self.lists_detail_title.setWordWrap(True)
-        self.lists_detail_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        info_grid.addWidget(self.lists_detail_title, 0, 3)
+        # Lists tree
+        self.lists_tree = QTreeWidget()
+        self.lists_tree.setHeaderHidden(True)
+        self.lists_tree.setIndentation(0)
+        self.lists_tree.setRootIsDecorated(False)
+        self.lists_tree.itemClicked.connect(self.lists_on_list_selected)
+        self.lists_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lists_tree.customContextMenuRequested.connect(self.lists_show_list_context_menu)
+        sidebar_layout.addWidget(self.lists_tree, 1)
 
-        info_grid.addWidget(QLabel(tr("Lists:")), 1, 0)
-        self.lists_detail_lists = QLabel()
-        info_grid.addWidget(self.lists_detail_lists, 1, 1, 1, 3)
+        # Sidebar action buttons
+        sidebar_actions = QVBoxLayout()
+        sidebar_actions.setSpacing(2)
 
-        info_grid.addWidget(QLabel(tr("Tags:")), 2, 0)
-        self.lists_detail_tags_container = QHBoxLayout()
-        self.lists_detail_tags_widget = QWidget()
-        self.lists_detail_tags_widget.setLayout(self.lists_detail_tags_container)
-        info_grid.addWidget(self.lists_detail_tags_widget, 2, 1, 1, 3)
+        btn_duplicate = QPushButton(tr("Duplicate List"))
+        btn_duplicate.clicked.connect(self.lists_duplicate_selected_list)
+        sidebar_actions.addWidget(btn_duplicate)
 
-        info_grid.addWidget(QLabel(tr("Note:")), 3, 0)
-        self.lists_detail_note = QLineEdit()
-        self.lists_detail_note.setPlaceholderText(tr("Add a note..."))
-        info_grid.addWidget(self.lists_detail_note, 3, 1, 1, 3)
+        btn_merge = QPushButton(tr("Merge Lists"))
+        btn_merge.clicked.connect(self.lists_merge_lists)
+        sidebar_actions.addWidget(btn_merge)
 
-        info_grid.addWidget(QLabel(tr("Source:")), 4, 0)
-        self.lists_detail_source = QLabel()
-        info_grid.addWidget(self.lists_detail_source, 4, 1)
+        sidebar_layout.addLayout(sidebar_actions)
 
-        info_grid.addWidget(QLabel(tr("Added:")), 4, 2)
-        self.lists_detail_added = QLabel()
-        info_grid.addWidget(self.lists_detail_added, 4, 3)
+        # Add to content splitter
+        content_splitter.addWidget(main_area)
+        content_splitter.addWidget(sidebar)
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 0)
 
-        details_layout.addLayout(info_grid)
+        center_layout.addWidget(content_splitter)
 
-        # Detail action buttons
-        detail_actions = QHBoxLayout()
+        # Add to main splitter
+        main_splitter.addWidget(self.lists_preview_panel)
+        main_splitter.addWidget(center_widget)
+        main_splitter.setStretchFactor(0, 0)
+        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setSizes([300, 700])
 
-        self.btn_detail_save = QPushButton(tr("Save Changes"))
-        self.btn_detail_save.clicked.connect(self.lists_save_item_details)
-        detail_actions.addWidget(self.btn_detail_save)
+        # Store reference to splitter for toggle
+        self.lists_main_splitter = main_splitter
 
-        detail_actions.addStretch()
-
-        btn_detail_view = QPushButton("👁️ " + tr("Quick View"))
-        btn_detail_view.clicked.connect(self.lists_quick_view_item)
-        detail_actions.addWidget(btn_detail_view)
-
-        btn_detail_browse = QPushButton("📖 " + tr("Browse"))
-        btn_detail_browse.clicked.connect(self.lists_browse_item)
-        detail_actions.addWidget(btn_detail_browse)
-
-        btn_detail_copy = QPushButton("📋 " + tr("Copy Info..."))
-        btn_detail_copy.clicked.connect(self.lists_copy_item_info)
-        detail_actions.addWidget(btn_detail_copy)
-
-        details_layout.addLayout(detail_actions)
-
-        main_layout.addWidget(details_frame)
-
-        # Combine sidebar and main area
-        layout.addWidget(sidebar)
-        layout.addWidget(main_area, 1)
+        layout.addWidget(main_splitter)
 
         # Initialize state
         self.lists_current_list_id = 'default'
         self.lists_current_item_sys_id = None
+        self.lists_preview_visible = True
 
         return panel
+
+    def lists_toggle_preview(self):
+        """Toggle the preview panel visibility."""
+        self.lists_preview_visible = not self.lists_preview_visible
+        self.lists_preview_panel.setVisible(self.lists_preview_visible)
+        self.btn_toggle_preview.setText("◀" if self.lists_preview_visible else "▶")
 
     def lists_refresh_all(self):
         """Refresh the lists sidebar and current items view."""
@@ -4453,8 +4480,82 @@ class GenizahGUI(QMainWindow):
         else:
             self.lists_detail_added.setText('-')
 
+        # Load text preview and image
+        self._lists_load_preview(sys_id)
+
+    def _lists_load_preview(self, sys_id):
+        """Load text and image preview for an item."""
+        # Clear previous preview
+        self.lists_preview_text.clear()
+        self.lists_preview_image.clear()
+        self.lists_preview_image.setText(tr("No image"))
+
+        if not self.searcher:
+            return
+
+        # Get page data
+        page_data = self.searcher.get_browse_page(sys_id, p_num=1)
+        if not page_data:
+            self.lists_preview_text.setPlainText(tr("Could not load text"))
+            return
+
+        # Load text
+        text = page_data.get('text', '')
+        if text:
+            # Truncate for preview (first ~500 chars)
+            preview_text = text[:1000] + ('...' if len(text) > 1000 else '')
+            self.lists_preview_text.setPlainText(preview_text)
+        else:
+            self.lists_preview_text.setPlainText(tr("No text available"))
+
+        # Load image (async would be better, but for now sync)
+        self._lists_load_preview_image(sys_id, page_data)
+
+    def _lists_load_preview_image(self, sys_id, page_data):
+        """Load image for preview panel."""
+        if not self.meta_mgr:
+            return
+
+        try:
+            # Try to get image URL
+            full_header = page_data.get('full_header', '')
+            if not full_header:
+                return
+
+            parsed = self.meta_mgr.parse_full_id_components(full_header)
+            fl_id = parsed.get('fl_id')
+
+            if fl_id and hasattr(self, 'fetcher') and self.fetcher:
+                # Try cached image first
+                cached = self.fetcher.get_cached_image(fl_id)
+                if cached:
+                    self._lists_set_preview_image(cached)
+                else:
+                    # Fetch synchronously for now (can optimize later)
+                    self.lists_preview_image.setText(tr("Loading..."))
+                    QApplication.processEvents()
+                    img_data = self.fetcher.fetch_single(fl_id)
+                    if img_data:
+                        self._lists_set_preview_image(img_data)
+                    else:
+                        self.lists_preview_image.setText(tr("No image"))
+        except Exception as e:
+            LOGGER.debug(f"Failed to load preview image: {e}")
+            self.lists_preview_image.setText(tr("No image"))
+
+    def _lists_set_preview_image(self, img_data):
+        """Set preview image from data."""
+        try:
+            pixmap = QPixmap()
+            pixmap.loadFromData(img_data)
+            scaled = pixmap.scaled(280, 200, Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.SmoothTransformation)
+            self.lists_preview_image.setPixmap(scaled)
+        except:
+            self.lists_preview_image.setText(tr("No image"))
+
     def lists_clear_details(self):
-        """Clear the details panel."""
+        """Clear the details panel and preview."""
         self.lists_detail_shelfmark.setText('')
         self.lists_detail_title.setText('')
         self.lists_detail_lists.setText('')
@@ -4467,6 +4568,11 @@ class GenizahGUI(QMainWindow):
             child = self.lists_detail_tags_container.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+
+        # Clear preview
+        self.lists_preview_text.clear()
+        self.lists_preview_image.clear()
+        self.lists_preview_image.setText(tr("No image"))
 
     def lists_save_item_details(self):
         """Save changes to the current item."""
