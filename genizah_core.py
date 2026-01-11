@@ -4750,6 +4750,14 @@ class ListsManager:
             if project_id and project_id not in self.data.get('projects', {}):
                 continue
             lst['project_id'] = project_id
+            if project_id:
+                project = self.data.get('projects', {}).get(project_id, {})
+                if project.get('color'):
+                    lst['color'] = project['color']
+            else:
+                default_color = self.data.get('lists', {}).get('default', {}).get('color')
+                if default_color:
+                    lst['color'] = default_color
 
         self.data['lists_order'] = [list_id for list_id in list_order if list_id in self.data['lists']]
         self.data['projects_order'] = [
