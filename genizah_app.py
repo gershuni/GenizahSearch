@@ -26,14 +26,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle,
+                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath)
+                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
 
 from version import APP_VERSION
 
@@ -41,7 +41,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -1932,6 +1932,10 @@ class ResultDialog(QDialog):
         self.btn_search_parallels = QPushButton(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
 
+        # Add to List button
+        self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_add_to_list.clicked.connect(self.add_current_to_list)
+
         self.btn_ext_info = QPushButton(tr("Show Extended Info"))
         self.btn_ext_info.setCheckable(True)
         self.btn_ext_info.toggled.connect(self.toggle_extended_info)
@@ -1949,6 +1953,7 @@ class ResultDialog(QDialog):
 
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
+        action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_toggle_image)
         action_row.addStretch()
@@ -2073,6 +2078,43 @@ class ResultDialog(QDialog):
             )
             self.close()
 
+    def add_current_to_list(self):
+        """Add the current manuscript to a list."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'lists_mgr') or not parent.lists_mgr:
+            return
+
+        # Get system ID from current result
+        sys_id = None
+        if self.data:
+            display = self.data.get('display', {})
+            sys_id = display.get('id')
+
+        if sys_id:
+            fl_id = parent._normalize_fl_id(self.current_fl_id)
+            img = self.current_p_num
+            parent.show_add_to_list_menu(
+                [{'sys_id': sys_id, 'fl_id': fl_id, 'img': img}],
+                source=tr("from browse"),
+                anchor_widget=self.btn_add_to_list
+            )
+            # Also add to recently viewed
+            parent.lists_mgr.add_to_recent(sys_id, fl_id=fl_id, img=img)
+            self._update_add_to_list_button()
+
+    def _update_add_to_list_button(self):
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'lists_mgr') or not parent.lists_mgr:
+            return
+        if not self.current_sys_id:
+            return
+        in_list = parent._is_item_in_non_recent_list(
+            self.current_sys_id,
+            img=self.current_p_num,
+            fl_id=parent._normalize_fl_id(self.current_fl_id),
+        )
+        self.btn_add_to_list.setText(_format_add_to_list_label(in_list))
+
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
 
@@ -2133,9 +2175,15 @@ class ResultDialog(QDialog):
         # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data['raw_header'])
         self.current_sys_id = ids['sys_id']
-        try: p = int(ids['p_num']) 
+        try: p = int(ids['p_num'])
         except: p = 1
-        
+
+        # Add to Recently Viewed
+        parent = self.parent()
+        if parent and hasattr(parent, 'lists_mgr') and parent.lists_mgr and self.current_sys_id:
+            fl_id = parent._normalize_fl_id(ids.get('fl_id'))
+            parent.lists_mgr.add_to_recent(self.current_sys_id, fl_id=fl_id, img=ids.get('p_num'))
+
         # --- Prepare Text Content ---
         # 1. Manuscript Text (Apply Pattern!)
         ms_raw = data.get('full_text', '') or data.get('text', '')
@@ -2234,6 +2282,7 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
+        self._update_add_to_list_button()
 
         # Keep the dialog's data object aligned with the currently displayed folio
         if self.data is not None:
@@ -2685,15 +2734,32 @@ class ActionsHoverWidget(QWidget):
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.buttons = []
+        self.always_visible_buttons = set()
 
-    def add_btn(self, btn):
+    def add_btn(self, btn, always_visible=False):
         self.layout().addWidget(btn)
         self.buttons.append(btn)
-        btn.setVisible(False)
+        if always_visible:
+            self.always_visible_buttons.add(btn)
+            btn.setVisible(True)
+        else:
+            btn.setVisible(False)
 
     def set_buttons_visible(self, visible):
         for b in self.buttons:
-            b.setVisible(visible)
+            if b in self.always_visible_buttons:
+                b.setVisible(True)
+            else:
+                b.setVisible(visible)
+
+
+def _format_add_to_list_label(in_list=False):
+    star = "⭐" if in_list else "☆"
+    return f"{star} {tr('Add to List')}"
+
+
+def _format_list_star(in_list=False):
+    return "⭐" if in_list else "☆"
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
@@ -2713,6 +2779,7 @@ class GenizahGUI(QMainWindow):
         self.indexer = None
         self.ai_mgr = None
         self.lab_engine = None
+        self.lists_mgr = None
 
         self.last_results = []
         self.last_search_query = ""
@@ -2766,6 +2833,7 @@ class GenizahGUI(QMainWindow):
         self.comp_thread = None 
         self.comp_worker = None
         self.hovered_row = -1
+        self.lists_hovered_row = -1
         self.results_loaded = 0
         self.snippet_queue = []
 
@@ -2793,6 +2861,9 @@ class GenizahGUI(QMainWindow):
             self.searcher = searcher
             self.indexer = indexer
             self.ai_mgr = ai_mgr
+
+            # Init Lists Manager
+            self.lists_mgr = ListsManager(self.meta_mgr)
 
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
@@ -2831,6 +2902,9 @@ class GenizahGUI(QMainWindow):
             
             self.status_label.setText(tr("Components loaded. Ready."))
             self.set_results_loading(False)
+
+            # Initialize Lists Tab UI
+            self.lists_refresh_all()
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
@@ -2925,10 +2999,12 @@ class GenizahGUI(QMainWindow):
         self.search_tab = self.create_search_tab()
         self.composition_tab = self.create_composition_tab()
         self.browse_tab = self.create_browse_tab()
+        self.lists_tab = self.create_lists_tab()
         self.settings_tab = self.create_settings_tab()
         self.tabs.addTab(self.search_tab, tr("Search"))
         self.tabs.addTab(self.composition_tab, tr("Composition Search"))
         self.tabs.addTab(self.browse_tab, tr("Browse Manuscript"))
+        self.tabs.addTab(self.lists_tab, tr("Personal Lists"))
         self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
         # Language Toggle
@@ -3073,7 +3149,7 @@ class GenizahGUI(QMainWindow):
         self._update_results_filter_indicators()
 
         self.results_table.setColumnWidth(self.COL_CHECKBOX, 30) # Checkbox column
-        self.results_table.setColumnWidth(self.COL_ACTIONS, 70)
+        self.results_table.setColumnWidth(self.COL_ACTIONS, 95)
         self.results_table.setColumnWidth(self.COL_SYS_ID, 135)
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
@@ -3139,6 +3215,12 @@ class GenizahGUI(QMainWindow):
 
         # Add controls to status row
         bot.addWidget(self.status_label, 1)
+
+        # Add to List button
+        self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_add_to_list.clicked.connect(self.search_add_selected_to_list)
+        self.btn_add_to_list.setEnabled(False)
+        bot.addWidget(self.btn_add_to_list)
 
         # Append export controls to the right
         bot.addWidget(QLabel("|"))
@@ -3312,6 +3394,11 @@ class GenizahGUI(QMainWindow):
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
+        self.btn_comp_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_comp_add_to_list.clicked.connect(self.comp_add_selected_to_list)
+        self.btn_comp_add_to_list.setEnabled(False)
+        exp_layout.addWidget(self.btn_comp_add_to_list)
+        exp_layout.addStretch()
         self.lbl_comp_export = QLabel(tr("Save Report"))
         exp_layout.addWidget(self.lbl_comp_export)
         
@@ -3407,6 +3494,13 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
         row1.addWidget(self.btn_find_parallels)
+
+        # Add to List button for browse tab
+        self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_browse_add_to_list.clicked.connect(self.browse_add_to_list)
+        self.btn_browse_add_to_list.setEnabled(False)
+        row1.addWidget(self.btn_browse_add_to_list)
+
         row1.addSpacing(20)
         row1.addWidget(self.btn_b_catalog)
         row1.addStretch()
@@ -3560,6 +3654,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_save.setEnabled(True)
         self.btn_b_all.setEnabled(True)
         self.btn_find_parallels.setEnabled(True)
+        self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
 
         # 4. Trigger Page Load to show text (IMPORTANT)
@@ -3650,6 +3745,20 @@ class GenizahGUI(QMainWindow):
                 source_text=text_content,
                 title=short_title
             )
+
+    def browse_add_to_list(self):
+        """Add current manuscript to a list."""
+        if not self.current_browse_sid or not self.lists_mgr:
+            return
+
+        fl_id = self._normalize_fl_id(self.browse_fl_input.text().strip())
+        img = self.current_browse_p
+        self.show_add_to_list_menu(
+            [{'sys_id': self.current_browse_sid, 'fl_id': fl_id, 'img': img}],
+            source=tr("from browse"),
+            anchor_widget=self.btn_browse_add_to_list
+        )
+        self._update_browse_add_to_list_button()
 
     def _set_last_browse_field(self, field):
         self.last_browse_field = field
@@ -3884,7 +3993,1510 @@ class GenizahGUI(QMainWindow):
                 f.write(lab_config)
         
         QMessageBox.information(self, tr("Saved"), tr("Manuscript saved to:\n{}").format(path))
-    
+
+    # ==========================================================================
+    #  PERSONAL LISTS TAB
+    # ==========================================================================
+
+    def create_lists_tab(self):
+        """Create the Personal Lists tab for managing starred manuscripts."""
+        panel = QWidget()
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Main splitter for preview panel and content
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # --- Preview Panel (Left/Optional) ---
+        self.lists_preview_panel = QWidget()
+        preview_layout = QVBoxLayout(self.lists_preview_panel)
+        preview_layout.setContentsMargins(5, 5, 5, 5)
+        preview_layout.setSpacing(5)
+
+        # Preview header with collapse button
+        preview_header = QHBoxLayout()
+        self.lists_preview_title = QLabel(f"<b>{tr('Preview')}</b>")
+        preview_header.addWidget(self.lists_preview_title)
+        preview_header.addStretch()
+        self.btn_toggle_preview = QPushButton("◀")
+        self.btn_toggle_preview.setFixedSize(24, 24)
+        self.btn_toggle_preview.setToolTip(tr("Toggle Preview Panel"))
+        self.btn_toggle_preview.clicked.connect(self.lists_toggle_preview)
+        preview_header.addWidget(self.btn_toggle_preview)
+        preview_layout.addLayout(preview_header)
+
+        self.lists_preview_contents = QWidget()
+        preview_contents_layout = QVBoxLayout(self.lists_preview_contents)
+        preview_contents_layout.setContentsMargins(0, 0, 0, 0)
+        preview_contents_layout.setSpacing(5)
+
+        # Text preview area
+        self.lists_preview_text = QTextEdit()
+        self.lists_preview_text.setReadOnly(True)
+        self.lists_preview_text.setPlaceholderText(tr("Select an item to preview"))
+        preview_contents_layout.addWidget(self.lists_preview_text, 2)
+
+        # Image area
+        self.lists_preview_image = QLabel()
+        self.lists_preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lists_preview_image.setMinimumHeight(150)
+        self.lists_preview_image.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333;")
+        self.lists_preview_image.setText(tr("No image"))
+        preview_contents_layout.addWidget(self.lists_preview_image, 1)
+
+        # Details section
+        details_group = QGroupBox(tr("Item Details"))
+        details_layout = QFormLayout(details_group)
+        details_layout.setContentsMargins(5, 10, 5, 5)
+
+        self.lists_detail_shelfmark = QLabel()
+        self.lists_detail_shelfmark.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Shelfmark:"), self.lists_detail_shelfmark)
+
+        self.lists_detail_image = QLabel()
+        self.lists_detail_image.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Image:"), self.lists_detail_image)
+
+        self.lists_detail_title = QLabel()
+        self.lists_detail_title.setWordWrap(True)
+        self.lists_detail_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Title:"), self.lists_detail_title)
+
+        self.lists_detail_lists = QLabel()
+        details_layout.addRow(tr("Lists:"), self.lists_detail_lists)
+
+        self.lists_detail_sys_id = QLabel()
+        self.lists_detail_sys_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("System ID:"), self.lists_detail_sys_id)
+
+        # Tags with add button
+        tags_widget = QWidget()
+        self.lists_detail_tags_container = QHBoxLayout(tags_widget)
+        self.lists_detail_tags_container.setContentsMargins(0, 0, 0, 0)
+        self.lists_detail_tags_container.setSpacing(3)
+        details_layout.addRow(tr("Tags:"), tags_widget)
+
+        # Editable note
+        self.lists_detail_note = QLineEdit()
+        self.lists_detail_note.setPlaceholderText(tr("Add a note..."))
+        details_layout.addRow(tr("Note:"), self.lists_detail_note)
+
+        self.lists_detail_source = QLabel()
+        details_layout.addRow(tr("Source:"), self.lists_detail_source)
+
+        self.lists_detail_added = QLabel()
+        details_layout.addRow(tr("Added:"), self.lists_detail_added)
+
+        # Save button for note
+        self.btn_detail_save = QPushButton(tr("Save Changes"))
+        self.btn_detail_save.clicked.connect(self.lists_save_item_details)
+        details_layout.addRow("", self.btn_detail_save)
+
+        preview_contents_layout.addWidget(details_group)
+        preview_layout.addWidget(self.lists_preview_contents)
+
+        # --- Center Content Area ---
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Splitter for sidebar and main area
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # --- Main Area ---
+        main_area = QWidget()
+        main_layout = QVBoxLayout(main_area)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # List header bar
+        list_header = QHBoxLayout()
+
+        self.lists_current_label = QLabel()
+        self.lists_current_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        list_header.addWidget(self.lists_current_label)
+
+        list_header.addStretch()
+
+        # Edit/Delete buttons for current list
+        self.btn_edit_list = QPushButton("✏️")
+        self.btn_edit_list.setFixedSize(28, 28)
+        self.btn_edit_list.setToolTip(tr("Edit List"))
+        self.btn_edit_list.clicked.connect(self.lists_edit_current_list)
+        list_header.addWidget(self.btn_edit_list)
+
+        self.btn_delete_list = QPushButton("🗑️")
+        self.btn_delete_list.setFixedSize(28, 28)
+        self.btn_delete_list.setToolTip(tr("Delete List"))
+        self.btn_delete_list.clicked.connect(self.lists_delete_current_list)
+        list_header.addWidget(self.btn_delete_list)
+
+        main_layout.addLayout(list_header)
+
+        # Filter and sort bar
+        filter_bar = QHBoxLayout()
+
+        self.lists_filter_input = QLineEdit()
+        self.lists_filter_input.setPlaceholderText(tr("Filter items..."))
+        self.lists_filter_input.textChanged.connect(self.lists_apply_filter)
+        filter_bar.addWidget(self.lists_filter_input)
+
+        filter_bar.addWidget(QLabel(tr("Sort by:")))
+        self.lists_sort_combo = QComboBox()
+        self.lists_sort_combo.addItems([tr("Shelfmark"), tr("Title"), tr("Date Added")])
+        self.lists_sort_combo.currentIndexChanged.connect(self.lists_refresh_items)
+        filter_bar.addWidget(self.lists_sort_combo)
+
+        main_layout.addLayout(filter_bar)
+
+        # Items table
+        self.lists_items_table = QTableWidget()
+        self.lists_items_table.setColumnCount(6)
+        self.lists_items_table.setHorizontalHeaderLabels(["", tr("Shelfmark"), tr("Image"), tr("Title"), tr("Tags"), tr("Actions")])
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.lists_items_table.setColumnWidth(0, 30)  # Checkbox
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.lists_items_table.setColumnWidth(1, 150)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.lists_items_table.setColumnWidth(2, 90)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        self.lists_items_table.setColumnWidth(4, 120)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.lists_items_table.setColumnWidth(5, 120)
+        self.lists_items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.lists_items_table.itemClicked.connect(self.lists_on_item_clicked)
+        self.lists_items_table.itemChanged.connect(self.lists_on_item_checkbox_changed)
+        self.lists_items_table.setMouseTracking(True)
+        self.lists_items_table.cellEntered.connect(self.on_lists_table_cell_entered)
+        self.lists_items_table.installEventFilter(self)
+        main_layout.addWidget(self.lists_items_table, 1)
+
+        # Single action bar
+        action_bar = QHBoxLayout()
+
+        self.chk_lists_select_all = QCheckBox(tr("Select All"))
+        self.chk_lists_select_all.setTristate(True)
+        self.chk_lists_select_all.toggled.connect(self.lists_on_select_all_toggled)
+        action_bar.addWidget(self.chk_lists_select_all)
+
+        self.lists_selection_label = QLabel("")
+        action_bar.addWidget(self.lists_selection_label)
+
+        btn_move = QPushButton(tr("Move to List..."))
+        btn_move.clicked.connect(self.lists_move_selected_items)
+        action_bar.addWidget(btn_move)
+
+        btn_add_tag = QPushButton(tr("Add Tag..."))
+        btn_add_tag.clicked.connect(self.lists_add_tag_to_selected)
+        action_bar.addWidget(btn_add_tag)
+
+        btn_remove_selected = QPushButton(tr("Remove Selected"))
+        btn_remove_selected.clicked.connect(self.lists_remove_selected_items)
+        action_bar.addWidget(btn_remove_selected)
+
+        action_bar.addStretch()
+
+        btn_export = QPushButton(tr("Export List..."))
+        btn_export.clicked.connect(self.lists_export_current_list)
+        action_bar.addWidget(btn_export)
+
+        btn_import = QPushButton(tr("Import List..."))
+        btn_import.clicked.connect(self.lists_import_list)
+        action_bar.addWidget(btn_import)
+
+        main_layout.addLayout(action_bar)
+
+        # --- Right Sidebar: Lists ---
+        sidebar = QWidget()
+        sidebar.setFixedWidth(200)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(5, 0, 0, 0)
+
+        # Lists header
+        lists_header = QHBoxLayout()
+        lists_header.addWidget(QLabel(f"<b>{tr('Personal Lists')}</b>"))
+        lists_header.addStretch()
+
+        # New list button
+        btn_new_list = QPushButton("+")
+        btn_new_list.setFixedSize(24, 24)
+        btn_new_list.setToolTip(tr("New List..."))
+        btn_new_list.clicked.connect(self.lists_create_new_list)
+        lists_header.addWidget(btn_new_list)
+
+        sidebar_layout.addLayout(lists_header)
+
+        # Lists tree
+        self.lists_tree = QTreeWidget()
+        self.lists_tree.setHeaderHidden(True)
+        self.lists_tree.setIndentation(0)
+        self.lists_tree.setRootIsDecorated(False)
+        self.lists_tree.itemClicked.connect(self.lists_on_list_selected)
+        self.lists_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lists_tree.customContextMenuRequested.connect(self.lists_show_list_context_menu)
+        sidebar_layout.addWidget(self.lists_tree, 1)
+
+        # Sidebar action buttons
+        sidebar_actions = QVBoxLayout()
+        sidebar_actions.setSpacing(2)
+
+        btn_duplicate = QPushButton(tr("Duplicate List"))
+        btn_duplicate.clicked.connect(self.lists_duplicate_selected_list)
+        sidebar_actions.addWidget(btn_duplicate)
+
+        btn_merge = QPushButton(tr("Merge Lists"))
+        btn_merge.clicked.connect(self.lists_merge_lists)
+        sidebar_actions.addWidget(btn_merge)
+
+        sidebar_layout.addLayout(sidebar_actions)
+
+        is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+
+        # Add to content splitter
+        if is_rtl:
+            content_splitter.addWidget(sidebar)
+            content_splitter.addWidget(main_area)
+        else:
+            content_splitter.addWidget(main_area)
+            content_splitter.addWidget(sidebar)
+        content_splitter.setStretchFactor(content_splitter.indexOf(main_area), 1)
+        content_splitter.setStretchFactor(content_splitter.indexOf(sidebar), 0)
+
+        center_layout.addWidget(content_splitter)
+
+        # Add to main splitter
+        if is_rtl:
+            main_splitter.addWidget(center_widget)
+            main_splitter.addWidget(self.lists_preview_panel)
+        else:
+            main_splitter.addWidget(self.lists_preview_panel)
+            main_splitter.addWidget(center_widget)
+        main_splitter.setStretchFactor(main_splitter.indexOf(self.lists_preview_panel), 0)
+        main_splitter.setStretchFactor(main_splitter.indexOf(center_widget), 1)
+        main_splitter.setSizes([300, 700] if not is_rtl else [700, 300])
+
+        # Store reference to splitter for toggle
+        self.lists_main_splitter = main_splitter
+        self.lists_preview_index = main_splitter.indexOf(self.lists_preview_panel)
+        self.lists_preview_last_sizes = None
+
+        layout.addWidget(main_splitter)
+
+        # Initialize state
+        self.lists_current_list_id = 'default'
+        self.lists_current_item_id = None
+        self.lists_preview_visible = True
+        self.lists_set_preview_visible(True, auto=True)
+
+        return panel
+
+    def lists_toggle_preview(self):
+        """Toggle the preview panel visibility."""
+        self.lists_set_preview_visible(not self.lists_preview_visible, auto=False)
+
+    def _normalize_fl_id(self, fl_id):
+        digits = re.sub(r"\D", "", str(fl_id or ""))
+        return digits or None
+
+    def _format_image_display(self, img):
+        return str(img) if img not in (None, "") else ""
+
+    def _get_list_display_name(self, lst):
+        if CURRENT_LANG == 'en' and lst.get('name_en'):
+            return lst.get('name_en')
+        name = lst.get('name', lst.get('name_en', 'List'))
+        if lst.get('is_system') or lst.get('is_default'):
+            return tr(name)
+        return name
+
+    def lists_set_preview_visible(self, visible, auto=False):
+        """Show/hide preview panel with a slim collapsed bar."""
+        if self.lists_preview_visible == visible and not auto:
+            return
+            
+        self.lists_preview_visible = visible
+        
+        self.lists_preview_contents.setVisible(visible)
+        self.lists_preview_title.setVisible(visible)
+        self.btn_toggle_preview.setText("◀" if visible else "▶")
+
+        if not self.lists_main_splitter:
+            return
+
+        collapsed_width = 32 
+
+        if visible:
+            self.lists_preview_panel.setMaximumWidth(16777215) # QWIDGETSIZE_MAX
+            
+            self.lists_preview_panel.setMinimumWidth(250)
+            
+            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+            
+            if self.lists_preview_last_sizes:
+                self.lists_main_splitter.setSizes(self.lists_preview_last_sizes)
+            
+            self.lists_main_splitter.setCollapsible(self.lists_preview_index, False)
+
+        else:
+            
+            self.lists_preview_last_sizes = self.lists_main_splitter.sizes()
+            
+            self.lists_preview_panel.setMinimumWidth(collapsed_width)
+            self.lists_preview_panel.setMaximumWidth(collapsed_width)
+            
+            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            
+            sizes = self.lists_main_splitter.sizes()
+            total = sum(sizes)
+            
+            new_sizes = [0] * len(sizes)
+            for i in range(len(sizes)):
+                if i == self.lists_preview_index:
+                    new_sizes[i] = collapsed_width
+                else:
+                    new_sizes[i] = total - collapsed_width
+            
+            self.lists_main_splitter.setSizes(new_sizes)
+
+    def lists_refresh_all(self):
+        """Refresh the lists sidebar and current items view."""
+        self.lists_refresh_sidebar()
+        self.lists_refresh_items()
+        self._update_search_action_stars()
+        self._update_browse_add_to_list_button()
+
+    def lists_refresh_sidebar(self):
+        """Refresh the lists tree in the sidebar."""
+        self.lists_tree.clear()
+
+        if not self.lists_mgr:
+            return
+
+        lists = self.lists_mgr.get_all_lists(include_recent=True)
+
+        for lst in lists:
+            item = QTreeWidgetItem()
+
+            # Create colored dot
+            color = lst.get('color', '#FFD700')
+            name = self._get_list_display_name(lst)
+            count = lst.get('count', 0)
+
+            if lst.get('is_system') and lst['id'] == 'recent':
+                display_text = f"🕐 {name} ({count})"
+            else:
+                display_text = f"● {name} ({count})"
+                item.setForeground(0, QColor(color))
+
+            item.setText(0, display_text)
+            item.setData(0, Qt.ItemDataRole.UserRole, lst['id'])
+
+            # Bold for default list
+            if lst.get('is_default'):
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
+
+            self.lists_tree.addTopLevelItem(item)
+
+        # Select current list
+        for i in range(self.lists_tree.topLevelItemCount()):
+            item = self.lists_tree.topLevelItem(i)
+            if item.data(0, Qt.ItemDataRole.UserRole) == self.lists_current_list_id:
+                self.lists_tree.setCurrentItem(item)
+                break
+
+    def lists_refresh_items(self):
+        """Refresh the items table for the current list."""
+        self.lists_items_table.setRowCount(0)
+
+        if not self.lists_mgr:
+            return
+
+        # Get current list info
+        lists = self.lists_mgr.get_all_lists()
+        current_list = None
+        for lst in lists:
+            if lst['id'] == self.lists_current_list_id:
+                current_list = lst
+                break
+
+        if current_list:
+            color = current_list.get('color', '#FFD700')
+            name = self._get_list_display_name(current_list)
+            self.lists_current_label.setText(f"<span style='color:{color}'>●</span> {name}")
+
+            # Show/hide edit/delete buttons for system lists
+            is_system = current_list.get('is_system', False)
+            is_default = current_list.get('is_default', False)
+            self.btn_edit_list.setEnabled(not is_system)
+            self.btn_delete_list.setEnabled(not is_system and not is_default)
+
+        # Get sort order
+        sort_map = {0: 'shelfmark', 1: 'title', 2: 'added'}
+        sort_by = sort_map.get(self.lists_sort_combo.currentIndex(), 'shelfmark')
+
+        items = self.lists_mgr.get_items_sorted(self.lists_current_list_id, sort_by=sort_by)
+
+        # Apply filter if any
+        filter_text = self.lists_filter_input.text().strip().lower()
+
+        self.lists_items_table.blockSignals(True)
+        visible_item_ids = set()
+
+        for item in items:
+            shelfmark = item.get('shelfmark', 'Unknown')
+            title = item.get('title', '')
+            tags = item.get('tags', [])
+            item_id = item.get('item_id') or item.get('sys_id')
+            img = item.get('img')
+            sys_id = item.get('sys_id')
+            is_unidentified = item.get('shelfmark_override') is not None
+
+            # Apply filter
+            if filter_text:
+                searchable = f"{shelfmark} {title} {' '.join(tags)} {img or ''}".lower()
+                if filter_text not in searchable:
+                    continue
+
+            row = self.lists_items_table.rowCount()
+            self.lists_items_table.insertRow(row)
+            if item_id:
+                visible_item_ids.add(item_id)
+
+            # Checkbox
+            chk_item = QTableWidgetItem()
+            chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            chk_item.setCheckState(Qt.CheckState.Unchecked)
+            chk_item.setData(Qt.ItemDataRole.UserRole, item_id)
+            self.lists_items_table.setItem(row, 0, chk_item)
+
+            # Shelfmark
+            shelf_item = QTableWidgetItem(shelfmark)
+            if is_unidentified:
+                shelf_item.setForeground(QColor("#e74c3c"))
+                shelf_item.setToolTip(tr("(unidentified)"))
+            self.lists_items_table.setItem(row, 1, shelf_item)
+
+            # Image
+            self.lists_items_table.setItem(row, 2, QTableWidgetItem(str(img or "")))
+
+            # Title
+            self.lists_items_table.setItem(row, 3, QTableWidgetItem(title))
+
+            # Tags
+            self.lists_items_table.setItem(row, 4, QTableWidgetItem(", ".join(tags)))
+
+            # Action buttons
+            actions_widget = ActionsHoverWidget()
+
+            btn_view = self._create_action_button("👁️", tr("Quick View"), lambda _, iid=item_id: self.lists_quick_view_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_view)
+
+            btn_browse = self._create_action_button("📖", tr("Browse"), lambda _, iid=item_id: self.lists_browse_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_browse)
+
+            btn_copy = self._create_action_button("📋", tr("Copy Info"), lambda _, iid=item_id: self.lists_copy_info_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_copy)
+
+            btn_remove = self._create_action_button("🗑️", tr("Remove from List"), lambda _, iid=item_id: self.lists_remove_item_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_remove)
+
+            self.lists_items_table.setCellWidget(row, 5, actions_widget)
+
+        self.lists_items_table.blockSignals(False)
+        self.lists_update_selection_label()
+        self.chk_lists_select_all.setEnabled(self.lists_items_table.rowCount() > 0)
+        self.lists_sync_select_all_checkbox()
+        if not self.lists_current_item_id or self.lists_current_item_id not in visible_item_ids:
+            self.lists_current_item_id = None
+            self.lists_clear_details()
+
+    def lists_on_list_selected(self, item, column):
+        """Handle list selection in the sidebar."""
+        list_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if list_id:
+            self.lists_current_list_id = list_id
+            self.lists_current_item_id = None
+            self.lists_refresh_items()
+            self.lists_clear_details()
+
+    def lists_on_item_clicked(self, item):
+        """Handle item click in the table."""
+        if item.column() == 0:  # Checkbox column
+            return
+
+        row = item.row()
+        chk_item = self.lists_items_table.item(row, 0)
+        if chk_item:
+            item_id = chk_item.data(Qt.ItemDataRole.UserRole)
+            if item_id:
+                self.lists_current_item_id = item_id
+                self.lists_show_item_details(item_id)
+
+    def lists_on_item_checkbox_changed(self, item):
+        """Handle checkbox state change."""
+        if item.column() != 0:
+            return
+        self.lists_update_selection_label()
+
+    def lists_update_selection_label(self):
+        """Update the selection count label."""
+        count = 0
+        for row in range(self.lists_items_table.rowCount()):
+            chk = self.lists_items_table.item(row, 0)
+            if chk and chk.checkState() == Qt.CheckState.Checked:
+                count += 1
+
+        if count > 0:
+            self.lists_selection_label.setText(tr("{} selected").format(count))
+        else:
+            self.lists_selection_label.setText("")
+        self.lists_sync_select_all_checkbox()
+
+    def lists_on_select_all_toggled(self, checked):
+        """Toggle all checkboxes in the list table."""
+        if not hasattr(self, "_lists_select_all_guard"):
+            self._lists_select_all_guard = False
+        if self._lists_select_all_guard:
+            return
+        self.lists_items_table.blockSignals(True)
+        for row in range(self.lists_items_table.rowCount()):
+            chk = self.lists_items_table.item(row, 0)
+            if chk:
+                chk.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self.lists_items_table.blockSignals(False)
+        self.lists_update_selection_label()
+
+    def lists_sync_select_all_checkbox(self):
+        """Sync 'Select All' checkbox state with row selections."""
+        if not hasattr(self, "_lists_select_all_guard"):
+            self._lists_select_all_guard = False
+        total = self.lists_items_table.rowCount()
+        if total == 0:
+            self._lists_select_all_guard = True
+            self.chk_lists_select_all.setCheckState(Qt.CheckState.Unchecked)
+            self._lists_select_all_guard = False
+            return
+        checked_count = 0
+        for row in range(total):
+            chk = self.lists_items_table.item(row, 0)
+            if chk and chk.checkState() == Qt.CheckState.Checked:
+                checked_count += 1
+        self._lists_select_all_guard = True
+        if checked_count == 0:
+            self.chk_lists_select_all.setCheckState(Qt.CheckState.Unchecked)
+        elif checked_count == total:
+            self.chk_lists_select_all.setCheckState(Qt.CheckState.Checked)
+        else:
+            self.chk_lists_select_all.setCheckState(Qt.CheckState.PartiallyChecked)
+        self._lists_select_all_guard = False
+
+    def lists_get_selected_item_ids(self):
+        """Get list of selected item ids."""
+        selected = []
+        for row in range(self.lists_items_table.rowCount()):
+            chk = self.lists_items_table.item(row, 0)
+            if chk and chk.checkState() == Qt.CheckState.Checked:
+                item_id = chk.data(Qt.ItemDataRole.UserRole)
+                if item_id:
+                    selected.append(item_id)
+        return selected
+
+    def lists_show_item_details(self, item_id):
+        """Show details for a specific item."""
+        if not self.lists_mgr:
+            return
+
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
+
+        # Get metadata
+        shelfmark = 'Unknown'
+        title = ''
+        if item.get('shelfmark_override'):
+            shelfmark = item['shelfmark_override']
+        elif self.meta_mgr:
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        self.lists_detail_shelfmark.setText(shelfmark)
+        self.lists_detail_image.setText(str(img) if img not in (None, "") else "-")
+        self.lists_detail_title.setText(title)
+        self.lists_detail_sys_id.setText(sys_id or '')
+
+        # Lists
+        list_names = []
+        for list_id in item.get('lists', []):
+            lst_info = self.lists_mgr.data['lists'].get(list_id)
+            if lst_info:
+                list_names.append(lst_info.get('name', list_id))
+        self.lists_detail_lists.setText(", ".join(list_names) if list_names else "-")
+
+        # Tags
+        # Clear previous tags
+        while self.lists_detail_tags_container.count():
+            child = self.lists_detail_tags_container.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        for tag in item.get('tags', []):
+            tag_label = QLabel(f"[{tag}]")
+            tag_label.setStyleSheet("color: #3498db; font-weight: bold;")
+            self.lists_detail_tags_container.addWidget(tag_label)
+
+        # Add tag button
+        btn_add_tag = QPushButton("+")
+        btn_add_tag.setFixedSize(20, 20)
+        btn_add_tag.clicked.connect(lambda: self.lists_add_tag_to_item(item_id))
+        self.lists_detail_tags_container.addWidget(btn_add_tag)
+        self.lists_detail_tags_container.addStretch()
+
+        # Note
+        self.lists_detail_note.setText(item.get('note', ''))
+
+        # Source
+        self.lists_detail_source.setText(item.get('source', '-'))
+
+        # Added date
+        added_ts = item.get('added', 0)
+        if added_ts:
+            from datetime import datetime
+            added_str = datetime.fromtimestamp(added_ts).strftime('%d.%m.%Y %H:%M')
+            self.lists_detail_added.setText(added_str)
+        else:
+            self.lists_detail_added.setText('-')
+
+        # Load text preview and image
+        if sys_id:
+            self._lists_load_preview(sys_id, img=img)
+        if not self.lists_preview_visible:
+            self.lists_set_preview_visible(True, auto=True)
+
+    def _lists_load_preview(self, sys_id, img=None):
+        """Load text and image preview for an item."""
+        # Clear previous preview
+        self.lists_preview_text.clear()
+        self.lists_preview_image.clear()
+        self.lists_preview_image.setText(tr("No image"))
+
+        if not self.searcher:
+            return
+
+        # Get page data
+        p_num = 1
+        if img not in (None, ""):
+            try:
+                p_num = int(img)
+            except ValueError:
+                p_num = 1
+        page_data = self.searcher.get_browse_page(sys_id, p_num=p_num)
+        if not page_data:
+            self.lists_preview_text.setPlainText(tr("Could not load text"))
+            return
+
+        # Load text
+        text = page_data.get('text', '')
+        if text:
+            # Truncate for preview (first ~500 chars)
+            preview_text = text[:1000] + ('...' if len(text) > 1000 else '')
+            self.lists_preview_text.setPlainText(preview_text)
+        else:
+            self.lists_preview_text.setPlainText(tr("No text available"))
+
+        # Load image (async would be better, but for now sync)
+        self._lists_load_preview_image(sys_id, page_data)
+
+    def _lists_load_preview_image(self, sys_id, page_data):
+        """Load image for preview panel."""
+        if not self.meta_mgr:
+            return
+
+        try:
+            # Try to get image URL
+            full_header = page_data.get('full_header', '')
+            if not full_header:
+                return
+
+            parsed = self.meta_mgr.parse_full_id_components(full_header)
+            fl_id = parsed.get('fl_id')
+
+            if fl_id and hasattr(self, 'fetcher') and self.fetcher:
+                # Try cached image first
+                cached = self.fetcher.get_cached_image(fl_id)
+                if cached:
+                    self._lists_set_preview_image(cached)
+                else:
+                    # Fetch synchronously for now (can optimize later)
+                    self.lists_preview_image.setText(tr("Loading..."))
+                    QApplication.processEvents()
+                    img_data = self.fetcher.fetch_single(fl_id)
+                    if img_data:
+                        self._lists_set_preview_image(img_data)
+                    else:
+                        self.lists_preview_image.setText(tr("No image"))
+        except Exception as e:
+            LOGGER.debug(f"Failed to load preview image: {e}")
+            self.lists_preview_image.setText(tr("No image"))
+
+    def _lists_set_preview_image(self, img_data):
+        """Set preview image from data."""
+        try:
+            pixmap = QPixmap()
+            pixmap.loadFromData(img_data)
+            scaled = pixmap.scaled(280, 200, Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.SmoothTransformation)
+            self.lists_preview_image.setPixmap(scaled)
+        except:
+            self.lists_preview_image.setText(tr("No image"))
+
+    def lists_clear_details(self):
+        """Clear the details panel and preview."""
+        self.lists_detail_shelfmark.setText('')
+        self.lists_detail_title.setText('')
+        self.lists_detail_lists.setText('')
+        self.lists_detail_sys_id.setText('')
+        self.lists_detail_image.setText('')
+        self.lists_detail_note.setText('')
+        self.lists_detail_source.setText('')
+        self.lists_detail_added.setText('')
+
+        # Clear tags
+        while self.lists_detail_tags_container.count():
+            child = self.lists_detail_tags_container.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Clear preview
+        self.lists_preview_text.clear()
+        self.lists_preview_image.clear()
+        self.lists_preview_image.setText(tr("No image"))
+        if self.lists_preview_visible:
+            self.lists_set_preview_visible(False, auto=True)
+
+    def lists_save_item_details(self):
+        """Save changes to the current item."""
+        if not self.lists_mgr or not self.lists_current_item_id:
+            return
+
+        note = self.lists_detail_note.text()
+        self.lists_mgr.update_item(self.lists_current_item_id, note=note)
+
+    def lists_create_new_list(self):
+        """Create a new list."""
+        name, ok = QInputDialog.getText(self, tr("Create New List"), tr("List Name:"))
+        if ok and name.strip():
+            if self.lists_mgr:
+                self.lists_mgr.create_list(name.strip())
+                self.lists_refresh_sidebar()
+
+    def lists_edit_current_list(self):
+        """Edit the current list name/color."""
+        if not self.lists_mgr or self.lists_current_list_id in ['default', 'recent']:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(self.lists_current_list_id)
+        if not lst or lst.get('is_system'):
+            return
+
+        name, ok = QInputDialog.getText(self, tr("Rename List"), tr("List Name:"), text=lst.get('name', ''))
+        if ok and name.strip():
+            self.lists_mgr.update_list(self.lists_current_list_id, name=name.strip())
+            self.lists_refresh_all()
+
+    def lists_delete_current_list(self):
+        """Delete the current list."""
+        if not self.lists_mgr or self.lists_current_list_id in ['default', 'recent']:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(self.lists_current_list_id)
+        if not lst:
+            return
+
+        name = lst.get('name', 'List')
+        reply = QMessageBox.question(
+            self, tr("Delete List?"),
+            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.lists_mgr.delete_list(self.lists_current_list_id)
+            self.lists_current_list_id = 'default'
+            self.lists_refresh_all()
+
+    def lists_duplicate_selected_list(self):
+        """Duplicate the current list."""
+        if not self.lists_mgr or self.lists_current_list_id == 'recent':
+            return
+
+        self.lists_mgr.duplicate_list(self.lists_current_list_id)
+        self.lists_refresh_sidebar()
+
+    def lists_merge_lists(self):
+        """Show dialog to merge lists."""
+        if not self.lists_mgr:
+            return
+
+        # Get non-system lists
+        lists = [l for l in self.lists_mgr.get_all_lists(include_recent=False)
+                 if not l.get('is_system')]
+
+        if len(lists) < 2:
+            QMessageBox.information(self, tr("Merge Lists"), tr("Need at least two lists to merge."))
+            return
+
+        # Simple dialog - select target
+        items = [self._get_list_display_name(l) for l in lists]
+        target_name, ok = QInputDialog.getItem(
+            self, tr("Merge Lists"),
+            tr("Merge '{}' into:").format(
+                self.lists_mgr.data['lists'].get(self.lists_current_list_id, {}).get('name', '')
+            ),
+            items, 0, False
+        )
+
+        if ok and target_name:
+            target_list = None
+            for l in lists:
+                if self._get_list_display_name(l) == target_name:
+                    target_list = l
+                    break
+
+            if target_list and target_list['id'] != self.lists_current_list_id:
+                self.lists_mgr.merge_lists(self.lists_current_list_id, target_list['id'])
+                self.lists_current_list_id = target_list['id']
+                self.lists_refresh_all()
+
+    def lists_move_selected_items(self):
+        """Move selected items to another list."""
+        if not self.lists_mgr:
+            return
+
+        selected = self.lists_get_selected_item_ids()
+        if not selected:
+            return
+
+        lists = [l for l in self.lists_mgr.get_all_lists(include_recent=False)]
+        items = [self._get_list_display_name(l) for l in lists]
+
+        target_name, ok = QInputDialog.getItem(
+            self, tr("Move to List..."),
+            tr("Select list:"),
+            items, 0, False
+        )
+
+        if ok and target_name:
+            target_list = None
+            for l in lists:
+                if self._get_list_display_name(l) == target_name:
+                    target_list = l
+                    break
+
+            if target_list:
+                self.lists_mgr.move_items_to_list(selected, self.lists_current_list_id, target_list['id'])
+                self.lists_refresh_all()
+
+    def lists_add_tag_to_selected(self):
+        """Add a tag to selected items."""
+        if not self.lists_mgr:
+            return
+
+        selected = self.lists_get_selected_item_ids()
+        if not selected:
+            return
+
+        tag, ok = QInputDialog.getText(self, tr("Add Tag"), tr("Enter tag:"))
+        if ok and tag.strip():
+            self.lists_mgr.add_tag_to_items(selected, tag.strip())
+            self.lists_refresh_items()
+
+    def lists_add_tag_to_item(self, item_id):
+        """Add a tag to a specific item."""
+        if not self.lists_mgr:
+            return
+
+        tag, ok = QInputDialog.getText(self, tr("Add Tag"), tr("Enter tag:"))
+        if ok and tag.strip():
+            self.lists_mgr.add_tag_to_items([item_id], tag.strip())
+            self.lists_show_item_details(item_id)
+            self.lists_refresh_items()
+
+    def lists_remove_selected_items(self):
+        """Remove selected items from current list."""
+        if not self.lists_mgr:
+            return
+
+        selected = self.lists_get_selected_item_ids()
+        if not selected:
+            return
+
+        reply = QMessageBox.question(
+            self, tr("Delete Items?"),
+            tr("Remove {} items from this list?").format(len(selected)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            for item_id in selected:
+                self.lists_mgr.remove_item_from_list(item_id, self.lists_current_list_id)
+            self.lists_refresh_all()
+
+    def lists_remove_item_by_id(self, item_id):
+        """Remove a specific item from current list."""
+        if not self.lists_mgr:
+            return
+
+        self.lists_mgr.remove_item_from_list(item_id, self.lists_current_list_id)
+        self.lists_refresh_all()
+
+    def lists_quick_view_item(self):
+        """Quick view the current item."""
+        if self.lists_current_item_id:
+            self.lists_quick_view_by_id(self.lists_current_item_id)
+
+    def lists_quick_view_by_id(self, item_id):
+        """Open quick view dialog for an item."""
+        if not self.searcher or not self.meta_mgr:
+            return
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
+        if not sys_id:
+            return
+
+        # Get page data from browse index to have all required fields
+        p_num = 1
+        if img not in (None, ""):
+            try:
+                p_num = int(img)
+            except ValueError:
+                p_num = 1
+        page_data = self.searcher.get_browse_page(sys_id, p_num=p_num)
+        if not page_data:
+            QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
+            return
+
+        shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        # Create a complete result dict for ResultDialog
+        result = {
+            'uid': page_data.get('uid', ''),
+            'raw_header': page_data.get('full_header', ''),
+            'full_header': page_data.get('full_header', ''),
+            'text': page_data.get('text', ''),
+            'full_text': page_data.get('text', ''),
+            'display': {
+                'id': sys_id,
+                'shelfmark': shelfmark,
+                'title': title,
+                'img': '',
+                'source': ''
+            }
+        }
+
+        ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
+
+    def lists_browse_item(self):
+        """Browse the current item in the Browse tab."""
+        if self.lists_current_item_id:
+            self.lists_browse_by_id(self.lists_current_item_id)
+
+    def lists_browse_by_id(self, item_id):
+        """Open an item in the Browse tab."""
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
+        if not sys_id:
+            return
+
+        # Switch to browse tab and load the manuscript
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self.browse_sys_input.setText(sys_id)
+        self._set_last_browse_field("sys")
+        self.browse_load()
+
+    def lists_copy_item_info(self):
+        """Copy current item info to clipboard."""
+        if self.lists_current_item_id:
+            self.lists_copy_info_by_id(self.lists_current_item_id)
+
+    def lists_copy_info_by_id(self, item_id):
+        """Copy item info to clipboard with format options."""
+        if not self.lists_mgr:
+            return
+
+        menu = QMenu(self)
+
+        action_compact = menu.addAction(tr("Compact"))
+        action_compact.triggered.connect(lambda: self._do_copy_info(item_id, 'compact'))
+
+        action_detailed = menu.addAction(tr("Detailed"))
+        action_detailed.triggered.connect(lambda: self._do_copy_info(item_id, 'detailed'))
+
+        action_link = menu.addAction(tr("With Link"))
+        action_link.triggered.connect(lambda: self._do_copy_info(item_id, 'with_link'))
+
+        menu.exec(QCursor.pos())
+
+    def _do_copy_info(self, item_id, format_type):
+        """Actually copy the info to clipboard."""
+        if not self.lists_mgr:
+            return
+
+        # Get info even if item is not in a list
+        item = self.lists_mgr.get_item(item_id)
+
+        if item:
+            sys_id = item.get('sys_id')
+            text = self.lists_mgr.get_item_copy_text(item_id, format_type)
+        else:
+            # Item not in lists, generate text from metadata
+            sys_id = item_id
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id) if self.meta_mgr else ('Unknown', '')
+
+            if format_type == 'compact':
+                text = f"{shelfmark} - {title}" if title else shelfmark
+            elif format_type == 'detailed':
+                lines = [f"מספר מדף: {shelfmark}"]
+                if title:
+                    lines.append(f"כותרת: {title}")
+                lines.append(f"מספר מערכת: {sys_id}")
+                text = '\n'.join(lines)
+            else:  # with_link
+                lines = [f"מספר מדף: {shelfmark}"]
+                if title:
+                    lines.append(f"כותרת: {title}")
+                lines.append(f"מספר מערכת: {sys_id}")
+                ktiv_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={sys_id}"
+                lines.append(f"קישור: {ktiv_url}")
+                text = '\n'.join(lines)
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.status_label.setText(tr("Info copied to clipboard."))
+
+    def lists_export_current_list(self):
+        """Export the current list."""
+        if not self.lists_mgr or not self.lists_current_list_id:
+            return
+
+        # Export format selection menu
+        menu = QMenu(self)
+
+        action_text = menu.addAction(tr("Text (plain)"))
+        action_text.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'text'))
+
+        action_json = menu.addAction(tr("JSON"))
+        action_json.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'json'))
+
+        menu.addSeparator()
+
+        action_excel = menu.addAction(tr("Excel (.xlsx)"))
+        action_excel.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'excel'))
+
+        action_word = menu.addAction(tr("Word (.docx)"))
+        action_word.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'word'))
+
+        menu.exec(QCursor.pos())
+
+    def lists_import_list(self):
+        """Import a list from file."""
+        if not self.lists_mgr:
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("Select List File"),
+            Config.REPORTS_DIR,
+            tr("JSON Files") + " (*.json)"
+        )
+
+        if not path:
+            return
+
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+
+            list_id, imported, unidentified = self.lists_mgr.import_list(import_data)
+
+            if list_id:
+                self.lists_current_list_id = list_id
+                self.lists_refresh_all()
+                QMessageBox.information(
+                    self, tr("Import List"),
+                    tr("Imported {} items ({} unidentified).").format(imported, unidentified)
+                )
+            else:
+                QMessageBox.warning(self, tr("Import Error"), tr("Invalid file format."))
+
+        except Exception as e:
+            QMessageBox.warning(self, tr("Import Error"), str(e))
+
+    def lists_show_list_context_menu(self, pos):
+        """Show context menu for list items in sidebar."""
+        item = self.lists_tree.itemAt(pos)
+        if not item:
+            return
+
+        list_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not list_id or not self.lists_mgr:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(list_id)
+        if not lst:
+            return
+
+        menu = QMenu(self)
+
+        if not lst.get('is_system'):
+            action_rename = menu.addAction(tr("Rename List"))
+            action_rename.triggered.connect(lambda: self._rename_list(list_id))
+
+            if not lst.get('is_default'):
+                action_delete = menu.addAction(tr("Delete List"))
+                action_delete.triggered.connect(lambda: self._delete_list(list_id))
+
+            menu.addSeparator()
+
+        action_duplicate = menu.addAction(tr("Duplicate List"))
+        action_duplicate.triggered.connect(lambda: self._duplicate_list(list_id))
+
+        # Export submenu
+        export_menu = menu.addMenu(tr("Export List"))
+
+        action_text = export_menu.addAction(tr("Text (plain)"))
+        action_text.triggered.connect(lambda: self._export_list_format(list_id, 'text'))
+
+        action_json = export_menu.addAction(tr("JSON"))
+        action_json.triggered.connect(lambda: self._export_list_format(list_id, 'json'))
+
+        export_menu.addSeparator()
+
+        action_excel = export_menu.addAction(tr("Excel (.xlsx)"))
+        action_excel.triggered.connect(lambda: self._export_list_format(list_id, 'excel'))
+
+        action_word = export_menu.addAction(tr("Word (.docx)"))
+        action_word.triggered.connect(lambda: self._export_list_format(list_id, 'word'))
+
+        menu.exec(self.lists_tree.mapToGlobal(pos))
+
+    def _rename_list(self, list_id):
+        """Rename a specific list."""
+        if not self.lists_mgr:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(list_id)
+        if not lst:
+            return
+
+        name, ok = QInputDialog.getText(self, tr("Rename List"), tr("List Name:"), text=lst.get('name', ''))
+        if ok and name.strip():
+            self.lists_mgr.update_list(list_id, name=name.strip())
+            self.lists_refresh_all()
+
+    def _delete_list(self, list_id):
+        """Delete a specific list."""
+        if not self.lists_mgr:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(list_id)
+        if not lst:
+            return
+
+        name = lst.get('name', 'List')
+        reply = QMessageBox.question(
+            self, tr("Delete List?"),
+            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.lists_mgr.delete_list(list_id)
+            if self.lists_current_list_id == list_id:
+                self.lists_current_list_id = 'default'
+            self.lists_refresh_all()
+
+    def _duplicate_list(self, list_id):
+        """Duplicate a specific list."""
+        if not self.lists_mgr:
+            return
+
+        self.lists_mgr.duplicate_list(list_id)
+        self.lists_refresh_sidebar()
+
+    def _export_list(self, list_id):
+        """Export a specific list (opens format menu)."""
+        self._export_list_format(list_id, None)  # Will show format menu
+
+    def _export_list_format(self, list_id, format_type):
+        """Export a specific list in the given format."""
+        if not self.lists_mgr:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(list_id)
+        if not lst:
+            return
+
+        list_name = lst.get('name', 'list')
+        items = self.lists_mgr.get_items_sorted(list_id, sort_by='shelfmark')
+
+        if not items:
+            QMessageBox.information(self, tr("Export List"), tr("List is empty."))
+            return
+
+        if format_type == 'text':
+            self._export_as_text(list_id, list_name, items)
+        elif format_type == 'json':
+            self._export_as_json(list_id, list_name, items)
+        elif format_type == 'excel':
+            self._export_as_excel(list_id, list_name, items)
+        elif format_type == 'word':
+            self._export_as_word(list_id, list_name, items)
+        else:
+            # Show format selection menu
+            menu = QMenu(self)
+            menu.addAction(tr("Text (plain)")).triggered.connect(lambda: self._export_list_format(list_id, 'text'))
+            menu.addAction(tr("JSON")).triggered.connect(lambda: self._export_list_format(list_id, 'json'))
+            menu.addSeparator()
+            menu.addAction(tr("Excel (.xlsx)")).triggered.connect(lambda: self._export_list_format(list_id, 'excel'))
+            menu.addAction(tr("Word (.docx)")).triggered.connect(lambda: self._export_list_format(list_id, 'word'))
+            menu.exec(QCursor.pos())
+
+    def _format_item_text(self, item, include_notes=True):
+        """Format a single item for text export."""
+        sys_id = item.get('sys_id', 'Unknown')
+        shelfmark = item.get('shelfmark', '')
+        title = item.get('title', '')
+        source = item.get('source', '')
+        notes = item.get('notes', '')
+        tags = item.get('tags', [])
+        img = item.get('img')
+
+        lines = []
+        if shelfmark:
+            lines.append(shelfmark)
+        if img not in (None, ""):
+            lines.append(f"  {tr('Image')}: {self._format_image_display(img)}")
+        if title:
+            lines.append(f"  {title}")
+        lines.append(f"  ID: {sys_id}")
+        if source:
+            lines.append(f"  {tr('Source')}: {source}")
+        if tags:
+            lines.append(f"  {tr('Tags')}: {', '.join(tags)}")
+        if include_notes and notes:
+            lines.append(f"  {tr('Notes')}: {notes}")
+
+        return '\n'.join(lines)
+
+    def _export_as_text(self, list_id, list_name, items):
+        """Export list as plain text."""
+        lines = [f"=== {list_name} ===", f"{tr('Total items')}: {len(items)}", ""]
+
+        for i, item in enumerate(items, 1):
+            lines.append(f"{i}. {self._format_item_text(item)}")
+            lines.append("")
+
+        text = '\n'.join(lines)
+
+        # Ask destination
+        menu = QMenu(self)
+        menu.addAction(tr("Save to File")).triggered.connect(lambda: self._save_text_to_file(text, list_name))
+        menu.addAction(tr("Copy to Clipboard")).triggered.connect(lambda: self._copy_to_clipboard(text))
+        menu.addAction(tr("Send by Email")).triggered.connect(lambda: self._send_by_email(text, list_name))
+        menu.exec(QCursor.pos())
+
+    def _export_as_json(self, list_id, list_name, items):
+        """Export list as JSON."""
+        from datetime import datetime
+        export_data = {
+            'list_name': list_name,
+            'exported': datetime.now().isoformat(),
+            'items': items
+        }
+        json_text = json.dumps(export_data, ensure_ascii=False, indent=2)
+
+        default_name = f"{list_name}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("JSON Files") + " (*.json)"
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(json_text)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _export_as_excel(self, list_id, list_name, items):
+        """Export list as Excel file."""
+        try:
+            import openpyxl
+        except ImportError:
+            QMessageBox.warning(self, tr("Export Error"),
+                                tr("Excel export requires the 'openpyxl' package. Install it with: pip install openpyxl"))
+            return
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = list_name[:31]  # Excel max sheet name length
+
+        # Headers
+        headers = [tr('Shelfmark'), tr('Image'), tr('Title'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=1, column=col, value=header)
+
+        # Data
+        for row, item in enumerate(items, 2):
+            ws.cell(row=row, column=1, value=item.get('shelfmark', ''))
+            ws.cell(row=row, column=2, value=self._format_image_display(item.get('img')))
+            ws.cell(row=row, column=3, value=item.get('title', ''))
+            ws.cell(row=row, column=4, value=item.get('sys_id', ''))
+            ws.cell(row=row, column=5, value=item.get('source', ''))
+            ws.cell(row=row, column=6, value=', '.join(item.get('tags', [])))
+            ws.cell(row=row, column=7, value=item.get('notes', ''))
+
+        default_name = f"{list_name}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Excel Files") + " (*.xlsx)"
+        )
+
+        if path:
+            wb.save(path)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _export_as_word(self, list_id, list_name, items):
+        """Export list as Word document."""
+        try:
+            from docx import Document
+        except ImportError:
+            QMessageBox.warning(self, tr("Export Error"),
+                                tr("Word export requires the 'python-docx' package. Install it with: pip install python-docx"))
+            return
+
+        doc = Document()
+        doc.add_heading(list_name, 0)
+        doc.add_paragraph(f"{tr('Total items')}: {len(items)}")
+
+        for i, item in enumerate(items, 1):
+            shelfmark = item.get('shelfmark', 'Unknown')
+            title = item.get('title', '')
+            sys_id = item.get('sys_id', '')
+            img = item.get('img')
+            source = item.get('source', '')
+            tags = item.get('tags', [])
+            notes = item.get('notes', '')
+
+            doc.add_heading(f"{i}. {shelfmark}", level=2)
+            if img not in (None, ""):
+                doc.add_paragraph(f"{tr('Image')}: {self._format_image_display(img)}")
+            if title:
+                doc.add_paragraph(title)
+            doc.add_paragraph(f"ID: {sys_id}")
+            if source:
+                doc.add_paragraph(f"{tr('Source')}: {source}")
+            if tags:
+                doc.add_paragraph(f"{tr('Tags')}: {', '.join(tags)}")
+            if notes:
+                doc.add_paragraph(f"{tr('Notes')}: {notes}")
+
+        default_name = f"{list_name}.docx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Word Files") + " (*.docx)"
+        )
+
+        if path:
+            doc.save(path)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _save_text_to_file(self, text, list_name):
+        """Save text to file."""
+        default_name = f"{list_name}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Text Files") + " (*.txt)"
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _copy_to_clipboard(self, text):
+        """Copy text to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.status_label.setText(tr("Copied to clipboard."))
+
+    def _send_by_email(self, text, subject):
+        """Open email client with text."""
+        import urllib.parse
+        subject_encoded = urllib.parse.quote(f"GenizahSearch - {subject}")
+        body_encoded = urllib.parse.quote(text[:2000])  # Limit for mailto
+        QDesktopServices.openUrl(QUrl(f"mailto:?subject={subject_encoded}&body={body_encoded}"))
+
+    def lists_apply_filter(self, text):
+        """Apply filter to items table."""
+        self.lists_refresh_items()
+
+    # --- Add to List from other places ---
+
+    def show_add_to_list_menu(self, items, source='', anchor_widget=None):
+        """Show menu for adding items to a list."""
+        if not self.lists_mgr or not items:
+            return
+
+        menu = QMenu(self)
+
+        # Get all lists (excluding recent)
+        lists = self.lists_mgr.get_all_lists(include_recent=False)
+
+        for lst in lists:
+            action = menu.addAction(f"● {lst['name']}")
+            action.setData(lst['id'])
+
+        menu.addSeparator()
+        action_new = menu.addAction(tr("New List..."))
+
+        if anchor_widget:
+            pos = anchor_widget.mapToGlobal(anchor_widget.rect().bottomLeft())
+        else:
+            pos = QCursor.pos()
+
+        action = menu.exec(pos)
+
+        if action:
+            if action == action_new:
+                name, ok = QInputDialog.getText(self, tr("Create New List"), tr("List Name:"))
+                if ok and name.strip():
+                    list_id = self.lists_mgr.create_list(name.strip())
+                    self.lists_mgr.add_items_bulk(items, list_id, source=source)
+                    self.status_label.setText(tr("Added to list."))
+                    self.lists_refresh_all()  # Refresh to show new list
+            else:
+                list_id = action.data()
+                if list_id:
+                    added = self.lists_mgr.add_items_bulk(items, list_id, source=source)
+                    if added > 0:
+                        self.status_label.setText(tr("Added to list."))
+                        self.lists_refresh_all()  # Refresh to show new items
+                    else:
+                        # Items already in list
+                        QMessageBox.information(self, tr("Already in list"),
+                                                tr("Items are already in this list."))
+
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
 
@@ -4423,8 +6035,12 @@ class GenizahGUI(QMainWindow):
 
             # Actions
             actions_widget = ActionsHoverWidget()
-            view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
+            list_btn = self._create_action_button("☆", tr("Add to List"), parent=self.results_table)
+            list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
+            list_btn.setProperty("action_role", "list_star")
+            actions_widget.add_btn(list_btn, always_visible=True)
             browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
+            view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
             actions_widget.add_btn(browse_btn)
             actions_widget.add_btn(view_btn)
             self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
@@ -4461,6 +6077,7 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(str(meta.get('img', ''))))
             # Src
             self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(str(meta.get('source', ''))))
+            self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
         self.results_table.setSortingEnabled(True)
@@ -4741,8 +6358,8 @@ class GenizahGUI(QMainWindow):
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
-    def _create_action_button(self, content, tooltip, callback):
-        btn = QToolButton(self.results_table)
+    def _create_action_button(self, content, tooltip, callback=None, parent=None):
+        btn = QToolButton(parent or self.results_table)
         if isinstance(content, str):
             btn.setText(content)
             f = btn.font()
@@ -4754,8 +6371,59 @@ class GenizahGUI(QMainWindow):
         btn.setAutoRaise(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(28, 24)
-        btn.clicked.connect(callback)
+        if callback:
+            btn.clicked.connect(callback)
         return btn
+
+    def _is_item_in_non_recent_list(self, sys_id, img=None, fl_id=None):
+        if not self.lists_mgr or not sys_id:
+            return False
+        item_id = self.lists_mgr._build_item_id(sys_id, img=img, fl_id=fl_id)
+        item = self.lists_mgr.get_item(item_id)
+        return bool(item and item.get('lists'))
+
+    def _set_add_to_list_button_label(self, button, in_list):
+        if not button:
+            return
+        button.setText(_format_add_to_list_label(in_list))
+
+    def _update_browse_add_to_list_button(self):
+        if not hasattr(self, 'btn_browse_add_to_list'):
+            return
+        in_list = self._is_item_in_non_recent_list(
+            self.current_browse_sid,
+            img=self.current_browse_p,
+            fl_id=self._normalize_fl_id(self.browse_fl_input.text().strip()),
+        )
+        self._set_add_to_list_button_label(self.btn_browse_add_to_list, in_list)
+
+    def _update_search_row_list_indicator(self, row, res=None):
+        actions_widget = self.results_table.cellWidget(row, self.COL_ACTIONS)
+        if not isinstance(actions_widget, ActionsHoverWidget):
+            return
+        if res is None:
+            item = self.results_table.item(row, self.COL_SYS_ID)
+            if item:
+                res = item.data(Qt.ItemDataRole.UserRole)
+        if not res:
+            return
+
+        display = res.get('display', {}) if isinstance(res, dict) else {}
+        sys_id = display.get('id')
+        img = display.get('img')
+        fl_id = self._normalize_fl_id(self._extract_fl_id(res))
+        in_list = self._is_item_in_non_recent_list(sys_id, img=img, fl_id=fl_id)
+
+        for btn in actions_widget.buttons:
+            if btn.property("action_role") == "list_star":
+                btn.setText(_format_list_star(in_list))
+                break
+
+    def _update_search_action_stars(self):
+        if not hasattr(self, 'results_table'):
+            return
+        for row in range(self.results_table.rowCount()):
+            self._update_search_row_list_indicator(row)
 
     def on_table_cell_entered(self, row, col):
         if row == self.hovered_row:
@@ -4774,6 +6442,22 @@ class GenizahGUI(QMainWindow):
         if isinstance(w, ActionsHoverWidget):
             w.set_buttons_visible(True)
 
+    def on_lists_table_cell_entered(self, row, col):
+        if not hasattr(self, "lists_items_table"):
+            return
+        if row == self.lists_hovered_row:
+            return
+
+        if self.lists_hovered_row != -1:
+            w = self.lists_items_table.cellWidget(self.lists_hovered_row, 5)
+            if isinstance(w, ActionsHoverWidget):
+                w.set_buttons_visible(False)
+
+        self.lists_hovered_row = row
+        w = self.lists_items_table.cellWidget(row, 5)
+        if isinstance(w, ActionsHoverWidget):
+            w.set_buttons_visible(True)
+
     def eventFilter(self, source, event):
         if source == self.results_table and event.type() == QEvent.Type.Leave:
             if self.hovered_row != -1:
@@ -4781,6 +6465,12 @@ class GenizahGUI(QMainWindow):
                 if isinstance(w, ActionsHoverWidget):
                     w.set_buttons_visible(False)
                 self.hovered_row = -1
+        if hasattr(self, "lists_items_table") and source == self.lists_items_table and event.type() == QEvent.Type.Leave:
+            if self.lists_hovered_row != -1:
+                w = self.lists_items_table.cellWidget(self.lists_hovered_row, 5)
+                if isinstance(w, ActionsHoverWidget):
+                    w.set_buttons_visible(False)
+                self.lists_hovered_row = -1
         return super().eventFilter(source, event)
 
     def _collect_sorted_results(self):
@@ -4924,6 +6614,107 @@ class GenizahGUI(QMainWindow):
             self.lbl_search_export.setText(tr("Export selected results") + ":")
         else:
             self.lbl_search_export.setText(tr("Export Results") + ":")
+
+        # Update add-to-list button state
+        if hasattr(self, 'btn_add_to_list'):
+            self.btn_add_to_list.setEnabled(has_selection)
+
+    def search_add_selected_to_list(self):
+        """Add selected search results to a list."""
+        if not self.lists_mgr:
+            return
+
+        # Collect selected items
+        items = []
+        for i in range(self.results_table.rowCount()):
+            chk = self.results_table.item(i, self.COL_CHECKBOX)
+            if chk and chk.checkState() == Qt.CheckState.Checked:
+                res = chk.data(Qt.ItemDataRole.UserRole)
+                if res:
+                    display = res.get('display', {})
+                    sys_id = display.get('id')
+                    if sys_id:
+                        items.append({
+                            'sys_id': sys_id,
+                            'img': display.get('img'),
+                            'fl_id': self._normalize_fl_id(self._extract_fl_id(res))
+                        })
+
+        if items:
+            source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"
+            self.show_add_to_list_menu(items, source=source, anchor_widget=self.btn_add_to_list)
+
+    def search_add_row_to_list(self, res, anchor_widget=None):
+        """Add a single search result row to a list."""
+        if not self.lists_mgr or not isinstance(res, dict):
+            return
+        display = res.get('display', {})
+        sys_id = display.get('id')
+        if not sys_id:
+            return
+        items = [{
+            'sys_id': sys_id,
+            'img': display.get('img'),
+            'fl_id': self._normalize_fl_id(self._extract_fl_id(res)),
+        }]
+        source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"
+        self.show_add_to_list_menu(items, source=source, anchor_widget=anchor_widget or self.results_table)
+
+    def _collect_selected_comp_pages(self):
+        selected = []
+        sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known = self._collect_checked_comp_items_struct()
+
+        def add_item(item):
+            if not item:
+                return
+            if item.get('type') in ('manuscript', 'part'):
+                pages = item.get('pages', [])
+                if pages:
+                    selected.extend(pages)
+                else:
+                    selected.append(item)
+            else:
+                selected.append(item)
+
+        for item in sel_main:
+            add_item(item)
+        for group_items in sel_appx.values():
+            for item in group_items:
+                add_item(item)
+        for item in sel_filt:
+            add_item(item)
+        for group_items in sel_filt_appx.values():
+            for item in group_items:
+                add_item(item)
+        for item in sel_known:
+            add_item(item)
+
+        return selected
+
+    def comp_add_selected_to_list(self):
+        """Add selected composition results to a list."""
+        if not self.lists_mgr:
+            return
+
+        pages = self._collect_selected_comp_pages()
+        items = []
+        for page in pages:
+            raw_header = page.get('raw_header', '')
+            sys_id, p_num, _, _ = self._get_meta_for_header(raw_header)
+            if not sys_id:
+                continue
+            parsed = self.meta_mgr.parse_full_id_components(raw_header) if raw_header else {}
+            fl_id = self._normalize_fl_id(parsed.get('fl_id'))
+            items.append({
+                'sys_id': sys_id,
+                'img': p_num,
+                'fl_id': fl_id,
+            })
+
+        if items:
+            title = self.comp_title_input.text().strip()
+            source = f"Composition: {title[:50]}" if title else "Composition Search"
+            self.show_add_to_list_menu(items, source=source, anchor_widget=self.btn_comp_add_to_list)
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
         sid = None
@@ -7223,6 +9014,8 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_export.setText(tr("Export selected results"))
         else:
             self.lbl_comp_export.setText(tr("Save Report"))
+        if hasattr(self, 'btn_comp_add_to_list'):
+            self.btn_comp_add_to_list.setEnabled(has_selection)
 
     def _collect_checked_comp_items_struct(self):
         """
@@ -7816,7 +9609,13 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
-        
+
+        # Add to Recently Viewed
+        if self.lists_mgr:
+            fl_id = self._normalize_fl_id(page_data.get('fl_id') if page_data else self.browse_fl_input.text().strip())
+            img = page_data.get('p_num') if page_data else None
+            self.lists_mgr.add_to_recent(sid, fl_id=fl_id, img=img)
+
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
         self.btn_b_save.setEnabled(False)
@@ -7947,6 +9746,8 @@ class GenizahGUI(QMainWindow):
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_save.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
+        self.btn_find_parallels.setEnabled(True)
+        self.btn_browse_add_to_list.setEnabled(True)
 
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
@@ -8012,6 +9813,7 @@ class GenizahGUI(QMainWindow):
 
         # Enable core buttons immediately when content is available
         self.btn_find_parallels.setEnabled(True)
+        self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_save.setEnabled(True)
         self.btn_b_all.setEnabled(True)
         if self.current_browse_sid:
@@ -8087,6 +9889,7 @@ class GenizahGUI(QMainWindow):
 
         self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
         self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
+        self._update_browse_add_to_list_button()
 
         parsed = self.meta_mgr.parse_full_id_components(full_header)
         if parsed.get('fl_id'):
