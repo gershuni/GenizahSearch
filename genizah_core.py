@@ -4461,8 +4461,8 @@ class ListsManager:
 
     Features:
     - Multiple named lists with colors
-    - Built-in "כללי" (General) default list
-    - Built-in "נצפו לאחרונה" (Recently Viewed) auto-populated list
+    - Built-in "General" default list
+    - Built-in "Recently Viewed" auto-populated list
     - Tags and notes per item
     - Export/import functionality
     """
@@ -4496,7 +4496,7 @@ class ListsManager:
         return {
             'lists': {
                 'default': {
-                    'name': 'כללי',
+                    'name': 'General',
                     'name_en': 'General',
                     'color': '#FFD700',
                     'created': time.time(),
@@ -4504,7 +4504,7 @@ class ListsManager:
                     'is_system': False
                 },
                 'recent': {
-                    'name': 'נצפו לאחרונה',
+                    'name': 'Recently Viewed',
                     'name_en': 'Recently Viewed',
                     'color': '#9E9E9E',
                     'is_system': True,
@@ -4663,7 +4663,7 @@ class ListsManager:
 
         original = self.data['lists'][list_id]
         if new_name is None:
-            new_name = f"{original.get('name', 'רשימה')} (עותק)"
+            new_name = f"{original.get('name', tr('List'))} ({tr('Copy')})"
 
         new_list_id = self.create_list(new_name, original.get('color'))
 
@@ -5023,7 +5023,7 @@ class ListsManager:
         if not import_data or 'items' not in import_data:
             return None, 0, 0
 
-        list_name = list_name_override or import_data.get('list_name', 'רשימה מיובאת')
+        list_name = list_name_override or import_data.get('list_name', tr("Imported List"))
         list_color = import_data.get('list_color')
 
         list_id = self.create_list(list_name, list_color)
@@ -5134,22 +5134,22 @@ class ListsManager:
             return shelfmark
 
         elif format_type == 'detailed':
-            lines = [f"מספר מדף: {shelfmark}"]
+            lines = [f"{tr('Shelfmark:')} {shelfmark}"]
             if title:
-                lines.append(f"כותרת: {title}")
-            lines.append(f"מספר מערכת: {sys_id}")
+                lines.append(f"{tr('Title:')} {title}")
+            lines.append(f"{tr('System ID:')} {sys_id}")
             if item.get('note'):
-                lines.append(f"הערה: {item['note']}")
+                lines.append(f"{tr('Note:')} {item['note']}")
             return '\n'.join(lines)
 
         elif format_type == 'with_link':
-            lines = [f"מספר מדף: {shelfmark}"]
+            lines = [f"{tr('Shelfmark:')} {shelfmark}"]
             if title:
-                lines.append(f"כותרת: {title}")
-            lines.append(f"מספר מערכת: {sys_id}")
+                lines.append(f"{tr('Title:')} {title}")
+            lines.append(f"{tr('System ID:')} {sys_id}")
             # Add Ktiv link
             ktiv_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={sys_id}"
-            lines.append(f"קישור: {ktiv_url}")
+            lines.append(f"{tr('Link:')} {ktiv_url}")
             return '\n'.join(lines)
 
         return shelfmark
