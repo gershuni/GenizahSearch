@@ -4348,9 +4348,9 @@ class GenizahGUI(QMainWindow):
             self.lists_refresh_items()
             self.lists_clear_details()
 
-    def lists_on_item_clicked(self, item, column):
+    def lists_on_item_clicked(self, item):
         """Handle item click in the table."""
-        if column == 0:  # Checkbox column
+        if item.column() == 0:  # Checkbox column
             return
 
         row = item.row()
@@ -4654,9 +4654,21 @@ class GenizahGUI(QMainWindow):
         if not self.searcher or not self.meta_mgr:
             return
 
-        # Create a minimal result dict for ResultDialog
+        # Get page data from browse index to have all required fields
+        page_data = self.searcher.get_browse_page(sys_id, p_num=1)
+        if not page_data:
+            QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
+            return
+
         shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+        # Create a complete result dict for ResultDialog
         result = {
+            'uid': page_data.get('uid', ''),
+            'raw_header': page_data.get('full_header', ''),
+            'full_header': page_data.get('full_header', ''),
+            'text': page_data.get('text', ''),
+            'full_text': page_data.get('text', ''),
             'display': {
                 'id': sys_id,
                 'shelfmark': shelfmark,
@@ -4744,74 +4756,27 @@ class GenizahGUI(QMainWindow):
 
     def lists_export_current_list(self):
         """Export the current list."""
-        if not self.lists_mgr:
+        if not self.lists_mgr or not self.lists_current_list_id:
             return
 
-        # Export options dialog
+        # Export format selection menu
         menu = QMenu(self)
 
-        action_ids = menu.addAction(tr("IDs only (for transfer)"))
-        action_ids.triggered.connect(lambda: self._do_export_list(False, False))
+        action_text = menu.addAction(tr("Text (plain)"))
+        action_text.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'text'))
 
-        action_meta = menu.addAction(tr("With metadata (shelfmark, title)"))
-        action_meta.triggered.connect(lambda: self._do_export_list(True, False))
+        action_json = menu.addAction(tr("JSON"))
+        action_json.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'json'))
 
         menu.addSeparator()
 
-        action_file = menu.addAction(tr("Save to File"))
-        action_file.triggered.connect(lambda: self._do_export_list(True, False, to_file=True))
+        action_excel = menu.addAction(tr("Excel (.xlsx)"))
+        action_excel.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'excel'))
 
-        action_clip = menu.addAction(tr("Copy to Clipboard"))
-        action_clip.triggered.connect(lambda: self._do_export_list(True, False, to_clipboard=True))
-
-        action_email = menu.addAction(tr("Send by Email"))
-        action_email.triggered.connect(lambda: self._do_export_list(True, False, to_email=True))
+        action_word = menu.addAction(tr("Word (.docx)"))
+        action_word.triggered.connect(lambda: self._export_list_format(self.lists_current_list_id, 'word'))
 
         menu.exec(QCursor.pos())
-
-    def _do_export_list(self, include_metadata, include_snippets, to_file=False, to_clipboard=False, to_email=False):
-        """Perform the export."""
-        if not self.lists_mgr:
-            return
-
-        export_data = self.lists_mgr.export_list(
-            self.lists_current_list_id,
-            include_metadata=include_metadata,
-            include_snippets=include_snippets
-        )
-
-        if not export_data:
-            return
-
-        json_text = json.dumps(export_data, ensure_ascii=False, indent=2)
-
-        if to_clipboard:
-            clipboard = QApplication.clipboard()
-            clipboard.setText(json_text)
-            self.status_label.setText(tr("List exported successfully."))
-
-        elif to_email:
-            list_name = export_data.get('list_name', 'list')
-            subject = f"GenizahSearch - {list_name}"
-            body = json_text
-
-            # Open default mail client
-            mailto_url = f"mailto:?subject={subject}&body={body[:1000]}"  # Limit body for mailto
-            QDesktopServices.openUrl(QUrl(mailto_url))
-
-        else:  # to_file or default
-            list_name = export_data.get('list_name', 'list')
-            default_name = f"{list_name}.json"
-            path, _ = QFileDialog.getSaveFileName(
-                self, tr("Export List"),
-                os.path.join(Config.REPORTS_DIR, default_name),
-                tr("JSON Files") + " (*.json)"
-            )
-
-            if path:
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(json_text)
-                self.status_label.setText(tr("List exported successfully."))
 
     def lists_import_list(self):
         """Import a list from file."""
@@ -4875,8 +4840,22 @@ class GenizahGUI(QMainWindow):
         action_duplicate = menu.addAction(tr("Duplicate List"))
         action_duplicate.triggered.connect(lambda: self._duplicate_list(list_id))
 
-        action_export = menu.addAction(tr("Export List..."))
-        action_export.triggered.connect(lambda: self._export_list(list_id))
+        # Export submenu
+        export_menu = menu.addMenu(tr("Export List"))
+
+        action_text = export_menu.addAction(tr("Text (plain)"))
+        action_text.triggered.connect(lambda: self._export_list_format(list_id, 'text'))
+
+        action_json = export_menu.addAction(tr("JSON"))
+        action_json.triggered.connect(lambda: self._export_list_format(list_id, 'json'))
+
+        export_menu.addSeparator()
+
+        action_excel = export_menu.addAction(tr("Excel (.xlsx)"))
+        action_excel.triggered.connect(lambda: self._export_list_format(list_id, 'excel'))
+
+        action_word = export_menu.addAction(tr("Word (.docx)"))
+        action_word.triggered.connect(lambda: self._export_list_format(list_id, 'word'))
 
         menu.exec(self.lists_tree.mapToGlobal(pos))
 
@@ -4925,11 +4904,212 @@ class GenizahGUI(QMainWindow):
         self.lists_refresh_sidebar()
 
     def _export_list(self, list_id):
-        """Export a specific list."""
-        original_list_id = self.lists_current_list_id
-        self.lists_current_list_id = list_id
-        self.lists_export_current_list()
-        self.lists_current_list_id = original_list_id
+        """Export a specific list (opens format menu)."""
+        self._export_list_format(list_id, None)  # Will show format menu
+
+    def _export_list_format(self, list_id, format_type):
+        """Export a specific list in the given format."""
+        if not self.lists_mgr:
+            return
+
+        lst = self.lists_mgr.data['lists'].get(list_id)
+        if not lst:
+            return
+
+        list_name = lst.get('name', 'list')
+        items = self.lists_mgr.get_list_items(list_id)
+
+        if not items:
+            QMessageBox.information(self, tr("Export List"), tr("List is empty."))
+            return
+
+        if format_type == 'text':
+            self._export_as_text(list_id, list_name, items)
+        elif format_type == 'json':
+            self._export_as_json(list_id, list_name, items)
+        elif format_type == 'excel':
+            self._export_as_excel(list_id, list_name, items)
+        elif format_type == 'word':
+            self._export_as_word(list_id, list_name, items)
+        else:
+            # Show format selection menu
+            menu = QMenu(self)
+            menu.addAction(tr("Text (plain)")).triggered.connect(lambda: self._export_list_format(list_id, 'text'))
+            menu.addAction(tr("JSON")).triggered.connect(lambda: self._export_list_format(list_id, 'json'))
+            menu.addSeparator()
+            menu.addAction(tr("Excel (.xlsx)")).triggered.connect(lambda: self._export_list_format(list_id, 'excel'))
+            menu.addAction(tr("Word (.docx)")).triggered.connect(lambda: self._export_list_format(list_id, 'word'))
+            menu.exec(QCursor.pos())
+
+    def _format_item_text(self, item, include_notes=True):
+        """Format a single item for text export."""
+        sys_id = item.get('sys_id', 'Unknown')
+        shelfmark = item.get('shelfmark', '')
+        title = item.get('title', '')
+        source = item.get('source', '')
+        notes = item.get('notes', '')
+        tags = item.get('tags', [])
+
+        lines = []
+        if shelfmark:
+            lines.append(shelfmark)
+        if title:
+            lines.append(f"  {title}")
+        lines.append(f"  ID: {sys_id}")
+        if source:
+            lines.append(f"  {tr('Source')}: {source}")
+        if tags:
+            lines.append(f"  {tr('Tags')}: {', '.join(tags)}")
+        if include_notes and notes:
+            lines.append(f"  {tr('Notes')}: {notes}")
+
+        return '\n'.join(lines)
+
+    def _export_as_text(self, list_id, list_name, items):
+        """Export list as plain text."""
+        lines = [f"=== {list_name} ===", f"{tr('Total items')}: {len(items)}", ""]
+
+        for i, item in enumerate(items, 1):
+            lines.append(f"{i}. {self._format_item_text(item)}")
+            lines.append("")
+
+        text = '\n'.join(lines)
+
+        # Ask destination
+        menu = QMenu(self)
+        menu.addAction(tr("Save to File")).triggered.connect(lambda: self._save_text_to_file(text, list_name))
+        menu.addAction(tr("Copy to Clipboard")).triggered.connect(lambda: self._copy_to_clipboard(text))
+        menu.addAction(tr("Send by Email")).triggered.connect(lambda: self._send_by_email(text, list_name))
+        menu.exec(QCursor.pos())
+
+    def _export_as_json(self, list_id, list_name, items):
+        """Export list as JSON."""
+        export_data = {
+            'list_name': list_name,
+            'exported': datetime.now().isoformat(),
+            'items': items
+        }
+        json_text = json.dumps(export_data, ensure_ascii=False, indent=2)
+
+        default_name = f"{list_name}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("JSON Files") + " (*.json)"
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(json_text)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _export_as_excel(self, list_id, list_name, items):
+        """Export list as Excel file."""
+        try:
+            import openpyxl
+        except ImportError:
+            QMessageBox.warning(self, tr("Export Error"),
+                                tr("Excel export requires the 'openpyxl' package. Install it with: pip install openpyxl"))
+            return
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = list_name[:31]  # Excel max sheet name length
+
+        # Headers
+        headers = [tr('Shelfmark'), tr('Title'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
+        for col, header in enumerate(headers, 1):
+            ws.cell(row=1, column=col, value=header)
+
+        # Data
+        for row, item in enumerate(items, 2):
+            ws.cell(row=row, column=1, value=item.get('shelfmark', ''))
+            ws.cell(row=row, column=2, value=item.get('title', ''))
+            ws.cell(row=row, column=3, value=item.get('sys_id', ''))
+            ws.cell(row=row, column=4, value=item.get('source', ''))
+            ws.cell(row=row, column=5, value=', '.join(item.get('tags', [])))
+            ws.cell(row=row, column=6, value=item.get('notes', ''))
+
+        default_name = f"{list_name}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Excel Files") + " (*.xlsx)"
+        )
+
+        if path:
+            wb.save(path)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _export_as_word(self, list_id, list_name, items):
+        """Export list as Word document."""
+        try:
+            from docx import Document
+        except ImportError:
+            QMessageBox.warning(self, tr("Export Error"),
+                                tr("Word export requires the 'python-docx' package. Install it with: pip install python-docx"))
+            return
+
+        doc = Document()
+        doc.add_heading(list_name, 0)
+        doc.add_paragraph(f"{tr('Total items')}: {len(items)}")
+
+        for i, item in enumerate(items, 1):
+            shelfmark = item.get('shelfmark', 'Unknown')
+            title = item.get('title', '')
+            sys_id = item.get('sys_id', '')
+            source = item.get('source', '')
+            tags = item.get('tags', [])
+            notes = item.get('notes', '')
+
+            doc.add_heading(f"{i}. {shelfmark}", level=2)
+            if title:
+                doc.add_paragraph(title)
+            doc.add_paragraph(f"ID: {sys_id}")
+            if source:
+                doc.add_paragraph(f"{tr('Source')}: {source}")
+            if tags:
+                doc.add_paragraph(f"{tr('Tags')}: {', '.join(tags)}")
+            if notes:
+                doc.add_paragraph(f"{tr('Notes')}: {notes}")
+
+        default_name = f"{list_name}.docx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Word Files") + " (*.docx)"
+        )
+
+        if path:
+            doc.save(path)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _save_text_to_file(self, text, list_name):
+        """Save text to file."""
+        default_name = f"{list_name}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export List"),
+            os.path.join(Config.REPORTS_DIR, default_name),
+            tr("Text Files") + " (*.txt)"
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            self.status_label.setText(tr("List exported successfully."))
+
+    def _copy_to_clipboard(self, text):
+        """Copy text to clipboard."""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.status_label.setText(tr("Copied to clipboard."))
+
+    def _send_by_email(self, text, subject):
+        """Open email client with text."""
+        import urllib.parse
+        subject_encoded = urllib.parse.quote(f"GenizahSearch - {subject}")
+        body_encoded = urllib.parse.quote(text[:2000])  # Limit for mailto
+        QDesktopServices.openUrl(QUrl(f"mailto:?subject={subject_encoded}&body={body_encoded}"))
 
     def lists_apply_filter(self, text):
         """Apply filter to items table."""
@@ -4968,12 +5148,14 @@ class GenizahGUI(QMainWindow):
                     list_id = self.lists_mgr.create_list(name.strip())
                     self.lists_mgr.add_items_bulk(sys_ids, list_id, source=source)
                     self.status_label.setText(tr("Added to list."))
+                    self.lists_refresh_all()  # Refresh to show new list
             else:
                 list_id = action.data()
                 if list_id:
                     added = self.lists_mgr.add_items_bulk(sys_ids, list_id, source=source)
                     if added > 0:
                         self.status_label.setText(tr("Added to list."))
+                        self.lists_refresh_all()  # Refresh to show new items
                     else:
                         # Items already in list
                         QMessageBox.information(self, tr("Already in list"),
