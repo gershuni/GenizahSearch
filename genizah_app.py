@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
-                             QCompleter)
+                             QCompleter, QAbstractItemView)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
@@ -2753,6 +2753,22 @@ class ActionsHoverWidget(QWidget):
                 b.setVisible(visible)
 
 
+class ListsTreeWidget(QTreeWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        parent = self.parent()
+        if parent and hasattr(parent, 'lists_handle_tree_reorder'):
+            parent.lists_handle_tree_reorder()
+
+
 def _format_add_to_list_label(in_list=False):
     star = "⭐" if in_list else "☆"
     return f"{star} {tr('Add to List')}"
@@ -4228,7 +4244,7 @@ class GenizahGUI(QMainWindow):
         sidebar_layout.addLayout(lists_header)
 
         # Lists tree
-        self.lists_tree = QTreeWidget()
+        self.lists_tree = ListsTreeWidget(self)
         self.lists_tree.setHeaderHidden(True)
         self.lists_tree.setIndentation(10)
         self.lists_tree.setRootIsDecorated(True)
@@ -4401,7 +4417,12 @@ class GenizahGUI(QMainWindow):
                     parent.setData(0, Qt.ItemDataRole.UserRole, None)
                     parent.setData(0, Qt.ItemDataRole.UserRole + 1, project_id)
                     parent.setForeground(0, QColor(projects[project_id].get('color', '#FFD700')))
-                    parent.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    parent.setFlags(
+                        Qt.ItemFlag.ItemIsEnabled
+                        | Qt.ItemFlag.ItemIsSelectable
+                        | Qt.ItemFlag.ItemIsDropEnabled
+                        | Qt.ItemFlag.ItemIsDragEnabled
+                    )
                     self.lists_tree.addTopLevelItem(parent)
                     project_items[project_id] = parent
 
@@ -4420,6 +4441,11 @@ class GenizahGUI(QMainWindow):
 
             item.setText(0, display_text)
             item.setData(0, Qt.ItemDataRole.UserRole, lst['id'])
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsDragEnabled
+            )
 
             # Bold for default list
             if lst.get('is_default'):
@@ -4440,7 +4466,12 @@ class GenizahGUI(QMainWindow):
                 parent.setData(0, Qt.ItemDataRole.UserRole, None)
                 parent.setData(0, Qt.ItemDataRole.UserRole + 1, project['id'])
                 parent.setForeground(0, QColor(project.get('color', '#FFD700')))
-                parent.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                parent.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsDropEnabled
+                    | Qt.ItemFlag.ItemIsDragEnabled
+                )
                 self.lists_tree.addTopLevelItem(parent)
                 project_items[project['id']] = parent
 
@@ -4450,6 +4481,44 @@ class GenizahGUI(QMainWindow):
         current_item = list_items.get(self.lists_current_list_id)
         if current_item:
             self.lists_tree.setCurrentItem(current_item)
+
+    def lists_handle_tree_reorder(self):
+        """Apply drag-and-drop changes to list/project order and assignment."""
+        if not self.lists_mgr:
+            return
+
+        list_project_map = {}
+        list_order = []
+        project_order = []
+
+        for i in range(self.lists_tree.topLevelItemCount()):
+            top_item = self.lists_tree.topLevelItem(i)
+            list_id = top_item.data(0, Qt.ItemDataRole.UserRole)
+            project_id = top_item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+            if project_id and not list_id:
+                project_order.append(project_id)
+                for j in range(top_item.childCount()):
+                    child = top_item.child(j)
+                    child_list_id = child.data(0, Qt.ItemDataRole.UserRole)
+                    if child_list_id:
+                        list_project_map[child_list_id] = project_id
+                        list_order.append(child_list_id)
+            elif list_id:
+                list_project_map[list_id] = None
+                list_order.append(list_id)
+
+        for list_id, list_data in self.lists_mgr.data.get('lists', {}).items():
+            if list_id not in list_order:
+                list_order.append(list_id)
+                list_project_map.setdefault(list_id, list_data.get('project_id'))
+
+        for project_id in self.lists_mgr.data.get('projects', {}):
+            if project_id not in project_order:
+                project_order.append(project_id)
+
+        self.lists_mgr.apply_list_layout(list_project_map, list_order, project_order)
+        self.lists_refresh_sidebar()
 
     def lists_refresh_items(self):
         """Refresh the items table for the current list."""
