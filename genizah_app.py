@@ -4268,7 +4268,9 @@ class GenizahGUI(QMainWindow):
         """Show/hide preview panel with a slim collapsed bar."""
         if self.lists_preview_visible == visible and not auto:
             return
+            
         self.lists_preview_visible = visible
+        
         self.lists_preview_contents.setVisible(visible)
         self.lists_preview_title.setVisible(visible)
         self.btn_toggle_preview.setText("◀" if visible else "▶")
@@ -4276,30 +4278,40 @@ class GenizahGUI(QMainWindow):
         if not self.lists_main_splitter:
             return
 
+        collapsed_width = 32 
+
         if visible:
+            self.lists_preview_panel.setMaximumWidth(16777215) # QWIDGETSIZE_MAX
+            
             self.lists_preview_panel.setMinimumWidth(250)
-            self.lists_preview_panel.setMaximumWidth(16777215)
+            
             self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+            
             if self.lists_preview_last_sizes:
                 self.lists_main_splitter.setSizes(self.lists_preview_last_sizes)
+            
+            self.lists_main_splitter.setCollapsible(self.lists_preview_index, False)
+
         else:
+            
             self.lists_preview_last_sizes = self.lists_main_splitter.sizes()
-            collapsed_width = 28
-            total = self.lists_main_splitter.width()
-            if total <= 0:
-                total = max(sum(self.lists_preview_last_sizes), collapsed_width * 2)
-            sizes = self.lists_preview_last_sizes[:]
-            if self.lists_preview_index < len(sizes):
-                sizes[self.lists_preview_index] = collapsed_width
-                for i in range(len(sizes)):
-                    if i != self.lists_preview_index:
-                        sizes[i] = max(1, total - collapsed_width)
-                    else:
-                        sizes[i] = collapsed_width
-                self.lists_main_splitter.setSizes(sizes)
-            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            
             self.lists_preview_panel.setMinimumWidth(collapsed_width)
             self.lists_preview_panel.setMaximumWidth(collapsed_width)
+            
+            self.lists_preview_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            
+            sizes = self.lists_main_splitter.sizes()
+            total = sum(sizes)
+            
+            new_sizes = [0] * len(sizes)
+            for i in range(len(sizes)):
+                if i == self.lists_preview_index:
+                    new_sizes[i] = collapsed_width
+                else:
+                    new_sizes[i] = total - collapsed_width
+            
+            self.lists_main_splitter.setSizes(new_sizes)
 
     def lists_refresh_all(self):
         """Refresh the lists sidebar and current items view."""
