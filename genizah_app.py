@@ -2092,10 +2092,14 @@ class ResultDialog(QDialog):
 
         if sys_id:
             fl_id = parent._normalize_fl_id(self.current_fl_id)
-            parent.show_add_to_list_menu([sys_id], source=tr("from browse"),
-                                          anchor_widget=self.btn_add_to_list, fl_id_map={sys_id: fl_id} if fl_id else None)
+            img = self.current_p_num
+            parent.show_add_to_list_menu(
+                [{'sys_id': sys_id, 'fl_id': fl_id, 'img': img}],
+                source=tr("from browse"),
+                anchor_widget=self.btn_add_to_list
+            )
             # Also add to recently viewed
-            parent.lists_mgr.add_to_recent(sys_id, fl_id=fl_id)
+            parent.lists_mgr.add_to_recent(sys_id, fl_id=fl_id, img=img)
 
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
@@ -2164,7 +2168,7 @@ class ResultDialog(QDialog):
         parent = self.parent()
         if parent and hasattr(parent, 'lists_mgr') and parent.lists_mgr and self.current_sys_id:
             fl_id = parent._normalize_fl_id(ids.get('fl_id'))
-            parent.lists_mgr.add_to_recent(self.current_sys_id, fl_id=fl_id)
+            parent.lists_mgr.add_to_recent(self.current_sys_id, fl_id=fl_id, img=ids.get('p_num'))
 
         # --- Prepare Text Content ---
         # 1. Manuscript Text (Apply Pattern!)
@@ -3710,11 +3714,11 @@ class GenizahGUI(QMainWindow):
             return
 
         fl_id = self._normalize_fl_id(self.browse_fl_input.text().strip())
+        img = self.current_browse_p
         self.show_add_to_list_menu(
-            [self.current_browse_sid],
+            [{'sys_id': self.current_browse_sid, 'fl_id': fl_id, 'img': img}],
             source=tr("from browse"),
-            anchor_widget=self.btn_browse_add_to_list,
-            fl_id_map={self.current_browse_sid: fl_id} if fl_id else None
+            anchor_widget=self.btn_browse_add_to_list
         )
 
     def _set_last_browse_field(self, field):
@@ -4010,6 +4014,10 @@ class GenizahGUI(QMainWindow):
         self.lists_detail_shelfmark.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         details_layout.addRow(tr("Shelfmark:"), self.lists_detail_shelfmark)
 
+        self.lists_detail_image = QLabel()
+        self.lists_detail_image.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        details_layout.addRow(tr("Image:"), self.lists_detail_image)
+
         self.lists_detail_title = QLabel()
         self.lists_detail_title.setWordWrap(True)
         self.lists_detail_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -4021,10 +4029,6 @@ class GenizahGUI(QMainWindow):
         self.lists_detail_sys_id = QLabel()
         self.lists_detail_sys_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         details_layout.addRow(tr("System ID:"), self.lists_detail_sys_id)
-
-        self.lists_detail_image = QLabel()
-        self.lists_detail_image.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        details_layout.addRow(tr("Image:"), self.lists_detail_image)
 
         # Tags with add button
         tags_widget = QWidget()
@@ -4108,14 +4112,14 @@ class GenizahGUI(QMainWindow):
         # Items table
         self.lists_items_table = QTableWidget()
         self.lists_items_table.setColumnCount(6)
-        self.lists_items_table.setHorizontalHeaderLabels(["", tr("Shelfmark"), tr("Title"), tr("Image"), tr("Tags"), tr("Actions")])
+        self.lists_items_table.setHorizontalHeaderLabels(["", tr("Shelfmark"), tr("Image"), tr("Title"), tr("Tags"), tr("Actions")])
         self.lists_items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.lists_items_table.setColumnWidth(0, 30)  # Checkbox
         self.lists_items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.lists_items_table.setColumnWidth(1, 150)
-        self.lists_items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.lists_items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        self.lists_items_table.setColumnWidth(3, 90)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.lists_items_table.setColumnWidth(2, 90)
+        self.lists_items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.lists_items_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         self.lists_items_table.setColumnWidth(4, 120)
         self.lists_items_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
@@ -4238,7 +4242,7 @@ class GenizahGUI(QMainWindow):
 
         # Initialize state
         self.lists_current_list_id = 'default'
-        self.lists_current_item_sys_id = None
+        self.lists_current_item_id = None
         self.lists_preview_visible = True
         self.lists_set_preview_visible(True, auto=True)
 
@@ -4252,9 +4256,13 @@ class GenizahGUI(QMainWindow):
         digits = re.sub(r"\D", "", str(fl_id or ""))
         return digits or None
 
-    def _format_fl_id_display(self, fl_id):
-        digits = self._normalize_fl_id(fl_id)
-        return f"FL{digits}" if digits else ""
+    def _format_image_display(self, img):
+        return str(img) if img not in (None, "") else ""
+
+    def _get_list_display_name(self, lst):
+        if CURRENT_LANG == 'en' and lst.get('name_en'):
+            return lst.get('name_en')
+        return lst.get('name', lst.get('name_en', 'List'))
 
     def lists_set_preview_visible(self, visible, auto=False):
         """Show/hide preview panel with a slim collapsed bar."""
@@ -4276,15 +4284,16 @@ class GenizahGUI(QMainWindow):
         else:
             self.lists_preview_last_sizes = self.lists_main_splitter.sizes()
             collapsed_width = 28
+            total = sum(self.lists_preview_last_sizes)
+            if total <= 0:
+                total = max(self.lists_main_splitter.width(), collapsed_width * 2)
             sizes = self.lists_preview_last_sizes[:]
             if self.lists_preview_index < len(sizes):
                 sizes[self.lists_preview_index] = collapsed_width
-                total = sum(sizes)
-                if total:
-                    for i in range(len(sizes)):
-                        if i != self.lists_preview_index:
-                            sizes[i] = max(1, total - collapsed_width)
-                            break
+                for i in range(len(sizes)):
+                    if i != self.lists_preview_index:
+                        sizes[i] = max(1, total - collapsed_width)
+                        break
                 self.lists_main_splitter.setSizes(sizes)
             self.lists_preview_panel.setMinimumWidth(collapsed_width)
             self.lists_preview_panel.setMaximumWidth(collapsed_width)
@@ -4308,7 +4317,7 @@ class GenizahGUI(QMainWindow):
 
             # Create colored dot
             color = lst.get('color', '#FFD700')
-            name = lst.get('name', lst.get('name_en', 'List'))
+            name = self._get_list_display_name(lst)
             count = lst.get('count', 0)
 
             if lst.get('is_system') and lst['id'] == 'recent':
@@ -4352,7 +4361,7 @@ class GenizahGUI(QMainWindow):
 
         if current_list:
             color = current_list.get('color', '#FFD700')
-            name = current_list.get('name', 'List')
+            name = self._get_list_display_name(current_list)
             self.lists_current_label.setText(f"<span style='color:{color}'>●</span> {name}")
 
             # Show/hide edit/delete buttons for system lists
@@ -4371,31 +4380,33 @@ class GenizahGUI(QMainWindow):
         filter_text = self.lists_filter_input.text().strip().lower()
 
         self.lists_items_table.blockSignals(True)
-        visible_sys_ids = set()
+        visible_item_ids = set()
 
         for item in items:
             shelfmark = item.get('shelfmark', 'Unknown')
             title = item.get('title', '')
             tags = item.get('tags', [])
-            fl_id = item.get('fl_id')
+            item_id = item.get('item_id') or item.get('sys_id')
+            img = item.get('img')
             sys_id = item.get('sys_id')
             is_unidentified = item.get('shelfmark_override') is not None
 
             # Apply filter
             if filter_text:
-                searchable = f"{shelfmark} {title} {' '.join(tags)} {fl_id or ''}".lower()
+                searchable = f"{shelfmark} {title} {' '.join(tags)} {img or ''}".lower()
                 if filter_text not in searchable:
                     continue
 
             row = self.lists_items_table.rowCount()
             self.lists_items_table.insertRow(row)
-            visible_sys_ids.add(sys_id)
+            if item_id:
+                visible_item_ids.add(item_id)
 
             # Checkbox
             chk_item = QTableWidgetItem()
             chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             chk_item.setCheckState(Qt.CheckState.Unchecked)
-            chk_item.setData(Qt.ItemDataRole.UserRole, sys_id)
+            chk_item.setData(Qt.ItemDataRole.UserRole, item_id)
             self.lists_items_table.setItem(row, 0, chk_item)
 
             # Shelfmark
@@ -4405,11 +4416,11 @@ class GenizahGUI(QMainWindow):
                 shelf_item.setToolTip(tr("(unidentified)"))
             self.lists_items_table.setItem(row, 1, shelf_item)
 
-            # Title
-            self.lists_items_table.setItem(row, 2, QTableWidgetItem(title))
-
             # Image
-            self.lists_items_table.setItem(row, 3, QTableWidgetItem(self._format_fl_id_display(fl_id)))
+            self.lists_items_table.setItem(row, 2, QTableWidgetItem(str(img or "")))
+
+            # Title
+            self.lists_items_table.setItem(row, 3, QTableWidgetItem(title))
 
             # Tags
             self.lists_items_table.setItem(row, 4, QTableWidgetItem(", ".join(tags)))
@@ -4423,25 +4434,25 @@ class GenizahGUI(QMainWindow):
             btn_view = QPushButton("👁️")
             btn_view.setFixedSize(24, 24)
             btn_view.setToolTip(tr("Quick View"))
-            btn_view.clicked.connect(lambda _, sid=sys_id: self.lists_quick_view_by_id(sid))
+            btn_view.clicked.connect(lambda _, iid=item_id: self.lists_quick_view_by_id(iid))
             actions_layout.addWidget(btn_view)
 
             btn_browse = QPushButton("📖")
             btn_browse.setFixedSize(24, 24)
             btn_browse.setToolTip(tr("Browse"))
-            btn_browse.clicked.connect(lambda _, sid=sys_id: self.lists_browse_by_id(sid))
+            btn_browse.clicked.connect(lambda _, iid=item_id: self.lists_browse_by_id(iid))
             actions_layout.addWidget(btn_browse)
 
             btn_copy = QPushButton("📋")
             btn_copy.setFixedSize(24, 24)
             btn_copy.setToolTip(tr("Copy Info"))
-            btn_copy.clicked.connect(lambda _, sid=sys_id: self.lists_copy_info_by_id(sid))
+            btn_copy.clicked.connect(lambda _, iid=item_id: self.lists_copy_info_by_id(iid))
             actions_layout.addWidget(btn_copy)
 
             btn_remove = QPushButton("🗑️")
             btn_remove.setFixedSize(24, 24)
             btn_remove.setToolTip(tr("Remove from List"))
-            btn_remove.clicked.connect(lambda _, sid=sys_id: self.lists_remove_item_by_id(sid))
+            btn_remove.clicked.connect(lambda _, iid=item_id: self.lists_remove_item_by_id(iid))
             actions_layout.addWidget(btn_remove)
 
             self.lists_items_table.setCellWidget(row, 5, actions_widget)
@@ -4450,8 +4461,8 @@ class GenizahGUI(QMainWindow):
         self.lists_update_selection_label()
         self.chk_lists_select_all.setEnabled(self.lists_items_table.rowCount() > 0)
         self.lists_sync_select_all_checkbox()
-        if not self.lists_current_item_sys_id or self.lists_current_item_sys_id not in visible_sys_ids:
-            self.lists_current_item_sys_id = None
+        if not self.lists_current_item_id or self.lists_current_item_id not in visible_item_ids:
+            self.lists_current_item_id = None
             self.lists_clear_details()
 
     def lists_on_list_selected(self, item, column):
@@ -4459,7 +4470,7 @@ class GenizahGUI(QMainWindow):
         list_id = item.data(0, Qt.ItemDataRole.UserRole)
         if list_id:
             self.lists_current_list_id = list_id
-            self.lists_current_item_sys_id = None
+            self.lists_current_item_id = None
             self.lists_refresh_items()
             self.lists_clear_details()
 
@@ -4471,10 +4482,10 @@ class GenizahGUI(QMainWindow):
         row = item.row()
         chk_item = self.lists_items_table.item(row, 0)
         if chk_item:
-            sys_id = chk_item.data(Qt.ItemDataRole.UserRole)
-            if sys_id:
-                self.lists_current_item_sys_id = sys_id
-                self.lists_show_item_details(sys_id)
+            item_id = chk_item.data(Qt.ItemDataRole.UserRole)
+            if item_id:
+                self.lists_current_item_id = item_id
+                self.lists_show_item_details(item_id)
 
     def lists_on_item_checkbox_changed(self, item):
         """Handle checkbox state change."""
@@ -4534,25 +4545,27 @@ class GenizahGUI(QMainWindow):
             self.chk_lists_select_all.setCheckState(Qt.CheckState.PartiallyChecked)
         self._lists_select_all_guard = False
 
-    def lists_get_selected_sys_ids(self):
-        """Get list of selected sys_ids."""
+    def lists_get_selected_item_ids(self):
+        """Get list of selected item ids."""
         selected = []
         for row in range(self.lists_items_table.rowCount()):
             chk = self.lists_items_table.item(row, 0)
             if chk and chk.checkState() == Qt.CheckState.Checked:
-                sys_id = chk.data(Qt.ItemDataRole.UserRole)
-                if sys_id:
-                    selected.append(sys_id)
+                item_id = chk.data(Qt.ItemDataRole.UserRole)
+                if item_id:
+                    selected.append(item_id)
         return selected
 
-    def lists_show_item_details(self, sys_id):
+    def lists_show_item_details(self, item_id):
         """Show details for a specific item."""
         if not self.lists_mgr:
             return
 
-        item = self.lists_mgr.get_item(sys_id)
+        item = self.lists_mgr.get_item(item_id)
         if not item:
             return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
 
         # Get metadata
         shelfmark = 'Unknown'
@@ -4563,9 +4576,9 @@ class GenizahGUI(QMainWindow):
             shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
 
         self.lists_detail_shelfmark.setText(shelfmark)
+        self.lists_detail_image.setText(str(img) if img not in (None, "") else "-")
         self.lists_detail_title.setText(title)
         self.lists_detail_sys_id.setText(sys_id or '')
-        self.lists_detail_image.setText(self._format_fl_id_display(item.get('fl_id')) or '-')
 
         # Lists
         list_names = []
@@ -4590,7 +4603,7 @@ class GenizahGUI(QMainWindow):
         # Add tag button
         btn_add_tag = QPushButton("+")
         btn_add_tag.setFixedSize(20, 20)
-        btn_add_tag.clicked.connect(lambda: self.lists_add_tag_to_item(sys_id))
+        btn_add_tag.clicked.connect(lambda: self.lists_add_tag_to_item(item_id))
         self.lists_detail_tags_container.addWidget(btn_add_tag)
         self.lists_detail_tags_container.addStretch()
 
@@ -4610,11 +4623,12 @@ class GenizahGUI(QMainWindow):
             self.lists_detail_added.setText('-')
 
         # Load text preview and image
-        self._lists_load_preview(sys_id)
+        if sys_id:
+            self._lists_load_preview(sys_id, img=img)
         if not self.lists_preview_visible:
             self.lists_set_preview_visible(True, auto=True)
 
-    def _lists_load_preview(self, sys_id):
+    def _lists_load_preview(self, sys_id, img=None):
         """Load text and image preview for an item."""
         # Clear previous preview
         self.lists_preview_text.clear()
@@ -4625,7 +4639,13 @@ class GenizahGUI(QMainWindow):
             return
 
         # Get page data
-        page_data = self.searcher.get_browse_page(sys_id, p_num=1)
+        p_num = 1
+        if img not in (None, ""):
+            try:
+                p_num = int(img)
+            except ValueError:
+                p_num = 1
+        page_data = self.searcher.get_browse_page(sys_id, p_num=p_num)
         if not page_data:
             self.lists_preview_text.setPlainText(tr("Could not load text"))
             return
@@ -4711,11 +4731,11 @@ class GenizahGUI(QMainWindow):
 
     def lists_save_item_details(self):
         """Save changes to the current item."""
-        if not self.lists_mgr or not self.lists_current_item_sys_id:
+        if not self.lists_mgr or not self.lists_current_item_id:
             return
 
         note = self.lists_detail_note.text()
-        self.lists_mgr.update_item(self.lists_current_item_sys_id, note=note)
+        self.lists_mgr.update_item(self.lists_current_item_id, note=note)
 
     def lists_create_new_list(self):
         """Create a new list."""
@@ -4782,7 +4802,7 @@ class GenizahGUI(QMainWindow):
             return
 
         # Simple dialog - select target
-        items = [l['name'] for l in lists]
+        items = [self._get_list_display_name(l) for l in lists]
         target_name, ok = QInputDialog.getItem(
             self, tr("Merge Lists"),
             tr("Merge '{}' into:").format(
@@ -4794,7 +4814,7 @@ class GenizahGUI(QMainWindow):
         if ok and target_name:
             target_list = None
             for l in lists:
-                if l['name'] == target_name:
+                if self._get_list_display_name(l) == target_name:
                     target_list = l
                     break
 
@@ -4808,12 +4828,12 @@ class GenizahGUI(QMainWindow):
         if not self.lists_mgr:
             return
 
-        selected = self.lists_get_selected_sys_ids()
+        selected = self.lists_get_selected_item_ids()
         if not selected:
             return
 
         lists = [l for l in self.lists_mgr.get_all_lists(include_recent=False)]
-        items = [l['name'] for l in lists]
+        items = [self._get_list_display_name(l) for l in lists]
 
         target_name, ok = QInputDialog.getItem(
             self, tr("Move to List..."),
@@ -4824,7 +4844,7 @@ class GenizahGUI(QMainWindow):
         if ok and target_name:
             target_list = None
             for l in lists:
-                if l['name'] == target_name:
+                if self._get_list_display_name(l) == target_name:
                     target_list = l
                     break
 
@@ -4837,7 +4857,7 @@ class GenizahGUI(QMainWindow):
         if not self.lists_mgr:
             return
 
-        selected = self.lists_get_selected_sys_ids()
+        selected = self.lists_get_selected_item_ids()
         if not selected:
             return
 
@@ -4846,15 +4866,15 @@ class GenizahGUI(QMainWindow):
             self.lists_mgr.add_tag_to_items(selected, tag.strip())
             self.lists_refresh_items()
 
-    def lists_add_tag_to_item(self, sys_id):
+    def lists_add_tag_to_item(self, item_id):
         """Add a tag to a specific item."""
         if not self.lists_mgr:
             return
 
         tag, ok = QInputDialog.getText(self, tr("Add Tag"), tr("Enter tag:"))
         if ok and tag.strip():
-            self.lists_mgr.add_tag_to_items([sys_id], tag.strip())
-            self.lists_show_item_details(sys_id)
+            self.lists_mgr.add_tag_to_items([item_id], tag.strip())
+            self.lists_show_item_details(item_id)
             self.lists_refresh_items()
 
     def lists_remove_selected_items(self):
@@ -4862,7 +4882,7 @@ class GenizahGUI(QMainWindow):
         if not self.lists_mgr:
             return
 
-        selected = self.lists_get_selected_sys_ids()
+        selected = self.lists_get_selected_item_ids()
         if not selected:
             return
 
@@ -4873,30 +4893,43 @@ class GenizahGUI(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            for sys_id in selected:
-                self.lists_mgr.remove_item_from_list(sys_id, self.lists_current_list_id)
+            for item_id in selected:
+                self.lists_mgr.remove_item_from_list(item_id, self.lists_current_list_id)
             self.lists_refresh_all()
 
-    def lists_remove_item_by_id(self, sys_id):
+    def lists_remove_item_by_id(self, item_id):
         """Remove a specific item from current list."""
         if not self.lists_mgr:
             return
 
-        self.lists_mgr.remove_item_from_list(sys_id, self.lists_current_list_id)
+        self.lists_mgr.remove_item_from_list(item_id, self.lists_current_list_id)
         self.lists_refresh_all()
 
     def lists_quick_view_item(self):
         """Quick view the current item."""
-        if self.lists_current_item_sys_id:
-            self.lists_quick_view_by_id(self.lists_current_item_sys_id)
+        if self.lists_current_item_id:
+            self.lists_quick_view_by_id(self.lists_current_item_id)
 
-    def lists_quick_view_by_id(self, sys_id):
+    def lists_quick_view_by_id(self, item_id):
         """Open quick view dialog for an item."""
         if not self.searcher or not self.meta_mgr:
             return
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
+        if not sys_id:
+            return
 
         # Get page data from browse index to have all required fields
-        page_data = self.searcher.get_browse_page(sys_id, p_num=1)
+        p_num = 1
+        if img not in (None, ""):
+            try:
+                p_num = int(img)
+            except ValueError:
+                p_num = 1
+        page_data = self.searcher.get_browse_page(sys_id, p_num=p_num)
         if not page_data:
             QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
             return
@@ -4923,11 +4956,16 @@ class GenizahGUI(QMainWindow):
 
     def lists_browse_item(self):
         """Browse the current item in the Browse tab."""
-        if self.lists_current_item_sys_id:
-            self.lists_browse_by_id(self.lists_current_item_sys_id)
+        if self.lists_current_item_id:
+            self.lists_browse_by_id(self.lists_current_item_id)
 
-    def lists_browse_by_id(self, sys_id):
+    def lists_browse_by_id(self, item_id):
         """Open an item in the Browse tab."""
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id')
+        img = item.get('img')
         if not sys_id:
             return
 
@@ -4939,10 +4977,10 @@ class GenizahGUI(QMainWindow):
 
     def lists_copy_item_info(self):
         """Copy current item info to clipboard."""
-        if self.lists_current_item_sys_id:
-            self.lists_copy_info_by_id(self.lists_current_item_sys_id)
+        if self.lists_current_item_id:
+            self.lists_copy_info_by_id(self.lists_current_item_id)
 
-    def lists_copy_info_by_id(self, sys_id):
+    def lists_copy_info_by_id(self, item_id):
         """Copy item info to clipboard with format options."""
         if not self.lists_mgr:
             return
@@ -4950,28 +4988,30 @@ class GenizahGUI(QMainWindow):
         menu = QMenu(self)
 
         action_compact = menu.addAction(tr("Compact"))
-        action_compact.triggered.connect(lambda: self._do_copy_info(sys_id, 'compact'))
+        action_compact.triggered.connect(lambda: self._do_copy_info(item_id, 'compact'))
 
         action_detailed = menu.addAction(tr("Detailed"))
-        action_detailed.triggered.connect(lambda: self._do_copy_info(sys_id, 'detailed'))
+        action_detailed.triggered.connect(lambda: self._do_copy_info(item_id, 'detailed'))
 
         action_link = menu.addAction(tr("With Link"))
-        action_link.triggered.connect(lambda: self._do_copy_info(sys_id, 'with_link'))
+        action_link.triggered.connect(lambda: self._do_copy_info(item_id, 'with_link'))
 
         menu.exec(QCursor.pos())
 
-    def _do_copy_info(self, sys_id, format_type):
+    def _do_copy_info(self, item_id, format_type):
         """Actually copy the info to clipboard."""
         if not self.lists_mgr:
             return
 
         # Get info even if item is not in a list
-        item = self.lists_mgr.get_item(sys_id)
+        item = self.lists_mgr.get_item(item_id)
 
         if item:
-            text = self.lists_mgr.get_item_copy_text(sys_id, format_type)
+            sys_id = item.get('sys_id')
+            text = self.lists_mgr.get_item_copy_text(item_id, format_type)
         else:
             # Item not in lists, generate text from metadata
+            sys_id = item_id
             shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id) if self.meta_mgr else ('Unknown', '')
 
             if format_type == 'compact':
@@ -5190,15 +5230,15 @@ class GenizahGUI(QMainWindow):
         source = item.get('source', '')
         notes = item.get('notes', '')
         tags = item.get('tags', [])
-        fl_id = item.get('fl_id')
+        img = item.get('img')
 
         lines = []
         if shelfmark:
             lines.append(shelfmark)
+        if img not in (None, ""):
+            lines.append(f"  {tr('Image')}: {self._format_image_display(img)}")
         if title:
             lines.append(f"  {title}")
-        if fl_id:
-            lines.append(f"  {tr('Image')}: {self._format_fl_id_display(fl_id)}")
         lines.append(f"  ID: {sys_id}")
         if source:
             lines.append(f"  {tr('Source')}: {source}")
@@ -5261,15 +5301,15 @@ class GenizahGUI(QMainWindow):
         ws.title = list_name[:31]  # Excel max sheet name length
 
         # Headers
-        headers = [tr('Shelfmark'), tr('Title'), tr('Image'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
+        headers = [tr('Shelfmark'), tr('Image'), tr('Title'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
         for col, header in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=header)
 
         # Data
         for row, item in enumerate(items, 2):
             ws.cell(row=row, column=1, value=item.get('shelfmark', ''))
-            ws.cell(row=row, column=2, value=item.get('title', ''))
-            ws.cell(row=row, column=3, value=self._format_fl_id_display(item.get('fl_id')))
+            ws.cell(row=row, column=2, value=self._format_image_display(item.get('img')))
+            ws.cell(row=row, column=3, value=item.get('title', ''))
             ws.cell(row=row, column=4, value=item.get('sys_id', ''))
             ws.cell(row=row, column=5, value=item.get('source', ''))
             ws.cell(row=row, column=6, value=', '.join(item.get('tags', [])))
@@ -5303,16 +5343,16 @@ class GenizahGUI(QMainWindow):
             shelfmark = item.get('shelfmark', 'Unknown')
             title = item.get('title', '')
             sys_id = item.get('sys_id', '')
-            fl_id = item.get('fl_id')
+            img = item.get('img')
             source = item.get('source', '')
             tags = item.get('tags', [])
             notes = item.get('notes', '')
 
             doc.add_heading(f"{i}. {shelfmark}", level=2)
+            if img not in (None, ""):
+                doc.add_paragraph(f"{tr('Image')}: {self._format_image_display(img)}")
             if title:
                 doc.add_paragraph(title)
-            if fl_id:
-                doc.add_paragraph(f"{tr('Image')}: {self._format_fl_id_display(fl_id)}")
             doc.add_paragraph(f"ID: {sys_id}")
             if source:
                 doc.add_paragraph(f"{tr('Source')}: {source}")
@@ -5365,9 +5405,9 @@ class GenizahGUI(QMainWindow):
 
     # --- Add to List from other places ---
 
-    def show_add_to_list_menu(self, sys_ids, source='', anchor_widget=None, fl_id_map=None):
+    def show_add_to_list_menu(self, items, source='', anchor_widget=None):
         """Show menu for adding items to a list."""
-        if not self.lists_mgr or not sys_ids:
+        if not self.lists_mgr or not items:
             return
 
         menu = QMenu(self)
@@ -5394,13 +5434,13 @@ class GenizahGUI(QMainWindow):
                 name, ok = QInputDialog.getText(self, tr("Create New List"), tr("List Name:"))
                 if ok and name.strip():
                     list_id = self.lists_mgr.create_list(name.strip())
-                    self.lists_mgr.add_items_bulk(sys_ids, list_id, source=source, fl_id_map=fl_id_map)
+                    self.lists_mgr.add_items_bulk(items, list_id, source=source)
                     self.status_label.setText(tr("Added to list."))
                     self.lists_refresh_all()  # Refresh to show new list
             else:
                 list_id = action.data()
                 if list_id:
-                    added = self.lists_mgr.add_items_bulk(sys_ids, list_id, source=source, fl_id_map=fl_id_map)
+                    added = self.lists_mgr.add_items_bulk(items, list_id, source=source)
                     if added > 0:
                         self.status_label.setText(tr("Added to list."))
                         self.lists_refresh_all()  # Refresh to show new items
@@ -6458,9 +6498,8 @@ class GenizahGUI(QMainWindow):
         if not self.lists_mgr:
             return
 
-        # Collect selected sys_ids
-        sys_ids = []
-        fl_id_map = {}
+        # Collect selected items
+        items = []
         for i in range(self.results_table.rowCount()):
             chk = self.results_table.item(i, self.COL_CHECKBOX)
             if chk and chk.checkState() == Qt.CheckState.Checked:
@@ -6469,15 +6508,15 @@ class GenizahGUI(QMainWindow):
                     display = res.get('display', {})
                     sys_id = display.get('id')
                     if sys_id:
-                        sys_ids.append(sys_id)
-                        fl_id = self._normalize_fl_id(self._extract_fl_id(res))
-                        if fl_id:
-                            fl_id_map[sys_id] = fl_id
+                        items.append({
+                            'sys_id': sys_id,
+                            'img': display.get('img'),
+                            'fl_id': self._normalize_fl_id(self._extract_fl_id(res))
+                        })
 
-        if sys_ids:
+        if items:
             source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"
-            self.show_add_to_list_menu(sys_ids, source=source, anchor_widget=self.btn_add_to_list,
-                                       fl_id_map=fl_id_map or None)
+            self.show_add_to_list_menu(items, source=source, anchor_widget=self.btn_add_to_list)
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
         sid = None
@@ -9374,7 +9413,8 @@ class GenizahGUI(QMainWindow):
         # Add to Recently Viewed
         if self.lists_mgr:
             fl_id = self._normalize_fl_id(page_data.get('fl_id') if page_data else self.browse_fl_input.text().strip())
-            self.lists_mgr.add_to_recent(sid, fl_id=fl_id)
+            img = page_data.get('p_num') if page_data else None
+            self.lists_mgr.add_to_recent(sid, fl_id=fl_id, img=img)
 
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)

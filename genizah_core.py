@@ -4532,6 +4532,10 @@ class ListsManager:
                         loaded['lists']['default'] = defaults['lists']['default']
                     if 'recent' not in loaded['lists']:
                         loaded['lists']['recent'] = defaults['lists']['recent']
+                    # Backfill sys_id on stored items (older format used key only)
+                    for item_id, item_data in loaded.get('items', {}).items():
+                        if isinstance(item_data, dict) and 'sys_id' not in item_data:
+                            item_data['sys_id'] = item_id
                     self.data = loaded
             except Exception as e:
                 LOGGER.warning(f"Failed to load lists: {e}")
@@ -4696,25 +4700,37 @@ class ListsManager:
 
     # --- Item Management ---
 
-    def add_item(self, sys_id, list_id='default', note='', tags=None, source='', fl_id=None):
+    def _build_item_id(self, sys_id, img=None, fl_id=None):
+        if img not in (None, ""):
+            return f"{sys_id}::img::{img}"
+        if fl_id not in (None, ""):
+            return f"{sys_id}::fl::{fl_id}"
+        return sys_id
+
+    def add_item(self, sys_id, list_id='default', note='', tags=None, source='', fl_id=None, img=None):
         """Add an item to a list. Returns True if added, False if already exists."""
         import time
 
         if list_id not in self.data['lists']:
             return False
 
-        if sys_id in self.data['items']:
+        item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+
+        if item_id in self.data['items']:
             # Item exists, add to list if not already
-            item = self.data['items'][sys_id]
+            item = self.data['items'][item_id]
             if list_id in item.get('lists', []):
                 return False  # Already in this list
             item['lists'].append(list_id)
             if fl_id:
                 item['fl_id'] = fl_id
+            if img not in (None, ""):
+                item['img'] = img
             item['modified'] = time.time()
         else:
             # New item
-            self.data['items'][sys_id] = {
+            self.data['items'][item_id] = {
+                'sys_id': sys_id,
                 'lists': [list_id],
                 'tags': tags or [],
                 'note': note,
@@ -4722,7 +4738,8 @@ class ListsManager:
                 'added': time.time(),
                 'modified': time.time(),
                 'shelfmark_override': None,  # For unidentified items
-                'fl_id': fl_id
+                'fl_id': fl_id,
+                'img': img
             }
 
         # Update all_tags
@@ -4734,7 +4751,7 @@ class ListsManager:
         self.save()
         return True
 
-    def add_items_bulk(self, sys_ids, list_id='default', source='', fl_id_map=None):
+    def add_items_bulk(self, items, list_id='default', source='', fl_id_map=None):
         """Add multiple items to a list at once."""
         import time
 
@@ -4742,20 +4759,36 @@ class ListsManager:
             return 0
 
         added = 0
-        for sys_id in sys_ids:
-            if sys_id in self.data['items']:
-                item = self.data['items'][sys_id]
+        for entry in items:
+            if isinstance(entry, dict):
+                sys_id = entry.get('sys_id')
+                fl_id = entry.get('fl_id')
+                img = entry.get('img')
+            else:
+                sys_id = entry
+                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
+                img = None
+
+            if not sys_id:
+                continue
+
+            item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+
+            if item_id in self.data['items']:
+                item = self.data['items'][item_id]
                 if list_id not in item.get('lists', []):
                     item['lists'].append(list_id)
                     item['modified'] = time.time()
                     added += 1
-                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
                 if fl_id and item.get('fl_id') != fl_id:
                     item['fl_id'] = fl_id
                     item['modified'] = time.time()
+                if img not in (None, "") and item.get('img') != img:
+                    item['img'] = img
+                    item['modified'] = time.time()
             else:
-                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
-                self.data['items'][sys_id] = {
+                self.data['items'][item_id] = {
+                    'sys_id': sys_id,
                     'lists': [list_id],
                     'tags': [],
                     'note': '',
@@ -4763,21 +4796,22 @@ class ListsManager:
                     'added': time.time(),
                     'modified': time.time(),
                     'shelfmark_override': None,
-                    'fl_id': fl_id
+                    'fl_id': fl_id,
+                    'img': img
                 }
                 added += 1
 
         self.save()
         return added
 
-    def update_item(self, sys_id, note=None, tags=None, shelfmark_override=None, fl_id=None):
+    def update_item(self, item_id, note=None, tags=None, shelfmark_override=None, fl_id=None, img=None):
         """Update an item's properties."""
         import time
 
-        if sys_id not in self.data['items']:
+        if item_id not in self.data['items']:
             return False
 
-        item = self.data['items'][sys_id]
+        item = self.data['items'][item_id]
 
         if note is not None:
             item['note'] = note
@@ -4791,17 +4825,19 @@ class ListsManager:
             item['shelfmark_override'] = shelfmark_override
         if fl_id is not None:
             item['fl_id'] = fl_id
+        if img is not None:
+            item['img'] = img
 
         item['modified'] = time.time()
         self.save()
         return True
 
-    def remove_item_from_list(self, sys_id, list_id):
+    def remove_item_from_list(self, item_id, list_id):
         """Remove an item from a specific list."""
-        if sys_id not in self.data['items']:
+        if item_id not in self.data['items']:
             return False
 
-        item = self.data['items'][sys_id]
+        item = self.data['items'][item_id]
         if list_id not in item.get('lists', []):
             return False
 
@@ -4809,7 +4845,7 @@ class ListsManager:
 
         # If item has no more lists, remove it entirely
         if not item['lists']:
-            del self.data['items'][sys_id]
+            del self.data['items'][item_id]
 
         self.save()
         return True
@@ -4818,9 +4854,9 @@ class ListsManager:
         """Move items from one list to another."""
         import time
 
-        for sys_id in sys_ids:
-            if sys_id in self.data['items']:
-                item = self.data['items'][sys_id]
+        for item_id in sys_ids:
+            if item_id in self.data['items']:
+                item = self.data['items'][item_id]
                 if from_list_id in item.get('lists', []):
                     item['lists'].remove(from_list_id)
                 if to_list_id not in item.get('lists', []):
@@ -4833,53 +4869,62 @@ class ListsManager:
         """Get all items in a list with their metadata."""
         if list_id == 'recent':
             items = []
-            for sys_id in self.data.get('recent_items', []):
-                item_data = self.data['items'].get(sys_id, {})
+            for item_id in self.data.get('recent_items', []):
+                item_data = self.data['items'].get(item_id, {})
                 items.append({
-                    'sys_id': sys_id,
-                    **item_data
+                    **item_data,
+                    'item_id': item_id
                 })
+                if 'sys_id' not in items[-1] and item_id:
+                    items[-1]['sys_id'] = item_id
             return items
 
         items = []
-        for sys_id, item_data in self.data['items'].items():
+        for item_id, item_data in self.data['items'].items():
             if list_id in item_data.get('lists', []):
                 items.append({
-                    'sys_id': sys_id,
-                    **item_data
+                    **item_data,
+                    'item_id': item_id
                 })
+                if 'sys_id' not in items[-1] and item_id:
+                    items[-1]['sys_id'] = item_id
         return items
 
-    def get_item(self, sys_id):
+    def get_item(self, item_id):
         """Get a single item's data."""
-        if sys_id in self.data['items']:
-            return {'sys_id': sys_id, **self.data['items'][sys_id]}
+        if item_id in self.data['items']:
+            item = dict(self.data['items'][item_id])
+            if 'sys_id' not in item:
+                item['sys_id'] = item_id
+            item['item_id'] = item_id
+            return item
         return None
 
-    def is_item_in_any_list(self, sys_id):
+    def is_item_in_any_list(self, item_id):
         """Check if an item is in any list (excluding recent)."""
-        return sys_id in self.data['items']
+        return item_id in self.data['items']
 
-    def get_item_lists(self, sys_id):
+    def get_item_lists(self, item_id):
         """Get list of lists an item belongs to."""
-        if sys_id not in self.data['items']:
+        if item_id not in self.data['items']:
             return []
-        return self.data['items'][sys_id].get('lists', [])
+        return self.data['items'][item_id].get('lists', [])
 
     # --- Recently Viewed ---
 
-    def add_to_recent(self, sys_id, fl_id=None):
+    def add_to_recent(self, sys_id, fl_id=None, img=None):
         """Add an item to the recently viewed list."""
         import time
 
         recent = self.data.get('recent_items', [])
 
         # Remove if already present (we'll add to front)
-        if sys_id in recent:
-            recent.remove(sys_id)
+        item_id = self._build_item_id(sys_id, img=img, fl_id=fl_id)
+        if item_id in recent:
+            recent.remove(item_id)
 
         # Add to front
-        recent.insert(0, sys_id)
+        recent.insert(0, item_id)
 
         # Trim to max size
         if len(recent) > self.MAX_RECENT_ITEMS:
@@ -4888,8 +4933,9 @@ class ListsManager:
         self.data['recent_items'] = recent
 
         # Also ensure item exists in items dict for metadata
-        if sys_id not in self.data['items']:
-            self.data['items'][sys_id] = {
+        if item_id not in self.data['items']:
+            self.data['items'][item_id] = {
+                'sys_id': sys_id,
                 'lists': [],  # Not in any regular list, just recent
                 'tags': [],
                 'note': '',
@@ -4897,10 +4943,14 @@ class ListsManager:
                 'added': time.time(),
                 'modified': time.time(),
                 'shelfmark_override': None,
-                'fl_id': fl_id
+                'fl_id': fl_id,
+                'img': img
             }
-        elif fl_id:
-            self.data['items'][sys_id]['fl_id'] = fl_id
+        else:
+            if fl_id:
+                self.data['items'][item_id]['fl_id'] = fl_id
+            if img is not None:
+                self.data['items'][item_id]['img'] = img
 
         self.save()
 
@@ -4948,8 +4998,9 @@ class ListsManager:
 
         for item in items:
             item_export = {
-                'sys_id': item['sys_id'],
+                'sys_id': item.get('sys_id'),
                 'fl_id': item.get('fl_id'),
+                'img': item.get('img'),
                 'tags': item.get('tags', []),
                 'note': item.get('note', ''),
                 'source': item.get('source', ''),
@@ -4999,12 +5050,14 @@ class ListsManager:
                 note=item.get('note', ''),
                 tags=item.get('tags', []),
                 source=item.get('source', ''),
-                fl_id=item.get('fl_id')
+                fl_id=item.get('fl_id'),
+                img=item.get('img')
             )
 
             # Set shelfmark override for unidentified items
             if not is_identified and item.get('shelfmark'):
-                self.update_item(sys_id, shelfmark_override=item.get('shelfmark'))
+                item_id = self._build_item_id(sys_id, img=item.get('img'), fl_id=item.get('fl_id'))
+                self.update_item(item_id, shelfmark_override=item.get('shelfmark'))
 
             imported += 1
 
@@ -5056,15 +5109,16 @@ class ListsManager:
 
     # --- Copy Info ---
 
-    def get_item_copy_text(self, sys_id, format_type='compact'):
+    def get_item_copy_text(self, item_id, format_type='compact'):
         """
         Generate text for copying item info.
         format_type: 'compact', 'detailed', 'with_link'
         """
-        if sys_id not in self.data['items']:
+        if item_id not in self.data['items']:
             return ''
 
-        item = self.data['items'][sys_id]
+        item = self.data['items'][item_id]
+        sys_id = item.get('sys_id', item_id)
 
         shelfmark = 'Unknown'
         title = ''
