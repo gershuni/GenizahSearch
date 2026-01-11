@@ -4501,16 +4501,19 @@ class ListsManager:
                     'color': '#FFD700',
                     'created': time.time(),
                     'is_default': True,
-                    'is_system': False
+                    'is_system': False,
+                    'project_id': None
                 },
                 'recent': {
                     'name': 'Recently Viewed',
                     'name_en': 'Recently Viewed',
                     'color': '#9E9E9E',
                     'is_system': True,
-                    'max_items': self.MAX_RECENT_ITEMS
+                    'max_items': self.MAX_RECENT_ITEMS,
+                    'project_id': None
                 }
             },
+            'projects': {},
             'items': {},  # sys_id -> item data
             'recent_items': [],  # ordered list of sys_ids (most recent first)
             'all_tags': []  # for autocomplete
@@ -4532,6 +4535,11 @@ class ListsManager:
                         loaded['lists']['default'] = defaults['lists']['default']
                     if 'recent' not in loaded['lists']:
                         loaded['lists']['recent'] = defaults['lists']['recent']
+                    if 'projects' not in loaded:
+                        loaded['projects'] = defaults['projects']
+                    for list_data in loaded.get('lists', {}).values():
+                        if 'project_id' not in list_data:
+                            list_data['project_id'] = None
                     # Backfill sys_id on stored items (older format used key only)
                     for item_id, item_data in loaded.get('items', {}).items():
                         if isinstance(item_data, dict) and 'sys_id' not in item_data:
@@ -4608,7 +4616,8 @@ class ListsManager:
         self.data['lists'][list_id] = {
             'name': name,
             'color': color,
-            'created': time.time()
+            'created': time.time(),
+            'project_id': None
         }
         self.save()
         return list_id
@@ -4629,6 +4638,42 @@ class ListsManager:
 
         self.save()
         return True
+
+    def update_list_project(self, list_id, project_id=None):
+        """Assign a list to a project (or clear project)."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_system') or lst.get('is_default'):
+            return False
+
+        if project_id and project_id not in self.data.get('projects', {}):
+            return False
+
+        lst['project_id'] = project_id
+        self.save()
+        return True
+
+    def create_project(self, name):
+        """Create a new project. Returns the project ID."""
+        import time
+        import uuid
+
+        project_id = f"project_{uuid.uuid4().hex[:8]}"
+        self.data.setdefault('projects', {})[project_id] = {
+            'name': name,
+            'created': time.time()
+        }
+        self.save()
+        return project_id
+
+    def get_projects(self):
+        """Get projects sorted by name."""
+        projects = []
+        for project_id, data in self.data.get('projects', {}).items():
+            projects.append({'id': project_id, **data})
+        return sorted(projects, key=lambda p: p.get('name', '').lower())
 
     def delete_list(self, list_id):
         """Delete a list and all its items."""
@@ -4666,6 +4711,8 @@ class ListsManager:
             new_name = f"{original.get('name', tr('List'))} ({tr('Copy')})"
 
         new_list_id = self.create_list(new_name, original.get('color'))
+        if original.get('project_id'):
+            self.update_list_project(new_list_id, original.get('project_id'))
 
         # Copy items
         for sys_id, item in self.data['items'].items():
