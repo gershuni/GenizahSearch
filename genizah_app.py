@@ -3744,17 +3744,15 @@ class GenizahGUI(QMainWindow):
             fl_id = entry.get('fl_id')
 
             label_parts = [shelfmark]
-            if title:
-                label_parts.append(title)
-            extra_bits = []
             if img not in (None, ""):
-                extra_bits.append(tr("Image {}").format(self._format_image_display(img)))
-            if fl_id not in (None, ""):
-                extra_bits.append(tr("FL {}").format(fl_id))
+                label_parts.append(tr("Img {}").format(self._format_image_display(img)))
+            extra_bits = []  
+            if title:
+                extra_bits.append(title)                    
             if extra_bits:
                 label_parts.append(f"({', '.join(extra_bits)})")
 
-            list_item = QListWidgetItem(" — ".join(label_parts))
+            list_item = QListWidgetItem(" • ".join(label_parts))
             list_item.setData(Qt.ItemDataRole.UserRole, item_id)
             self.browse_list_items.addItem(list_item)
 
