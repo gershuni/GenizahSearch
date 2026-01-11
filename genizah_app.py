@@ -4036,7 +4036,7 @@ class GenizahGUI(QMainWindow):
         self.lists_preview_title = QLabel(f"<b>{tr('Preview')}</b>")
         preview_header.addWidget(self.lists_preview_title)
         preview_header.addStretch()
-        self.btn_toggle_preview = QPushButton("◀")
+        self.btn_toggle_preview = QPushButton(tr("◀"))
         self.btn_toggle_preview.setFixedSize(24, 24)
         self.btn_toggle_preview.setToolTip(tr("Toggle Preview Panel"))
         self.btn_toggle_preview.clicked.connect(self.lists_toggle_preview)
