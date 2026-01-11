@@ -4841,34 +4841,66 @@ class GenizahGUI(QMainWindow):
             parsed = self.meta_mgr.parse_full_id_components(full_header)
             fl_id = parsed.get('fl_id')
 
-            if fl_id and hasattr(self, 'fetcher') and self.fetcher:
-                # Try cached image first
-                cached = self.fetcher.get_cached_image(fl_id)
-                if cached:
-                    self._lists_set_preview_image(cached)
-                else:
-                    # Fetch synchronously for now (can optimize later)
-                    self.lists_preview_image.setText(tr("Loading..."))
-                    QApplication.processEvents()
-                    img_data = self.fetcher.fetch_single(fl_id)
-                    if img_data:
-                        self._lists_set_preview_image(img_data)
-                    else:
-                        self.lists_preview_image.setText(tr("No image"))
+            thumb_url = None
+            if fl_id:
+                thumb_url = self.meta_mgr._resolve_thumbnail([fl_id])
+
+            if not thumb_url:
+                thumb_url = self.meta_mgr.get_thumbnail(sys_id)
+
+            if thumb_url:
+                self._lists_start_preview_download(thumb_url)
+            else:
+                self.lists_preview_image.setText(tr("No image"))
         except Exception as e:
             LOGGER.debug(f"Failed to load preview image: {e}")
             self.lists_preview_image.setText(tr("No image"))
 
-    def _lists_set_preview_image(self, img_data):
-        """Set preview image from data."""
-        try:
-            pixmap = QPixmap()
-            pixmap.loadFromData(img_data)
-            scaled = pixmap.scaled(280, 200, Qt.AspectRatioMode.KeepAspectRatio,
-                                  Qt.TransformationMode.SmoothTransformation)
-            self.lists_preview_image.setPixmap(scaled)
-        except:
+    def _lists_start_preview_download(self, thumb_url):
+        """Download and display preview image for lists panel."""
+        self._lists_cancel_preview_image_thread()
+        self.lists_preview_thumb_url = thumb_url
+        if not thumb_url:
             self.lists_preview_image.setText(tr("No image"))
+            return
+
+        self.lists_preview_image.setText(tr("Loading..."))
+        self.lists_preview_image.setPixmap(QPixmap())
+
+        self.lists_preview_img_thread = ImageLoaderThread(thumb_url)
+        self.lists_preview_img_thread.image_loaded.connect(
+            lambda image, url=thumb_url: self._lists_on_preview_image_loaded(image, url)
+        )
+        self.lists_preview_img_thread.load_failed.connect(
+            lambda url=thumb_url: self._lists_on_preview_image_failed(url)
+        )
+        self.lists_preview_img_thread.start()
+
+    def _lists_on_preview_image_loaded(self, image, thumb_url):
+        """Handle preview image loaded for lists panel."""
+        if thumb_url != getattr(self, 'lists_preview_thumb_url', None):
+            return
+        pix = QPixmap.fromImage(image)
+        scaled = pix.scaled(
+            self.lists_preview_image.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.lists_preview_image.setPixmap(scaled)
+        self.lists_preview_image.setText("")
+
+    def _lists_on_preview_image_failed(self, thumb_url):
+        """Handle preview image load failure for lists panel."""
+        if thumb_url != getattr(self, 'lists_preview_thumb_url', None):
+            return
+        self.lists_preview_image.setPixmap(QPixmap())
+        self.lists_preview_image.setText(tr("No image"))
+
+    def _lists_cancel_preview_image_thread(self):
+        preview_thread = getattr(self, 'lists_preview_img_thread', None)
+        if preview_thread and preview_thread.isRunning():
+            preview_thread.cancel()
+            preview_thread.wait(500)
 
     def lists_clear_details(self):
         """Clear the details panel and preview."""
@@ -4891,6 +4923,7 @@ class GenizahGUI(QMainWindow):
         self.lists_preview_text.clear()
         self.lists_preview_image.clear()
         self.lists_preview_image.setText(tr("No image"))
+        self._lists_cancel_preview_image_thread()
         if self.lists_preview_visible:
             self.lists_set_preview_visible(False, auto=True)
 
