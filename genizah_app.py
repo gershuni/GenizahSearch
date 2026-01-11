@@ -6439,6 +6439,8 @@ class GenizahGUI(QMainWindow):
             w.set_buttons_visible(True)
 
     def on_lists_table_cell_entered(self, row, col):
+        if not hasattr(self, "lists_items_table"):
+            return
         if row == self.lists_hovered_row:
             return
 
@@ -6459,7 +6461,7 @@ class GenizahGUI(QMainWindow):
                 if isinstance(w, ActionsHoverWidget):
                     w.set_buttons_visible(False)
                 self.hovered_row = -1
-        if source == self.lists_items_table and event.type() == QEvent.Type.Leave:
+        if hasattr(self, "lists_items_table") and source == self.lists_items_table and event.type() == QEvent.Type.Leave:
             if self.lists_hovered_row != -1:
                 w = self.lists_items_table.cellWidget(self.lists_hovered_row, 5)
                 if isinstance(w, ActionsHoverWidget):
