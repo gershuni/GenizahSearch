@@ -1933,7 +1933,7 @@ class ResultDialog(QDialog):
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
 
         # Add to List button
-        self.btn_add_to_list = QPushButton(tr("☆ Add to List"))
+        self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_add_to_list.clicked.connect(self.add_current_to_list)
 
         self.btn_ext_info = QPushButton(tr("Show Extended Info"))
@@ -2100,6 +2100,20 @@ class ResultDialog(QDialog):
             )
             # Also add to recently viewed
             parent.lists_mgr.add_to_recent(sys_id, fl_id=fl_id, img=img)
+            self._update_add_to_list_button()
+
+    def _update_add_to_list_button(self):
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'lists_mgr') or not parent.lists_mgr:
+            return
+        if not self.current_sys_id:
+            return
+        in_list = parent._is_item_in_non_recent_list(
+            self.current_sys_id,
+            img=self.current_p_num,
+            fl_id=parent._normalize_fl_id(self.current_fl_id),
+        )
+        self.btn_add_to_list.setText(_format_add_to_list_label(in_list))
 
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
@@ -2268,6 +2282,7 @@ class ResultDialog(QDialog):
         self.current_full_header = page_data.get('full_header', '')
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
+        self._update_add_to_list_button()
 
         # Keep the dialog's data object aligned with the currently displayed folio
         if self.data is not None:
@@ -2719,15 +2734,32 @@ class ActionsHoverWidget(QWidget):
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.buttons = []
+        self.always_visible_buttons = set()
 
-    def add_btn(self, btn):
+    def add_btn(self, btn, always_visible=False):
         self.layout().addWidget(btn)
         self.buttons.append(btn)
-        btn.setVisible(False)
+        if always_visible:
+            self.always_visible_buttons.add(btn)
+            btn.setVisible(True)
+        else:
+            btn.setVisible(False)
 
     def set_buttons_visible(self, visible):
         for b in self.buttons:
-            b.setVisible(visible)
+            if b in self.always_visible_buttons:
+                b.setVisible(True)
+            else:
+                b.setVisible(visible)
+
+
+def _format_add_to_list_label(in_list=False):
+    star = "⭐" if in_list else "☆"
+    return f"{star} {tr('Add to List')}"
+
+
+def _format_list_star(in_list=False):
+    return "⭐" if in_list else "☆"
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
@@ -2801,6 +2833,7 @@ class GenizahGUI(QMainWindow):
         self.comp_thread = None 
         self.comp_worker = None
         self.hovered_row = -1
+        self.lists_hovered_row = -1
         self.results_loaded = 0
         self.snippet_queue = []
 
@@ -3116,7 +3149,7 @@ class GenizahGUI(QMainWindow):
         self._update_results_filter_indicators()
 
         self.results_table.setColumnWidth(self.COL_CHECKBOX, 30) # Checkbox column
-        self.results_table.setColumnWidth(self.COL_ACTIONS, 70)
+        self.results_table.setColumnWidth(self.COL_ACTIONS, 95)
         self.results_table.setColumnWidth(self.COL_SYS_ID, 135)
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
@@ -3184,7 +3217,7 @@ class GenizahGUI(QMainWindow):
         bot.addWidget(self.status_label, 1)
 
         # Add to List button
-        self.btn_add_to_list = QPushButton(tr("☆ Add to List"))
+        self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_add_to_list.clicked.connect(self.search_add_selected_to_list)
         self.btn_add_to_list.setEnabled(False)
         bot.addWidget(self.btn_add_to_list)
@@ -3361,6 +3394,11 @@ class GenizahGUI(QMainWindow):
         rl.addWidget(self.comp_tree)
         
         exp_layout = QHBoxLayout()
+        self.btn_comp_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_comp_add_to_list.clicked.connect(self.comp_add_selected_to_list)
+        self.btn_comp_add_to_list.setEnabled(False)
+        exp_layout.addWidget(self.btn_comp_add_to_list)
+        exp_layout.addStretch()
         self.lbl_comp_export = QLabel(tr("Save Report"))
         exp_layout.addWidget(self.lbl_comp_export)
         
@@ -3458,7 +3496,7 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.btn_find_parallels)
 
         # Add to List button for browse tab
-        self.btn_browse_add_to_list = QPushButton(tr("☆ Add to List"))
+        self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_browse_add_to_list.clicked.connect(self.browse_add_to_list)
         self.btn_browse_add_to_list.setEnabled(False)
         row1.addWidget(self.btn_browse_add_to_list)
@@ -3720,6 +3758,7 @@ class GenizahGUI(QMainWindow):
             source=tr("from browse"),
             anchor_widget=self.btn_browse_add_to_list
         )
+        self._update_browse_add_to_list_button()
 
     def _set_last_browse_field(self, field):
         self.last_browse_field = field
@@ -4127,6 +4166,9 @@ class GenizahGUI(QMainWindow):
         self.lists_items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.lists_items_table.itemClicked.connect(self.lists_on_item_clicked)
         self.lists_items_table.itemChanged.connect(self.lists_on_item_checkbox_changed)
+        self.lists_items_table.setMouseTracking(True)
+        self.lists_items_table.cellEntered.connect(self.on_lists_table_cell_entered)
+        self.lists_items_table.installEventFilter(self)
         main_layout.addWidget(self.lists_items_table, 1)
 
         # Single action bar
@@ -4317,6 +4359,8 @@ class GenizahGUI(QMainWindow):
         """Refresh the lists sidebar and current items view."""
         self.lists_refresh_sidebar()
         self.lists_refresh_items()
+        self._update_search_action_stars()
+        self._update_browse_add_to_list_button()
 
     def lists_refresh_sidebar(self):
         """Refresh the lists tree in the sidebar."""
@@ -4441,34 +4485,19 @@ class GenizahGUI(QMainWindow):
             self.lists_items_table.setItem(row, 4, QTableWidgetItem(", ".join(tags)))
 
             # Action buttons
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(2, 2, 2, 2)
-            actions_layout.setSpacing(2)
+            actions_widget = ActionsHoverWidget()
 
-            btn_view = QPushButton("👁️")
-            btn_view.setFixedSize(24, 24)
-            btn_view.setToolTip(tr("Quick View"))
-            btn_view.clicked.connect(lambda _, iid=item_id: self.lists_quick_view_by_id(iid))
-            actions_layout.addWidget(btn_view)
+            btn_view = self._create_action_button("👁️", tr("Quick View"), lambda _, iid=item_id: self.lists_quick_view_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_view)
 
-            btn_browse = QPushButton("📖")
-            btn_browse.setFixedSize(24, 24)
-            btn_browse.setToolTip(tr("Browse"))
-            btn_browse.clicked.connect(lambda _, iid=item_id: self.lists_browse_by_id(iid))
-            actions_layout.addWidget(btn_browse)
+            btn_browse = self._create_action_button("📖", tr("Browse"), lambda _, iid=item_id: self.lists_browse_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_browse)
 
-            btn_copy = QPushButton("📋")
-            btn_copy.setFixedSize(24, 24)
-            btn_copy.setToolTip(tr("Copy Info"))
-            btn_copy.clicked.connect(lambda _, iid=item_id: self.lists_copy_info_by_id(iid))
-            actions_layout.addWidget(btn_copy)
+            btn_copy = self._create_action_button("📋", tr("Copy Info"), lambda _, iid=item_id: self.lists_copy_info_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_copy)
 
-            btn_remove = QPushButton("🗑️")
-            btn_remove.setFixedSize(24, 24)
-            btn_remove.setToolTip(tr("Remove from List"))
-            btn_remove.clicked.connect(lambda _, iid=item_id: self.lists_remove_item_by_id(iid))
-            actions_layout.addWidget(btn_remove)
+            btn_remove = self._create_action_button("🗑️", tr("Remove from List"), lambda _, iid=item_id: self.lists_remove_item_by_id(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_remove)
 
             self.lists_items_table.setCellWidget(row, 5, actions_widget)
 
@@ -5283,6 +5312,7 @@ class GenizahGUI(QMainWindow):
 
     def _export_as_json(self, list_id, list_name, items):
         """Export list as JSON."""
+        from datetime import datetime
         export_data = {
             'list_name': list_name,
             'exported': datetime.now().isoformat(),
@@ -6002,8 +6032,12 @@ class GenizahGUI(QMainWindow):
 
             # Actions
             actions_widget = ActionsHoverWidget()
-            view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
+            list_btn = self._create_action_button("☆", tr("Add to List"), parent=self.results_table)
+            list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
+            list_btn.setProperty("action_role", "list_star")
+            actions_widget.add_btn(list_btn, always_visible=True)
             browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
+            view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
             actions_widget.add_btn(browse_btn)
             actions_widget.add_btn(view_btn)
             self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
@@ -6040,6 +6074,7 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(str(meta.get('img', ''))))
             # Src
             self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(str(meta.get('source', ''))))
+            self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
         self.results_table.setSortingEnabled(True)
@@ -6320,8 +6355,8 @@ class GenizahGUI(QMainWindow):
             progress_part = f" ({self.meta_progress_current}/{self.meta_to_fetch_count})"
         return tr("Metadata loaded: {}/{}").format(total_loaded, total_expected) + progress_part
 
-    def _create_action_button(self, content, tooltip, callback):
-        btn = QToolButton(self.results_table)
+    def _create_action_button(self, content, tooltip, callback=None, parent=None):
+        btn = QToolButton(parent or self.results_table)
         if isinstance(content, str):
             btn.setText(content)
             f = btn.font()
@@ -6333,8 +6368,59 @@ class GenizahGUI(QMainWindow):
         btn.setAutoRaise(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(28, 24)
-        btn.clicked.connect(callback)
+        if callback:
+            btn.clicked.connect(callback)
         return btn
+
+    def _is_item_in_non_recent_list(self, sys_id, img=None, fl_id=None):
+        if not self.lists_mgr or not sys_id:
+            return False
+        item_id = self.lists_mgr._build_item_id(sys_id, img=img, fl_id=fl_id)
+        item = self.lists_mgr.get_item(item_id)
+        return bool(item and item.get('lists'))
+
+    def _set_add_to_list_button_label(self, button, in_list):
+        if not button:
+            return
+        button.setText(_format_add_to_list_label(in_list))
+
+    def _update_browse_add_to_list_button(self):
+        if not hasattr(self, 'btn_browse_add_to_list'):
+            return
+        in_list = self._is_item_in_non_recent_list(
+            self.current_browse_sid,
+            img=self.current_browse_p,
+            fl_id=self._normalize_fl_id(self.browse_fl_input.text().strip()),
+        )
+        self._set_add_to_list_button_label(self.btn_browse_add_to_list, in_list)
+
+    def _update_search_row_list_indicator(self, row, res=None):
+        actions_widget = self.results_table.cellWidget(row, self.COL_ACTIONS)
+        if not isinstance(actions_widget, ActionsHoverWidget):
+            return
+        if res is None:
+            item = self.results_table.item(row, self.COL_SYS_ID)
+            if item:
+                res = item.data(Qt.ItemDataRole.UserRole)
+        if not res:
+            return
+
+        display = res.get('display', {}) if isinstance(res, dict) else {}
+        sys_id = display.get('id')
+        img = display.get('img')
+        fl_id = self._normalize_fl_id(self._extract_fl_id(res))
+        in_list = self._is_item_in_non_recent_list(sys_id, img=img, fl_id=fl_id)
+
+        for btn in actions_widget.buttons:
+            if btn.property("action_role") == "list_star":
+                btn.setText(_format_list_star(in_list))
+                break
+
+    def _update_search_action_stars(self):
+        if not hasattr(self, 'results_table'):
+            return
+        for row in range(self.results_table.rowCount()):
+            self._update_search_row_list_indicator(row)
 
     def on_table_cell_entered(self, row, col):
         if row == self.hovered_row:
@@ -6353,6 +6439,22 @@ class GenizahGUI(QMainWindow):
         if isinstance(w, ActionsHoverWidget):
             w.set_buttons_visible(True)
 
+    def on_lists_table_cell_entered(self, row, col):
+        if not hasattr(self, "lists_items_table"):
+            return
+        if row == self.lists_hovered_row:
+            return
+
+        if self.lists_hovered_row != -1:
+            w = self.lists_items_table.cellWidget(self.lists_hovered_row, 5)
+            if isinstance(w, ActionsHoverWidget):
+                w.set_buttons_visible(False)
+
+        self.lists_hovered_row = row
+        w = self.lists_items_table.cellWidget(row, 5)
+        if isinstance(w, ActionsHoverWidget):
+            w.set_buttons_visible(True)
+
     def eventFilter(self, source, event):
         if source == self.results_table and event.type() == QEvent.Type.Leave:
             if self.hovered_row != -1:
@@ -6360,6 +6462,12 @@ class GenizahGUI(QMainWindow):
                 if isinstance(w, ActionsHoverWidget):
                     w.set_buttons_visible(False)
                 self.hovered_row = -1
+        if hasattr(self, "lists_items_table") and source == self.lists_items_table and event.type() == QEvent.Type.Leave:
+            if self.lists_hovered_row != -1:
+                w = self.lists_items_table.cellWidget(self.lists_hovered_row, 5)
+                if isinstance(w, ActionsHoverWidget):
+                    w.set_buttons_visible(False)
+                self.lists_hovered_row = -1
         return super().eventFilter(source, event)
 
     def _collect_sorted_results(self):
@@ -6532,6 +6640,78 @@ class GenizahGUI(QMainWindow):
         if items:
             source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"
             self.show_add_to_list_menu(items, source=source, anchor_widget=self.btn_add_to_list)
+
+    def search_add_row_to_list(self, res, anchor_widget=None):
+        """Add a single search result row to a list."""
+        if not self.lists_mgr or not isinstance(res, dict):
+            return
+        display = res.get('display', {})
+        sys_id = display.get('id')
+        if not sys_id:
+            return
+        items = [{
+            'sys_id': sys_id,
+            'img': display.get('img'),
+            'fl_id': self._normalize_fl_id(self._extract_fl_id(res)),
+        }]
+        source = f"Search: {self.last_search_query[:50]}" if self.last_search_query else "Search"
+        self.show_add_to_list_menu(items, source=source, anchor_widget=anchor_widget or self.results_table)
+
+    def _collect_selected_comp_pages(self):
+        selected = []
+        sel_main, sel_appx, sel_filt, sel_filt_appx, sel_known = self._collect_checked_comp_items_struct()
+
+        def add_item(item):
+            if not item:
+                return
+            if item.get('type') in ('manuscript', 'part'):
+                pages = item.get('pages', [])
+                if pages:
+                    selected.extend(pages)
+                else:
+                    selected.append(item)
+            else:
+                selected.append(item)
+
+        for item in sel_main:
+            add_item(item)
+        for group_items in sel_appx.values():
+            for item in group_items:
+                add_item(item)
+        for item in sel_filt:
+            add_item(item)
+        for group_items in sel_filt_appx.values():
+            for item in group_items:
+                add_item(item)
+        for item in sel_known:
+            add_item(item)
+
+        return selected
+
+    def comp_add_selected_to_list(self):
+        """Add selected composition results to a list."""
+        if not self.lists_mgr:
+            return
+
+        pages = self._collect_selected_comp_pages()
+        items = []
+        for page in pages:
+            raw_header = page.get('raw_header', '')
+            sys_id, p_num, _, _ = self._get_meta_for_header(raw_header)
+            if not sys_id:
+                continue
+            parsed = self.meta_mgr.parse_full_id_components(raw_header) if raw_header else {}
+            fl_id = self._normalize_fl_id(parsed.get('fl_id'))
+            items.append({
+                'sys_id': sys_id,
+                'img': p_num,
+                'fl_id': fl_id,
+            })
+
+        if items:
+            title = self.comp_title_input.text().strip()
+            source = f"Composition: {title[:50]}" if title else "Composition Search"
+            self.show_add_to_list_menu(items, source=source, anchor_widget=self.btn_comp_add_to_list)
 
     def open_result_in_browse(self, res, shelfmark=None, title=None, fl_id=None):
         sid = None
@@ -8831,6 +9011,8 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_export.setText(tr("Export selected results"))
         else:
             self.lbl_comp_export.setText(tr("Save Report"))
+        if hasattr(self, 'btn_comp_add_to_list'):
+            self.btn_comp_add_to_list.setEnabled(has_selection)
 
     def _collect_checked_comp_items_struct(self):
         """
@@ -9704,6 +9886,7 @@ class GenizahGUI(QMainWindow):
 
         self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
         self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
+        self._update_browse_add_to_list_button()
 
         parsed = self.meta_mgr.parse_full_id_components(full_header)
         if parsed.get('fl_id'):
