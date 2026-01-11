@@ -5834,11 +5834,26 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(tr("Copied to clipboard."))
 
     def _send_by_email(self, text, subject):
-        """Open email client with text."""
+        """
+        Robust Email: Copies text to clipboard and opens empty email draft.
+        Directly injecting body text into mailto links fails with Hebrew/Long text.
+        """
         import urllib.parse
+        
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        
+        QMessageBox.information(
+            self, 
+            tr("Email"), 
+            tr("The items have been copied to your clipboard.\n\n"
+               "Your email client will now open.\n"
+               "Please paste (Ctrl+V) the text into the message body.")
+        )
+        
         subject_encoded = urllib.parse.quote(f"GenizahSearch - {subject}")
-        body_encoded = urllib.parse.quote(text[:2000])  # Limit for mailto
-        QDesktopServices.openUrl(QUrl(f"mailto:?subject={subject_encoded}&body={body_encoded}"))
+        
+        QDesktopServices.openUrl(QUrl(f"mailto:?subject={subject_encoded}"))
 
     def lists_apply_filter(self, text):
         """Apply filter to items table."""
