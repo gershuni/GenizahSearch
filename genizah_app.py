@@ -2756,6 +2756,8 @@ class ActionsHoverWidget(QWidget):
 class ListsTreeWidget(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.main_window = parent  # שומרים את ההפניה ל-GenizahGUI
+        
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
@@ -2764,9 +2766,9 @@ class ListsTreeWidget(QTreeWidget):
 
     def dropEvent(self, event):
         super().dropEvent(event)
-        parent = self.parent()
-        if parent and hasattr(parent, 'lists_handle_tree_reorder'):
-            parent.lists_handle_tree_reorder()
+        # קריאה לפונקציה בחלון הראשי לעדכון הצבעים והסדר
+        if self.main_window and hasattr(self.main_window, 'lists_handle_tree_reorder'):
+            self.main_window.lists_handle_tree_reorder()
 
 
 def _format_add_to_list_label(in_list=False):
