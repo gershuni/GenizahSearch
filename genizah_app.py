@@ -4304,7 +4304,10 @@ class GenizahGUI(QMainWindow):
     def _get_list_display_name(self, lst):
         if CURRENT_LANG == 'en' and lst.get('name_en'):
             return lst.get('name_en')
-        return lst.get('name', lst.get('name_en', 'List'))
+        name = lst.get('name', lst.get('name_en', 'List'))
+        if lst.get('is_system') or lst.get('is_default'):
+            return tr(name)
+        return name
 
     def lists_set_preview_visible(self, visible, auto=False):
         """Show/hide preview panel with a slim collapsed bar."""
