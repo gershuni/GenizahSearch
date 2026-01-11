@@ -4312,6 +4312,16 @@ class GenizahGUI(QMainWindow):
             return tr(name)
         return name
 
+    def _get_list_display_color(self, lst, projects=None):
+        if lst.get('is_system') and lst.get('id') == 'recent':
+            return lst.get('color', '#9E9E9E')
+        project_id = lst.get('project_id')
+        if project_id and projects and project_id in projects:
+            return projects[project_id].get('color', '#FFD700')
+        if lst.get('is_default'):
+            return lst.get('color', '#FFD700')
+        return self.lists_mgr.data.get('lists', {}).get('default', {}).get('color', '#FFD700')
+
     def lists_set_preview_visible(self, visible, auto=False):
         """Show/hide preview panel with a slim collapsed bar."""
         if self.lists_preview_visible == visible and not auto:
@@ -4376,7 +4386,7 @@ class GenizahGUI(QMainWindow):
             return
 
         lists = self.lists_mgr.get_all_lists(include_recent=True)
-        projects = {proj['id']: proj['name'] for proj in self.lists_mgr.get_projects()}
+        projects = {proj['id']: proj for proj in self.lists_mgr.get_projects()}
         project_items = {}
         list_items = {}
 
@@ -4387,9 +4397,10 @@ class GenizahGUI(QMainWindow):
                 parent = project_items.get(project_id)
                 if not parent:
                     parent = QTreeWidgetItem()
-                    parent.setText(0, f"📁 {projects[project_id]}")
+                    parent.setText(0, f"📁 {projects[project_id]['name']}")
                     parent.setData(0, Qt.ItemDataRole.UserRole, None)
                     parent.setData(0, Qt.ItemDataRole.UserRole + 1, project_id)
+                    parent.setForeground(0, QColor(projects[project_id].get('color', '#FFD700')))
                     parent.setFlags(Qt.ItemFlag.ItemIsEnabled)
                     self.lists_tree.addTopLevelItem(parent)
                     project_items[project_id] = parent
@@ -4397,7 +4408,7 @@ class GenizahGUI(QMainWindow):
             item = QTreeWidgetItem()
 
             # Create colored dot
-            color = lst.get('color', '#FFD700')
+            color = self._get_list_display_color(lst, projects)
             name = self._get_list_display_name(lst)
             count = lst.get('count', 0)
 
@@ -4428,6 +4439,7 @@ class GenizahGUI(QMainWindow):
                 parent.setText(0, f"📁 {project['name']}")
                 parent.setData(0, Qt.ItemDataRole.UserRole, None)
                 parent.setData(0, Qt.ItemDataRole.UserRole + 1, project['id'])
+                parent.setForeground(0, QColor(project.get('color', '#FFD700')))
                 parent.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 self.lists_tree.addTopLevelItem(parent)
                 project_items[project['id']] = parent
@@ -4448,6 +4460,7 @@ class GenizahGUI(QMainWindow):
 
         # Get current list info
         lists = self.lists_mgr.get_all_lists()
+        projects = {proj['id']: proj for proj in self.lists_mgr.get_projects()}
         current_list = None
         for lst in lists:
             if lst['id'] == self.lists_current_list_id:
@@ -4455,7 +4468,7 @@ class GenizahGUI(QMainWindow):
                 break
 
         if current_list:
-            color = current_list.get('color', '#FFD700')
+            color = self._get_list_display_color(current_list, projects)
             name = self._get_list_display_name(current_list)
             self.lists_current_label.setText(f"<span style='color:{color}'>●</span> {name}")
 
@@ -5188,7 +5201,40 @@ class GenizahGUI(QMainWindow):
             return
 
         list_id = item.data(0, Qt.ItemDataRole.UserRole)
-        if not list_id or not self.lists_mgr:
+        project_id = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if not self.lists_mgr:
+            return
+
+        if not list_id and project_id:
+            menu = QMenu(self)
+            action_rename = menu.addAction(tr("Rename Project"))
+            action_delete_keep = menu.addAction(tr("Delete Project (Keep Lists)"))
+            action_delete_lists = menu.addAction(tr("Delete Project and Lists"))
+
+            action = menu.exec(self.lists_tree.mapToGlobal(pos))
+            if action == action_rename:
+                name, ok = QInputDialog.getText(
+                    self,
+                    tr("Rename Project"),
+                    tr("Project Name:"),
+                    text=self.lists_mgr.data.get('projects', {}).get(project_id, {}).get('name', '')
+                )
+                if ok and name.strip():
+                    self.lists_mgr.update_project(project_id, name=name.strip())
+                    self.lists_refresh_sidebar()
+            elif action == action_delete_keep:
+                self.lists_mgr.delete_project(project_id, delete_lists=False)
+                if self.lists_current_list_id not in self.lists_mgr.data.get('lists', {}):
+                    self.lists_current_list_id = 'default'
+                self.lists_refresh_all()
+            elif action == action_delete_lists:
+                self.lists_mgr.delete_project(project_id, delete_lists=True)
+                if self.lists_current_list_id not in self.lists_mgr.data.get('lists', {}):
+                    self.lists_current_list_id = 'default'
+                self.lists_refresh_all()
+            return
+
+        if not list_id:
             return
 
         lst = self.lists_mgr.data['lists'].get(list_id)
@@ -5209,10 +5255,10 @@ class GenizahGUI(QMainWindow):
                 action_delete.triggered.connect(lambda: self._delete_list(list_id))
 
             if not lst.get('is_default'):
-                category_menu = menu.addMenu(tr("Add to category..."))
+                category_menu = menu.addMenu(tr("Add to project..."))
                 category_actions = {}
 
-                action_clear = category_menu.addAction(tr("No category"))
+                action_clear = category_menu.addAction(tr("No project"))
                 category_actions[action_clear] = None
 
                 for project in self.lists_mgr.get_projects():

@@ -4537,6 +4537,9 @@ class ListsManager:
                         loaded['lists']['recent'] = defaults['lists']['recent']
                     if 'projects' not in loaded:
                         loaded['projects'] = defaults['projects']
+                    for project_data in loaded.get('projects', {}).values():
+                        if 'color' not in project_data:
+                            project_data['color'] = self._get_next_project_color(loaded.get('projects', {}))
                     for list_data in loaded.get('lists', {}).values():
                         if 'project_id' not in list_data:
                             list_data['project_id'] = None
@@ -4663,7 +4666,8 @@ class ListsManager:
         project_id = f"project_{uuid.uuid4().hex[:8]}"
         self.data.setdefault('projects', {})[project_id] = {
             'name': name,
-            'created': time.time()
+            'created': time.time(),
+            'color': self._get_next_project_color()
         }
         self.save()
         return project_id
@@ -4674,6 +4678,49 @@ class ListsManager:
         for project_id, data in self.data.get('projects', {}).items():
             projects.append({'id': project_id, **data})
         return sorted(projects, key=lambda p: p.get('name', '').lower())
+
+    def update_project(self, project_id, name=None):
+        """Update a project's properties."""
+        project = self.data.get('projects', {}).get(project_id)
+        if not project:
+            return False
+        if name is not None:
+            project['name'] = name
+        self.save()
+        return True
+
+    def delete_project(self, project_id, delete_lists=False):
+        """Delete a project and optionally its lists."""
+        if project_id not in self.data.get('projects', {}):
+            return False
+
+        if delete_lists:
+            list_ids = [
+                list_id for list_id, list_data in self.data.get('lists', {}).items()
+                if list_data.get('project_id') == project_id
+            ]
+            for list_id in list_ids:
+                self.delete_list(list_id)
+        else:
+            for list_data in self.data.get('lists', {}).values():
+                if list_data.get('project_id') == project_id:
+                    list_data['project_id'] = None
+
+        del self.data['projects'][project_id]
+        self.save()
+        return True
+
+    def _get_next_project_color(self, projects=None):
+        source = projects if projects is not None else self.data.get('projects', {})
+        used_colors = {
+            project.get('color')
+            for project in source.values()
+            if project.get('color')
+        }
+        for color in self.DEFAULT_COLORS[1:]:
+            if color not in used_colors:
+                return color
+        return self.DEFAULT_COLORS[0]
 
     def delete_list(self, list_id):
         """Delete a list and all its items."""
