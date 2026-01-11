@@ -4696,7 +4696,7 @@ class ListsManager:
 
     # --- Item Management ---
 
-    def add_item(self, sys_id, list_id='default', note='', tags=None, source=''):
+    def add_item(self, sys_id, list_id='default', note='', tags=None, source='', fl_id=None):
         """Add an item to a list. Returns True if added, False if already exists."""
         import time
 
@@ -4709,6 +4709,8 @@ class ListsManager:
             if list_id in item.get('lists', []):
                 return False  # Already in this list
             item['lists'].append(list_id)
+            if fl_id:
+                item['fl_id'] = fl_id
             item['modified'] = time.time()
         else:
             # New item
@@ -4719,7 +4721,8 @@ class ListsManager:
                 'source': source,
                 'added': time.time(),
                 'modified': time.time(),
-                'shelfmark_override': None  # For unidentified items
+                'shelfmark_override': None,  # For unidentified items
+                'fl_id': fl_id
             }
 
         # Update all_tags
@@ -4731,7 +4734,7 @@ class ListsManager:
         self.save()
         return True
 
-    def add_items_bulk(self, sys_ids, list_id='default', source=''):
+    def add_items_bulk(self, sys_ids, list_id='default', source='', fl_id_map=None):
         """Add multiple items to a list at once."""
         import time
 
@@ -4746,7 +4749,12 @@ class ListsManager:
                     item['lists'].append(list_id)
                     item['modified'] = time.time()
                     added += 1
+                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
+                if fl_id and item.get('fl_id') != fl_id:
+                    item['fl_id'] = fl_id
+                    item['modified'] = time.time()
             else:
+                fl_id = fl_id_map.get(sys_id) if fl_id_map else None
                 self.data['items'][sys_id] = {
                     'lists': [list_id],
                     'tags': [],
@@ -4754,14 +4762,15 @@ class ListsManager:
                     'source': source,
                     'added': time.time(),
                     'modified': time.time(),
-                    'shelfmark_override': None
+                    'shelfmark_override': None,
+                    'fl_id': fl_id
                 }
                 added += 1
 
         self.save()
         return added
 
-    def update_item(self, sys_id, note=None, tags=None, shelfmark_override=None):
+    def update_item(self, sys_id, note=None, tags=None, shelfmark_override=None, fl_id=None):
         """Update an item's properties."""
         import time
 
@@ -4780,6 +4789,8 @@ class ListsManager:
                     self.data['all_tags'].append(tag)
         if shelfmark_override is not None:
             item['shelfmark_override'] = shelfmark_override
+        if fl_id is not None:
+            item['fl_id'] = fl_id
 
         item['modified'] = time.time()
         self.save()
@@ -4857,7 +4868,7 @@ class ListsManager:
 
     # --- Recently Viewed ---
 
-    def add_to_recent(self, sys_id):
+    def add_to_recent(self, sys_id, fl_id=None):
         """Add an item to the recently viewed list."""
         import time
 
@@ -4885,8 +4896,11 @@ class ListsManager:
                 'source': '',
                 'added': time.time(),
                 'modified': time.time(),
-                'shelfmark_override': None
+                'shelfmark_override': None,
+                'fl_id': fl_id
             }
+        elif fl_id:
+            self.data['items'][sys_id]['fl_id'] = fl_id
 
         self.save()
 
@@ -4935,6 +4949,7 @@ class ListsManager:
         for item in items:
             item_export = {
                 'sys_id': item['sys_id'],
+                'fl_id': item.get('fl_id'),
                 'tags': item.get('tags', []),
                 'note': item.get('note', ''),
                 'source': item.get('source', ''),
@@ -4983,7 +4998,8 @@ class ListsManager:
                 list_id=list_id,
                 note=item.get('note', ''),
                 tags=item.get('tags', []),
-                source=item.get('source', '')
+                source=item.get('source', ''),
+                fl_id=item.get('fl_id')
             )
 
             # Set shelfmark override for unidentified items
