@@ -4206,14 +4206,15 @@ class GenizahGUI(QMainWindow):
 
         main_layout.addLayout(action_bar)
 
-        # --- Right Sidebar: Lists ---
+        # --- Sidebar: Lists ---
         sidebar = QWidget()
-        sidebar.setFixedWidth(200)
+        sidebar.setMinimumWidth(120)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(5, 0, 0, 0)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
 
         # Lists header
         lists_header = QHBoxLayout()
+        lists_header.setContentsMargins(5, 5, 5, 5)
         lists_header.addWidget(QLabel(f"<b>{tr('Personal Lists')}</b>"))
         lists_header.addStretch()
 
@@ -4229,7 +4230,7 @@ class GenizahGUI(QMainWindow):
         # Lists tree
         self.lists_tree = QTreeWidget()
         self.lists_tree.setHeaderHidden(True)
-        self.lists_tree.setIndentation(0)
+        self.lists_tree.setIndentation(10)
         self.lists_tree.setRootIsDecorated(False)
         self.lists_tree.itemClicked.connect(self.lists_on_list_selected)
         self.lists_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -4239,6 +4240,7 @@ class GenizahGUI(QMainWindow):
         # Sidebar action buttons
         sidebar_actions = QVBoxLayout()
         sidebar_actions.setSpacing(2)
+        sidebar_actions.setContentsMargins(5, 0, 5, 5)
 
         btn_duplicate = QPushButton(tr("Duplicate List"))
         btn_duplicate.clicked.connect(self.lists_duplicate_selected_list)
@@ -4252,40 +4254,33 @@ class GenizahGUI(QMainWindow):
 
         is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
 
-        # Add to content splitter
-        if is_rtl:
-            content_splitter.addWidget(sidebar)
-            content_splitter.addWidget(main_area)
-        else:
-            content_splitter.addWidget(main_area)
-            content_splitter.addWidget(sidebar)
-        content_splitter.setStretchFactor(content_splitter.indexOf(main_area), 1)
-        content_splitter.setStretchFactor(content_splitter.indexOf(sidebar), 0)
+        content_splitter.addWidget(sidebar)     # איבר 0: רשימות
+        content_splitter.addWidget(main_area)   # איבר 1: טבלה ראשית
+        
+        content_splitter.setStretchFactor(0, 0)
+        content_splitter.setStretchFactor(1, 1)
+        content_splitter.setSizes([250, 800])
 
         center_layout.addWidget(content_splitter)
 
-        # Add to main splitter
-        if is_rtl:
-            main_splitter.addWidget(center_widget)
-            main_splitter.addWidget(self.lists_preview_panel)
-        else:
-            main_splitter.addWidget(self.lists_preview_panel)
-            main_splitter.addWidget(center_widget)
-        main_splitter.setStretchFactor(main_splitter.indexOf(self.lists_preview_panel), 0)
-        main_splitter.setStretchFactor(main_splitter.indexOf(center_widget), 1)
-        main_splitter.setSizes([300, 700] if not is_rtl else [700, 300])
+        main_splitter.addWidget(center_widget)            # המרכז
+        main_splitter.addWidget(self.lists_preview_panel) # תצוגה מקדימה
 
-        # Store reference to splitter for toggle
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 0)
+        main_splitter.setSizes([800, 300])
+
+        
         self.lists_main_splitter = main_splitter
-        self.lists_preview_index = main_splitter.indexOf(self.lists_preview_panel)
-        self.lists_preview_last_sizes = None
+        self.lists_preview_index = 1
+        self.lists_preview_last_sizes = None  
 
         layout.addWidget(main_splitter)
 
-        # Initialize state
         self.lists_current_list_id = 'default'
         self.lists_current_item_id = None
         self.lists_preview_visible = True
+        
         self.lists_set_preview_visible(True, auto=True)
 
         return panel
