@@ -4501,16 +4501,21 @@ class ListsManager:
                     'color': '#FFD700',
                     'created': time.time(),
                     'is_default': True,
-                    'is_system': False
+                    'is_system': False,
+                    'project_id': None
                 },
                 'recent': {
                     'name': 'Recently Viewed',
                     'name_en': 'Recently Viewed',
                     'color': '#9E9E9E',
                     'is_system': True,
-                    'max_items': self.MAX_RECENT_ITEMS
+                    'max_items': self.MAX_RECENT_ITEMS,
+                    'project_id': None
                 }
             },
+            'projects': {},
+            'lists_order': [],
+            'projects_order': [],
             'items': {},  # sys_id -> item data
             'recent_items': [],  # ordered list of sys_ids (most recent first)
             'all_tags': []  # for autocomplete
@@ -4532,6 +4537,22 @@ class ListsManager:
                         loaded['lists']['default'] = defaults['lists']['default']
                     if 'recent' not in loaded['lists']:
                         loaded['lists']['recent'] = defaults['lists']['recent']
+                    if 'projects' not in loaded:
+                        loaded['projects'] = defaults['projects']
+                    if 'lists_order' not in loaded:
+                        loaded['lists_order'] = defaults['lists_order']
+                    if 'projects_order' not in loaded:
+                        loaded['projects_order'] = defaults['projects_order']
+                    if not loaded.get('lists_order'):
+                        loaded['lists_order'] = list(loaded.get('lists', {}).keys())
+                    if not loaded.get('projects_order'):
+                        loaded['projects_order'] = list(loaded.get('projects', {}).keys())
+                    for project_data in loaded.get('projects', {}).values():
+                        if 'color' not in project_data:
+                            project_data['color'] = self._get_next_project_color(loaded.get('projects', {}))
+                    for list_data in loaded.get('lists', {}).values():
+                        if 'project_id' not in list_data:
+                            list_data['project_id'] = None
                     # Backfill sys_id on stored items (older format used key only)
                     for item_id, item_data in loaded.get('items', {}).items():
                         if isinstance(item_data, dict) and 'sys_id' not in item_data:
@@ -4557,25 +4578,23 @@ class ListsManager:
     def get_all_lists(self, include_recent=True):
         """Get all lists sorted alphabetically (system lists have special handling)."""
         lists = []
-        for list_id, list_data in self.data['lists'].items():
+        list_ids = []
+        ordered = [list_id for list_id in self.data.get('lists_order', []) if list_id in self.data['lists']]
+        fallback = [list_id for list_id in self.data['lists'] if list_id not in ordered]
+        list_ids.extend(ordered)
+        list_ids.extend(sorted(fallback, key=lambda list_id: self.data['lists'][list_id].get('name', '')))
+
+        for list_id in list_ids:
             if list_id == 'recent' and not include_recent:
                 continue
+            list_data = self.data['lists'][list_id]
             lists.append({
                 'id': list_id,
                 **list_data,
                 'count': self._get_list_item_count(list_id)
             })
 
-        # Sort: default first, then recent, then alphabetically by name
-        def sort_key(lst):
-            if lst['id'] == 'default':
-                return (0, '')
-            elif lst['id'] == 'recent':
-                return (1, '')
-            else:
-                return (2, lst.get('name', ''))
-
-        return sorted(lists, key=sort_key)
+        return lists
 
     def _get_list_item_count(self, list_id):
         """Get the number of items in a list."""
@@ -4608,8 +4627,10 @@ class ListsManager:
         self.data['lists'][list_id] = {
             'name': name,
             'color': color,
-            'created': time.time()
+            'created': time.time(),
+            'project_id': None
         }
+        self.data.setdefault('lists_order', []).append(list_id)
         self.save()
         return list_id
 
@@ -4629,6 +4650,120 @@ class ListsManager:
 
         self.save()
         return True
+
+    def update_list_project(self, list_id, project_id=None):
+        """Assign a list to a project (or clear project)."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if lst.get('is_system') or lst.get('is_default'):
+            return False
+
+        if project_id and project_id not in self.data.get('projects', {}):
+            return False
+
+        lst['project_id'] = project_id
+        self.save()
+        return True
+
+    def create_project(self, name):
+        """Create a new project. Returns the project ID."""
+        import time
+        import uuid
+
+        project_id = f"project_{uuid.uuid4().hex[:8]}"
+        self.data.setdefault('projects', {})[project_id] = {
+            'name': name,
+            'created': time.time(),
+            'color': self._get_next_project_color()
+        }
+        self.data.setdefault('projects_order', []).append(project_id)
+        self.save()
+        return project_id
+
+    def get_projects(self):
+        """Get projects sorted by name."""
+        projects = []
+        project_ids = []
+        ordered = [project_id for project_id in self.data.get('projects_order', []) if project_id in self.data.get('projects', {})]
+        fallback = [project_id for project_id in self.data.get('projects', {}) if project_id not in ordered]
+        project_ids.extend(ordered)
+        project_ids.extend(sorted(fallback, key=lambda project_id: self.data['projects'][project_id].get('name', '').lower()))
+
+        for project_id in project_ids:
+            data = self.data['projects'][project_id]
+            projects.append({'id': project_id, **data})
+        return projects
+
+    def update_project(self, project_id, name=None):
+        """Update a project's properties."""
+        project = self.data.get('projects', {}).get(project_id)
+        if not project:
+            return False
+        if name is not None:
+            project['name'] = name
+        self.save()
+        return True
+
+    def delete_project(self, project_id, delete_lists=False):
+        """Delete a project and optionally its lists."""
+        if project_id not in self.data.get('projects', {}):
+            return False
+
+        if delete_lists:
+            list_ids = [
+                list_id for list_id, list_data in self.data.get('lists', {}).items()
+                if list_data.get('project_id') == project_id
+            ]
+            for list_id in list_ids:
+                self.delete_list(list_id)
+        else:
+            for list_data in self.data.get('lists', {}).values():
+                if list_data.get('project_id') == project_id:
+                    list_data['project_id'] = None
+
+        del self.data['projects'][project_id]
+        if project_id in self.data.get('projects_order', []):
+            self.data['projects_order'].remove(project_id)
+        self.save()
+        return True
+
+    def _get_next_project_color(self, projects=None):
+        source = projects if projects is not None else self.data.get('projects', {})
+        used_colors = {
+            project.get('color')
+            for project in source.values()
+            if project.get('color')
+        }
+        for color in self.DEFAULT_COLORS[1:]:
+            if color not in used_colors:
+                return color
+        return self.DEFAULT_COLORS[0]
+
+    def apply_list_layout(self, list_project_map, list_order, project_order):
+        """Apply list ordering and project assignments in one save."""
+        for list_id, project_id in list_project_map.items():
+            lst = self.data['lists'].get(list_id)
+            if not lst or lst.get('is_system') or lst.get('is_default'):
+                continue
+            if project_id and project_id not in self.data.get('projects', {}):
+                continue
+            lst['project_id'] = project_id
+            if project_id:
+                project = self.data.get('projects', {}).get(project_id, {})
+                if project.get('color'):
+                    lst['color'] = project['color']
+            else:
+                default_color = self.data.get('lists', {}).get('default', {}).get('color')
+                if default_color:
+                    lst['color'] = default_color
+
+        self.data['lists_order'] = [list_id for list_id in list_order if list_id in self.data['lists']]
+        self.data['projects_order'] = [
+            project_id for project_id in project_order if project_id in self.data.get('projects', {})
+        ]
+        self.save()
 
     def delete_list(self, list_id):
         """Delete a list and all its items."""
@@ -4653,6 +4788,8 @@ class ListsManager:
             del self.data['items'][sys_id]
 
         del self.data['lists'][list_id]
+        if list_id in self.data.get('lists_order', []):
+            self.data['lists_order'].remove(list_id)
         self.save()
         return True
 
@@ -4666,6 +4803,8 @@ class ListsManager:
             new_name = f"{original.get('name', tr('List'))} ({tr('Copy')})"
 
         new_list_id = self.create_list(new_name, original.get('color'))
+        if original.get('project_id'):
+            self.update_list_project(new_list_id, original.get('project_id'))
 
         # Copy items
         for sys_id, item in self.data['items'].items():
