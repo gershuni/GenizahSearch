@@ -5312,6 +5312,7 @@ class GenizahGUI(QMainWindow):
 
     def _export_as_json(self, list_id, list_name, items):
         """Export list as JSON."""
+        from datetime import datetime
         export_data = {
             'list_name': list_name,
             'exported': datetime.now().isoformat(),
