@@ -3759,11 +3759,36 @@ class GenizahGUI(QMainWindow):
             self.browse_list_items.addItem(list_item)
 
     def browse_on_list_item_clicked(self, item):
-        """Open a list item in the browse tab."""
+        """Open a list item in the browse tab using FL/Image ID lookup."""
         item_id = item.data(Qt.ItemDataRole.UserRole)
-        if not item_id:
+        if not item_id or not self.lists_mgr:
             return
-        self.lists_browse_by_id(item_id)
+
+        entry = self.lists_mgr.get_item(item_id)
+        if not entry:
+            return
+
+        fl_id = entry.get('fl_id')
+        img_id = entry.get('img')
+        sys_id = entry.get('sys_id')
+
+        self.browse_sys_input.clear()
+        self.browse_shelf_input.clear()
+        self.browse_fl_input.clear()
+
+        target_fl = fl_id if fl_id else img_id
+
+        if target_fl:
+            clean_fl = str(target_fl).replace('FL', '').strip()
+            
+            self.browse_fl_input.setText(clean_fl)
+            self._set_last_browse_field("fl") 
+            self.browse_load()
+            
+        elif sys_id:
+            self.browse_sys_input.setText(str(sys_id))
+            self._set_last_browse_field("sys")
+            self.browse_load()
 
     def on_browse_enriched_loaded(self, sid, meta):
         if not meta: return
