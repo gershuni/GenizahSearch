@@ -23,10 +23,10 @@ from openpyxl.cell.text import InlineFont
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
-                             QTableWidgetItem, QHeaderView, QComboBox, QCheckBox,
+                             QTableWidgetItem, QListWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
                              QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QPlainTextEdit, QStyle, QFormLayout,
+                             QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
@@ -3460,6 +3460,10 @@ class GenizahGUI(QMainWindow):
 
         # Row 1: Search Inputs
         row1 = QHBoxLayout()
+        self.btn_browse_by_list = QPushButton(tr("Browse by List"))
+        self.btn_browse_by_list.clicked.connect(self.browse_toggle_lists_panel)
+        row1.addWidget(self.btn_browse_by_list)
+
         self.btn_prev_ms = QPushButton(tr("◀"))
         self.btn_prev_ms.setToolTip(tr("Previous Manuscript (File Order)"))
         self.btn_prev_ms.setFixedWidth(25)
@@ -3541,8 +3545,39 @@ class GenizahGUI(QMainWindow):
 
         layout.addWidget(top_container)
 
-        # --- Main Splitter (Left: Text, Right: Images) ---
+        # --- Main Splitter (Left: List Panel, Center: Text, Right: Images) ---
         self.browse_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Lists Side Panel
+        self.browse_lists_panel = QFrame()
+        self.browse_lists_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        browse_lists_layout = QVBoxLayout(self.browse_lists_panel)
+        browse_lists_layout.setContentsMargins(8, 8, 8, 8)
+
+        browse_lists_header = QHBoxLayout()
+        browse_lists_title = QLabel(tr("Browse by List"))
+        browse_lists_title.setStyleSheet("font-weight: bold;")
+        browse_lists_header.addWidget(browse_lists_title)
+        browse_lists_header.addStretch()
+        self.btn_close_browse_lists = QPushButton("✕")
+        self.btn_close_browse_lists.setFixedWidth(28)
+        self.btn_close_browse_lists.setToolTip(tr("Close"))
+        self.btn_close_browse_lists.clicked.connect(lambda: self.browse_set_lists_panel_visible(False))
+        browse_lists_header.addWidget(self.btn_close_browse_lists)
+        browse_lists_layout.addLayout(browse_lists_header)
+
+        self.browse_lists_tree = QTreeWidget()
+        self.browse_lists_tree.setHeaderHidden(True)
+        self.browse_lists_tree.itemClicked.connect(self.browse_on_list_selected)
+        browse_lists_layout.addWidget(self.browse_lists_tree, 2)
+
+        self.browse_list_items_label = QLabel(tr("Items"))
+        self.browse_list_items_label.setStyleSheet("font-weight: bold;")
+        browse_lists_layout.addWidget(self.browse_list_items_label)
+
+        self.browse_list_items = QListWidget()
+        self.browse_list_items.itemClicked.connect(self.browse_on_list_item_clicked)
+        browse_lists_layout.addWidget(self.browse_list_items, 3)
 
         # Left: Text Browser
         text_widget = QWidget(); text_layout = QVBoxLayout(text_widget); text_layout.setContentsMargins(0,0,0,0)
@@ -3596,10 +3631,13 @@ class GenizahGUI(QMainWindow):
         # Right: Image Viewer
         self.browse_viewer = ManuscriptViewerWidget()
 
+        self.browse_splitter.addWidget(self.browse_lists_panel)
         self.browse_splitter.addWidget(text_widget)
         self.browse_splitter.addWidget(self.browse_viewer)
-        self.browse_splitter.setStretchFactor(0, 1)
+        self.browse_splitter.setStretchFactor(0, 0)
         self.browse_splitter.setStretchFactor(1, 1)
+        self.browse_splitter.setStretchFactor(2, 1)
+        self.browse_lists_panel.setVisible(False)
 
         layout.addWidget(self.browse_splitter, 1)
 
@@ -3607,8 +3645,125 @@ class GenizahGUI(QMainWindow):
         self.browse_thumb = QLabel()
         self.btn_b_ext = QPushButton()
         self.browse_side_panel = QTextBrowser()
+        self.browse_lists_panel_sizes = None
+        self.browse_current_list_id = None
 
         return panel
+
+    def browse_toggle_lists_panel(self):
+        """Toggle the browse lists side panel."""
+        self.browse_set_lists_panel_visible(not self.browse_lists_panel.isVisible())
+
+    def browse_set_lists_panel_visible(self, visible):
+        """Show or hide the browse lists side panel."""
+        if visible and not self.lists_mgr:
+            QMessageBox.information(self, tr("Browse by List"), tr("Lists are not available."))
+            return
+
+        if self.browse_lists_panel.isVisible() == visible:
+            return
+
+        if visible:
+            self.browse_lists_panel.setVisible(True)
+            self.browse_refresh_lists_panel()
+            sizes = self.browse_lists_panel_sizes
+            if not sizes:
+                total = sum(self.browse_splitter.sizes()) or 1000
+                sizes = [max(250, int(total * 0.25)), max(350, int(total * 0.45)), max(350, int(total * 0.30))]
+            self.browse_splitter.setSizes(sizes)
+        else:
+            self.browse_lists_panel_sizes = self.browse_splitter.sizes()
+            self.browse_lists_panel.setVisible(False)
+            sizes = self.browse_splitter.sizes()
+            if sizes:
+                sizes[0] = 0
+                self.browse_splitter.setSizes(sizes)
+
+    def browse_refresh_lists_panel(self):
+        """Refresh the lists tree and items list in the browse panel."""
+        self.browse_lists_tree.clear()
+        self.browse_list_items.clear()
+        self.browse_current_list_id = None
+
+        if not self.lists_mgr:
+            return
+
+        lists = self.lists_mgr.get_all_lists(include_recent=True)
+        projects = {proj['id']: proj for proj in self.lists_mgr.get_projects()}
+        project_lists = {}
+        top_level_lists = []
+
+        for lst in lists:
+            project_id = lst.get('project_id')
+            if project_id and project_id in projects:
+                project_lists.setdefault(project_id, []).append(lst)
+            else:
+                top_level_lists.append(lst)
+
+        for lst in top_level_lists:
+            item = QTreeWidgetItem([self._get_list_display_name(lst)])
+            item.setData(0, Qt.ItemDataRole.UserRole, lst.get('id'))
+            self.browse_lists_tree.addTopLevelItem(item)
+
+        for project in self.lists_mgr.get_projects():
+            proj_item = QTreeWidgetItem([project.get('name', tr("Project"))])
+            proj_item.setFlags(proj_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self.browse_lists_tree.addTopLevelItem(proj_item)
+            for lst in project_lists.get(project.get('id'), []):
+                child = QTreeWidgetItem([self._get_list_display_name(lst)])
+                child.setData(0, Qt.ItemDataRole.UserRole, lst.get('id'))
+                proj_item.addChild(child)
+
+        self.browse_lists_tree.expandAll()
+
+    def browse_on_list_selected(self, item, column):
+        """Handle selection of a list in the browse lists panel."""
+        list_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not list_id or not self.lists_mgr:
+            return
+
+        self.browse_current_list_id = list_id
+        self.browse_list_items.clear()
+
+        items = self.lists_mgr.get_items_sorted(list_id, sort_by='shelfmark')
+        if not items:
+            empty_item = QListWidgetItem(tr("No items in this list."))
+            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self.browse_list_items.addItem(empty_item)
+            return
+
+        for entry in items:
+            sys_id = entry.get('sys_id')
+            item_id = entry.get('item_id')
+            if not sys_id or not item_id:
+                continue
+
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+            shelfmark = entry.get('shelfmark_override') or shelfmark or sys_id
+            img = entry.get('img')
+            fl_id = entry.get('fl_id')
+
+            label_parts = [shelfmark]
+            if title:
+                label_parts.append(title)
+            extra_bits = []
+            if img not in (None, ""):
+                extra_bits.append(tr("Image {}").format(self._format_image_display(img)))
+            if fl_id not in (None, ""):
+                extra_bits.append(tr("FL {}").format(fl_id))
+            if extra_bits:
+                label_parts.append(f"({', '.join(extra_bits)})")
+
+            list_item = QListWidgetItem(" — ".join(label_parts))
+            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
+            self.browse_list_items.addItem(list_item)
+
+    def browse_on_list_item_clicked(self, item):
+        """Open a list item in the browse tab."""
+        item_id = item.data(Qt.ItemDataRole.UserRole)
+        if not item_id:
+            return
+        self.lists_browse_by_id(item_id)
 
     def on_browse_enriched_loaded(self, sid, meta):
         if not meta: return
