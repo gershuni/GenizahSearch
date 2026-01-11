@@ -4833,17 +4833,10 @@ class GenizahGUI(QMainWindow):
             return
 
         try:
-            # Try to get image URL
-            full_header = page_data.get('full_header', '')
-            if not full_header:
-                return
-
-            parsed = self.meta_mgr.parse_full_id_components(full_header)
-            fl_id = parsed.get('fl_id')
-
             thumb_url = None
-            if fl_id:
-                thumb_url = self.meta_mgr._resolve_thumbnail([fl_id])
+            meta = self.meta_mgr.nli_cache.get(sys_id)
+            if meta:
+                thumb_url = meta.get('thumb_url')
 
             if not thumb_url:
                 thumb_url = self.meta_mgr.get_thumbnail(sys_id)
