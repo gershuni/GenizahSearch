@@ -113,6 +113,12 @@ TRANSLATIONS = {
     "Image": "תמונה",
     "Toggle Image Pane": "הצג/הסתר תמונה",
     "Select Image": "בחר תמונה",
+    "Show entries:": "הצג פריטים:",
+    "In selected lists": "ברשימות הנבחרות",
+    "Not in selected lists": "שאינם ברשימות הנבחרות",
+    "All lists": "כל הרשימות",
+    "Filter configuration": "סנן",
+
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
