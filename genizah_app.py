@@ -8434,7 +8434,7 @@ class GenizahGUI(QMainWindow):
                 lists_to_check = target_lists
 
             for lst_id in lists_to_check:
-                items = self.lists_mgr.get_list_items(lst_id)
+                items = self.lists_mgr.get_items_in_list(lst_id)
                 for item in items:
                     sid = item.get('sys_id')
                     if sid: target_sys_ids.add(str(sid))
