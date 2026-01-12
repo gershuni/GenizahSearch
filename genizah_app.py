@@ -58,6 +58,7 @@ if _CORE_IMPORT_ERROR:
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
+from list_filter_dialog import ListFilterDialog
 
 logger = get_logger(__name__)
 
@@ -716,7 +717,7 @@ class CheckBoxHeader(QHeaderView):
     """Custom HeaderView that draws a checkbox in the first section."""
     toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None, non_sortable_cols=None, filter_columns=None, filter_callback=None):
+    def __init__(self, parent=None, non_sortable_cols=None, filter_columns=None, filter_callback=None, star_columns=None, star_callback=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.isChecked = False
         self.setSectionsClickable(True)
@@ -724,6 +725,9 @@ class CheckBoxHeader(QHeaderView):
         self.filter_columns = set(filter_columns or [])
         self.filter_callback = filter_callback
         self.filter_states = {}
+        self.star_columns = set(star_columns or [])
+        self.star_callback = star_callback
+        self.star_states = {}
 
     def get_checkbox_rect(self, rect):
         box_size = 20
@@ -743,8 +747,15 @@ class CheckBoxHeader(QHeaderView):
         painter.restore()
 
         if logicalIndex in self.filter_columns:
-            icon_rect = self._filter_icon_rect(rect)
+            # Filter is usually right-most (index 0 from edge)
+            icon_rect = self._get_icon_rect(rect, 0)
             self._draw_filter_icon(painter, icon_rect, self.filter_states.get(logicalIndex, False))
+
+        if logicalIndex in self.star_columns:
+            # Star is next to filter (index 1 if filter exists, else 0)
+            offset = 1 if logicalIndex in self.filter_columns else 0
+            icon_rect = self._get_icon_rect(rect, offset)
+            self._draw_star_icon(painter, icon_rect, self.star_states.get(logicalIndex, False))
 
         if logicalIndex == 0:
             option = QStyleOptionButton()
@@ -759,13 +770,23 @@ class CheckBoxHeader(QHeaderView):
 
     def mousePressEvent(self, event):
         idx = self.logicalIndexAt(event.pos())
-        if idx in self.filter_columns and self.filter_callback:
+
+        # Handle Filter/Star clicks
+        if (idx in self.filter_columns and self.filter_callback) or (idx in self.star_columns and self.star_callback):
             sec_pos = self.sectionViewportPosition(idx)
             sec_width = self.sectionSize(idx)
             sec_rect = QRect(sec_pos, 0, sec_width, self.height())
-            if self._filter_icon_rect(sec_rect).contains(event.pos()):
-                self.filter_callback(idx)
-                return
+
+            if idx in self.filter_columns and self.filter_callback:
+                if self._get_icon_rect(sec_rect, 0).contains(event.pos()):
+                    self.filter_callback(idx)
+                    return
+
+            if idx in self.star_columns and self.star_callback:
+                offset = 1 if idx in self.filter_columns else 0
+                if self._get_icon_rect(sec_rect, offset).contains(event.pos()):
+                    self.star_callback(idx)
+                    return
 
         if idx == 0:
             sec_pos = self.sectionViewportPosition(0)
@@ -794,15 +815,19 @@ class CheckBoxHeader(QHeaderView):
             self.isChecked = checked
             self.viewport().update()
 
-    def _filter_icon_rect(self, rect):
+    def _get_icon_rect(self, rect, offset_index=0):
         icon_size = 12
         padding = 6
+        spacing = 4
+
+        total_offset = padding + (offset_index * (icon_size + spacing))
+
         y = rect.top() + (rect.height() - icon_size) // 2
 
         if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
-            x = rect.left() + padding
+            x = rect.left() + total_offset
         else:
-            x = rect.right() - icon_size - padding
+            x = rect.right() - icon_size - total_offset
 
         return QRect(x, y, icon_size, icon_size)
 
@@ -835,12 +860,89 @@ class CheckBoxHeader(QHeaderView):
         painter.drawPath(path)
         painter.restore()
 
+    def _draw_star_icon(self, painter, rect, active):
+        painter.save()
+        # Star color: Gold if active, Gray if inactive
+        if active:
+            color = QColor("#f1c40f") # Gold
+            brush = QBrush(color)
+        else:
+            color = self.palette().color(QPalette.ColorRole.Mid)
+            brush = Qt.BrushStyle.NoBrush
+
+        pen = QPen(color)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(brush)
+
+        # Draw Star using a simple path
+        center = rect.center()
+        radius = rect.width() / 2.0
+
+        path = QPainterPath()
+        import math
+        points = []
+        for i in range(5):
+            # Outer point
+            angle_deg = -90 + i * 72 # Start from top (rotated -90)
+            angle_rad = math.radians(angle_deg)
+            ox = center.x() + radius * math.cos(angle_rad)
+            oy = center.y() + radius * math.sin(angle_rad)
+            points.append((ox, oy))
+
+            # Inner point
+            angle_deg = -90 + i * 72 + 36
+            angle_rad = math.radians(angle_deg)
+            ix = center.x() + (radius * 0.4) * math.cos(angle_rad)
+            iy = center.y() + (radius * 0.4) * math.sin(angle_rad)
+            points.append((ix, iy))
+
+        path.moveTo(points[0][0], points[0][1])
+        for x, y in points[1:]:
+            path.lineTo(x, y)
+        path.closeSubpath()
+
+        painter.drawPath(path)
+        painter.restore()
+
     def set_filter_active(self, column, active):
         if active:
             self.filter_states[column] = True
         else:
             self.filter_states.pop(column, None)
         self.viewport().update()
+
+    def set_star_active(self, column, active):
+        if active:
+            self.star_states[column] = True
+        else:
+            self.star_states.pop(column, None)
+        self.viewport().update()
+
+    def event(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            pos = event.pos()
+            idx = self.logicalIndexAt(pos)
+
+            if idx in self.star_columns or idx in self.filter_columns:
+                sec_pos = self.sectionViewportPosition(idx)
+                sec_width = self.sectionSize(idx)
+                sec_rect = QRect(sec_pos, 0, sec_width, self.height())
+
+                # Check Star
+                if idx in self.star_columns:
+                    offset = 1 if idx in self.filter_columns else 0
+                    if self._get_icon_rect(sec_rect, offset).contains(pos):
+                        QToolTip.showText(event.globalPos(), tr("Show entries in selected lists") if self.star_states.get(idx) else tr("Filter by List (Click to enable)"))
+                        return True
+
+                # Check Filter
+                if idx in self.filter_columns:
+                    if self._get_icon_rect(sec_rect, 0).contains(pos):
+                        QToolTip.showText(event.globalPos(), tr("Filter configuration"))
+                        return True
+
+        return super().event(event)
 
 class ZoomableScrollArea(QGraphicsView):
     """A GraphicsView that supports hand-panning and wheel-zooming."""
@@ -2826,6 +2928,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_shelfmarks = set()
         self.filter_text_content = ""
         self.results_filters = {}
+        self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self.comp_filters = {}
         self.group_thread = None
         self.is_searching = False
@@ -3152,15 +3255,17 @@ class GenizahGUI(QMainWindow):
         self.COL_SRC = 7
 
         self.results_table = QTableWidget(); self.results_table.setColumnCount(8)
-        self.results_table.setHorizontalHeaderLabels(["", tr("Actions"), tr("System ID"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (4)
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
             non_sortable_cols=[0, 1, 4],
-            filter_columns=[self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET],
+            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET],
             filter_callback=self._open_results_filter_dialog,
+            star_columns=[self.COL_ACTIONS],
+            star_callback=self.toggle_list_filter
         )
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
@@ -6552,6 +6657,10 @@ class GenizahGUI(QMainWindow):
         self.load_next_batch()
 
     def _open_results_filter_dialog(self, column):
+        if column == 1:
+            self.open_list_filter_dialog()
+            return
+
         header_item = self.results_table.horizontalHeaderItem(column)
         column_label = header_item.text() if header_item else str(column)
         current = self.results_filters.get(column, {})
@@ -6587,18 +6696,46 @@ class GenizahGUI(QMainWindow):
         return item.text() if item else ""
 
     def _apply_results_table_filters(self):
-        if not self.results_filters:
+        # 1. Gather rules
+        list_active = self.list_filter_state.get('active', False)
+        list_mode = self.list_filter_state.get('mode', 'in')
+        target_lists = self.list_filter_state.get('lists', set())
+
+        # Use cached IDs if available, or empty set (will be populated on first activation via update_cache)
+        target_sys_ids = self.list_filter_state.get('cached_ids', set())
+
+        if not self.results_filters and not list_active:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
 
         for row in range(self.results_table.rowCount()):
             visible = True
+
+            # A. Check Column Filters
             for column, rule in self.results_filters.items():
                 cell_text = self._results_filter_text_for_row(row, column)
                 if not self._text_matches_filter(cell_text, rule):
                     visible = False
                     break
+
+            if not visible:
+                self.results_table.setRowHidden(row, True)
+                continue
+
+            # B. Check List Filter
+            if list_active:
+                # Get SysID from column 2
+                item = self.results_table.item(row, 2)
+                sys_id = item.text().strip() if item else ""
+
+                in_list = sys_id in target_sys_ids
+
+                if list_mode == 'in':
+                    if not in_list: visible = False
+                elif list_mode == 'not_in':
+                    if in_list: visible = False
+
             self.results_table.setRowHidden(row, not visible)
 
     def _open_comp_filter_dialog(self, column):
@@ -8250,10 +8387,96 @@ class GenizahGUI(QMainWindow):
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
 
     # Composition & Browse
-    def open_filter_dialog(self):
+    def open_filter_dialog(self, col_idx=None):
+        # If called from CheckBoxHeader, col_idx is passed
+        # If called from Composition (filter text), no arg is passed (or handled differently)
+
+        # Check if this is the Search Tab's results table callback
+        if isinstance(col_idx, int):
+            if col_idx == 1:
+                self.open_list_filter_dialog()
+                return
+
+            # Standard text filter for other columns
+            current_filter = self.results_filters.get(col_idx, {})
+            dlg = ColumnFilterDialog(self, col_index=col_idx, current_filter=current_filter)
+            if dlg.exec():
+                new_filter = dlg.get_filter_data()
+                if new_filter['active']:
+                    self.results_filters[col_idx] = new_filter
+                else:
+                    self.results_filters.pop(col_idx, None)
+
+                # Update header visual state
+                header = self.results_table.horizontalHeader()
+                if hasattr(header, 'set_filter_active'):
+                    header.set_filter_active(col_idx, new_filter['active'])
+
+                self._apply_results_table_filters()
+            return
+
+        # Legacy/Composition text filter
         dlg = FilterTextDialog(self, current_text=self.filter_text_content)
         if dlg.exec():
             self.filter_text_content = dlg.get_text()
+
+    def _update_list_filter_cache(self):
+        """Cache the set of system IDs for the currently selected lists to optimize filtering."""
+        target_lists = self.list_filter_state.get('lists', 'all')
+
+        target_sys_ids = set()
+        if self.lists_mgr:
+            lists_to_check = []
+            if target_lists == "all":
+                all_lists = self.lists_mgr.get_all_lists(include_recent=False)
+                lists_to_check = [l['id'] for l in all_lists]
+            else:
+                lists_to_check = target_lists
+
+            for lst_id in lists_to_check:
+                items = self.lists_mgr.get_items_in_list(lst_id)
+                for item in items:
+                    sid = item.get('sys_id')
+                    if sid: target_sys_ids.add(str(sid))
+
+        self.list_filter_state['cached_ids'] = target_sys_ids
+
+    def open_list_filter_dialog(self):
+        dlg = ListFilterDialog(self, self.lists_mgr, current_state=self.list_filter_state)
+        if dlg.exec():
+            mode, selected_lists = dlg.get_selection()
+            self.list_filter_state['mode'] = mode
+            self.list_filter_state['lists'] = selected_lists
+            self.list_filter_state['active'] = True # Auto-activate on OK
+
+            self._update_list_filter_cache()
+
+            # Update header
+            header = self.results_table.horizontalHeader()
+            if hasattr(header, 'set_filter_active'):
+                 header.set_filter_active(1, True)
+                 header.set_star_active(1, True)
+
+            self._apply_results_table_filters()
+
+    def toggle_list_filter(self, col_idx=1):
+        if col_idx != 1: return
+
+        # Toggle active state
+        self.list_filter_state['active'] = not self.list_filter_state['active']
+        is_active = self.list_filter_state['active']
+
+        # Ensure cache is populated if activating for the first time
+        if is_active and 'cached_ids' not in self.list_filter_state:
+            self._update_list_filter_cache()
+
+        # Update header
+        header = self.results_table.horizontalHeader()
+        if hasattr(header, 'set_filter_active'):
+             header.set_star_active(1, is_active)
+             header.set_filter_active(1, is_active)
+
+        self._apply_results_table_filters()
 
     def load_comp_file(self):
         path, _ = QFileDialog.getOpenFileName(self, tr("Load"), "", "Text (*.txt)")
