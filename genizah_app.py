@@ -6567,8 +6567,10 @@ class GenizahGUI(QMainWindow):
 
             # Actions
             # Align star to the edge (Right in English, Left in Hebrew)
-            align = Qt.AlignmentFlag.AlignLeft if CURRENT_LANG == 'he' else Qt.AlignmentFlag.AlignRight
+            is_hebrew = (CURRENT_LANG == 'he')
+            align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
             actions_widget = ActionsHoverWidget(alignment=align)
+            actions_widget.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_hebrew else Qt.LayoutDirection.LeftToRight)
 
             list_btn = self._create_action_button("☆", tr("Add to List"), parent=self.results_table)
             list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
