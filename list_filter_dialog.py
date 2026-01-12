@@ -81,7 +81,7 @@ class ListFilterDialog(QDialog):
         # Root Item: "All Lists"
         self.root_all = QTreeWidgetItem(self.tree)
         self.root_all.setText(0, tr("All Lists"))
-        self.root_all.setFlags(self.root_all.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsTristate)
+        self.root_all.setFlags(self.root_all.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
         self.root_all.setCheckState(0, Qt.CheckState.Checked) # Default
         self.root_all.setData(0, Qt.ItemDataRole.UserRole, "all")
 
@@ -104,7 +104,7 @@ class ListFilterDialog(QDialog):
         for proj in projects:
             proj_node = QTreeWidgetItem(self.root_all)
             proj_node.setText(0, proj.get('name', 'Project'))
-            proj_node.setFlags(proj_node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsTristate)
+            proj_node.setFlags(proj_node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
             proj_node.setCheckState(0, Qt.CheckState.Checked)
             proj_node.setData(0, Qt.ItemDataRole.UserRole, f"proj:{proj['id']}")
 
@@ -157,7 +157,7 @@ class ListFilterDialog(QDialog):
             if state == Qt.CheckState.PartiallyChecked:
                 return
 
-            if item.flags() & Qt.ItemFlag.ItemIsTristate:
+            if item.flags() & Qt.ItemFlag.ItemIsAutoTristate:
                 # If it's a parent/project node, push state to children
                 # Block signals to prevent recursive loops from child updates bubbling back up
                 self.tree.blockSignals(True)
