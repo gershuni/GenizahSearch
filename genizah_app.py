@@ -6568,9 +6568,11 @@ class GenizahGUI(QMainWindow):
             # Actions
             # Align star to the edge (Right in English, Left in Hebrew)
             is_hebrew = (CURRENT_LANG == 'he')
+
+            # Force LTR layout to control geometric expansion manually
             align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
             actions_widget = ActionsHoverWidget(alignment=align)
-            actions_widget.setLayoutDirection(Qt.LayoutDirection.RightToLeft if is_hebrew else Qt.LayoutDirection.LeftToRight)
+            actions_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
             list_btn = self._create_action_button("☆", tr("Add to List"), parent=self.results_table)
             list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
@@ -6579,10 +6581,16 @@ class GenizahGUI(QMainWindow):
             browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
             view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
 
-            # Add buttons (Star last ensures it stays at the edge in both RTL/LTR expansion)
-            actions_widget.add_btn(browse_btn)
-            actions_widget.add_btn(view_btn)
-            actions_widget.add_btn(list_btn, always_visible=True)
+            if is_hebrew:
+                # Hebrew: Star on Left (added first), then others expand to Right
+                actions_widget.add_btn(list_btn, always_visible=True)
+                actions_widget.add_btn(view_btn)
+                actions_widget.add_btn(browse_btn)
+            else:
+                # English: Star on Right (added last), others expand to Left
+                actions_widget.add_btn(browse_btn)
+                actions_widget.add_btn(view_btn)
+                actions_widget.add_btn(list_btn, always_visible=True)
 
             self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
 
