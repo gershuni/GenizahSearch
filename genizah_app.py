@@ -2829,12 +2829,12 @@ class ResultDialog(QDialog):
         if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
 
 class ActionsHoverWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, alignment=Qt.AlignmentFlag.AlignCenter):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setAlignment(alignment)
         self.buttons = []
         self.always_visible_buttons = set()
 
@@ -6566,15 +6566,22 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(row_idx, self.COL_CHECKBOX, item_chk)
 
             # Actions
-            actions_widget = ActionsHoverWidget()
+            # Align star to the edge (Right in English, Left in Hebrew)
+            align = Qt.AlignmentFlag.AlignLeft if CURRENT_LANG == 'he' else Qt.AlignmentFlag.AlignRight
+            actions_widget = ActionsHoverWidget(alignment=align)
+
             list_btn = self._create_action_button("☆", tr("Add to List"), parent=self.results_table)
             list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
             list_btn.setProperty("action_role", "list_star")
-            actions_widget.add_btn(list_btn, always_visible=True)
+
             browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
             view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
+
+            # Add buttons (Star last ensures it stays at the edge in both RTL/LTR expansion)
             actions_widget.add_btn(browse_btn)
             actions_widget.add_btn(view_btn)
+            actions_widget.add_btn(list_btn, always_visible=True)
+
             self.results_table.setCellWidget(row_idx, self.COL_ACTIONS, actions_widget)
 
             # System ID
