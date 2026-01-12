@@ -116,9 +116,9 @@ TRANSLATIONS = {
     "Show entries:": "הצג פריטים:",
     "In selected lists": "ברשימות הנבחרות",
     "Not in selected lists": "שאינם ברשימות הנבחרות",
-    "All lists": "כל הרשימות",
+    "All Lists": "כל הרשימות",
     "Filter configuration": "סנן",
-
+    "Filter by List (Click to enable)": "סנן לפי רשימה (לחץ כדי להפעיל)",
 
     # --- Search Modes & Tooltips ---
     "Exact": "מדויק",
