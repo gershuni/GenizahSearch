@@ -4,7 +4,6 @@
 import sys
 import os
 import re
-import time
 import threading
 import json
 import requests
@@ -5129,7 +5128,6 @@ class GenizahGUI(QMainWindow):
             else:
                 self.lists_preview_image.setText(tr("No image"))
         except Exception as e:
-            LOGGER.debug(f"Failed to load preview image: {e}")
             self.lists_preview_image.setText(tr("No image"))
 
     def _lists_start_preview_download(self, thumb_url):

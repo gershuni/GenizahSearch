@@ -1086,7 +1086,7 @@ class LabEngine:
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
 
-    @staticmethod
+#    @staticmethod
     def _pick_writable_dir(primary: str, fallback: str) -> str:
         """
         Prefer primary; if we cannot create/write there, use fallback.
@@ -1107,7 +1107,7 @@ class Config:
         os.makedirs(fallback, exist_ok=True)
         return fallback
 
-    @staticmethod
+#    @staticmethod
     def _get_documents_dir() -> str:
         """Best-effort Documents directory (Windows-aware), falling back to home."""
         documents_dir = None
