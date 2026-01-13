@@ -140,6 +140,6 @@ if __name__ == '__main__':
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
-        reload=False,  # Set to True for development
-        show=False,    # Don't open browser automatically
+        reload=True,   # Auto-reload on code changes
+        show=True,     # Open browser automatically
     )
