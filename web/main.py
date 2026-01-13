@@ -23,7 +23,7 @@ from web.pages.document import create_document_page
 
 # App configuration
 APP_TITLE = "Genizah Search"
-APP_PORT = 8080
+APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 
 def create_header():
