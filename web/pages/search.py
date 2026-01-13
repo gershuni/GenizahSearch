@@ -12,9 +12,10 @@ Professional search interface with:
 - Green color theme matching Genizah branding
 """
 
-from nicegui import ui
+from nicegui import ui, run
 from typing import List, Optional
 import re
+import asyncio
 
 from web.services import get_service, SearchResult
 from web.translations import tr, is_rtl
@@ -201,7 +202,7 @@ def create_search_page():
     ''')
 
     async def do_search():
-        """Execute the search."""
+        """Execute the search in background thread to avoid UI blocking."""
         if not state.query.strip():
             return
 
@@ -215,13 +216,18 @@ def create_search_page():
         state.current_page = 0
         update_results()
 
-        try:
-            results = service.search(
+        def run_search():
+            """Run search in background thread."""
+            return service.search(
                 query=state.query.strip(),
                 mode=state.mode,
                 gap=state.gap,
                 limit=500
             )
+
+        try:
+            # Run search in background thread to avoid blocking UI
+            results = await run.io_bound(run_search)
 
             state.results = results
             state.result_count = len(results)

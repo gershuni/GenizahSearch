@@ -4,7 +4,7 @@ Parallels (Composition Search) page for GenizahSearch web application.
 Find parallel texts in the Genizah corpus with professional UI.
 """
 
-from nicegui import ui
+from nicegui import ui, run
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 import asyncio
@@ -344,7 +344,7 @@ def create_parallels_page():
             char_count_label.set_text(f"{tr('Characters')}: {chars}")
 
     async def do_search():
-        """Execute the composition search."""
+        """Execute the composition search in background thread."""
         # Validate input
         words = count_words(state.source_text)
         if words < 10:
@@ -370,9 +370,9 @@ def create_parallels_page():
         update_results()
         update_progress()
 
-        try:
-            # Execute search
-            results = service.composition_search(
+        def run_composition_search():
+            """Run composition search in background thread."""
+            return service.composition_search(
                 full_text=state.source_text.strip(),
                 mode=state.mode,
                 chunk_size=state.chunk_size,
@@ -380,6 +380,10 @@ def create_parallels_page():
                 filter_text=state.filter_text.strip() if state.filter_text else None,
                 limit=200
             )
+
+        try:
+            # Execute search in background thread to avoid blocking UI
+            results = await run.io_bound(run_composition_search)
 
             if state.is_cancelled:
                 state.error = tr('Search cancelled')

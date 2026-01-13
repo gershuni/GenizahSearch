@@ -313,11 +313,25 @@ def create_footer():
 
 def add_page_head():
     """Add common head elements to pages."""
-    ui.add_head_html(f'<html dir="{get_dir()}" lang="{get_language()}">')
-    ui.add_head_html(COMMON_STYLES)
-    ui.add_head_html('''
+    # Set RTL direction on the document
+    direction = get_dir()
+    lang = get_language()
+
+    ui.add_head_html(f'''
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;500;700&display=swap" rel="stylesheet">
     ''')
+    ui.add_head_html(COMMON_STYLES)
+
+    # Add RTL body styles for Hebrew
+    if direction == 'rtl':
+        ui.add_head_html('''
+        <style>
+            body, html { direction: rtl; }
+            .q-field__native, .q-field__input, textarea, input { direction: rtl; text-align: right; }
+            .q-card, .q-expansion-item { direction: rtl; }
+        </style>
+        ''')
 
 
 # ============================================================================

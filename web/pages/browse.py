@@ -309,15 +309,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         try:
             if p_num is not None:
-                page = service.browse_page(state.sys_id, p_num=p_num)
+                page = service.get_browse_page(state.sys_id, p_num=p_num)
             elif state.current_page:
-                page = service.browse_page(
+                page = service.get_browse_page(
                     state.sys_id,
                     p_num=state.current_page.p_num,
                     direction=direction
                 )
             else:
-                page = service.browse_page(state.sys_id, p_num=1)
+                page = service.get_browse_page(state.sys_id, p_num=1)
 
             if page:
                 state.current_page = page
