@@ -132,14 +132,15 @@ def create_document_page(uid: str):
                 # Page info
                 with ui.row().classes('items-center gap-2'):
                     ui.label(tr('Page')).classes('text-gray-600')
-                    page_select = ui.select(
-                        {i: str(state.pages[i].p_num) for i in range(total_pages)},
-                        value=state.current_page_idx
-                    ).props('dense outlined').classes('w-24')
 
-                    @page_select.on('update:model-value')
-                    def on_page_change(e):
-                        go_to_page(e.args)
+                    def on_page_select_change(e):
+                        go_to_page(e.value)
+
+                    ui.select(
+                        {i: str(state.pages[i].p_num) for i in range(total_pages)},
+                        value=state.current_page_idx,
+                        on_change=on_page_select_change
+                    ).props('dense outlined').classes('w-24')
 
                     ui.label(f"{tr('of')} {total_pages}").classes('text-gray-600')
 

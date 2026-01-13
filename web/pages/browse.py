@@ -166,22 +166,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None):
                 # Page info and selector
                 with ui.row().classes('items-center gap-2'):
                     ui.label(tr('Page')).classes('text-gray-600')
+
                     page_input = ui.number(
                         value=page.p_num,
                         min=1,
                         max=page.total_pages
                     ).classes('w-20').props('dense')
 
-                    @page_input.on('keydown.enter')
-                    def on_page_enter():
-                        go_to_page(int(page_input.value))
-
                     ui.label(f"{tr('of')} {page.total_pages}").classes('text-gray-600')
 
-                    ui.button(
-                        tr('Go'),
-                        on_click=lambda: go_to_page(int(page_input.value))
-                    ).props('flat dense')
+                    def do_go_to_page():
+                        go_to_page(int(page_input.value))
+
+                    ui.button(tr('Go'), on_click=do_go_to_page).props('flat dense')
 
                 # Next button
                 ui.button(
