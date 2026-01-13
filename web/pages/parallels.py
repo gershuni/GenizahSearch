@@ -18,7 +18,8 @@ class ParallelsState:
         self.source_text: str = ''
         self.filter_text: str = ''
         self.mode: str = 'variants'
-        self.deep_scan: bool = False
+        self.chunk_size: int = 4
+        self.max_freq: int = 100
         self.results: List[CompositionResult] = []
         self.is_searching: bool = False
         self.error: Optional[str] = None
@@ -45,11 +46,6 @@ def create_parallels_page():
             update_results()
             return
 
-        if not service.has_lab_engine:
-            state.error = tr('Composition search not available')
-            update_results()
-            return
-
         state.is_searching = True
         state.error = None
         update_results()
@@ -58,8 +54,9 @@ def create_parallels_page():
             results = service.composition_search(
                 full_text=state.source_text.strip(),
                 mode=state.mode,
+                chunk_size=state.chunk_size,
+                max_freq=state.max_freq,
                 filter_text=state.filter_text.strip() if state.filter_text else None,
-                deep_scan=state.deep_scan,
                 limit=100
             )
 
@@ -208,8 +205,23 @@ def create_parallels_page():
                     ).classes('w-36').props('outlined dense')
                     mode_select.bind_value(state, 'mode')
 
-                    # Deep scan toggle
-                    deep_scan_switch = ui.switch(tr('Deep scan')).bind_value(state, 'deep_scan')
+                    # Chunk size
+                    chunk_input = ui.number(
+                        value=state.chunk_size,
+                        min=2,
+                        max=10,
+                        label=tr('Chunk size')
+                    ).classes('w-28').props('outlined dense')
+                    chunk_input.bind_value(state, 'chunk_size')
+
+                    # Max frequency
+                    freq_input = ui.number(
+                        value=state.max_freq,
+                        min=10,
+                        max=500,
+                        label=tr('Max frequency')
+                    ).classes('w-32').props('outlined dense')
+                    freq_input.bind_value(state, 'max_freq')
 
                 # Search button
                 ui.button(
@@ -224,11 +236,6 @@ def create_parallels_page():
                 with ui.row().classes('items-center gap-2'):
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')
-        elif not service.has_lab_engine:
-            with ui.card().classes('w-full p-4 bg-yellow-50 mb-4'):
-                with ui.row().classes('items-center gap-2'):
-                    ui.icon('warning', color='orange')
-                    ui.label(tr('Composition search not available')).classes('text-yellow-800')
 
         # Results container
         results_container = ui.column().classes('w-full')

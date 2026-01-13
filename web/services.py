@@ -274,9 +274,9 @@ class GenizahService:
         self,
         full_text: str,
         mode: str = "variants",
-        chunk_size: Optional[int] = None,
+        chunk_size: int = 4,
+        max_freq: int = 100,
         filter_text: Optional[str] = None,
-        deep_scan: bool = False,
         limit: int = 100
     ) -> List[CompositionResult]:
         """
@@ -285,22 +285,22 @@ class GenizahService:
         Args:
             full_text: The source text to find parallels for
             mode: Search mode (variants, extended, etc.)
-            chunk_size: Words per chunk (default from settings)
+            chunk_size: Words per chunk (default 4)
+            max_freq: Maximum frequency threshold (default 100)
             filter_text: Text to exclude matches from
-            deep_scan: Enable deep scanning for more results
             limit: Maximum results to return
         """
-        if not self.is_ready or not self._lab_engine:
+        if not self.is_ready:
             return []
 
         with self._search_lock:
             try:
-                raw_result = self._lab_engine.lab_composition_search(
+                raw_result = self._search_engine.search_composition_logic(
                     full_text,
-                    mode=mode,
                     chunk_size=chunk_size,
-                    filter_text=filter_text,
-                    deep_scan=deep_scan
+                    max_freq=max_freq,
+                    mode=mode,
+                    filter_text=filter_text
                 )
 
                 # lab_composition_search returns dict with 'main', 'filtered', 'known'
