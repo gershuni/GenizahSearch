@@ -110,15 +110,16 @@ def create_header():
                     ui.separator()
                     with ui.row().classes('items-center gap-2 px-2'):
                         ui.label(tr('Language'))
-                        lang_select = ui.select(
-                            {'he': 'עברית', 'en': 'English'},
-                            value=get_language()
-                        ).classes('w-24')
 
-                        @lang_select.on('update:model-value')
                         def on_lang_change(e):
-                            set_language(e.args)
+                            set_language(e.value)
                             ui.navigate.reload()
+
+                        ui.select(
+                            {'he': 'עברית', 'en': 'English'},
+                            value=get_language(),
+                            on_change=on_lang_change
+                        ).classes('w-24')
 
 
 def create_footer():
