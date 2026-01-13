@@ -295,7 +295,7 @@ class GenizahService:
 
         with self._search_lock:
             try:
-                raw_results = self._lab_engine.lab_composition_search(
+                raw_result = self._lab_engine.lab_composition_search(
                     full_text,
                     mode=mode,
                     chunk_size=chunk_size,
@@ -303,9 +303,12 @@ class GenizahService:
                     deep_scan=deep_scan
                 )
 
+                # lab_composition_search returns dict with 'main', 'filtered', 'known'
+                main_results = raw_result.get('main', []) if isinstance(raw_result, dict) else raw_result
+
                 results = []
-                for r in raw_results[:limit]:
-                    sys_id = self.extract_sys_id(r.get('raw_header', ''))
+                for r in main_results[:limit]:
+                    sys_id = self.extract_sys_id(r.get('raw_header', '') or r.get('uid', ''))
                     display = r.get('display', {})
                     if isinstance(display, str):
                         display = {'shelfmark': display}
@@ -324,6 +327,8 @@ class GenizahService:
 
             except Exception as e:
                 print(f"Composition search error: {e}")
+                import traceback
+                traceback.print_exc()
                 return []
 
     # ========================================================================
