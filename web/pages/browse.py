@@ -301,11 +301,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def load_page(direction: int = 0, p_num: Optional[int] = None):
         """Load a page of the manuscript."""
         if not state.sys_id:
+            state.error = tr('No manuscript found')
+            update_content()
             return
 
         state.is_loading = True
         state.error = None
         state.zoom_level = 1.0  # Reset zoom on page change
+        update_content()  # Show loading state
 
         try:
             if p_num is not None:
@@ -324,10 +327,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.page_input_value = page.p_num
                 state.error = None
             else:
-                state.error = tr('No text available')
+                state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
         except Exception as e:
-            state.error = str(e)
+            state.error = f"{tr('Error')}: {str(e)}"
 
         finally:
             state.is_loading = False

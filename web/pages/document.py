@@ -45,8 +45,29 @@ def create_document_page(uid: str):
             # Extract system ID from UID
             state.sys_id = service.extract_sys_id(uid)
 
+            # If no sys_id found, try to get it from the browse page directly
             if not state.sys_id:
-                state.error = tr('No manuscript found')
+                # Try to use the uid directly as a query
+                browse_result = service.get_browse_page(uid, p_num=1)
+                if browse_result:
+                    state.sys_id = browse_result.sys_id
+                    # Create a single page from browse result
+                    from web.services import DocumentPage
+                    state.pages = [DocumentPage(
+                        uid=browse_result.uid,
+                        p_num=browse_result.p_num,
+                        text=browse_result.text,
+                        full_header=browse_result.full_header,
+                        fl_id=browse_result.fl_id,
+                        sys_id=browse_result.sys_id
+                    )]
+                    state.shelfmark = browse_result.shelfmark
+                    state.title = browse_result.title
+                    state.is_loading = False
+                    return
+
+            if not state.sys_id:
+                state.error = tr('No manuscript found') + f" (uid: {uid[:30]}...)"
                 state.is_loading = False
                 return
 
@@ -54,9 +75,22 @@ def create_document_page(uid: str):
             state.pages = service.get_document(state.sys_id)
 
             if not state.pages:
-                state.error = tr('No text available')
-                state.is_loading = False
-                return
+                # Try single page browse
+                browse_result = service.get_browse_page(state.sys_id, p_num=1)
+                if browse_result:
+                    from web.services import DocumentPage
+                    state.pages = [DocumentPage(
+                        uid=browse_result.uid,
+                        p_num=browse_result.p_num,
+                        text=browse_result.text,
+                        full_header=browse_result.full_header,
+                        fl_id=browse_result.fl_id,
+                        sys_id=browse_result.sys_id
+                    )]
+                else:
+                    state.error = tr('No text available')
+                    state.is_loading = False
+                    return
 
             # Find the page matching the UID
             for idx, page in enumerate(state.pages):

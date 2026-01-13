@@ -722,7 +722,8 @@ def create_parallels_page():
                     value=state.source_text
                 ).classes('w-full rtl-text hebrew-text').props(
                     'outlined rows=10 autogrow'
-                ).on('input', lambda: update_counts())
+                ).on('input', lambda: update_counts()
+                ).on('keydown.ctrl.enter', do_search)  # Ctrl+Enter to search
 
                 source_textarea.bind_value(state, 'source_text')
 
