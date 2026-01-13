@@ -6,3 +6,4 @@ tqdm
 colorama
 openpyxl
 python-docx
+nicegui
