@@ -135,7 +135,7 @@ def startup():
 app.on_startup(startup)
 
 
-if __name__ == '__main__':
+if __name__ in {'__main__', '__mp_main__'}:
     print(f"Starting Genizah Search Web on port {APP_PORT}...")
     ui.run(
         title=APP_TITLE,
