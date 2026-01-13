@@ -14,7 +14,9 @@ _current_lang = 'he'  # Default to Hebrew
 
 # Translation dictionary: English -> Hebrew
 TRANSLATIONS = {
+    # =========================================================================
     # General UI
+    # =========================================================================
     "Search": "חיפוש",
     "Search...": "חיפוש...",
     "Results": "תוצאות",
@@ -27,8 +29,40 @@ TRANSLATIONS = {
     "Previous": "הקודם",
     "Page": "עמוד",
     "of": "מתוך",
+    "Settings": "הגדרות",
+    "Options": "אפשרויות",
+    "Language": "שפה",
+    "Hebrew": "עברית",
+    "English": "אנגלית",
 
-    # Search modes
+    # =========================================================================
+    # Home Page Cards
+    # =========================================================================
+    "Genizah Search": "חיפוש גניזה",
+    "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
+
+    # Search Card
+    "Text Search": "חיפוש טקסט",
+    "Search in manuscripts": "חיפוש בכתבי יד",
+    "Search for words and phrases in the Genizah corpus": "חפש מילים וביטויים בגניזה",
+    "Enter search terms and find matching manuscripts": "הזן מילות חיפוש ומצא כתבי יד תואמים",
+
+    # Parallels Card
+    "Find Parallels": "מציאת מקבילות",
+    "Composition Search": "חיפוש חיבורים",
+    "Find similar texts": "מצא טקסטים דומים",
+    "Enter a long text and find parallel texts in the Genizah": "הזן טקסט ארוך ומצא טקסטים מקבילים בגניזה",
+    "Paste your text to discover parallels": "הדבק טקסט כדי לגלות מקבילות",
+
+    # Browse Card
+    "Browse Manuscripts": "דפדוף בכתבי יד",
+    "Browse by shelfmark": "דפדוף לפי מספר מדף",
+    "Enter a shelfmark to browse the manuscript": "הזן מספר מדף כדי לדפדף בכתב היד",
+    "Navigate through manuscript pages": "נווט בין דפי כתב היד",
+
+    # =========================================================================
+    # Search Modes
+    # =========================================================================
     "Exact": "מדויק",
     "Variants": "וריאנטים",
     "Extended": "מורחב",
@@ -36,13 +70,51 @@ TRANSLATIONS = {
     "Fuzzy": "מטושטש",
     "Regex": "ביטוי רגולרי",
 
+    # =========================================================================
     # Search UI
+    # =========================================================================
     "Enter search terms": "הזן מילות חיפוש",
     "Search mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
     "Searching...": "מחפש...",
+    "Advanced options": "אפשרויות מתקדמות",
+    "Word gap": "מרווח מילים",
+    "Start search": "התחל חיפוש",
 
-    # Document viewer
+    # =========================================================================
+    # Composition Search UI
+    # =========================================================================
+    "Enter text to search for parallels": "הזן טקסט לחיפוש מקבילות",
+    "Paste text here...": "הדבק טקסט כאן...",
+    "Source text": "טקסט מקור",
+    "Filter text": "טקסט סינון",
+    "Optional: exclude matches from this text": "אופציונלי: סנן התאמות מטקסט זה",
+    "Deep scan": "סריקה מעמיקה",
+    "Find parallels": "מצא מקבילות",
+    "Score": "ציון",
+    "Match": "התאמה",
+    "Source": "מקור",
+    "Manuscript text": "טקסט כתב היד",
+    "Your text": "הטקסט שלך",
+
+    # =========================================================================
+    # Browse UI
+    # =========================================================================
+    "Enter shelfmark": "הזן מספר מדף",
+    "e.g. T-S 8J6.1": "לדוגמה: T-S 8J6.1",
+    "Go": "עבור",
+    "First page": "עמוד ראשון",
+    "Last page": "עמוד אחרון",
+    "Jump to page": "קפוץ לעמוד",
+    "Image": "תמונה",
+    "Show image": "הצג תמונה",
+    "Hide image": "הסתר תמונה",
+    "Open in Ktiv": "פתח בכתיב",
+    "External link": "קישור חיצוני",
+
+    # =========================================================================
+    # Document Viewer
+    # =========================================================================
     "View Document": "צפה במסמך",
     "Document": "מסמך",
     "Manuscript": "כתב יד",
@@ -52,25 +124,37 @@ TRANSLATIONS = {
     "Title": "כותרת",
     "Library": "ספרייה",
     "No text available": "אין טקסט זמין",
+    "View": "צפה",
+    "Cross-page match": "התאמה חוצת עמודים",
 
+    # =========================================================================
     # Navigation
+    # =========================================================================
     "Home": "בית",
     "About": "אודות",
     "Help": "עזרה",
 
-    # Status
+    # =========================================================================
+    # Status Messages
+    # =========================================================================
     "Ready": "מוכן",
     "Initializing...": "מאתחל...",
     "Service not available": "השירות אינו זמין",
     "Index not found": "האינדקס לא נמצא",
+    "Composition search not available": "חיפוש חיבורים אינו זמין",
+    "No manuscript found": "לא נמצא כתב יד",
+    "Enter at least 10 words": "הזן לפחות 10 מילים",
 
-    # Page header/footer
-    "Genizah Search": "חיפוש גניזה",
-    "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
-
-    # Search result card
-    "View": "צפה",
-    "Cross-page match": "התאמה חוצת עמודים",
+    # =========================================================================
+    # Settings
+    # =========================================================================
+    "Display settings": "הגדרות תצוגה",
+    "Search settings": "הגדרות חיפוש",
+    "Default search mode": "מצב חיפוש ברירת מחדל",
+    "Results per page": "תוצאות לעמוד",
+    "Theme": "ערכת נושא",
+    "Light": "בהיר",
+    "Dark": "כהה",
 }
 
 
