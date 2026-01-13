@@ -271,18 +271,19 @@ class GenizahService:
         Extract system ID from a unique page ID.
 
         Args:
-            uid: The unique page identifier (e.g., "CUL-T-S_8_J_6_1_1")
+            uid: The unique page identifier (e.g., "99123456789_IE12345_1")
 
         Returns:
-            System ID (e.g., "CUL-T-S_8_J_6_1")
+            System ID - the 99... number (e.g., "99123456789")
         """
         if not uid:
             return ''
 
-        # Remove the last component (page number)
-        parts = uid.rsplit('_', 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            return parts[0]
+        # sys_id is a number starting with 99
+        import re
+        match = re.search(r'(99\d{8,})', uid)
+        if match:
+            return match.group(1)
         return uid
 
 
