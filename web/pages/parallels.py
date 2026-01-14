@@ -236,38 +236,45 @@ PARALLELS_STYLES = '''
     }
 
     .manuscript-group-card {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 12px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+        border-radius: 12px;
+        border: 2px solid #d1fae5;
+        margin-bottom: 16px;
         overflow: hidden;
+        transition: all 0.3s ease;
+    }
+
+    .manuscript-group-card:hover {
+        box-shadow: 0 6px 16px rgba(46, 125, 50, 0.2);
+        border-color: #a7f3d0;
     }
 
     .manuscript-group-header {
-        background: linear-gradient(to right, #f0fdf4, #ffffff);
-        padding: 12px 16px;
+        background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+        padding: 16px 24px;
         cursor: pointer;
         transition: background 0.2s;
     }
 
     .manuscript-group-header:hover {
-        background: linear-gradient(to right, #dcfce7, #f0fdf4);
+        background: linear-gradient(135deg, #dcfce7, #bbf7d0);
     }
 
     .comparison-panel {
-        border-radius: 8px;
-        padding: 16px;
-        min-height: 80px;
+        border-radius: 10px;
+        padding: 20px;
+        min-height: 100px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
     }
 
     .source-panel {
         background-color: #eff6ff;
-        border: 1px solid #bfdbfe;
+        border: 2px solid #bfdbfe;
     }
 
     .manuscript-panel {
         background-color: #f0fdf4;
-        border: 1px solid #bbf7d0;
+        border: 2px solid #bbf7d0;
     }
 
     .highlight-match {
@@ -573,23 +580,26 @@ def create_parallels_page():
             # Results list - fully inlined for proper context handling
             max_score = max(g.total_score for g in state.grouped_results) if state.grouped_results else 1
 
-            for group in state.grouped_results:
+            for idx, group in enumerate(state.grouped_results):
                 score_style = get_score_badge_style(group.total_score, max_score)
+
+                # Auto-expand first 3 results for quick scanning
+                is_expanded = idx < 3
 
                 with ui.card().classes('w-full manuscript-group-card'):
                     with ui.expansion(
                         text='',
                         icon='menu_book',
-                        value=False
+                        value=is_expanded
                     ).classes('w-full').props('dense header-class=manuscript-group-header'):
                         with ui.row().classes('w-full items-center justify-between'):
-                            with ui.row().classes('items-center gap-3'):
+                            with ui.column().classes('gap-1 flex-1'):
                                 ui.label(group.shelfmark).classes(
-                                    'font-bold text-green-800 text-lg'
+                                    'font-bold text-green-800 text-xl'
                                 )
                                 if group.title:
-                                    ui.label(f"- {group.title[:50]}{'...' if len(group.title) > 50 else ''}").classes(
-                                        'text-gray-600 rtl-text hebrew-text'
+                                    ui.label(f"{group.title[:80]}{'...' if len(group.title) > 80 else ''}").classes(
+                                        'text-gray-600 rtl-text hebrew-text text-sm'
                                     )
 
                             with ui.row().classes('items-center gap-3'):
@@ -635,10 +645,10 @@ def create_parallels_page():
                                             )
                                             with ui.element('div').classes('comparison-panel source-panel'):
                                                 if result.src_snippet:
-                                                    highlighted = highlight_matched_text(result.src_snippet[:600])
+                                                    highlighted = highlight_matched_text(result.src_snippet[:700])
                                                     ui.html(
-                                                        f'<div class="rtl-text hebrew-text text-sm" '
-                                                        f'style="line-height: 1.8">{highlighted}</div>',
+                                                        f'<div class="rtl-text hebrew-text text-base" '
+                                                        f'style="line-height: 2.0; font-size: 1.05rem;">{highlighted}</div>',
                                                         sanitize=False
                                                     )
                                                 else:
@@ -648,14 +658,14 @@ def create_parallels_page():
 
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Manuscript text')).classes(
-                                                'text-sm font-medium text-green-700 mb-2'
+                                                'text-sm font-semibold text-green-700 mb-2'
                                             )
                                             with ui.element('div').classes('comparison-panel manuscript-panel'):
                                                 if result.ms_snippet:
-                                                    highlighted = highlight_matched_text(result.ms_snippet[:600])
+                                                    highlighted = highlight_matched_text(result.ms_snippet[:700])
                                                     ui.html(
-                                                        f'<div class="rtl-text hebrew-text text-sm" '
-                                                        f'style="line-height: 1.8">{highlighted}</div>',
+                                                        f'<div class="rtl-text hebrew-text text-base" '
+                                                        f'style="line-height: 2.0; font-size: 1.05rem;">{highlighted}</div>',
                                                         sanitize=False
                                                     )
                                                 else:

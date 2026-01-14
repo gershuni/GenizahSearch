@@ -126,41 +126,48 @@ VIEWER_STYLES = '''
 
     /* Metadata header */
     .metadata-header {
-        background: linear-gradient(to right, #166534, #15803d);
+        background: linear-gradient(135deg, #15803d, #166534);
         color: white;
-        padding: 20px 24px;
-        border-radius: 8px;
-        margin-bottom: 16px;
+        padding: 24px 28px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(22, 101, 52, 0.25);
     }
 
     .shelfmark-title {
-        font-size: 1.75rem;
-        font-weight: 700;
-        margin-bottom: 8px;
+        font-size: 2rem;
+        font-weight: 800;
+        margin-bottom: 12px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        letter-spacing: 0.5px;
     }
 
     .metadata-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 16px;
+        gap: 20px;
         align-items: center;
-        font-size: 0.95rem;
-        opacity: 0.9;
+        font-size: 1rem;
+        opacity: 0.95;
     }
 
     .metadata-item {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 6px 12px;
+        border-radius: 8px;
     }
 
     /* Navigation bar */
     .navigation-bar {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 16px;
+        background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+        border: 2px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }
 
     /* Source badge styling */
@@ -483,14 +490,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # External links
                     with ui.column().classes('items-end gap-2'):
-                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=NNL_ALEPH{page.sys_id}"
-                        ui.link(
-                            tr('Open in Ktiv'),
-                            ktiv_url,
-                            new_tab=True
-                        ).classes('text-white hover:text-green-200 flex items-center gap-1').style(
-                            'text-decoration: none;'
-                        )
+                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                        with ui.link(target=ktiv_url, new_tab=True).classes(
+                            'flex items-center gap-2 px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg transition-all'
+                        ).style('text-decoration: none; color: white;'):
+                            ui.icon('open_in_new', size='sm')
+                            ui.label(tr('Open in Ktiv')).classes('font-semibold')
 
             # === Navigation Bar ===
             with ui.element('div').classes('navigation-bar'):
@@ -550,23 +555,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.element('div').classes('image-viewer-container'):
                         # Image container
                         with ui.element('div').classes('image-container'):
-                            if page.image_url or page.fl_id:
+                            # Determine image URL with fallback logic
+                            img_url = None
+                            if page.image_url and page.image_url.strip():
                                 img_url = page.image_url
-                                if not img_url and page.fl_id:
-                                    digits = re.sub(r"\D", "", str(page.fl_id))
-                                    if digits:
-                                        img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/1000,/0/default.jpg"
+                            elif page.fl_id:
+                                digits = re.sub(r"\D", "", str(page.fl_id))
+                                if digits:
+                                    img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
 
-                                if img_url:
-                                    ui.image(img_url).classes(
-                                        'zoomable-image'
-                                    ).style(
-                                        f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                    ).props('loading="lazy"')
-                                else:
-                                    with ui.element('div').classes('image-loading'):
-                                        ui.icon('image_not_supported', size='4rem')
-                                        ui.label(tr('Image not available')).classes('mt-2')
+                            if img_url:
+                                ui.image(img_url).classes(
+                                    'zoomable-image'
+                                ).style(
+                                    f'transform: scale({state.zoom_level}); transform-origin: center;'
+                                ).props('loading="lazy"')
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')

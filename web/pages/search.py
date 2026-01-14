@@ -12,11 +12,12 @@ Professional search interface with:
 - Green color theme matching Genizah branding
 """
 
-from nicegui import ui, run
+from nicegui import ui, run, app
 from typing import List, Optional
 import re
 import asyncio
 import html
+import json
 
 from web.services import get_service, SearchResult
 from web.translations import tr, is_rtl
@@ -37,16 +38,69 @@ class SearchState:
     """Holds the search state for the page."""
 
     def __init__(self):
-        self.query: str = ''
-        self.mode: str = 'variants'
-        self.gap: int = 0
+        # Try to restore state from storage
+        stored = app.storage.user.get('search_state', {})
+        self.query: str = stored.get('query', '')
+        self.mode: str = stored.get('mode', 'variants')
+        self.gap: int = stored.get('gap', 0)
         self.results: List[SearchResult] = []
         self.is_searching: bool = False
         self.error: Optional[str] = None
-        self.result_count: int = 0
+        self.result_count: int = stored.get('result_count', 0)
         self.show_advanced: bool = False
-        self.results_per_page: int = 50
-        self.current_page: int = 0
+        self.results_per_page: int = stored.get('results_per_page', 50)
+        self.current_page: int = stored.get('current_page', 0)
+
+        # Restore results from storage if available
+        results_data = stored.get('results', [])
+        if results_data:
+            try:
+                # Reconstruct SearchResult objects
+                from web.services import SearchResult
+                self.results = [
+                    SearchResult(
+                        uid=r['uid'],
+                        sys_id=r.get('sys_id'),
+                        snippet=r.get('snippet'),
+                        display=r.get('display'),
+                        source=r.get('source'),
+                        cross_page=r.get('cross_page', False)
+                    )
+                    for r in results_data
+                ]
+                self.result_count = len(self.results)
+            except Exception:
+                # If restoration fails, start fresh
+                self.results = []
+                self.result_count = 0
+
+    def save_to_storage(self):
+        """Save current state to browser storage."""
+        try:
+            # Convert SearchResult objects to dicts for JSON serialization
+            results_data = [
+                {
+                    'uid': r.uid,
+                    'sys_id': r.sys_id,
+                    'snippet': r.snippet,
+                    'display': r.display,
+                    'source': r.source,
+                    'cross_page': r.cross_page
+                }
+                for r in self.results
+            ]
+
+            app.storage.user['search_state'] = {
+                'query': self.query,
+                'mode': self.mode,
+                'gap': self.gap,
+                'results': results_data,
+                'result_count': self.result_count,
+                'results_per_page': self.results_per_page,
+                'current_page': self.current_page
+            }
+        except Exception as e:
+            print(f"Failed to save search state: {e}")
 
 
 def convert_highlight_markers(text: str) -> str:
@@ -238,11 +292,13 @@ def create_search_page():
             state.results = results
             state.result_count = len(results)
             state.error = None
+            state.save_to_storage()
 
         except Exception as e:
             state.error = str(e)
             state.results = []
             state.result_count = 0
+            state.save_to_storage()
 
         finally:
             state.is_searching = False
@@ -281,6 +337,7 @@ def create_search_page():
         total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
         if 0 <= page < total_pages:
             state.current_page = page
+            state.save_to_storage()
             render_results.refresh()
 
     @ui.refreshable
@@ -521,6 +578,7 @@ def create_search_page():
                             def on_rpp_change(e):
                                 state.results_per_page = e.value
                                 state.current_page = 0
+                                state.save_to_storage()
                                 if state.results:
                                     render_results.refresh()
 

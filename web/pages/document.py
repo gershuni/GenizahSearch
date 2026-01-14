@@ -254,7 +254,7 @@ def create_document_page(uid: str):
                 # External links
                 if state.sys_id:
                     with ui.row().classes('gap-2'):
-                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=NNL_ALEPH{state.sys_id}"
+                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{state.sys_id}"
                         ui.link(tr('Open in Ktiv'), ktiv_url, new_tab=True).classes('text-blue-600')
 
                         ui.button(
