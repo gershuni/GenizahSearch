@@ -186,6 +186,43 @@ class GenizahService:
             print(f"Browse page error: {e}")
             return None
 
+    def get_browse_page_by_fl(self, fl_id: str, sys_id: Optional[str] = None) -> Optional[BrowsePage]:
+        """Get a browse page by FL ID."""
+        if not self.is_ready: return None
+        try:
+            result = state.searcher.get_browse_page_by_fl(fl_id, sys_id=sys_id)
+            if not result: return None
+
+            shelfmark, title = state.meta_mgr.get_meta_for_id(result.get('sys_id', ''))
+
+            fl_id_parsed = None
+            try:
+                parsed = state.meta_mgr.parse_full_id_components(result.get('full_header', ''))
+                fl_id_parsed = parsed.get('fl_id')
+            except: pass
+
+            thumb_url = get_thumbnail_url(fl_id_parsed) if fl_id_parsed else None
+            image_url = get_full_image_url(fl_id_parsed) if fl_id_parsed else None
+
+            return BrowsePage(
+                uid=result.get('uid', ''),
+                p_num=result.get('p_num', 0),
+                text=result.get('text', ''),
+                full_header=result.get('full_header', ''),
+                total_pages=result.get('total_pages', 0),
+                current_idx=result.get('current_idx', 0),
+                sys_id=result.get('sys_id', ''),
+                fl_id=fl_id_parsed,
+                shelfmark=shelfmark or '',
+                title=title or '',
+                thumb_url=thumb_url,
+                image_url=image_url,
+                internal_index=result.get('internal_index', 0)
+            )
+        except Exception as e:
+            print(f"Browse page by FL error: {e}")
+            return None
+
 _service_instance = GenizahService()
 
 def get_service():

@@ -127,8 +127,8 @@ function handleImageError(img, fallbackUrl) {
 
     .transcription-text {
         white-space: pre-wrap;
-        line-height: 2.2;
-        font-size: 1.2rem;
+        line-height: 2.4;
+        font-size: 1.6rem;
         font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", "SBL Hebrew", serif;
         direction: rtl;
         text-align: right;
@@ -304,7 +304,7 @@ class BrowseState:
         self.page_input_value: int = 1
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None):
     """Create the professional manuscript viewer page UI."""
     state = BrowseState()
     service = get_service()
@@ -313,6 +313,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     content_container = None
     image_element = None
     viewer_container = None
+    initial_fl_id_value = initial_fl_id
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
@@ -375,6 +376,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.current_page = page
                 state.page_input_value = page.p_num
                 state.error = None
+
+                # Track recently viewed item
+                if state.sys_id and service.is_ready:
+                    try:
+                        from web.state import state as app_state
+                        if app_state.lists_mgr:
+                            app_state.lists_mgr.add_to_recent(state.sys_id, fl_id=page.fl_id)
+                    except Exception as track_err:
+                        print(f"Failed to track recent item: {track_err}")
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
@@ -591,102 +601,93 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # === Main Viewer Panels ===
             fullscreen_class = 'fullscreen-mode' if state.is_fullscreen else ''
 
-            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}').style('display: flex; flex-direction: row;'):
-                # LEFT: Image Viewer (60%)
-                with ui.column().classes('image-panel').style('width: 60%;'):
-                    with ui.element('div').classes('image-viewer-container'):
-                        # Image container
-                        with ui.element('div').classes('image-container'):
-                            # Determine image URL with fallback logic
-                            img_url = None
-                            fallback_url = None
+            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}').style('display: flex; flex-direction: row; height: calc(100vh - 300px);'):
+                # Extract FL ID and check if we have an image
+                fl_id = page.fl_id
+                if not fl_id and page.image_url:
+                    match = re.search(r'FL(\d+)', page.image_url)
+                    if match:
+                        fl_id = match.group(1)
 
-                            # Debug: Print image info
-                            print(f"[DEBUG] Page FL ID: {page.fl_id}, Image URL: {page.image_url}")
+                # Prepare image URLs
+                img_url = None
+                fallback_url = None
+                has_image = False
 
-                            # Extract FL ID from any source
-                            fl_id = page.fl_id
-                            if not fl_id and page.image_url:
-                                # Try to extract FL ID from IIIF URL
-                                match = re.search(r'FL(\d+)', page.image_url)
-                                if match:
-                                    fl_id = match.group(1)
+                if fl_id:
+                    digits = re.sub(r"\D", "", str(fl_id))
+                    if digits:
+                        has_image = True
+                        img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                        print(f"[DEBUG] Image available - FL{digits}")
 
-                            if fl_id:
-                                digits = re.sub(r"\D", "", str(fl_id))
-                                if digits:
-                                    # Use Rosetta as primary (IIIF has authorization issues)
-                                    img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                                    # Keep original IIIF as fallback (though it may not work)
-                                    if page.image_url and 'iiif.nli.org.il' in page.image_url:
-                                        fallback_url = page.image_url
-                                    else:
-                                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
-                                    print(f"[DEBUG] Using Rosetta URL (FL{digits}): {img_url}")
+                # LEFT: Image Viewer (50%) - only show if image exists
+                if has_image:
+                    with ui.column().classes('image-panel').style('width: 50%; height: 100%;'):
+                        with ui.element('div').classes('image-viewer-container'):
+                            # Image container
+                            with ui.element('div').classes('image-container'):
+                                if img_url:
+                                    # Use HTML img tag without crossorigin (causes issues with Rosetta)
+                                    safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                    safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+
+                                    img_html = f'''
+                                    <img
+                                        src="{safe_img_url}"
+                                        class="zoomable-image"
+                                        style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
+                                        loading="lazy"
+                                        onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                    />
+                                    '''
+                                    ui.html(img_html, sanitize=False)
                                 else:
-                                    print(f"[DEBUG] No digits found in FL ID: {fl_id}")
-                            else:
-                                print(f"[DEBUG] No FL ID available")
+                                    with ui.element('div').classes('image-loading'):
+                                        ui.icon('image_not_supported', size='4rem')
+                                        ui.label(tr('Image not available')).classes('mt-2')
 
-                            if img_url:
-                                # Use HTML img tag without crossorigin (causes issues with Rosetta)
-                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                                safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+                            # Image controls overlay
+                            with ui.element('div').classes('image-controls'):
+                                ui.button(icon='remove', on_click=zoom_out).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Zoom out'))
 
-                                img_html = f'''
-                                <img
-                                    src="{safe_img_url}"
-                                    class="zoomable-image"
-                                    style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
-                                    loading="lazy"
-                                    onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
-                                />
-                                '''
-                                ui.html(img_html, sanitize=False)
-                            else:
-                                with ui.element('div').classes('image-loading'):
-                                    ui.icon('image_not_supported', size='4rem')
-                                    ui.label(tr('Image not available')).classes('mt-2')
+                                ui.label(f'{int(state.zoom_level * 100)}%').classes(
+                                    'zoom-level-label text-white text-sm px-2'
+                                )
 
-                        # Image controls overlay
-                        with ui.element('div').classes('image-controls'):
-                            ui.button(icon='remove', on_click=zoom_out).props(
-                                'flat round size=sm'
-                            ).tooltip(tr('Zoom out'))
+                                ui.button(icon='add', on_click=zoom_in).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Zoom in'))
 
-                            ui.label(f'{int(state.zoom_level * 100)}%').classes(
-                                'zoom-level-label text-white text-sm px-2'
-                            )
+                                ui.separator().props('vertical').classes('mx-1')
 
-                            ui.button(icon='add', on_click=zoom_in).props(
-                                'flat round size=sm'
-                            ).tooltip(tr('Zoom in'))
+                                ui.button(icon='fit_screen', on_click=zoom_reset).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Reset zoom'))
 
-                            ui.separator().props('vertical').classes('mx-1')
+                                ui.button(icon='width_full', on_click=fit_width).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Fit to width'))
 
-                            ui.button(icon='fit_screen', on_click=zoom_reset).props(
-                                'flat round size=sm'
-                            ).tooltip(tr('Reset zoom'))
+                                ui.button(icon='height', on_click=fit_height).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Fit to height'))
 
-                            ui.button(icon='width_full', on_click=fit_width).props(
-                                'flat round size=sm'
-                            ).tooltip(tr('Fit to width'))
+                                ui.separator().props('vertical').classes('mx-1')
 
-                            ui.button(icon='height', on_click=fit_height).props(
-                                'flat round size=sm'
-                            ).tooltip(tr('Fit to height'))
+                                ui.button(
+                                    icon='fullscreen_exit' if state.is_fullscreen else 'fullscreen',
+                                    on_click=toggle_fullscreen
+                                ).props('flat round size=sm').tooltip(
+                                    tr('Exit fullscreen') if state.is_fullscreen else tr('Fullscreen')
+                                )
 
-                            ui.separator().props('vertical').classes('mx-1')
-
-                            ui.button(
-                                icon='fullscreen_exit' if state.is_fullscreen else 'fullscreen',
-                                on_click=toggle_fullscreen
-                            ).props('flat round size=sm').tooltip(
-                                tr('Exit fullscreen') if state.is_fullscreen else tr('Fullscreen')
-                            )
-
-                # RIGHT: Transcription Panel (40%)
-                with ui.column().classes('transcription-panel-wrapper').style('width: 40%;'):
+                # RIGHT: Transcription Panel (50% if image, 100% if no image)
+                transcription_width = '50%' if has_image else '100%'
+                with ui.column().classes('transcription-panel-wrapper').style(f'width: {transcription_width};'):
                     with ui.element('div').classes('transcription-panel'):
                         # Header with folio and source
                         with ui.element('div').classes('transcription-header'):
@@ -771,8 +772,26 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Main content container
         content_container = ui.column().classes('w-full')
 
-        # Load initial page if sys_id provided
-        if initial_sys_id:
+        # Load initial page if sys_id or fl_id provided
+        if initial_fl_id_value:
+            # Load by FL ID
+            state.is_loading = True
+            update_content()
+            try:
+                page = service.get_browse_page_by_fl(initial_fl_id_value, sys_id=initial_sys_id)
+                if page:
+                    state.sys_id = page.sys_id
+                    state.current_page = page
+                    state.page_input_value = page.p_num
+                    state.error = None
+                else:
+                    state.error = tr('No text available') + f" (fl_id: {initial_fl_id_value})"
+            except Exception as e:
+                state.error = f"{tr('Error')}: {str(e)}"
+            finally:
+                state.is_loading = False
+                update_content()
+        elif initial_sys_id:
             load_page()
         else:
             update_content()

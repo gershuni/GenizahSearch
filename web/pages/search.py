@@ -1,4 +1,4 @@
-from nicegui import ui, run
+from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
 import time
@@ -22,6 +22,14 @@ def create_search_page():
             self.adv_expanded = False
 
     search_state = SearchUIState()
+
+    # Restore previous search results if available
+    if 'search_results' in app.storage.user:
+        try:
+            search_state.results = app.storage.user.get('search_results', [])
+            print(f"[DEBUG Search] Restored {len(search_state.results)} results from storage")
+        except Exception as e:
+            print(f"[DEBUG Search] Failed to restore results: {e}")
 
     # --- UI Layout ---
     with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
@@ -90,9 +98,8 @@ def create_search_page():
 
             # --- LEFT: Result List ---
             with splitter.before:
-                results_container = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2 gap-2')
-                with results_container:
-                    ui.label(tr("Ready to search.")).classes('text-gray-400 text-center mt-10 w-full')
+                results_container = ui.column().classes('w-full h-full')
+                # Will be populated by render_results
 
             # --- RIGHT: Viewer (Placeholder for now) ---
             with splitter.after:
@@ -210,51 +217,143 @@ def create_search_page():
         search_state.results = results
         search_btn.enable()
 
+        # Save results to persistent storage
+        try:
+            app.storage.user['search_results'] = results
+            print(f"[DEBUG Search] Saved {len(results)} results to storage")
+        except Exception as e:
+            print(f"[DEBUG Search] Failed to save results: {e}")
+
         # Render Results (Virtual scroll is harder in NiceGUI, we'll use lazy rendering if needed,
         # but for now standard rendering. Limit to 100 for DOM performance)
         render_results(results[:100])
         if len(results) > 100:
             ui.notify(tr("Showing first 100 results. Refine search."), type='info')
 
+    def create_result_card(i, res, display, shelf):
+        """Create a single result card with proper closure capture."""
+        # Card
+        with ui.card().classes('w-full hover:bg-green-50 transition-colors p-3 gap-1'):
+
+            # Header: Shelfmark + Actions
+            with ui.row().classes('w-full justify-between items-start'):
+                with ui.column().classes('flex-grow cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(shelf).classes('font-bold text-primary text-sm')
+                with ui.row().classes('gap-1 items-center'):
+                    # Add to list button
+                    ui.button(
+                        icon='star_border',
+                        on_click=lambda: show_add_to_list_dialog(res)
+                    ).props('flat round dense size=sm').classes('text-yellow-600').tooltip(tr('Add to list'))
+                    ui.label(f"#{i+1}").classes('text-xs text-gray-400')
+
+            # Title
+            if display.get('title'):
+                with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(display['title']).classes('text-xs text-gray-600 w-full')
+
+            # Snippet
+            with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                snippet_html = format_snippet(str(res.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>", sanitize=False)
+
     def render_results(results):
         results_container.clear()
 
         if not results:
             with results_container:
-                ui.label(tr("No results found.")).classes('w-full text-center text-gray-500 mt-4')
+                with ui.column().classes('w-full h-full items-center justify-center bg-gray-50'):
+                    ui.icon('search', size='4rem').classes('text-gray-300')
+                    ui.label(tr("Ready to search.")).classes('text-gray-400 mt-4')
             return
 
         with results_container:
-            # Use a column to ensure vertical stacking within the scroll area
-            with ui.column().classes('w-full gap-2'):
-                for i, res in enumerate(results):
-                    display = res.get('display', {})
-                    shelf = display.get('shelfmark', 'Unknown')
+            # Create scroll area for results
+            scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2')
+            with scroll:
+                # Use a column to ensure vertical stacking within the scroll area
+                with ui.column().classes('w-full gap-2'):
+                    for i, res in enumerate(results):
+                        display = res.get('display', {})
+                        shelf = display.get('shelfmark', 'Unknown')
 
-                    # Card
-                    # Note: We bind 'r=res' to capture the current item in the closure
-                    with ui.card().classes('w-full cursor-pointer hover:bg-green-50 transition-colors p-3 gap-1').on('click', lambda _, r=res: load_in_viewer(r)):
+                        # Create card with proper closure capture
+                        create_result_card(i, res, display, shelf)
 
-                        # Header: Shelfmark + Title
-                        with ui.row().classes('w-full justify-between'):
-                            ui.label(shelf).classes('font-bold text-primary text-sm')
-                            ui.label(f"#{i+1}").classes('text-xs text-gray-400')
-
-                        # Title
-                        if display.get('title'):
-                            ui.label(display['title']).classes('text-xs text-gray-600 truncate w-full')
-
-                        # Snippet
-                        snippet_html = format_snippet(str(res.get('snippet', '')))
-                        ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800 line-clamp-3'>{snippet_html}</div>")
-
-    # --- Viewer Integration (Step 6 Hook) ---
+    # --- Viewer Integration ---
     def load_in_viewer(result):
-        # This will be implemented in Step 6, but we can hook it up now
+        """Load result in the right panel viewer."""
         from web.pages import viewer
         if hasattr(viewer, 'load_result'):
             viewer.load_result(viewer_container, result)
         else:
+            # Fallback: basic viewer
             viewer_container.clear()
             with viewer_container:
-                ui.label("Viewer not implemented yet.").classes('text-red-500')
+                display = result.get('display', {})
+                ui.label(display.get('shelfmark', 'Unknown')).classes('text-xl font-bold text-primary mb-2')
+                if display.get('title'):
+                    ui.label(display['title']).classes('text-sm text-gray-600 mb-4')
+
+                # Show snippet
+                snippet_html = format_snippet(str(result.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{snippet_html}</div>", sanitize=False).classes('w-full')
+
+                # Browse button
+                sys_id = display.get('id')
+                if sys_id:
+                    ui.button(
+                        tr('Browse Full Manuscript'),
+                        icon='menu_book',
+                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    ).classes('mt-4 bg-primary text-white')
+
+    # --- Add to List Dialog ---
+    def show_add_to_list_dialog(result):
+        """Show dialog to add result to a personal list."""
+        display = result.get('display', {})
+        sys_id = display.get('id')
+        shelfmark = display.get('shelfmark', 'Unknown')
+
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-4'):
+            ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
+            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+
+            # Get available lists
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
+                else:
+                    selected_list = ui.select(
+                        list_options,
+                        label=tr('Select List'),
+                        value=list(list_options.keys())[0]
+                    ).classes('w-full mb-4')
+
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
+
+                    def add_to_list():
+                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                            ui.notify(tr('Added to list'), type='positive')
+                            dialog.close()
+                        else:
+                            ui.notify(tr('Already in list'), type='info')
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
+            else:
+                ui.label(tr('Lists manager not available')).classes('text-red-500')
+
+        dialog.open()
+
+    # Initialize with restored results (if any)
+    render_results(search_state.results[:100] if search_state.results else [])
