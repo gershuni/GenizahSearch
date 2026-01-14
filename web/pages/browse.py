@@ -23,6 +23,22 @@ from web.translations import tr, is_rtl
 # ============================================================================
 
 VIEWER_STYLES = '''
+<script>
+// Global function for handling image errors with fallback
+function handleImageError(img, fallbackUrl) {
+    if (fallbackUrl && img.src !== fallbackUrl) {
+        console.log('IIIF image failed, trying Rosetta fallback');
+        img.src = fallbackUrl;
+    } else {
+        console.log('All image sources failed');
+        img.style.display = 'none';
+        const parent = img.parentElement;
+        if (parent) {
+            parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
+        }
+    }
+}
+</script>
 <style>
     /* Image viewer container */
     .image-viewer-container {
@@ -46,7 +62,9 @@ VIEWER_STYLES = '''
     }
 
     .image-container img {
-        max-width: none;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
         transition: transform 0.2s ease-out;
         cursor: grab;
     }
@@ -126,20 +144,39 @@ VIEWER_STYLES = '''
 
     /* Metadata header */
     .metadata-header {
-        background: linear-gradient(135deg, #15803d, #166534);
+        background: linear-gradient(135deg, #15803d 0%, #166534 50%, #14532d 100%);
         color: white;
-        padding: 24px 28px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(22, 101, 52, 0.25);
+        padding: 28px 32px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 6px 20px rgba(22, 101, 52, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    .metadata-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 10px,
+            rgba(255,255,255,0.03) 10px,
+            rgba(255,255,255,0.03) 20px
+        );
+        pointer-events: none;
     }
 
     .shelfmark-title {
-        font-size: 2rem;
+        font-size: 2.2rem;
         font-weight: 800;
         margin-bottom: 12px;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         letter-spacing: 0.5px;
+        position: relative;
     }
 
     .metadata-row {
@@ -163,11 +200,16 @@ VIEWER_STYLES = '''
     /* Navigation bar */
     .navigation-bar {
         background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
-        border: 2px solid #cbd5e1;
-        border-radius: 10px;
-        padding: 16px 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 2px solid #c8e6c9;
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+    }
+    .navigation-bar:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        border-color: #4caf50;
     }
 
     /* Source badge styling */
@@ -492,8 +534,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.column().classes('items-end gap-2'):
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                         with ui.link(target=ktiv_url, new_tab=True).classes(
-                            'flex items-center gap-2 px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg transition-all'
-                        ).style('text-decoration: none; color: white;'):
+                            'flex items-center gap-2 px-4 py-2 rounded-lg transition-all'
+                        ).style('text-decoration: none; color: white; background: rgba(255, 255, 255, 0.25); border: 2px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(4px);'):
                             ui.icon('open_in_new', size='sm')
                             ui.label(tr('Open in Ktiv')).classes('font-semibold')
 
@@ -549,7 +591,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # === Main Viewer Panels ===
             fullscreen_class = 'fullscreen-mode' if state.is_fullscreen else ''
 
-            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}'):
+            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}').style('display: flex; flex-direction: row;'):
                 # LEFT: Image Viewer (60%)
                 with ui.column().classes('image-panel').style('width: 60%;'):
                     with ui.element('div').classes('image-viewer-container'):
@@ -557,19 +599,50 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         with ui.element('div').classes('image-container'):
                             # Determine image URL with fallback logic
                             img_url = None
-                            if page.image_url and page.image_url.strip():
-                                img_url = page.image_url
-                            elif page.fl_id:
-                                digits = re.sub(r"\D", "", str(page.fl_id))
+                            fallback_url = None
+
+                            # Debug: Print image info
+                            print(f"[DEBUG] Page FL ID: {page.fl_id}, Image URL: {page.image_url}")
+
+                            # Extract FL ID from any source
+                            fl_id = page.fl_id
+                            if not fl_id and page.image_url:
+                                # Try to extract FL ID from IIIF URL
+                                match = re.search(r'FL(\d+)', page.image_url)
+                                if match:
+                                    fl_id = match.group(1)
+
+                            if fl_id:
+                                digits = re.sub(r"\D", "", str(fl_id))
                                 if digits:
-                                    img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                                    # Use Rosetta as primary (IIIF has authorization issues)
+                                    img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                                    # Keep original IIIF as fallback (though it may not work)
+                                    if page.image_url and 'iiif.nli.org.il' in page.image_url:
+                                        fallback_url = page.image_url
+                                    else:
+                                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                                    print(f"[DEBUG] Using Rosetta URL (FL{digits}): {img_url}")
+                                else:
+                                    print(f"[DEBUG] No digits found in FL ID: {fl_id}")
+                            else:
+                                print(f"[DEBUG] No FL ID available")
 
                             if img_url:
-                                ui.image(img_url).classes(
-                                    'zoomable-image'
-                                ).style(
-                                    f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                ).props('loading="lazy"')
+                                # Use HTML img tag without crossorigin (causes issues with Rosetta)
+                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+
+                                img_html = f'''
+                                <img
+                                    src="{safe_img_url}"
+                                    class="zoomable-image"
+                                    style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
+                                    loading="lazy"
+                                    onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                />
+                                '''
+                                ui.html(img_html, sanitize=False)
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')

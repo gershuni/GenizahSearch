@@ -3046,20 +3046,86 @@ class MetadataManager:
         self.save_caches()
 
     def search_by_meta(self, query, field):
-        """Search for system IDs where the specified field matches the query."""
+        """Search for system IDs where the specified field matches the query.
+
+        Uses precise matching to avoid false positives like 120.2 matching 120.25.
+        First tries exact match, then word-boundary aware substring match.
+        """
         results = set()
-        q_norm = query.lower()
+        q_norm = query.lower().strip()
+
+        # Helper function for smart matching
+        def matches(value, query_norm):
+            val_norm = value.lower().strip()
+
+            # 1. Exact match
+            if val_norm == query_norm:
+                return True
+
+            # 2. For shelfmarks, use precise sequential token matching
+            # Split by spaces, dots, hyphens to avoid 12.4 matching 121.4
+            if field == 'shelfmark':
+                # Tokenize both query and value
+                val_tokens = [t for t in re.split(r'[\s\.\-]+', val_norm) if t]
+                query_tokens = [t for t in re.split(r'[\s\.\-]+', query_norm) if t]
+
+                if not query_tokens:
+                    return False
+
+                # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
+                # Query: ["t", "s", "ns", "12", "4"]
+                # Value: ["t", "s", "ns", "121", "4"] -> NO MATCH (12 != 121)
+                # Value: ["t", "s", "ns", "12", "4"] -> MATCH
+
+                query_idx = 0
+                val_idx = 0
+
+                while query_idx < len(query_tokens) and val_idx < len(val_tokens):
+                    qt = query_tokens[query_idx]
+                    vt = val_tokens[val_idx]
+
+                    # Check if tokens match
+                    if qt == vt:
+                        # Exact match - advance both
+                        query_idx += 1
+                        val_idx += 1
+                    elif vt.startswith(qt):
+                        # Prefix match - only allow if both are not purely numeric
+                        # This prevents "12" from matching "121" but allows "8j6" to match "8j6a"
+                        if qt.isdigit() and vt.isdigit():
+                            # Both numeric: must be exact or vt must start with qt followed by non-digit
+                            # "12" can match "12" but not "121"
+                            # To allow "12" to be prefix of "12a", we need to check the next char
+                            if len(vt) > len(qt) and vt[len(qt)].isdigit():
+                                # Next char is digit, so "12" doesn't match "121"
+                                val_idx += 1  # Try next token
+                                continue
+                        # Valid prefix match
+                        query_idx += 1
+                        val_idx += 1
+                    else:
+                        # No match, try next value token
+                        val_idx += 1
+
+                # Success if all query tokens were matched
+                return query_idx == len(query_tokens)
+
+            # 3. For other fields (title), use substring match
+            else:
+                return query_norm in val_norm
+
+            return False
 
         # 1. Search in CSV Bank (Fastest)
         for sys_id, data in self.csv_bank.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         # 2. Search in NLI Cache (for items not in CSV or updated)
         for sys_id, data in self.nli_cache.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         return list(results)
