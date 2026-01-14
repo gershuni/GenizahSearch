@@ -236,7 +236,7 @@ def parallels_page_route():
         create_parallels_page()
 
 @ui.page('/browse')
-def browse_page_route():
+def browse_page_route(sys_id: str = None, highlight: str = None):
     app.storage.user['current_page'] = '/browse'
     ui.add_head_html(COMMON_STYLES)
     current_theme = app.storage.user.get('theme', 'light')
@@ -245,7 +245,7 @@ def browse_page_route():
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page()
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight)
 
 @ui.page('/lists')
 def lists_page_route():
@@ -255,7 +255,8 @@ def lists_page_route():
     ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
     content = create_layout()
     with content:
-        ui.label("Personal Lists").classes('text-2xl font-bold opacity-80')
+        from web.pages.lists import create_lists_page
+        create_lists_page()
 
 @ui.page('/settings')
 def settings_page_route():

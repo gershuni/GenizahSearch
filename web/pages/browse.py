@@ -375,6 +375,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.current_page = page
                 state.page_input_value = page.p_num
                 state.error = None
+
+                # Track recently viewed item
+                if state.sys_id and service.is_ready:
+                    try:
+                        from web.state import state as app_state
+                        if app_state.lists_mgr:
+                            app_state.lists_mgr.add_to_recent(state.sys_id, fl_id=page.fl_id)
+                    except Exception as track_err:
+                        print(f"Failed to track recent item: {track_err}")
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 

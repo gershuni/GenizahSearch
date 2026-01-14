@@ -90,9 +90,12 @@ def create_search_page():
 
             # --- LEFT: Result List ---
             with splitter.before:
-                results_container = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2 gap-2')
+                results_container = ui.column().classes('w-full h-full')
                 with results_container:
-                    ui.label(tr("Ready to search.")).classes('text-gray-400 text-center mt-10 w-full')
+                    # Initial placeholder
+                    results_scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2')
+                    with results_scroll:
+                        ui.label(tr("Ready to search.")).classes('text-gray-400 text-center mt-10 w-full')
 
             # --- RIGHT: Viewer (Placeholder for now) ---
             with splitter.after:
@@ -221,40 +224,118 @@ def create_search_page():
 
         if not results:
             with results_container:
-                ui.label(tr("No results found.")).classes('w-full text-center text-gray-500 mt-4')
+                scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-4')
+                with scroll:
+                    ui.label(tr("No results found.")).classes('w-full text-center text-gray-500 mt-4')
             return
 
         with results_container:
-            # Use a column to ensure vertical stacking within the scroll area
-            with ui.column().classes('w-full gap-2'):
-                for i, res in enumerate(results):
-                    display = res.get('display', {})
-                    shelf = display.get('shelfmark', 'Unknown')
+            # Create scroll area for results
+            scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2')
+            with scroll:
+                # Use a column to ensure vertical stacking within the scroll area
+                with ui.column().classes('w-full gap-2'):
+                    for i, res in enumerate(results):
+                        display = res.get('display', {})
+                        shelf = display.get('shelfmark', 'Unknown')
 
-                    # Card
-                    # Note: We bind 'r=res' to capture the current item in the closure
-                    with ui.card().classes('w-full cursor-pointer hover:bg-green-50 transition-colors p-3 gap-1').on('click', lambda _, r=res: load_in_viewer(r)):
+                        # Card
+                        # Note: We bind 'r=res' to capture the current item in the closure
+                        with ui.card().classes('w-full hover:bg-green-50 transition-colors p-3 gap-1'):
 
-                        # Header: Shelfmark + Title
-                        with ui.row().classes('w-full justify-between'):
-                            ui.label(shelf).classes('font-bold text-primary text-sm')
-                            ui.label(f"#{i+1}").classes('text-xs text-gray-400')
+                            # Header: Shelfmark + Actions
+                            with ui.row().classes('w-full justify-between items-start'):
+                                with ui.column().classes('flex-grow cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
+                                    ui.label(shelf).classes('font-bold text-primary text-sm')
+                                with ui.row().classes('gap-1 items-center'):
+                                    # Add to list button
+                                    ui.button(
+                                        icon='star_border',
+                                        on_click=lambda _, r=res: show_add_to_list_dialog(r)
+                                    ).props('flat round dense size=sm').classes('text-yellow-600').tooltip(tr('Add to list'))
+                                    ui.label(f"#{i+1}").classes('text-xs text-gray-400')
 
-                        # Title
-                        if display.get('title'):
-                            ui.label(display['title']).classes('text-xs text-gray-600 truncate w-full')
+                            # Title
+                            if display.get('title'):
+                                with ui.column().classes('w-full cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
+                                    ui.label(display['title']).classes('text-xs text-gray-600 w-full')
 
-                        # Snippet
-                        snippet_html = format_snippet(str(res.get('snippet', '')))
-                        ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800 line-clamp-3'>{snippet_html}</div>")
+                            # Snippet
+                            with ui.column().classes('w-full cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
+                                snippet_html = format_snippet(str(res.get('snippet', '')))
+                                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>")
 
-    # --- Viewer Integration (Step 6 Hook) ---
+    # --- Viewer Integration ---
     def load_in_viewer(result):
-        # This will be implemented in Step 6, but we can hook it up now
+        """Load result in the right panel viewer."""
         from web.pages import viewer
         if hasattr(viewer, 'load_result'):
             viewer.load_result(viewer_container, result)
         else:
+            # Fallback: basic viewer
             viewer_container.clear()
             with viewer_container:
-                ui.label("Viewer not implemented yet.").classes('text-red-500')
+                display = result.get('display', {})
+                ui.label(display.get('shelfmark', 'Unknown')).classes('text-xl font-bold text-primary mb-2')
+                if display.get('title'):
+                    ui.label(display['title']).classes('text-sm text-gray-600 mb-4')
+
+                # Show snippet
+                snippet_html = format_snippet(str(result.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{snippet_html}</div>").classes('w-full')
+
+                # Browse button
+                sys_id = display.get('id')
+                if sys_id:
+                    ui.button(
+                        tr('Browse Full Manuscript'),
+                        icon='menu_book',
+                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    ).classes('mt-4 bg-primary text-white')
+
+    # --- Add to List Dialog ---
+    def show_add_to_list_dialog(result):
+        """Show dialog to add result to a personal list."""
+        display = result.get('display', {})
+        sys_id = display.get('id')
+        shelfmark = display.get('shelfmark', 'Unknown')
+
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-4'):
+            ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
+            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+
+            # Get available lists
+            if state.lists_mgr:
+                lists = state.lists_mgr.get_lists()
+                list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
+                else:
+                    selected_list = ui.select(
+                        list_options,
+                        label=tr('Select List'),
+                        value=list(list_options.keys())[0]
+                    ).classes('w-full mb-4')
+
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
+
+                    def add_to_list():
+                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                            ui.notify(tr('Added to list'), type='positive')
+                            dialog.close()
+                        else:
+                            ui.notify(tr('Already in list'), type='info')
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
+            else:
+                ui.label(tr('Lists manager not available')).classes('text-red-500')
+
+        dialog.open()
