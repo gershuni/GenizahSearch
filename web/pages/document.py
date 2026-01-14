@@ -44,7 +44,7 @@ def create_document_page(uid: str):
 
         try:
             # Extract system ID from UID
-            state.sys_id = service.extract_sys_id(uid)
+            state.sys_id = service.resolve_sys_id(uid)
 
             # Try different methods to load the document
             browse_result = None
@@ -143,7 +143,7 @@ def create_document_page(uid: str):
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error', size='3rem').classes('text-red-500')
                     ui.label(state.error).classes('text-red-600 mt-2')
-                    ui.button(tr('Back'), on_click=lambda: ui.navigate.to('/search')).classes('mt-4')
+                    ui.button(tr('Back'), on_click=lambda: ui.run_javascript('history.back()')).classes('mt-4')
                 return
 
             if not state.pages:
@@ -233,7 +233,7 @@ def create_document_page(uid: str):
             ui.button(
                 tr('Back'),
                 icon='arrow_back',
-                on_click=lambda: ui.navigate.to('/search')
+                on_click=lambda: ui.run_javascript('history.back()')
             ).props('flat')
 
         # Metadata card

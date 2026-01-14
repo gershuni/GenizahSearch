@@ -215,6 +215,8 @@ class GenizahService:
             # Metadata cache for web requests (TTL-based)
             self._metadata_cache: Dict[str, Tuple[Dict, float]] = {}
             self._cache_ttl = 300  # 5 minutes
+            self._uid_sys_id_cache: Dict[str, Tuple[str, float]] = {}
+            self._uid_cache_ttl = 3600  # 1 hour
 
             GenizahService._initialized = True
 
@@ -408,7 +410,10 @@ class GenizahService:
                     if isinstance(display, str):
                         display = {'shelfmark': display, 'title': '', 'img': '', 'source': '', 'id': ''}
 
-                    sys_id = display.get('id', '') or self.extract_sys_id(r.get('uid', ''))
+                    sys_id = display.get('id', '') or self.extract_sys_id(
+                        r.get('raw_header', '') or r.get('uid', '')
+                    )
+                    self.cache_uid_sys_id(r.get('uid', ''), sys_id)
 
                     # Extract page highlights for cross-page results
                     page_highlights = r.get('page_highlights', [])
@@ -505,6 +510,7 @@ class GenizahService:
                         display=display,
                         uid=r.get('uid', '')
                     ))
+                    self.cache_uid_sys_id(r.get('uid', ''), sys_id)
 
                 return results
 
@@ -658,6 +664,47 @@ class GenizahService:
                 # Build image URLs
                 thumb_url = get_thumbnail_url(fl_id) if fl_id else None
                 image_url = get_full_image_url(fl_id) if fl_id else None
+
+                if not image_url:
+                    enriched = self._meta_mgr.enrich_metadata(result.get('sys_id', sys_id))
+                    images = enriched.get('images_ext') or enriched.get('images_nli') or enriched.get('images', [])
+                    if images:
+                        idx = 0
+                        folio_entries = []
+                        if p_num is not None:
+                            for i, img in enumerate(images):
+                                folio_num = img.get('folio_num')
+                                if folio_num is None:
+                                    continue
+                                try:
+                                    folio_entries.append((i, int(folio_num)))
+                                except (TypeError, ValueError):
+                                    continue
+                            try:
+                                p_val = int(p_num)
+                            except (TypeError, ValueError):
+                                p_val = None
+                            if folio_entries and p_val is not None:
+                                match = next((i for i, num in folio_entries if num == p_val), None)
+                                if match is not None:
+                                    idx = match
+                                else:
+                                    prior = [(i, num) for i, num in folio_entries if num <= p_val]
+                                    if prior:
+                                        idx = max(prior, key=lambda pair: pair[1])[0]
+                                    else:
+                                        idx = min(folio_entries, key=lambda pair: pair[1])[0]
+                            elif p_val is not None:
+                                idx = max(p_val - 1, 0)
+                        if idx >= len(images):
+                            idx = len(images) - 1
+                        img = images[idx]
+                        fl_id = fl_id or img.get('fl_id')
+                        thumb_url = img.get('thumb_url') or (get_thumbnail_url(fl_id) if fl_id else None)
+                        url = img.get('url', '')
+                        image_url = build_iiif_image_url(url, 'full') if url else (
+                            get_full_image_url(fl_id) if fl_id else None
+                        )
 
                 return BrowsePage(
                     uid=result.get('uid', ''),
@@ -1128,6 +1175,24 @@ class GenizahService:
             return match.group(1)
 
         return ''
+
+    def cache_uid_sys_id(self, uid: str, sys_id: str) -> None:
+        """Cache UID to system ID mapping for later resolution."""
+        if not uid or not sys_id:
+            return
+        self._uid_sys_id_cache[uid] = (sys_id, time.time())
+
+    def resolve_sys_id(self, uid_or_header: str) -> str:
+        """Resolve sys_id using cache first, then fallback extraction."""
+        if not uid_or_header:
+            return ''
+        cached = self._uid_sys_id_cache.get(uid_or_header)
+        if cached:
+            sys_id, cached_at = cached
+            if time.time() - cached_at < self._uid_cache_ttl:
+                return sys_id
+            self._uid_sys_id_cache.pop(uid_or_header, None)
+        return self.extract_sys_id(uid_or_header)
 
     def parse_header(self, full_header: str) -> Dict[str, str]:
         """Parse a full header into components."""

@@ -550,13 +550,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.element('div').classes('image-viewer-container'):
                         # Image container
                         with ui.element('div').classes('image-container'):
-                            if page.fl_id:
-                                # Build IIIF URL
-                                digits = re.sub(r"\D", "", str(page.fl_id))
-                                if digits:
-                                    # Use a reasonable default size
-                                    img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/1000,/0/default.jpg"
+                            if page.image_url or page.fl_id:
+                                img_url = page.image_url
+                                if not img_url and page.fl_id:
+                                    digits = re.sub(r"\D", "", str(page.fl_id))
+                                    if digits:
+                                        img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/1000,/0/default.jpg"
 
+                                if img_url:
                                     ui.image(img_url).classes(
                                         'zoomable-image'
                                     ).style(
@@ -628,9 +629,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Source badge
                                 source_class = get_source_badge_class(page.full_header)
                                 source_text = 'V0.8' if 'V0.8' in page.full_header else 'V0.7'
-                                ui.element('span').classes(
+                                ui.label(source_text).classes(
                                     f'source-badge {source_class}'
-                                ).text(source_text)
+                                )
 
                         # Transcription content
                         with ui.scroll_area().classes('transcription-content'):
