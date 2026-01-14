@@ -46,20 +46,10 @@ def create_document_page(uid: str):
             # Extract system ID from UID
             state.sys_id = service.extract_sys_id(uid)
 
-            # Try to extract FL ID for browse by FL
-            fl_match = doc_re.search(r'FL(\d+)', uid)
-            fl_id = fl_match.group(1) if fl_match else None
-
             # Try different methods to load the document
             browse_result = None
 
-            # Method 1: Try by FL ID first (most reliable for IE format)
-            if fl_id:
-                browse_result = service.get_browse_page_by_fl(fl_id, state.sys_id)
-                if browse_result:
-                    state.sys_id = browse_result.sys_id or state.sys_id
-
-            # Method 2: Try by sys_id
+            # Method 1: Try by sys_id
             if not browse_result and state.sys_id:
                 # Try with IE prefix
                 for sys_id_variant in [state.sys_id, f'IE{state.sys_id}']:

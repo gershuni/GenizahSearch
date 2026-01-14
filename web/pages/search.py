@@ -84,8 +84,6 @@ def create_search_page():
     """Create the advanced search page UI."""
     state = SearchState()
     service = get_service()
-    results_container = None
-    search_input_ref = None
 
     # Add custom styles for this page
     ui.add_head_html('''
@@ -185,14 +183,6 @@ def create_search_page():
             border-radius: 20px !important;
         }
 
-        /* Gap Slider */
-        .gap-slider .q-slider__track-container {
-            background-color: #c8e6c9 !important;
-        }
-        .gap-slider .q-slider__track--left {
-            background-color: #4caf50 !important;
-        }
-
         /* No Results */
         .no-results-box {
             text-align: center;
@@ -224,13 +214,13 @@ def create_search_page():
 
         if not service.is_ready:
             state.error = tr('Service not available')
-            update_results()
+            render_results.refresh()
             return
 
         state.is_searching = True
         state.error = None
         state.current_page = 0
-        update_results()
+        render_results.refresh()
 
         def run_search():
             """Run search in background thread."""
@@ -256,20 +246,14 @@ def create_search_page():
 
         finally:
             state.is_searching = False
-            update_results()
+            render_results.refresh()
 
     def set_search_mode(mode: str):
         """Update the search mode."""
         state.mode = mode
-        update_mode_display()
+        render_mode_selector.refresh()
 
-    def update_mode_display():
-        """Update the mode selector display."""
-        if hasattr(state, 'mode_container') and state.mode_container:
-            state.mode_container.clear()
-            with state.mode_container:
-                render_mode_selector()
-
+    @ui.refreshable
     def render_mode_selector():
         """Render the search mode selector with visual cards."""
         with ui.row().classes('flex-wrap gap-2'):
@@ -292,168 +276,167 @@ def create_search_page():
         ui.run_javascript(f'navigator.clipboard.writeText({repr(text)})')
         ui.notify(tr('Text copied'), type='positive', position='bottom')
 
-    def update_results():
-        """Update the results display."""
-        results_container.clear()
-
-        with results_container:
-            if state.is_searching:
-                with ui.column().classes('w-full search-loading'):
-                    ui.spinner('dots', size='xl', color='green')
-                    ui.label(tr('Searching...')).classes('text-xl text-gray-600 mt-4')
-                    ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
-                return
-
-            if state.error:
-                with ui.card().classes('w-full p-6 bg-red-50 border-red-200'):
-                    with ui.row().classes('items-center gap-3'):
-                        ui.icon('error', size='lg').classes('text-red-500')
-                        with ui.column():
-                            ui.label(tr('Error')).classes('font-bold text-red-700')
-                            ui.label(state.error).classes('text-red-600')
-                return
-
-            if not state.results:
-                if state.query:
-                    with ui.column().classes('w-full no-results-box'):
-                        ui.icon('search_off', size='4rem').classes('text-gray-300')
-                        ui.label(tr('No results found')).classes('text-2xl text-gray-500 mt-4')
-                        ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
-
-                        with ui.column().classes('mt-6'):
-                            ui.label(tr('Search tips')).classes('font-medium text-gray-600 mb-2')
-                            with ui.column().classes('text-gray-500 text-sm'):
-                                ui.label(tr('Try different search mode'))
-                                ui.label(tr('Check spelling'))
-                                ui.label(tr('Use fewer words'))
-                else:
-                    # Initial state - show search tips
-                    with ui.column().classes('w-full items-center py-8'):
-                        ui.icon('tips_and_updates', size='3rem').classes('text-green-300')
-                        ui.label(tr('Enter Hebrew text to search')).classes(
-                            'text-xl text-gray-500 mt-4'
-                        )
-                return
-
-            # Results stats bar
-            with ui.row().classes('w-full stats-bar items-center justify-between'):
-                with ui.row().classes('items-center gap-3'):
-                    ui.icon('analytics', size='sm').classes('text-green-700')
-                    ui.label(f"{state.result_count} {tr('results found')}").classes(
-                        'font-bold text-green-800'
-                    )
-
-                with ui.row().classes('items-center gap-2'):
-                    ui.label(f'{tr("Search mode")}: {tr(dict((m[0], m[1]) for m in SEARCH_MODES).get(state.mode, state.mode))}').classes(
-                        'text-sm text-green-700'
-                    )
-                    if state.gap > 0:
-                        ui.label(f' | {tr("Word gap")}: {state.gap}').classes('text-sm text-green-700')
-
-            # Pagination info
-            start_idx = state.current_page * state.results_per_page
-            end_idx = min(start_idx + state.results_per_page, state.result_count)
-            page_results = state.results[start_idx:end_idx]
-            total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
-
-            # Results list - inline card creation for proper context handling
-            for result in page_results:
-                display = result.display
-                shelfmark = display.get('shelfmark', '') if isinstance(display, dict) else str(display)
-                title = display.get('title', '') if isinstance(display, dict) else ''
-                img_num = display.get('img', '') if isinstance(display, dict) else ''
-                source = result.source or 'V0.8'
-                source_class = 'source-v08' if 'V0.8' in source or '0.8' in source else 'source-v07'
-
-                with ui.card().classes('w-full result-card'):
-                    # Header row with metadata
-                    with ui.row().classes('w-full items-start justify-between'):
-                        # Left side - metadata
-                        with ui.column().classes('flex-1'):
-                            # Top line: shelfmark, badges
-                            with ui.row().classes('items-center gap-3 flex-wrap'):
-                                ui.label(shelfmark or f"ID: {result.sys_id}").classes(
-                                    'text-lg font-bold text-green-800 cursor-pointer hover:text-green-600'
-                                ).on('click', lambda r=result: ui.navigate.to(f'/document/{r.uid}'))
-
-                                if img_num:
-                                    with ui.element('span').classes('source-badge source-v08'):
-                                        ui.label(f"p. {img_num}")
-
-                                with ui.element('span').classes(f'source-badge {source_class}'):
-                                    ui.label(source)
-
-                                if result.cross_page:
-                                    with ui.element('span').classes('source-badge').style(
-                                        'background-color: #fff3e0; color: #e65100;'
-                                    ):
-                                        ui.icon('layers', size='xs').classes('mr-1')
-                                        ui.label(tr('Cross-page match'))
-
-                            if title:
-                                ui.label(title).classes(
-                                    'text-gray-600 rtl-text hebrew-text mt-2 text-base'
-                                )
-
-                        # Right side - action buttons
-                        with ui.row().classes('gap-2'):
-                            ui.button(
-                                tr('View'),
-                                icon='visibility',
-                                on_click=lambda r=result: ui.navigate.to(f'/document/{r.uid}')
-                            ).props('flat dense color=green').classes('action-btn')
-
-                            if result.sys_id:
-                                ui.button(
-                                    icon='menu_book',
-                                    on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
-                                ).props('flat dense color=grey').tooltip(tr('Browse Manuscripts'))
-
-                            if result.snippet:
-                                ui.button(
-                                    icon='content_copy',
-                                    on_click=lambda r=result: copy_text(r.snippet)
-                                ).props('flat dense color=grey').tooltip(tr('Copy text'))
-
-                    # Snippet with highlighted matches
-                    if result.snippet:
-                        snippet_text = result.snippet[:500]
-                        if len(result.snippet) > 500:
-                            snippet_text += '...'
-                        highlighted_snippet = convert_highlight_markers(snippet_text)
-                        with ui.element('div').classes('snippet-box'):
-                            ui.html(highlighted_snippet, sanitize=False)
-
-            # Pagination controls
-            if total_pages > 1:
-                with ui.row().classes('w-full justify-center items-center gap-4 mt-6 py-4'):
-                    # Previous button
-                    ui.button(
-                        icon='chevron_right' if is_rtl() else 'chevron_left',
-                        on_click=lambda: go_to_page(state.current_page - 1)
-                    ).props('flat round').classes(
-                        '' if state.current_page > 0 else 'invisible'
-                    )
-
-                    # Page info
-                    ui.label(f'{tr("Page")} {state.current_page + 1} {tr("of")} {total_pages}').classes(
-                        'text-gray-600'
-                    )
-
-                    # Next button
-                    ui.button(
-                        icon='chevron_left' if is_rtl() else 'chevron_right',
-                        on_click=lambda: go_to_page(state.current_page + 1)
-                    ).props('flat round').classes(
-                        '' if state.current_page < total_pages - 1 else 'invisible'
-                    )
-
     def go_to_page(page: int):
         """Navigate to a specific results page."""
         total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
         if 0 <= page < total_pages:
             state.current_page = page
-            update_results()
+            render_results.refresh()
+
+    @ui.refreshable
+    def render_results():
+        """Render the search results using @ui.refreshable for proper updates."""
+        if state.is_searching:
+            with ui.column().classes('w-full search-loading'):
+                ui.spinner('dots', size='xl', color='green')
+                ui.label(tr('Searching...')).classes('text-xl text-gray-600 mt-4')
+                ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
+            return
+
+        if state.error:
+            with ui.card().classes('w-full p-6 bg-red-50 border-red-200'):
+                with ui.row().classes('items-center gap-3'):
+                    ui.icon('error', size='lg').classes('text-red-500')
+                    with ui.column():
+                        ui.label(tr('Error')).classes('font-bold text-red-700')
+                        ui.label(state.error).classes('text-red-600')
+            return
+
+        if not state.results:
+            if state.query:
+                with ui.column().classes('w-full no-results-box'):
+                    ui.icon('search_off', size='4rem').classes('text-gray-300')
+                    ui.label(tr('No results found')).classes('text-2xl text-gray-500 mt-4')
+                    ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
+
+                    with ui.column().classes('mt-6'):
+                        ui.label(tr('Search tips')).classes('font-medium text-gray-600 mb-2')
+                        with ui.column().classes('text-gray-500 text-sm'):
+                            ui.label(tr('Try different search mode'))
+                            ui.label(tr('Check spelling'))
+                            ui.label(tr('Use fewer words'))
+            else:
+                # Initial state - show search tips
+                with ui.column().classes('w-full items-center py-8'):
+                    ui.icon('tips_and_updates', size='3rem').classes('text-green-300')
+                    ui.label(tr('Enter Hebrew text to search')).classes(
+                        'text-xl text-gray-500 mt-4'
+                    )
+            return
+
+        # Results stats bar
+        with ui.row().classes('w-full stats-bar items-center justify-between'):
+            with ui.row().classes('items-center gap-3'):
+                ui.icon('analytics', size='sm').classes('text-green-700')
+                ui.label(f"{state.result_count} {tr('results found')}").classes(
+                    'font-bold text-green-800'
+                )
+
+            with ui.row().classes('items-center gap-2'):
+                mode_labels = {m[0]: m[1] for m in SEARCH_MODES}
+                ui.label(f'{tr("Search mode")}: {tr(mode_labels.get(state.mode, state.mode))}').classes(
+                    'text-sm text-green-700'
+                )
+                if state.gap > 0:
+                    ui.label(f' | {tr("Word gap")}: {state.gap}').classes('text-sm text-green-700')
+
+        # Pagination info
+        start_idx = state.current_page * state.results_per_page
+        end_idx = min(start_idx + state.results_per_page, state.result_count)
+        page_results = state.results[start_idx:end_idx]
+        total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
+
+        # Results list - render each card
+        for result in page_results:
+            display = result.display
+            shelfmark = display.get('shelfmark', '') if isinstance(display, dict) else str(display)
+            title = display.get('title', '') if isinstance(display, dict) else ''
+            img_num = display.get('img', '') if isinstance(display, dict) else ''
+            source = result.source or 'V0.8'
+            source_class = 'source-v08' if 'V0.8' in source or '0.8' in source else 'source-v07'
+
+            with ui.card().classes('w-full result-card'):
+                # Header row with metadata
+                with ui.row().classes('w-full items-start justify-between'):
+                    # Left side - metadata
+                    with ui.column().classes('flex-1'):
+                        # Top line: shelfmark, badges
+                        with ui.row().classes('items-center gap-3 flex-wrap'):
+                            ui.label(shelfmark or f"ID: {result.sys_id}").classes(
+                                'text-lg font-bold text-green-800 cursor-pointer hover:text-green-600'
+                            ).on('click', lambda r=result: ui.navigate.to(f'/document/{r.uid}'))
+
+                            if img_num:
+                                with ui.element('span').classes('source-badge source-v08'):
+                                    ui.label(f"p. {img_num}")
+
+                            with ui.element('span').classes(f'source-badge {source_class}'):
+                                ui.label(source)
+
+                            if result.cross_page:
+                                with ui.element('span').classes('source-badge').style(
+                                    'background-color: #fff3e0; color: #e65100;'
+                                ):
+                                    ui.icon('layers', size='xs').classes('mr-1')
+                                    ui.label(tr('Cross-page match'))
+
+                        if title:
+                            ui.label(title).classes(
+                                'text-gray-600 rtl-text hebrew-text mt-2 text-base'
+                            )
+
+                    # Right side - action buttons
+                    with ui.row().classes('gap-2'):
+                        ui.button(
+                            tr('View'),
+                            icon='visibility',
+                            on_click=lambda r=result: ui.navigate.to(f'/document/{r.uid}')
+                        ).props('flat dense color=green').classes('action-btn')
+
+                        if result.sys_id:
+                            ui.button(
+                                icon='menu_book',
+                                on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
+                            ).props('flat dense color=grey').tooltip(tr('Browse Manuscripts'))
+
+                        if result.snippet:
+                            ui.button(
+                                icon='content_copy',
+                                on_click=lambda r=result: copy_text(r.snippet)
+                            ).props('flat dense color=grey').tooltip(tr('Copy text'))
+
+                # Snippet with highlighted matches
+                if result.snippet:
+                    snippet_text = result.snippet[:500]
+                    if len(result.snippet) > 500:
+                        snippet_text += '...'
+                    highlighted_snippet = convert_highlight_markers(snippet_text)
+                    with ui.element('div').classes('snippet-box'):
+                        ui.html(highlighted_snippet, sanitize=False)
+
+        # Pagination controls
+        if total_pages > 1:
+            with ui.row().classes('w-full justify-center items-center gap-4 mt-6 py-4'):
+                # Previous button
+                ui.button(
+                    icon='chevron_right' if is_rtl() else 'chevron_left',
+                    on_click=lambda: go_to_page(state.current_page - 1)
+                ).props('flat round').classes(
+                    '' if state.current_page > 0 else 'invisible'
+                )
+
+                # Page info
+                ui.label(f'{tr("Page")} {state.current_page + 1} {tr("of")} {total_pages}').classes(
+                    'text-gray-600'
+                )
+
+                # Next button
+                ui.button(
+                    icon='chevron_left' if is_rtl() else 'chevron_right',
+                    on_click=lambda: go_to_page(state.current_page + 1)
+                ).props('flat round').classes(
+                    '' if state.current_page < total_pages - 1 else 'invisible'
+                )
 
     # =========================================================================
     # Main Layout
@@ -479,7 +462,7 @@ def create_search_page():
                     )
 
                     with ui.row().classes('w-full gap-3'):
-                        search_input_ref = ui.input(
+                        search_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
                             value=state.query
                         ).classes(
@@ -488,7 +471,7 @@ def create_search_page():
                             'outlined rounded standout="bg-green-50"'
                         ).on('keydown.enter', do_search)
 
-                        search_input_ref.bind_value(state, 'query')
+                        search_input.bind_value(state, 'query')
 
                         # Search button - prominent
                         ui.button(
@@ -502,9 +485,7 @@ def create_search_page():
                     ui.label(tr('Search mode')).classes(
                         'text-sm font-medium text-gray-600 mb-2'
                     )
-                    state.mode_container = ui.element('div').classes('w-full')
-                    with state.mode_container:
-                        render_mode_selector()
+                    render_mode_selector()
 
                 # Advanced options expansion
                 with ui.expansion(
@@ -541,7 +522,7 @@ def create_search_page():
                                 state.results_per_page = e.value
                                 state.current_page = 0
                                 if state.results:
-                                    update_results()
+                                    render_results.refresh()
 
                             ui.select(
                                 {25: '25', 50: '50', 100: '100', 200: '200'},
@@ -564,8 +545,5 @@ def create_search_page():
                             'text-amber-700 text-sm'
                         )
 
-        # Results container
-        results_container = ui.column().classes('w-full')
-
-        # Initial state
-        update_results()
+        # Results container - using @ui.refreshable
+        render_results()
