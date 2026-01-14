@@ -215,6 +215,8 @@ class GenizahService:
             # Metadata cache for web requests (TTL-based)
             self._metadata_cache: Dict[str, Tuple[Dict, float]] = {}
             self._cache_ttl = 300  # 5 minutes
+            self._uid_sys_id_cache: Dict[str, Tuple[str, float]] = {}
+            self._uid_cache_ttl = 3600  # 1 hour
 
             GenizahService._initialized = True
 
@@ -408,7 +410,10 @@ class GenizahService:
                     if isinstance(display, str):
                         display = {'shelfmark': display, 'title': '', 'img': '', 'source': '', 'id': ''}
 
-                    sys_id = display.get('id', '') or self.extract_sys_id(r.get('uid', ''))
+                    sys_id = display.get('id', '') or self.extract_sys_id(
+                        r.get('raw_header', '') or r.get('uid', '')
+                    )
+                    self.cache_uid_sys_id(r.get('uid', ''), sys_id)
 
                     # Extract page highlights for cross-page results
                     page_highlights = r.get('page_highlights', [])
@@ -505,14 +510,15 @@ class GenizahService:
                         display=display,
                         uid=r.get('uid', '')
                     ))
+                    self.cache_uid_sys_id(r.get('uid', ''), sys_id)
 
                 return results
 
-            except Exception as e:
-                print(f"Composition search error: {e}")
-                import traceback
-                traceback.print_exc()
-                return []
+        except Exception as e:
+            print(f"Composition search error: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     def search_composition_logic(
         self,
@@ -1128,6 +1134,24 @@ class GenizahService:
             return match.group(1)
 
         return ''
+
+    def cache_uid_sys_id(self, uid: str, sys_id: str) -> None:
+        """Cache UID to system ID mapping for later resolution."""
+        if not uid or not sys_id:
+            return
+        self._uid_sys_id_cache[uid] = (sys_id, time.time())
+
+    def resolve_sys_id(self, uid_or_header: str) -> str:
+        """Resolve sys_id using cache first, then fallback extraction."""
+        if not uid_or_header:
+            return ''
+        cached = self._uid_sys_id_cache.get(uid_or_header)
+        if cached:
+            sys_id, cached_at = cached
+            if time.time() - cached_at < self._uid_cache_ttl:
+                return sys_id
+            self._uid_sys_id_cache.pop(uid_or_header, None)
+        return self.extract_sys_id(uid_or_header)
 
     def parse_header(self, full_header: str) -> Dict[str, str]:
         """Parse a full header into components."""
