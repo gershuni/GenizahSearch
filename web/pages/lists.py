@@ -160,7 +160,7 @@ def create_lists_page():
                 ui.label(tr('Lists manager not available')).classes('text-red-500')
                 return
 
-            lists = state.lists_mgr.get_lists()
+            lists = state.lists_mgr.data.get('lists', {})
             if not lists:
                 ui.label(tr('No lists yet. Create your first list!')).classes('text-gray-400 text-center mt-4')
                 return
@@ -188,7 +188,7 @@ def create_lists_page():
                             if list_id == 'recent':
                                 count = len(state.lists_mgr.data.get('recent_items', []))
                             else:
-                                count = state.lists_mgr.get_list_item_count(list_id)
+                                count = state.lists_mgr._get_list_item_count(list_id)
                             ui.label(str(count)).classes('text-xs bg-gray-200 px-2 py-1 rounded-full')
 
                             # Delete button (only for non-system lists)
@@ -225,7 +225,7 @@ def create_lists_page():
                 return
 
             list_id = page_state.selected_list_id
-            lists = state.lists_mgr.get_lists()
+            lists = state.lists_mgr.data.get('lists', {})
             list_data = lists.get(list_id)
 
             if not list_data:
@@ -254,15 +254,8 @@ def create_lists_page():
                     ).props('flat').classes('text-primary')
 
             # Get items
-            if list_id == 'recent':
-                item_ids = state.lists_mgr.data.get('recent_items', [])
-                items_data = []
-                for sys_id in item_ids:
-                    item = state.lists_mgr.data.get('items', {}).get(sys_id)
-                    if item:
-                        items_data.append((sys_id, item))
-            else:
-                items_data = state.lists_mgr.get_list_items(list_id)
+            items_list = state.lists_mgr.get_items_in_list(list_id)
+            items_data = [(item.get('item_id'), item) for item in items_list]
 
             if not items_data:
                 with ui.column().classes('w-full items-center justify-center py-16'):

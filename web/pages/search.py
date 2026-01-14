@@ -91,11 +91,7 @@ def create_search_page():
             # --- LEFT: Result List ---
             with splitter.before:
                 results_container = ui.column().classes('w-full h-full')
-                with results_container:
-                    # Initial placeholder
-                    results_scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2')
-                    with results_scroll:
-                        ui.label(tr("Ready to search.")).classes('text-gray-400 text-center mt-10 w-full')
+                # Will be populated by render_results
 
             # --- RIGHT: Viewer (Placeholder for now) ---
             with splitter.after:
@@ -224,9 +220,9 @@ def create_search_page():
 
         if not results:
             with results_container:
-                scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-4')
-                with scroll:
-                    ui.label(tr("No results found.")).classes('w-full text-center text-gray-500 mt-4')
+                with ui.column().classes('w-full h-full items-center justify-center bg-gray-50'):
+                    ui.icon('search', size='4rem').classes('text-gray-300')
+                    ui.label(tr("Ready to search.")).classes('text-gray-400 mt-4')
             return
 
         with results_container:
@@ -310,7 +306,7 @@ def create_search_page():
 
             # Get available lists
             if state.lists_mgr:
-                lists = state.lists_mgr.get_lists()
+                lists = state.lists_mgr.data.get('lists', {})
                 list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
 
                 if not list_options:
@@ -339,3 +335,6 @@ def create_search_page():
                 ui.label(tr('Lists manager not available')).classes('text-red-500')
 
         dialog.open()
+
+    # Initialize with empty results view
+    render_results([])

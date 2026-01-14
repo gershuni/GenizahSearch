@@ -59,12 +59,23 @@ def load_result(container, result):
 
     # Get Full Text (fetch if missing)
     full_text = result.get('full_text') or result.get('text', '')
+    snippet = result.get('snippet', '')
+
+    # If no full text, try to fetch it
     if not full_text and uid and state.searcher:
         try:
             full_text = state.searcher.get_full_text_by_id(uid)
         except Exception as e:
             print(f"Error fetching text for {uid}: {e}")
-            full_text = tr("Error loading text.")
+            # Fall back to snippet if available
+            if snippet:
+                full_text = snippet.replace('*', '')  # Remove highlight markers
+            else:
+                full_text = tr("Error loading text.")
+
+    # If still no text, use snippet
+    if not full_text and snippet:
+        full_text = snippet.replace('*', '')
 
     with container:
 
