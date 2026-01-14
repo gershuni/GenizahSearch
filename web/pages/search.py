@@ -422,7 +422,7 @@ def create_search_page():
                             snippet_text += '...'
                         highlighted_snippet = convert_highlight_markers(snippet_text)
                         with ui.element('div').classes('snippet-box'):
-                            ui.html(highlighted_snippet)
+                            ui.html(highlighted_snippet, sanitize=False)
 
             # Pagination controls
             if total_pages > 1:

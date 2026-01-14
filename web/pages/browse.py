@@ -539,7 +539,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             <span class="kbd">←</span> <span class="kbd">→</span> {tr('Navigate')} |
                             <span class="kbd">+</span> <span class="kbd">-</span> {tr('Zoom')} |
                             <span class="kbd">F</span> {tr('Fullscreen')}
-                        ''')
+                        ''', sanitize=False)
 
             # === Main Viewer Panels ===
             fullscreen_class = 'fullscreen-mode' if state.is_fullscreen else ''
@@ -639,7 +639,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 display_text = page.text
                                 if state.highlight_terms:
                                     display_text = highlight_text(page.text)
-                                    ui.html(f'<div class="transcription-text">{display_text}</div>')
+                                    ui.html(f'<div class="transcription-text">{display_text}</div>', sanitize=False)
                                 else:
                                     ui.label(page.text).classes('transcription-text')
                             else:

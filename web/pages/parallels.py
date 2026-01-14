@@ -600,7 +600,8 @@ def create_parallels_page():
 
                                 ui.html(
                                     f'<span class="score-badge {score_style}">'
-                                    f'{tr("Score")}: {group.total_score:.0f}</span>'
+                                    f'{tr("Score")}: {group.total_score:.0f}</span>',
+                                    sanitize=False
                                 )
 
                                 ui.button(
@@ -637,7 +638,8 @@ def create_parallels_page():
                                                     highlighted = highlight_matched_text(result.src_snippet[:600])
                                                     ui.html(
                                                         f'<div class="rtl-text hebrew-text text-sm" '
-                                                        f'style="line-height: 1.8">{highlighted}</div>'
+                                                        f'style="line-height: 1.8">{highlighted}</div>',
+                                                        sanitize=False
                                                     )
                                                 else:
                                                     ui.label(tr('No context available')).classes(
@@ -653,7 +655,8 @@ def create_parallels_page():
                                                     highlighted = highlight_matched_text(result.ms_snippet[:600])
                                                     ui.html(
                                                         f'<div class="rtl-text hebrew-text text-sm" '
-                                                        f'style="line-height: 1.8">{highlighted}</div>'
+                                                        f'style="line-height: 1.8">{highlighted}</div>',
+                                                        sanitize=False
                                                     )
                                                 else:
                                                     ui.label(tr('No text available')).classes(

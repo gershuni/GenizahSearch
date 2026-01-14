@@ -33,6 +33,7 @@ def create_document_page(uid: str):
 
     def load_document():
         """Load the document data."""
+        import re as doc_re
         state.is_loading = True
         state.error = None
 
@@ -45,52 +46,61 @@ def create_document_page(uid: str):
             # Extract system ID from UID
             state.sys_id = service.extract_sys_id(uid)
 
-            # If no sys_id found, try to get it from the browse page directly
-            if not state.sys_id:
-                # Try to use the uid directly as a query
+            # Try to extract FL ID for browse by FL
+            fl_match = doc_re.search(r'FL(\d+)', uid)
+            fl_id = fl_match.group(1) if fl_match else None
+
+            # Try different methods to load the document
+            browse_result = None
+
+            # Method 1: Try by FL ID first (most reliable for IE format)
+            if fl_id:
+                browse_result = service.get_browse_page_by_fl(fl_id, state.sys_id)
+                if browse_result:
+                    state.sys_id = browse_result.sys_id or state.sys_id
+
+            # Method 2: Try by sys_id
+            if not browse_result and state.sys_id:
+                # Try with IE prefix
+                for sys_id_variant in [state.sys_id, f'IE{state.sys_id}']:
+                    browse_result = service.get_browse_page(sys_id_variant, p_num=1)
+                    if browse_result:
+                        state.sys_id = browse_result.sys_id or state.sys_id
+                        break
+
+            # Method 3: Use uid directly
+            if not browse_result:
                 browse_result = service.get_browse_page(uid, p_num=1)
                 if browse_result:
-                    state.sys_id = browse_result.sys_id
-                    # Create a single page from browse result
-                    from web.services import DocumentPage
-                    state.pages = [DocumentPage(
-                        uid=browse_result.uid,
-                        p_num=browse_result.p_num,
-                        text=browse_result.text,
-                        full_header=browse_result.full_header,
-                        fl_id=browse_result.fl_id,
-                        sys_id=browse_result.sys_id
-                    )]
-                    state.shelfmark = browse_result.shelfmark
-                    state.title = browse_result.title
-                    state.is_loading = False
-                    return
+                    state.sys_id = browse_result.sys_id or state.sys_id
 
-            if not state.sys_id:
-                state.error = tr('No manuscript found') + f" (uid: {uid[:30]}...)"
+            # If we have a browse result, use it
+            if browse_result:
+                from web.services import DocumentPage
+                state.pages = [DocumentPage(
+                    uid=browse_result.uid,
+                    p_num=browse_result.p_num,
+                    text=browse_result.text,
+                    full_header=browse_result.full_header,
+                    fl_id=browse_result.fl_id,
+                    sys_id=browse_result.sys_id
+                )]
+                state.shelfmark = browse_result.shelfmark
+                state.title = browse_result.title
                 state.is_loading = False
                 return
 
-            # Load all pages
-            state.pages = service.get_document(state.sys_id)
+            # Method 4: Try get_document
+            if state.sys_id:
+                state.pages = service.get_document(state.sys_id)
+                if not state.pages:
+                    # Try with IE prefix
+                    state.pages = service.get_document(f'IE{state.sys_id}')
 
             if not state.pages:
-                # Try single page browse
-                browse_result = service.get_browse_page(state.sys_id, p_num=1)
-                if browse_result:
-                    from web.services import DocumentPage
-                    state.pages = [DocumentPage(
-                        uid=browse_result.uid,
-                        p_num=browse_result.p_num,
-                        text=browse_result.text,
-                        full_header=browse_result.full_header,
-                        fl_id=browse_result.fl_id,
-                        sys_id=browse_result.sys_id
-                    )]
-                else:
-                    state.error = tr('No text available')
-                    state.is_loading = False
-                    return
+                state.error = tr('No text available')
+                state.is_loading = False
+                return
 
             # Find the page matching the UID
             for idx, page in enumerate(state.pages):
@@ -99,9 +109,10 @@ def create_document_page(uid: str):
                     break
 
             # Get metadata
-            meta = service.get_metadata(state.sys_id)
-            state.shelfmark = meta.get('shelfmark', '')
-            state.title = meta.get('title', '')
+            if state.sys_id:
+                meta = service.get_metadata(state.sys_id)
+                state.shelfmark = meta.get('shelfmark', '')
+                state.title = meta.get('title', '')
 
         except Exception as e:
             state.error = str(e)
