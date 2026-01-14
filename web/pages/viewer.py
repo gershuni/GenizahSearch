@@ -64,20 +64,12 @@ def load_result(container, result):
     # Debug print
     print(f"[DEBUG] uid={uid}, full_text length={len(full_text) if full_text else 0}, snippet length={len(snippet) if snippet else 0}")
 
-    # Always prefer snippet if no full text (search results typically have snippets)
-    if not full_text:
-        if snippet:
-            # Use snippet directly
-            full_text = snippet
-            print(f"[DEBUG] Using snippet as full_text")
-        elif uid and state.searcher:
-            # Try to fetch full text
-            try:
-                full_text = state.searcher.get_full_text_by_id(uid)
-                print(f"[DEBUG] Fetched full_text, length={len(full_text) if full_text else 0}")
-            except Exception as e:
-                print(f"[DEBUG] Error fetching text for {uid}: {e}")
-                full_text = tr("Error loading text.")
+    # For search results, prefer to show snippet + link to browse
+    # Don't load the full manuscript text as it's too large
+    display_text = snippet if snippet else full_text
+    is_snippet_only = bool(snippet and not full_text)
+
+    print(f"[DEBUG] Using {'snippet' if is_snippet_only else 'full_text'}, length={len(display_text) if display_text else 0}")
 
     with container:
 
@@ -92,8 +84,59 @@ def load_result(container, result):
                     if fl_id: ui.label(f"FL: {fl_id}")
 
             with ui.row().classes('gap-2'):
-                ui.button(icon='star_border', on_click=lambda: ui.notify('Add to list implemented in desktop app')).props('flat round dense')
+                # Add to list button
+                def show_add_to_list():
+                    with ui.dialog() as dialog, ui.card().classes('p-4'):
+                        ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
+                        ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+
+                        if state.lists_mgr:
+                            lists = state.lists_mgr.data.get('lists', {})
+                            list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
+
+                            if not list_options:
+                                ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
+                                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
+                            else:
+                                selected_list = ui.select(
+                                    list_options,
+                                    label=tr('Select List'),
+                                    value=list(list_options.keys())[0]
+                                ).classes('w-full mb-4')
+
+                                note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
+
+                                def add_to_list():
+                                    if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                                        ui.notify(tr('Added to list'), type='positive')
+                                        dialog.close()
+                                    else:
+                                        ui.notify(tr('Already in list'), type='info')
+
+                                with ui.row().classes('w-full justify-end gap-2'):
+                                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                                    ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
+                        else:
+                            ui.label(tr('Lists manager not available')).classes('text-red-500')
+
+                    dialog.open()
+
+                ui.button(
+                    icon='star_border',
+                    on_click=show_add_to_list
+                ).props('flat round dense').tooltip(tr('Add to list'))
+
                 ui.button(icon='download', on_click=lambda: ui.notify('Exporting...')).props('flat round dense')
+
+        # --- Quick Actions ---
+        with ui.row().classes('w-full gap-2 mt-4'):
+            # Browse button - go to full manuscript viewer with navigation
+            if sys_id:
+                ui.button(
+                    tr('Browse Full Manuscript'),
+                    icon='menu_book',
+                    on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                ).classes('bg-primary text-white')
 
         # --- Content Tabs ---
         with ui.tabs().classes('w-full text-primary') as tabs:
@@ -107,16 +150,29 @@ def load_result(container, result):
 
             # 1. Text Panel
             with ui.tab_panel(tab_text).classes('p-4 bg-white'):
-                if full_text:
+                if display_text:
+                    # Show snippet with context indicator
+                    if is_snippet_only:
+                        with ui.card().classes('w-full bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-4'):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('info', color='orange')
+                                ui.label(tr('Showing match context only')).classes('font-semibold')
+                            ui.label(tr('Click "Browse Full Manuscript" to view the complete page with navigation')).classes('text-sm text-gray-600 mt-1')
+
                     pattern = result.get('highlight_pattern')
-                    ui.html(format_text_html(full_text, pattern), sanitize=False).classes('w-full')
+                    ui.html(format_text_html(display_text, pattern), sanitize=False).classes('w-full')
+
+                    # Add button to go to full view
+                    if is_snippet_only and sys_id:
+                        ui.button(
+                            tr('View Complete Page'),
+                            icon='open_in_new',
+                            on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                        ).classes('mt-4 bg-primary text-white')
                 else:
                     with ui.column().classes('w-full items-center py-8'):
                         ui.icon('text_snippet', size='3rem').classes('text-gray-300')
                         ui.label(tr('No text available')).classes('text-gray-400 mt-2')
-                        if snippet:
-                            ui.label(tr('Snippet only:')).classes('text-sm text-gray-500 mt-4')
-                            ui.html(format_text_html(snippet.replace('*', ''), None), sanitize=False).classes('w-full mt-2')
 
             # 2. Image Panel
             with ui.tab_panel(tab_img).classes('p-0 h-full bg-black flex items-center justify-center relative'):

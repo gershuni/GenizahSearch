@@ -302,6 +302,22 @@ TRANSLATIONS = {
 
     # Dashboard/Home
     "Done. Found {} results.": "סיים. נמצאו {} תוצאות.",
+
+    # Viewer
+    "Showing match context only": "מציג הקשר התאמה בלבד",
+    "Click \"Browse Full Manuscript\" to view the complete page with navigation": "לחץ על \"עיין בכתב יד מלא\" לצפייה בעמוד המלא עם ניווט",
+    "View Complete Page": "צפה בעמוד המלא",
+
+    # Parallels
+    "Composition Search": "חיפוש חיבורים",
+    "Find parallel texts in the Genizah corpus": "מצא טקסטים מקבילים בגניזה",
+    "Manuscript Match": "התאמה בכתב יד",
+    "Source Context": "הקשר מקור",
+    "View Result": "צפה בתוצאה",
+    "Quick View": "צפייה מהירה",
+    "Add to Favorites": "הוסף למועדפים",
+    "How does it work?": "איך זה עובד?",
+    "found": "נמצאו",
 }
 
 

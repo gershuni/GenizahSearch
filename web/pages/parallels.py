@@ -19,11 +19,27 @@ def create_parallels_page():
     # Layout
     with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
 
+        # Title and explanation
+        with ui.card().classes('w-full p-4 mb-2 bg-blue-50 border-l-4 border-blue-500'):
+            ui.label(tr('Composition Search')).classes('text-xl font-bold text-blue-900 mb-2')
+            ui.label(tr('Find parallel texts in the Genizah corpus')).classes('text-sm text-blue-700 mb-2')
+            with ui.expansion(tr('How does it work?'), icon='help').classes('bg-blue-100'):
+                ui.markdown('''
+                **חיפוש מקבילות** מחפש קטעי טקסט דומים בגניזה:
+
+                1. **Chunk Size** - כמה מילים לחפש בכל פעם (מומלץ: 3-6)
+                2. **Mode** - רמת הדיוק:
+                   - **variants** - מוצא וריאציות כתיב (מומלץ)
+                   - **exact** - חיפוש מדויק
+                   - **fuzzy** - חיפוש מטושטש
+                3. המערכת מחפשת את הקטעים בכל התעתיקים ומדרגת לפי התאמה
+                ''')
+
         # 1. Input Area (Top)
-        with ui.row().classes('w-full bg-white p-4 shadow-sm items-start gap-4 z-10 h-1/3'):
+        with ui.row().classes('w-full bg-white p-4 shadow-sm items-start gap-4 z-10'):
 
             # Text Input
-            text_input = ui.textarea(label=tr('Source Text'), placeholder=tr('Paste text here...')).classes('flex-grow h-full').props('outlined rounded')
+            text_input = ui.textarea(label=tr('Source Text'), placeholder=tr('Paste text here...')).classes('flex-grow h-48').props('outlined rounded')
 
             # Controls
             with ui.column().classes('gap-2 w-64'):
@@ -38,7 +54,7 @@ def create_parallels_page():
                 run_btn = ui.button(tr('Find Parallels'), on_click=lambda: execute_parallels()).classes('bg-primary text-white w-full')
 
                 status_label = ui.label(tr('Ready')).classes('text-xs text-gray-500')
-                progress_bar = ui.linear_progress(0).classes('w-full')
+                progress_bar = ui.linear_progress(0).classes('w-full').props('stripe')
 
         # 2. Results Area (Bottom)
         with ui.scroll_area().classes('w-full flex-grow bg-gray-50 p-4'):
@@ -124,27 +140,115 @@ def create_parallels_page():
             return
 
         with results_container:
-            for item in items:
+            # Summary
+            ui.label(f"{len(items)} {tr('matches')} {tr('found')}").classes('text-lg font-semibold mb-4')
+
+            for idx, item in enumerate(items):
                 score = int(item.get('score', 0))
+
+                # Extract metadata from raw_header
+                raw_header = item.get('raw_header', '')
+                shelfmark = item.get('display', {}).get('shelfmark', 'Unknown')
+                title = item.get('display', {}).get('title', '')
+                sys_id = item.get('display', {}).get('id', '')
+
+                # If display not present, try to parse from raw_header
+                if shelfmark == 'Unknown' and state.meta_mgr:
+                    # Try to extract sys_id from raw_header
+                    import re as regex
+                    match = regex.search(r'IE(\d+)', raw_header)
+                    if match:
+                        temp_id = match.group(1)
+                        shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(temp_id)
+                        if shelf_temp:
+                            shelfmark = shelf_temp
+                            title = title_temp
+                            sys_id = temp_id
+
                 # Format snippet
                 ms_text = item.get('text', '').replace('\n', '<br>')
-                ms_text = re.sub(r'\*(.*?)\*', r'<span class="bg-yellow-200 font-bold">\1</span>', ms_text)
+                ms_text = re.sub(r'\*(.*?)\*', r'<span class="bg-yellow-200 font-bold px-1">\1</span>', ms_text)
 
                 src_text = item.get('source_ctx', '').replace('\n', '<br>')
-                src_text = re.sub(r'\*(.*?)\*', r'<span class="bg-green-100 font-bold">\1</span>', src_text)
+                src_text = re.sub(r'\*(.*?)\*', r'<span class="bg-green-200 font-bold px-1">\1</span>', src_text)
 
-                with ui.card().classes('w-full p-4 border-l-4 border-primary'):
-                    with ui.row().classes('w-full justify-between items-start'):
-                        ui.label(item.get('raw_header', 'Unknown')).classes('font-bold text-lg')
-                        ui.badge(f"Score: {score}", color='green')
+                with ui.card().classes('w-full p-4 border-l-4 border-primary hover:shadow-lg transition-shadow'):
+                    # Header with metadata
+                    with ui.row().classes('w-full justify-between items-start mb-3'):
+                        with ui.column().classes('gap-1'):
+                            ui.label(f"#{idx+1}: {shelfmark}").classes('font-bold text-lg text-primary')
+                            if title:
+                                ui.label(title).classes('text-sm text-gray-600')
+                        with ui.row().classes('gap-2 items-center'):
+                            ui.badge(f"{tr('Score')}: {score}", color='green')
 
+                    # Content
                     with ui.row().classes('w-full gap-4 mt-2'):
                         # Source Context
-                        with ui.column().classes('flex-1 bg-gray-50 p-2 rounded'):
-                            ui.label(tr("Source Context")).classes('text-xs font-bold text-gray-500 uppercase')
-                            ui.html(f"<div dir='rtl' class='text-sm'>{src_text}</div>", sanitize=False)
+                        with ui.column().classes('flex-1 bg-green-50 p-3 rounded border border-green-200'):
+                            ui.label(tr("Source Context")).classes('text-xs font-bold text-green-700 uppercase mb-2')
+                            ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{src_text}</div>", sanitize=False)
 
                         # Manuscript Match
-                        with ui.column().classes('flex-1 bg-white border p-2 rounded'):
-                            ui.label(tr("Manuscript Match")).classes('text-xs font-bold text-gray-500 uppercase')
-                            ui.html(f"<div dir='rtl' class='text-sm'>{ms_text}</div>", sanitize=False)
+                        with ui.column().classes('flex-1 bg-yellow-50 p-3 rounded border border-yellow-200'):
+                            ui.label(tr("Manuscript Match")).classes('text-xs font-bold text-yellow-700 uppercase mb-2')
+                            ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{ms_text}</div>", sanitize=False)
+
+                    # Action buttons
+                    with ui.row().classes('w-full gap-2 mt-3 pt-3 border-t'):
+                        if sys_id:
+                            ui.button(
+                                icon='menu_book',
+                                on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
+                            ).props('flat dense size=sm').classes('text-primary').tooltip(tr('Browse'))
+
+                        ui.button(
+                            icon='star_border',
+                            on_click=lambda item=item: add_parallel_to_list(item, shelfmark, title, sys_id)
+                        ).props('flat dense size=sm').classes('text-yellow-600').tooltip(tr('Add to Favorites'))
+
+                        ui.button(
+                            icon='table_view',
+                            on_click=lambda: ui.notify(tr('Export functionality coming soon'))
+                        ).props('flat dense size=sm').tooltip(tr('Export'))
+
+    def add_parallel_to_list(item, shelfmark, title, sys_id):
+        """Add a parallel result to a list."""
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-4'):
+            ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
+            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
+                else:
+                    selected_list = ui.select(
+                        list_options,
+                        label=tr('Select List'),
+                        value=list(list_options.keys())[0]
+                    ).classes('w-full mb-4')
+
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
+
+                    def add_to_list():
+                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                            ui.notify(tr('Added to list'), type='positive')
+                            dialog.close()
+                        else:
+                            ui.notify(tr('Already in list'), type='info')
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
+            else:
+                ui.label(tr('Lists manager not available')).classes('text-red-500')
+
+        dialog.open()
