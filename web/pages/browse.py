@@ -23,6 +23,22 @@ from web.translations import tr, is_rtl
 # ============================================================================
 
 VIEWER_STYLES = '''
+<script>
+// Global function for handling image errors with fallback
+function handleImageError(img, fallbackUrl) {
+    if (fallbackUrl && img.src !== fallbackUrl) {
+        console.log('IIIF image failed, trying Rosetta fallback');
+        img.src = fallbackUrl;
+    } else {
+        console.log('All image sources failed');
+        img.style.display = 'none';
+        const parent = img.parentElement;
+        if (parent) {
+            parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
+        }
+    }
+}
+</script>
 <style>
     /* Image viewer container */
     .image-viewer-container {
@@ -46,7 +62,9 @@ VIEWER_STYLES = '''
     }
 
     .image-container img {
-        max-width: none;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
         transition: transform 0.2s ease-out;
         cursor: grab;
     }
@@ -582,46 +600,41 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Determine image URL with fallback logic
                             img_url = None
                             fallback_url = None
+
+                            # Debug: Print image info
+                            print(f"[DEBUG] Page FL ID: {page.fl_id}, Image URL: {page.image_url}")
+
                             if page.image_url and page.image_url.strip():
                                 img_url = page.image_url
+                                print(f"[DEBUG] Using page.image_url: {img_url}")
                             elif page.fl_id:
                                 digits = re.sub(r"\D", "", str(page.fl_id))
                                 if digits:
                                     img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
                                     # Prepare Rosetta fallback URL
                                     fallback_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                                    print(f"[DEBUG] Built IIIF URL from FL ID: {img_url}")
+                                else:
+                                    print(f"[DEBUG] No digits found in FL ID: {page.fl_id}")
+                            else:
+                                print(f"[DEBUG] No image URL or FL ID available")
 
                             if img_url:
-                                # Add JavaScript to handle image load errors with fallback
+                                # Use global error handler function
                                 if fallback_url:
-                                    ui.add_head_html(f'''
-                                    <script>
-                                    function handleImageError(img) {{
-                                        if (img.src !== '{fallback_url}') {{
-                                            console.log('IIIF image failed, trying Rosetta fallback');
-                                            img.src = '{fallback_url}';
-                                        }} else {{
-                                            console.log('Rosetta fallback also failed');
-                                            img.style.display = 'none';
-                                            const parent = img.parentElement;
-                                            if (parent) {{
-                                                parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>{tr("Image not available")}</p></div>';
-                                            }}
-                                        }}
-                                    }}
-                                    </script>
-                                    ''')
+                                    # Escape quotes in fallback URL for JS
+                                    safe_fallback = fallback_url.replace("'", "\\'")
                                     ui.image(img_url).classes(
                                         'zoomable-image'
                                     ).style(
                                         f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                    ).props('loading="lazy" onerror="handleImageError(this)"')
+                                    ).props(f'loading="lazy" onerror="handleImageError(this, \'{safe_fallback}\')"')
                                 else:
                                     ui.image(img_url).classes(
                                         'zoomable-image'
                                     ).style(
                                         f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                    ).props('loading="lazy"')
+                                    ).props('loading="lazy" onerror="handleImageError(this, null)"')
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')

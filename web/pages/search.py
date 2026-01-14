@@ -55,22 +55,28 @@ class SearchState:
         results_data = stored.get('results', [])
         if results_data:
             try:
-                # Reconstruct SearchResult objects
+                # Reconstruct SearchResult objects with all fields
                 from web.services import SearchResult
                 self.results = [
                     SearchResult(
                         uid=r['uid'],
-                        sys_id=r.get('sys_id'),
-                        snippet=r.get('snippet'),
-                        display=r.get('display'),
-                        source=r.get('source'),
-                        cross_page=r.get('cross_page', False)
+                        sys_id=r.get('sys_id', ''),
+                        snippet=r.get('snippet', ''),
+                        display=r.get('display', {}),
+                        source=r.get('source', 'V0.8'),
+                        raw_header=r.get('raw_header', ''),
+                        full_text=r.get('full_text', ''),
+                        highlight_pattern=r.get('highlight_pattern'),
+                        cross_page=r.get('cross_page', False),
+                        page_highlights=r.get('page_highlights', []),
+                        scope=r.get('scope', 'page')
                     )
                     for r in results_data
                 ]
                 self.result_count = len(self.results)
-            except Exception:
+            except Exception as e:
                 # If restoration fails, start fresh
+                print(f"Failed to restore search results: {e}")
                 self.results = []
                 self.result_count = 0
 
@@ -78,6 +84,7 @@ class SearchState:
         """Save current state to browser storage."""
         try:
             # Convert SearchResult objects to dicts for JSON serialization
+            # Include all fields to allow proper restoration
             results_data = [
                 {
                     'uid': r.uid,
@@ -85,7 +92,12 @@ class SearchState:
                     'snippet': r.snippet,
                     'display': r.display,
                     'source': r.source,
-                    'cross_page': r.cross_page
+                    'raw_header': r.raw_header,
+                    'full_text': r.full_text[:500] if r.full_text else '',  # Limit size
+                    'highlight_pattern': r.highlight_pattern,
+                    'cross_page': r.cross_page,
+                    'page_highlights': r.page_highlights[:5] if r.page_highlights else [],  # Limit size
+                    'scope': r.scope
                 }
                 for r in self.results
             ]
