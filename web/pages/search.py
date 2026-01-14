@@ -1,619 +1,359 @@
-# -*- coding: utf-8 -*-
-"""
-Advanced Search Page for GenizahSearch Web Application.
-
-Professional search interface with:
-- Large Hebrew RTL text input
-- Search mode selector with multiple options
-- Word gap slider for phrase searches
-- Advanced options panel
-- Beautiful card-based results with highlights
-- Result actions (view, browse, copy)
-- Green color theme matching Genizah branding
-"""
-
 from nicegui import ui, run, app
-from typing import List, Optional
-import re
-import asyncio
-import html
-import json
+from web.state import state
+from web.translations import tr
+import time
 
-from web.services import get_service, SearchResult
-from web.translations import tr, is_rtl
-
-
-# Search mode options with descriptions
-SEARCH_MODES = [
-    ('exact', 'Exact', 'exact_desc'),
-    ('variants', 'Variants', 'variants_desc'),
-    ('variants_extended', 'Extended', 'extended_desc'),
-    ('variants_maximum', 'Maximum', 'maximum_desc'),
-    ('fuzzy', 'Fuzzy', 'fuzzy_desc'),
-    ('Regex', 'Regex', 'regex_desc'),
-]
-
-
-class SearchState:
-    """Holds the search state for the page."""
-
-    def __init__(self):
-        # Try to restore state from storage
-        stored = app.storage.user.get('search_state', {})
-        self.query: str = stored.get('query', '')
-        self.mode: str = stored.get('mode', 'variants')
-        self.gap: int = stored.get('gap', 0)
-        self.results: List[SearchResult] = []
-        self.is_searching: bool = False
-        self.error: Optional[str] = None
-        self.result_count: int = stored.get('result_count', 0)
-        self.show_advanced: bool = False
-        self.results_per_page: int = stored.get('results_per_page', 50)
-        self.current_page: int = stored.get('current_page', 0)
-
-        # Restore results from storage if available
-        results_data = stored.get('results', [])
-        if results_data:
-            try:
-                # Reconstruct SearchResult objects with all fields
-                from web.services import SearchResult
-                self.results = [
-                    SearchResult(
-                        uid=r['uid'],
-                        sys_id=r.get('sys_id', ''),
-                        snippet=r.get('snippet', ''),
-                        display=r.get('display', {}),
-                        source=r.get('source', 'V0.8'),
-                        raw_header=r.get('raw_header', ''),
-                        full_text=r.get('full_text', ''),
-                        highlight_pattern=r.get('highlight_pattern'),
-                        cross_page=r.get('cross_page', False),
-                        page_highlights=r.get('page_highlights', []),
-                        scope=r.get('scope', 'page')
-                    )
-                    for r in results_data
-                ]
-                self.result_count = len(self.results)
-            except Exception as e:
-                # If restoration fails, start fresh
-                print(f"Failed to restore search results: {e}")
-                self.results = []
-                self.result_count = 0
-
-    def save_to_storage(self):
-        """Save current state to browser storage."""
-        try:
-            # Convert SearchResult objects to dicts for JSON serialization
-            # Include all fields to allow proper restoration
-            results_data = [
-                {
-                    'uid': r.uid,
-                    'sys_id': r.sys_id,
-                    'snippet': r.snippet,
-                    'display': r.display,
-                    'source': r.source,
-                    'raw_header': r.raw_header,
-                    'full_text': r.full_text[:500] if r.full_text else '',  # Limit size
-                    'highlight_pattern': r.highlight_pattern,
-                    'cross_page': r.cross_page,
-                    'page_highlights': r.page_highlights[:5] if r.page_highlights else [],  # Limit size
-                    'scope': r.scope
-                }
-                for r in self.results
-            ]
-
-            app.storage.user['search_state'] = {
-                'query': self.query,
-                'mode': self.mode,
-                'gap': self.gap,
-                'results': results_data,
-                'result_count': self.result_count,
-                'results_per_page': self.results_per_page,
-                'current_page': self.current_page
-            }
-        except Exception as e:
-            print(f"Failed to save search state: {e}")
-
-
-def convert_highlight_markers(text: str) -> str:
-    """
-    Convert *text* markers to <mark> HTML tags for highlighting.
-    Also handles **text** markers.
-    HTML-escapes the text first to prevent broken DOM from special chars.
-    """
-    if not text:
-        return ''
-
-    # First, temporarily replace asterisk markers with placeholders
-    # to preserve them through HTML escaping
-    placeholder_double = '\x00DOUBLE_MARK\x00'
-    placeholder_single = '\x00SINGLE_MARK\x00'
-    placeholder_end = '\x00END_MARK\x00'
-
-    # Extract double markers first
-    text = re.sub(r'\*\*([^*]+)\*\*', placeholder_double + r'\1' + placeholder_end, text)
-    # Then single markers
-    text = re.sub(r'\*([^*]+)\*', placeholder_single + r'\1' + placeholder_end, text)
-
-    # Now escape HTML entities to prevent broken DOM
-    text = html.escape(text)
-
-    # Restore markers as HTML tags
-    text = text.replace(placeholder_double, '<mark class="highlight-strong">')
-    text = text.replace(placeholder_single, '<mark class="highlight">')
-    text = text.replace(placeholder_end, '</mark>')
-
-    return text
-
+# Helper to format snippet HTML
+def format_snippet(text):
+    if not text: return ""
+    # Robust replacement: *word* -> <span>word</span>
+    import re
+    return re.sub(r'\*(.*?)\*', r'<span class="bg-yellow-200 text-black font-bold px-1 rounded">\1</span>', text)
 
 def create_search_page():
-    """Create the advanced search page UI."""
-    state = SearchState()
-    service = get_service()
 
-    # Add custom styles for this page
-    ui.add_head_html('''
-    <style>
-        /* Green Genizah Theme */
-        .genizah-primary { color: #2e7d32 !important; }
-        .genizah-bg { background-color: #e8f5e9 !important; }
-        .genizah-border { border-color: #4caf50 !important; }
+    # --- State Management for Search ---
+    class SearchUIState:
+        def __init__(self):
+            self.progress = 0.0
+            self.status = ""
+            self.is_running = False
+            self.results = []
+            self.adv_expanded = False
 
-        /* Search Input Styling */
-        .search-input-large input {
-            font-size: 1.4rem !important;
-            padding: 16px !important;
-            line-height: 1.6 !important;
-        }
+    search_state = SearchUIState()
 
-        /* Highlight Marks */
-        .highlight {
-            background-color: #fff59d;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-weight: 500;
-        }
-        .highlight-strong {
-            background-color: #ffeb3b;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-weight: 700;
-        }
-
-        /* Result Card Styling */
-        .result-card {
-            border: 1px solid #e0e0e0;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 16px;
-            transition: all 0.25s ease;
-            background: white;
-        }
-        .result-card:hover {
-            border-color: #4caf50;
-            box-shadow: 0 4px 20px rgba(46, 125, 50, 0.15);
-            transform: translateY(-2px);
-        }
-
-        /* Source Badge */
-        .source-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-        .source-v08 {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-        }
-        .source-v07 {
-            background-color: #fff3e0;
-            color: #e65100;
-        }
-
-        /* Snippet Box */
-        .snippet-box {
-            background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 12px;
-            border-right: 4px solid #4caf50;
-            direction: rtl;
-            text-align: right;
-            white-space: pre-wrap;
-            line-height: 2.0;
-            font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif;
-        }
-
-        /* Mode Selector Card */
-        .mode-option {
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 12px 16px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .mode-option:hover {
-            border-color: #81c784;
-            background-color: #f1f8e9;
-        }
-        .mode-option.selected {
-            border-color: #4caf50;
-            background-color: #e8f5e9;
-        }
-
-        /* Action Buttons */
-        .action-btn {
-            border-radius: 20px !important;
-        }
-
-        /* No Results */
-        .no-results-box {
-            text-align: center;
-            padding: 60px 20px;
-            background: linear-gradient(180deg, #fafafa 0%, #f0f0f0 100%);
-            border-radius: 16px;
-        }
-
-        /* Loading Spinner */
-        .search-loading {
-            text-align: center;
-            padding: 60px 20px;
-        }
-
-        /* Stats Bar */
-        .stats-bar {
-            background: linear-gradient(90deg, #e8f5e9 0%, #c8e6c9 100%);
-            border-radius: 8px;
-            padding: 12px 20px;
-            margin-bottom: 20px;
-        }
-    </style>
-    ''')
-
-    async def do_search():
-        """Execute the search in background thread to avoid UI blocking."""
-        if not state.query.strip():
-            return
-
-        if not service.is_ready:
-            state.error = tr('Service not available')
-            render_results.refresh()
-            return
-
-        state.is_searching = True
-        state.error = None
-        state.current_page = 0
-        render_results.refresh()
-
-        def run_search():
-            """Run search in background thread."""
-            return service.search(
-                query=state.query.strip(),
-                mode=state.mode,
-                gap=state.gap,
-                limit=500
-            )
-
+    # Restore previous search results if available
+    if 'search_results' in app.storage.user:
         try:
-            # Run search in background thread to avoid blocking UI
-            results = await run.io_bound(run_search)
-
-            state.results = results
-            state.result_count = len(results)
-            state.error = None
-            state.save_to_storage()
-
+            search_state.results = app.storage.user.get('search_results', [])
+            print(f"[DEBUG Search] Restored {len(search_state.results)} results from storage")
         except Exception as e:
-            state.error = str(e)
-            state.results = []
-            state.result_count = 0
-            state.save_to_storage()
+            print(f"[DEBUG Search] Failed to restore results: {e}")
 
-        finally:
-            state.is_searching = False
-            render_results.refresh()
+    # --- UI Layout ---
+    with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
 
-    def set_search_mode(mode: str):
-        """Update the search mode."""
-        state.mode = mode
-        render_mode_selector.refresh()
+        # 1. Search Bar (Top Fixed)
+        with ui.column().classes('w-full bg-white p-4 shadow-sm z-10 gap-2'):
+            with ui.row().classes('w-full items-end gap-4'):
 
-    @ui.refreshable
-    def render_mode_selector():
-        """Render the search mode selector with visual cards."""
-        with ui.row().classes('flex-wrap gap-2'):
-            for mode_value, mode_label, _ in SEARCH_MODES:
-                is_selected = state.mode == mode_value
-                classes = 'mode-option selected' if is_selected else 'mode-option'
+                # Query Input
+                query_input = ui.input(label=tr('Search Query')).classes('flex-grow').props('outlined dense rounded')
+                query_input.on('keydown.enter', lambda: execute_search())
 
-                with ui.element('div').classes(classes).on(
-                    'click', lambda m=mode_value: set_search_mode(m)
-                ):
-                    with ui.row().classes('items-center gap-2'):
-                        if is_selected:
-                            ui.icon('check_circle', size='sm').classes('text-green-600')
-                        ui.label(tr(mode_label)).classes(
-                            'font-medium' + (' text-green-700' if is_selected else ' text-gray-600')
-                        )
+                # Mode Select
+                mode_select = ui.select(
+                    ['variants', 'variants_extended', 'variants_maximum', 'exact', 'fuzzy', 'Regex', 'Shelfmark', 'Title'],
+                    value='variants',
+                    label=tr('Mode')
+                ).classes('w-40').props('outlined dense')
 
-    def copy_text(text: str):
-        """Copy text to clipboard."""
-        ui.run_javascript(f'navigator.clipboard.writeText({repr(text)})')
-        ui.notify(tr('Text copied'), type='positive', position='bottom')
+                # Gap
+                gap_input = ui.number(label=tr('Gap'), value=0).classes('w-20').props('outlined dense')
 
-    def go_to_page(page: int):
-        """Navigate to a specific results page."""
-        total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
-        if 0 <= page < total_pages:
-            state.current_page = page
-            state.save_to_storage()
-            render_results.refresh()
+                # Search Button
+                search_btn = ui.button(tr('Search'), on_click=lambda: execute_search()).classes('bg-primary text-white h-10 px-6')
 
-    @ui.refreshable
-    def render_results():
-        """Render the search results using @ui.refreshable for proper updates."""
-        if state.is_searching:
-            with ui.column().classes('w-full search-loading'):
-                ui.spinner('dots', size='xl', color='green')
-                ui.label(tr('Searching...')).classes('text-xl text-gray-600 mt-4')
-                ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
-            return
+                # Lab Toggle
+                lab_mode = ui.checkbox('Lab').tooltip(tr("Enable Lab Mode algorithms"))
 
-        if state.error:
-            with ui.card().classes('w-full p-6 bg-red-50 border-red-200'):
-                with ui.row().classes('items-center gap-3'):
-                    ui.icon('error', size='lg').classes('text-red-500')
-                    with ui.column():
-                        ui.label(tr('Error')).classes('font-bold text-red-700')
-                        ui.label(state.error).classes('text-red-600')
-            return
+                ui.space()
 
-        if not state.results:
-            if state.query:
-                with ui.column().classes('w-full no-results-box'):
-                    ui.icon('search_off', size='4rem').classes('text-gray-300')
-                    ui.label(tr('No results found')).classes('text-2xl text-gray-500 mt-4')
-                    ui.label(f'"{state.query}"').classes('text-gray-400 mt-2 hebrew-text rtl-text')
+                # Export Buttons
+                with ui.row().classes('gap-1'):
+                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props('flat round dense').tooltip(tr('Export Word'))
+                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props('flat round dense').tooltip(tr('Export Excel'))
 
-                    with ui.column().classes('mt-6'):
-                        ui.label(tr('Search tips')).classes('font-medium text-gray-600 mb-2')
-                        with ui.column().classes('text-gray-500 text-sm'):
-                            ui.label(tr('Try different search mode'))
-                            ui.label(tr('Check spelling'))
-                            ui.label(tr('Use fewer words'))
+            # Advanced Search Expansion
+            with ui.expansion(tr('Advanced Filters'), icon='filter_list').classes('w-full bg-gray-50 rounded text-sm'):
+                with ui.row().classes('w-full gap-4 p-4'):
+                    # NOT Filter
+                    # Since Tantivy handles NOT via query syntax, we can append it or handle it in GUI
+                    # For now, let's provide helper buttons to append to query
+                    def append_syntax(text):
+                        current = query_input.value or ""
+                        query_input.set_value(current + " " + text)
+
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Boolean Operators')).classes('font-bold text-gray-600')
+                        with ui.row():
+                            ui.button('AND', on_click=lambda: append_syntax('AND')).props('outline dense size=sm')
+                            ui.button('OR', on_click=lambda: append_syntax('OR')).props('outline dense size=sm')
+                            ui.button('NOT', on_click=lambda: append_syntax('NOT')).props('outline dense size=sm')
+
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Shortcuts')).classes('font-bold text-gray-600')
+                        with ui.row():
+                            ui.button('=Exact', on_click=lambda: append_syntax('=')).props('flat dense size=sm').tooltip('=term')
+                            ui.button('?Variants', on_click=lambda: append_syntax('?')).props('flat dense size=sm').tooltip('?term')
+                            ui.button('#Shelf', on_click=lambda: append_syntax('#')).props('flat dense size=sm').tooltip('#shelfmark')
+
+        # 2. Progress Bar (Thin)
+        progress_bar = ui.linear_progress(0).props('stripe animate').classes('h-1 w-full opacity-0 transition-opacity duration-300')
+        status_label = ui.label('').classes('text-xs text-gray-500 q-px-4')
+
+        # 3. Main Splitter Area
+        with ui.splitter(value=30).classes('w-full flex-grow border-t') as splitter:
+
+            # --- LEFT: Result List ---
+            with splitter.before:
+                results_container = ui.column().classes('w-full h-full')
+                # Will be populated by render_results
+
+            # --- RIGHT: Viewer (Placeholder for now) ---
+            with splitter.after:
+                viewer_container = ui.column().classes('w-full h-full p-4 items-center justify-center')
+                with viewer_container:
+                    ui.icon('menu_book').classes('text-6xl text-gray-200')
+                    ui.label(tr("Select a result to view")).classes('text-gray-400')
+
+    # --- Search Logic ---
+
+    def update_progress_ui():
+        """Timer callback to update progress bar from thread state."""
+        if search_state.is_running:
+            progress_bar.classes(remove='opacity-0')
+            progress_bar.value = search_state.progress
+            status_label.text = search_state.status
+        else:
+            if search_state.progress >= 1.0:
+                progress_bar.value = 1.0
+                status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
+                ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
             else:
-                # Initial state - show search tips
-                with ui.column().classes('w-full items-center py-8'):
-                    ui.icon('tips_and_updates', size='3rem').classes('text-green-300')
-                    ui.label(tr('Enter Hebrew text to search')).classes(
-                        'text-xl text-gray-500 mt-4'
-                    )
+                progress_bar.classes(add='opacity-0')
+
+    ui.timer(0.1, update_progress_ui)
+
+    async def execute_search():
+        query = query_input.value.strip()
+        if not query: return
+
+        if not state.is_ready():
+            ui.notify(tr("Engine not ready."), type='warning')
             return
 
-        # Results stats bar
-        with ui.row().classes('w-full stats-bar items-center justify-between'):
-            with ui.row().classes('items-center gap-3'):
-                ui.icon('analytics', size='sm').classes('text-green-700')
-                ui.label(f"{state.result_count} {tr('results found')}").classes(
-                    'font-bold text-green-800'
-                )
+        # Parse Syntax Shortcuts
+        # =, ?, ??, ???, /, #, $
+        mode = mode_select.value
+        clean_query = query
 
-            with ui.row().classes('items-center gap-2'):
-                mode_labels = {m[0]: m[1] for m in SEARCH_MODES}
-                ui.label(f'{tr("Search mode")}: {tr(mode_labels.get(state.mode, state.mode))}').classes(
-                    'text-sm text-green-700'
-                )
-                if state.gap > 0:
-                    ui.label(f' | {tr("Word gap")}: {state.gap}').classes('text-sm text-green-700')
+        if query.startswith("???"):
+            mode = "variants_maximum"
+            clean_query = query[3:]
+        elif query.startswith("??"):
+            mode = "variants_extended"
+            clean_query = query[2:]
+        elif query.startswith("?"):
+            mode = "variants"
+            clean_query = query[1:]
+        elif query.startswith("="):
+            mode = "exact"
+            clean_query = query[1:]
+        elif query.startswith("/"):
+            mode = "Regex"
+            clean_query = query[1:]
+        elif query.startswith("#"):
+            mode = "Shelfmark"
+            clean_query = query[1:]
+        elif query.startswith("$"):
+            mode = "Title"
+            clean_query = query[1:]
 
-        # Pagination info
-        start_idx = state.current_page * state.results_per_page
-        end_idx = min(start_idx + state.results_per_page, state.result_count)
-        page_results = state.results[start_idx:end_idx]
-        total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
+        # Update UI to reflect auto-detected mode
+        mode_select.value = mode
 
-        # Results list - render each card
-        for result in page_results:
-            display = result.display
-            shelfmark = display.get('shelfmark', '') if isinstance(display, dict) else str(display)
-            title = display.get('title', '') if isinstance(display, dict) else ''
-            img_num = display.get('img', '') if isinstance(display, dict) else ''
-            source = result.source or 'V0.8'
-            source_class = 'source-v08' if 'V0.8' in source or '0.8' in source else 'source-v07'
+        # Reset UI
+        results_container.clear()
+        search_state.is_running = True
+        search_state.progress = 0
+        search_state.status = tr("Starting...")
+        search_state.results = []
+        search_btn.disable()
 
-            with ui.card().classes('w-full result-card'):
-                # Header row with metadata
-                with ui.row().classes('w-full items-start justify-between'):
-                    # Left side - metadata
-                    with ui.column().classes('flex-1'):
-                        # Top line: shelfmark, badges
-                        with ui.row().classes('items-center gap-3 flex-wrap'):
-                            ui.label(shelfmark or f"ID: {result.sys_id}").classes(
-                                'text-lg font-bold text-green-800 cursor-pointer hover:text-green-600'
-                            ).on('click', lambda r=result: ui.navigate.to(f'/document/{r.uid}'))
+        # Define callback for the engine (runs in thread)
+        def progress_cb(current, total):
+            if total > 0:
+                search_state.progress = current / total
+                search_state.status = f"{current} / {total}"
 
-                            if img_num:
-                                with ui.element('span').classes('source-badge source-v08'):
-                                    ui.label(f"p. {img_num}")
+        # Wrapper to run in thread
+        def run_core_search():
+            try:
+                if lab_mode.value:
+                    # Lab Search (Lab engine handles its own fuzzy logic, usually variants)
+                    # We pass 'variants' unless it's regex
+                    lab_search_mode = 'variants'
+                    if mode == 'Regex': lab_search_mode = 'Regex'
 
-                            with ui.element('span').classes(f'source-badge {source_class}'):
-                                ui.label(source)
-
-                            if result.cross_page:
-                                with ui.element('span').classes('source-badge').style(
-                                    'background-color: #fff3e0; color: #e65100;'
-                                ):
-                                    ui.icon('layers', size='xs').classes('mr-1')
-                                    ui.label(tr('Cross-page match'))
-
-                        if title:
-                            ui.label(title).classes(
-                                'text-gray-600 rtl-text hebrew-text mt-2 text-base'
-                            )
-
-                    # Right side - action buttons
-                    with ui.row().classes('gap-2'):
-                        ui.button(
-                            tr('View'),
-                            icon='visibility',
-                            on_click=lambda r=result: ui.navigate.to(f'/document/{r.uid}')
-                        ).props('flat dense color=green').classes('action-btn')
-
-                        if result.sys_id:
-                            ui.button(
-                                icon='menu_book',
-                                on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
-                            ).props('flat dense color=grey').tooltip(tr('Browse Manuscripts'))
-
-                        if result.snippet:
-                            ui.button(
-                                icon='content_copy',
-                                on_click=lambda r=result: copy_text(r.snippet)
-                            ).props('flat dense color=grey').tooltip(tr('Copy text'))
-
-                # Snippet with highlighted matches
-                if result.snippet:
-                    snippet_text = result.snippet[:500]
-                    if len(result.snippet) > 500:
-                        snippet_text += '...'
-                    highlighted_snippet = convert_highlight_markers(snippet_text)
-                    with ui.element('div').classes('snippet-box'):
-                        ui.html(highlighted_snippet, sanitize=False)
-
-        # Pagination controls
-        if total_pages > 1:
-            with ui.row().classes('w-full justify-center items-center gap-4 mt-6 py-4'):
-                # Previous button
-                ui.button(
-                    icon='chevron_right' if is_rtl() else 'chevron_left',
-                    on_click=lambda: go_to_page(state.current_page - 1)
-                ).props('flat round').classes(
-                    '' if state.current_page > 0 else 'invisible'
-                )
-
-                # Page info
-                ui.label(f'{tr("Page")} {state.current_page + 1} {tr("of")} {total_pages}').classes(
-                    'text-gray-600'
-                )
-
-                # Next button
-                ui.button(
-                    icon='chevron_left' if is_rtl() else 'chevron_right',
-                    on_click=lambda: go_to_page(state.current_page + 1)
-                ).props('flat round').classes(
-                    '' if state.current_page < total_pages - 1 else 'invisible'
-                )
-
-    # =========================================================================
-    # Main Layout
-    # =========================================================================
-
-    with ui.column().classes('w-full max-w-5xl mx-auto p-4'):
-        # Page title with icon
-        with ui.row().classes('w-full justify-center items-center gap-3 mb-6'):
-            ui.icon('search', size='2.5rem').classes('text-green-600')
-            ui.label(tr('Text Search')).classes(
-                'text-3xl font-bold text-green-800'
-            )
-
-        # Main search card
-        with ui.card().classes('w-full p-6 mb-6').style(
-            'border: 2px solid #c8e6c9; border-radius: 16px;'
-        ):
-            with ui.column().classes('w-full gap-5'):
-                # Search input - large and prominent
-                with ui.column().classes('w-full'):
-                    ui.label(tr('Enter search terms')).classes(
-                        'text-sm font-medium text-gray-600 mb-2'
+                    return state.lab_engine.lab_search(
+                        clean_query,
+                        mode=lab_search_mode,
+                        gap=int(gap_input.value),
+                        progress_callback=progress_cb
                     )
-
-                    with ui.row().classes('w-full gap-3'):
-                        search_input = ui.input(
-                            placeholder=tr('Enter Hebrew text to search'),
-                            value=state.query
-                        ).classes(
-                            'flex-1 search-input-large rtl-text hebrew-text'
-                        ).props(
-                            'outlined rounded standout="bg-green-50"'
-                        ).on('keydown.enter', do_search)
-
-                        search_input.bind_value(state, 'query')
-
-                        # Search button - prominent
-                        ui.button(
-                            tr('Search'),
-                            icon='search',
-                            on_click=do_search
-                        ).props('color=green size=lg').classes('px-6')
-
-                # Search mode selector
-                with ui.column().classes('w-full'):
-                    ui.label(tr('Search mode')).classes(
-                        'text-sm font-medium text-gray-600 mb-2'
+                else:
+                    # Standard Search
+                    return state.searcher.execute_search(
+                        clean_query,
+                        mode=mode,
+                        gap=int(gap_input.value),
+                        progress_callback=progress_cb
                     )
-                    render_mode_selector()
+            except Exception as e:
+                print(f"Search Error: {e}")
+                return []
 
-                # Advanced options expansion
-                with ui.expansion(
-                    tr('Advanced options'),
-                    icon='tune'
-                ).classes('w-full').props('dense header-class="text-green-700"'):
-                    with ui.column().classes('w-full gap-4 pt-4'):
-                        # Word gap - simple number input instead of slider
-                        with ui.row().classes('w-full items-center gap-4'):
-                            ui.label(tr('Word gap')).classes('font-medium text-gray-700')
+        # Run
+        results = await run.io_bound(run_core_search)
 
-                            def on_gap_change(e):
-                                state.gap = int(e.value) if e.value else 0
+        # Save to state for export
+        state.last_results = results
 
-                            ui.number(
-                                value=state.gap,
-                                min=0,
-                                max=5,
-                                step=1,
-                                on_change=on_gap_change
-                            ).classes('w-20').props('outlined dense')
+        # Post-process
+        search_state.is_running = False
+        search_state.progress = 1.0
+        search_state.results = results
+        search_btn.enable()
 
-                            ui.label(tr('Gap description')).classes(
-                                'text-xs text-gray-500'
-                            )
+        # Save results to persistent storage
+        try:
+            app.storage.user['search_results'] = results
+            print(f"[DEBUG Search] Saved {len(results)} results to storage")
+        except Exception as e:
+            print(f"[DEBUG Search] Failed to save results: {e}")
 
-                        ui.separator()
+        # Render Results (Virtual scroll is harder in NiceGUI, we'll use lazy rendering if needed,
+        # but for now standard rendering. Limit to 100 for DOM performance)
+        render_results(results[:100])
+        if len(results) > 100:
+            ui.notify(tr("Showing first 100 results. Refine search."), type='info')
 
-                        # Results per page
-                        with ui.row().classes('items-center gap-4'):
-                            ui.label(tr('Results per page')).classes('text-gray-700')
+    def create_result_card(i, res, display, shelf):
+        """Create a single result card with proper closure capture."""
+        # Card
+        with ui.card().classes('w-full hover:bg-green-50 transition-colors p-3 gap-1'):
 
-                            def on_rpp_change(e):
-                                state.results_per_page = e.value
-                                state.current_page = 0
-                                state.save_to_storage()
-                                if state.results:
-                                    render_results.refresh()
+            # Header: Shelfmark + Actions
+            with ui.row().classes('w-full justify-between items-start'):
+                with ui.column().classes('flex-grow cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(shelf).classes('font-bold text-primary text-sm')
+                with ui.row().classes('gap-1 items-center'):
+                    # Add to list button
+                    ui.button(
+                        icon='star_border',
+                        on_click=lambda: show_add_to_list_dialog(res)
+                    ).props('flat round dense size=sm').classes('text-yellow-600').tooltip(tr('Add to list'))
+                    ui.label(f"#{i+1}").classes('text-xs text-gray-400')
 
-                            ui.select(
-                                {25: '25', 50: '50', 100: '100', 200: '200'},
-                                value=state.results_per_page,
-                                on_change=on_rpp_change
-                            ).props('dense outlined').classes('w-24')
+            # Title
+            if display.get('title'):
+                with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(display['title']).classes('text-xs text-gray-600 w-full')
 
-        # Service status warning
-        if not service.is_ready:
-            with ui.card().classes('w-full p-4 mb-4').style(
-                'background-color: #fff8e1; border: 1px solid #ffe082; border-radius: 12px;'
-            ):
-                with ui.row().classes('items-center gap-3'):
-                    ui.icon('warning', size='lg').classes('text-amber-600')
-                    with ui.column():
-                        ui.label(tr('Service not available')).classes(
-                            'font-bold text-amber-800'
-                        )
-                        ui.label(tr('Search functionality is currently unavailable')).classes(
-                            'text-amber-700 text-sm'
-                        )
+            # Snippet
+            with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                snippet_html = format_snippet(str(res.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>", sanitize=False)
 
-        # Results container - using @ui.refreshable
-        render_results()
+    def render_results(results):
+        results_container.clear()
+
+        if not results:
+            with results_container:
+                with ui.column().classes('w-full h-full items-center justify-center bg-gray-50'):
+                    ui.icon('search', size='4rem').classes('text-gray-300')
+                    ui.label(tr("Ready to search.")).classes('text-gray-400 mt-4')
+            return
+
+        with results_container:
+            # Create scroll area for results
+            scroll = ui.scroll_area().classes('w-full h-full bg-gray-50 p-2')
+            with scroll:
+                # Use a column to ensure vertical stacking within the scroll area
+                with ui.column().classes('w-full gap-2'):
+                    for i, res in enumerate(results):
+                        display = res.get('display', {})
+                        shelf = display.get('shelfmark', 'Unknown')
+
+                        # Create card with proper closure capture
+                        create_result_card(i, res, display, shelf)
+
+    # --- Viewer Integration ---
+    def load_in_viewer(result):
+        """Load result in the right panel viewer."""
+        from web.pages import viewer
+        if hasattr(viewer, 'load_result'):
+            viewer.load_result(viewer_container, result)
+        else:
+            # Fallback: basic viewer
+            viewer_container.clear()
+            with viewer_container:
+                display = result.get('display', {})
+                ui.label(display.get('shelfmark', 'Unknown')).classes('text-xl font-bold text-primary mb-2')
+                if display.get('title'):
+                    ui.label(display['title']).classes('text-sm text-gray-600 mb-4')
+
+                # Show snippet
+                snippet_html = format_snippet(str(result.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{snippet_html}</div>", sanitize=False).classes('w-full')
+
+                # Browse button
+                sys_id = display.get('id')
+                if sys_id:
+                    ui.button(
+                        tr('Browse Full Manuscript'),
+                        icon='menu_book',
+                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    ).classes('mt-4 bg-primary text-white')
+
+    # --- Add to List Dialog ---
+    def show_add_to_list_dialog(result):
+        """Show dialog to add result to a personal list."""
+        display = result.get('display', {})
+        sys_id = display.get('id')
+        shelfmark = display.get('shelfmark', 'Unknown')
+
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-4'):
+            ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
+            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+
+            # Get available lists
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
+                else:
+                    selected_list = ui.select(
+                        list_options,
+                        label=tr('Select List'),
+                        value=list(list_options.keys())[0]
+                    ).classes('w-full mb-4')
+
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
+
+                    def add_to_list():
+                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                            ui.notify(tr('Added to list'), type='positive')
+                            dialog.close()
+                        else:
+                            ui.notify(tr('Already in list'), type='info')
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
+            else:
+                ui.label(tr('Lists manager not available')).classes('text-red-500')
+
+        dialog.open()
+
+    # Initialize with restored results (if any)
+    render_results(search_state.results[:100] if search_state.results else [])

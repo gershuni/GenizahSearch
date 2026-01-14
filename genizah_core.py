@@ -1212,27 +1212,42 @@ class Config:
 
 def dedupe_browse_map(browse_map):
     """
-    Remove duplicate page entries per system ID, keeping the first occurrence
-    of each page number.
+    Remove duplicate page entries per system ID, preferring V0.8 over V0.7
+    when the same page number appears in both versions.
     """
     cleaned = {}
     changed = False
 
     for sid, pages in browse_map.items():
-        seen_p_nums = set()
-        deduped_pages = []
+        # Group pages by p_num
+        p_num_map = {}
         for page in pages:
             p_num = page.get('p_num')
             if p_num is None:
-                deduped_pages.append(page)
+                # Keep pages without p_num as-is
+                if None not in p_num_map:
+                    p_num_map[None] = []
+                p_num_map[None].append(page)
                 continue
 
-            if p_num in seen_p_nums:
+            if p_num not in p_num_map:
+                p_num_map[p_num] = []
+            p_num_map[p_num].append(page)
+
+        # For each p_num, prefer V0.8 over V0.7
+        deduped_pages = []
+        for p_num, page_list in p_num_map.items():
+            if len(page_list) == 1:
+                deduped_pages.append(page_list[0])
+            else:
+                # Multiple pages with same p_num - prefer V0.8
                 changed = True
-                continue
-
-            seen_p_nums.add(p_num)
-            deduped_pages.append(page)
+                v08_pages = [p for p in page_list if 'V0.8' in p.get('full_header', '')]
+                if v08_pages:
+                    deduped_pages.append(v08_pages[0])
+                else:
+                    # No V0.8, take first V0.7 or other
+                    deduped_pages.append(page_list[0])
 
         cleaned[sid] = deduped_pages
 
