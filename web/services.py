@@ -1102,13 +1102,31 @@ class GenizahService:
     # ========================================================================
 
     def extract_sys_id(self, uid_or_header: str) -> str:
-        """Extract system ID (99...) from UID or header."""
+        """Extract system ID from UID or header.
+
+        Handles multiple formats:
+        - 99XXXXXXXX (NLI format)
+        - IEXXXXXXXX (IE prefix format)
+        - Plain numbers
+        """
         if not uid_or_header:
             return ''
 
+        # First try the standard 99... format
         match = re.search(r'(99\d{8,})', uid_or_header)
         if match:
             return match.group(1)
+
+        # Try IE prefix format (e.g., IE37931387)
+        match = re.search(r'IE(\d{7,})', uid_or_header)
+        if match:
+            return match.group(1)  # Return just the numbers
+
+        # Try any long number sequence (at least 7 digits)
+        match = re.search(r'(\d{7,})', uid_or_header)
+        if match:
+            return match.group(1)
+
         return ''
 
     def parse_header(self, full_header: str) -> Dict[str, str]:

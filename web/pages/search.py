@@ -16,6 +16,7 @@ from nicegui import ui, run
 from typing import List, Optional
 import re
 import asyncio
+import html
 
 from web.services import get_service, SearchResult
 from web.translations import tr, is_rtl
@@ -52,14 +53,29 @@ def convert_highlight_markers(text: str) -> str:
     """
     Convert *text* markers to <mark> HTML tags for highlighting.
     Also handles **text** markers.
+    HTML-escapes the text first to prevent broken DOM from special chars.
     """
     if not text:
         return ''
 
-    # First handle **double** markers
-    text = re.sub(r'\*\*([^*]+)\*\*', r'<mark class="highlight-strong">\1</mark>', text)
-    # Then handle *single* markers
-    text = re.sub(r'\*([^*]+)\*', r'<mark class="highlight">\1</mark>', text)
+    # First, temporarily replace asterisk markers with placeholders
+    # to preserve them through HTML escaping
+    placeholder_double = '\x00DOUBLE_MARK\x00'
+    placeholder_single = '\x00SINGLE_MARK\x00'
+    placeholder_end = '\x00END_MARK\x00'
+
+    # Extract double markers first
+    text = re.sub(r'\*\*([^*]+)\*\*', placeholder_double + r'\1' + placeholder_end, text)
+    # Then single markers
+    text = re.sub(r'\*([^*]+)\*', placeholder_single + r'\1' + placeholder_end, text)
+
+    # Now escape HTML entities to prevent broken DOM
+    text = html.escape(text)
+
+    # Restore markers as HTML tags
+    text = text.replace(placeholder_double, '<mark class="highlight-strong">')
+    text = text.replace(placeholder_single, '<mark class="highlight">')
+    text = text.replace(placeholder_end, '</mark>')
 
     return text
 
@@ -513,26 +529,23 @@ def create_search_page():
                     icon='tune'
                 ).classes('w-full').props('dense header-class="text-green-700"'):
                     with ui.column().classes('w-full gap-4 pt-4'):
-                        # Word gap slider
-                        with ui.column().classes('w-full'):
-                            with ui.row().classes('w-full justify-between items-center mb-2'):
-                                ui.label(tr('Word gap')).classes('font-medium text-gray-700')
-                                gap_display = ui.label(f'{state.gap}').classes(
-                                    'text-xl font-bold text-green-700'
-                                )
-
-                            gap_slider = ui.slider(
-                                min=0, max=5, step=1, value=state.gap
-                            ).classes('w-full gap-slider').props('label-always color=green')
+                        # Word gap - simple number input instead of slider
+                        with ui.row().classes('w-full items-center gap-4'):
+                            ui.label(tr('Word gap')).classes('font-medium text-gray-700')
 
                             def on_gap_change(e):
-                                state.gap = int(e.value)
-                                gap_display.set_text(str(state.gap))
+                                state.gap = int(e.value) if e.value else 0
 
-                            gap_slider.on('update:model-value', on_gap_change)
+                            ui.number(
+                                value=state.gap,
+                                min=0,
+                                max=5,
+                                step=1,
+                                on_change=on_gap_change
+                            ).classes('w-20').props('outlined dense')
 
                             ui.label(tr('Gap description')).classes(
-                                'text-xs text-gray-500 mt-1'
+                                'text-xs text-gray-500'
                             )
 
                         ui.separator()
