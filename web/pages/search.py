@@ -6,9 +6,6 @@ import time
 # Helper to format snippet HTML
 def format_snippet(text):
     if not text: return ""
-    # Convert *...* to yellow highlight
-    html = text.replace("*", '<span class="bg-yellow-200 font-bold px-1 rounded">').replace("*", "</span>") # This replacement logic is flawed, handled below
-
     # Robust replacement: *word* -> <span>word</span>
     import re
     return re.sub(r'\*(.*?)\*', r'<span class="bg-yellow-200 text-black font-bold px-1 rounded">\1</span>', text)
@@ -22,6 +19,7 @@ def create_search_page():
             self.status = ""
             self.is_running = False
             self.results = []
+            self.adv_expanded = False
 
     search_state = SearchUIState()
 
@@ -29,34 +27,59 @@ def create_search_page():
     with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
 
         # 1. Search Bar (Top Fixed)
-        with ui.row().classes('w-full bg-white p-4 shadow-sm items-end gap-4 z-10'):
+        with ui.column().classes('w-full bg-white p-4 shadow-sm z-10 gap-2'):
+            with ui.row().classes('w-full items-end gap-4'):
 
-            # Query Input
-            query_input = ui.input(label=tr('Search Query')).classes('flex-grow').props('outlined dense rounded')
-            query_input.on('keydown.enter', lambda: execute_search())
+                # Query Input
+                query_input = ui.input(label=tr('Search Query')).classes('flex-grow').props('outlined dense rounded')
+                query_input.on('keydown.enter', lambda: execute_search())
 
-            # Mode Select
-            mode_select = ui.select(
-                ['variants', 'exact', 'fuzzy', 'Regex'],
-                value='variants',
-                label=tr('Mode')
-            ).classes('w-40').props('outlined dense')
+                # Mode Select
+                mode_select = ui.select(
+                    ['variants', 'variants_extended', 'variants_maximum', 'exact', 'fuzzy', 'Regex', 'Shelfmark', 'Title'],
+                    value='variants',
+                    label=tr('Mode')
+                ).classes('w-40').props('outlined dense')
 
-            # Gap
-            gap_input = ui.number(label=tr('Gap'), value=0).classes('w-20').props('outlined dense')
+                # Gap
+                gap_input = ui.number(label=tr('Gap'), value=0).classes('w-20').props('outlined dense')
 
-            # Search Button
-            search_btn = ui.button(tr('Search'), on_click=lambda: execute_search()).classes('bg-primary text-white h-10 px-6')
+                # Search Button
+                search_btn = ui.button(tr('Search'), on_click=lambda: execute_search()).classes('bg-primary text-white h-10 px-6')
 
-            # Lab Toggle (Simple for now)
-            lab_mode = ui.checkbox('Lab').tooltip(tr("Enable Lab Mode algorithms"))
+                # Lab Toggle
+                lab_mode = ui.checkbox('Lab').tooltip(tr("Enable Lab Mode algorithms"))
 
-            ui.space()
+                ui.space()
 
-            # Export Buttons
-            with ui.row().classes('gap-1'):
-                ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props('flat round dense').tooltip(tr('Export Word'))
-                ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props('flat round dense').tooltip(tr('Export Excel'))
+                # Export Buttons
+                with ui.row().classes('gap-1'):
+                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props('flat round dense').tooltip(tr('Export Word'))
+                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props('flat round dense').tooltip(tr('Export Excel'))
+
+            # Advanced Search Expansion
+            with ui.expansion(tr('Advanced Filters'), icon='filter_list').classes('w-full bg-gray-50 rounded text-sm'):
+                with ui.row().classes('w-full gap-4 p-4'):
+                    # NOT Filter
+                    # Since Tantivy handles NOT via query syntax, we can append it or handle it in GUI
+                    # For now, let's provide helper buttons to append to query
+                    def append_syntax(text):
+                        current = query_input.value or ""
+                        query_input.set_value(current + " " + text)
+
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Boolean Operators')).classes('font-bold text-gray-600')
+                        with ui.row():
+                            ui.button('AND', on_click=lambda: append_syntax('AND')).props('outline dense size=sm')
+                            ui.button('OR', on_click=lambda: append_syntax('OR')).props('outline dense size=sm')
+                            ui.button('NOT', on_click=lambda: append_syntax('NOT')).props('outline dense size=sm')
+
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Shortcuts')).classes('font-bold text-gray-600')
+                        with ui.row():
+                            ui.button('=Exact', on_click=lambda: append_syntax('=')).props('flat dense size=sm').tooltip('=term')
+                            ui.button('?Variants', on_click=lambda: append_syntax('?')).props('flat dense size=sm').tooltip('?term')
+                            ui.button('#Shelf', on_click=lambda: append_syntax('#')).props('flat dense size=sm').tooltip('#shelfmark')
 
         # 2. Progress Bar (Thin)
         progress_bar = ui.linear_progress(0).props('stripe animate').classes('h-1 w-full opacity-0 transition-opacity duration-300')
@@ -97,12 +120,42 @@ def create_search_page():
     ui.timer(0.1, update_progress_ui)
 
     async def execute_search():
-        query = query_input.value
+        query = query_input.value.strip()
         if not query: return
 
         if not state.is_ready():
             ui.notify(tr("Engine not ready."), type='warning')
             return
+
+        # Parse Syntax Shortcuts
+        # =, ?, ??, ???, /, #, $
+        mode = mode_select.value
+        clean_query = query
+
+        if query.startswith("???"):
+            mode = "variants_maximum"
+            clean_query = query[3:]
+        elif query.startswith("??"):
+            mode = "variants_extended"
+            clean_query = query[2:]
+        elif query.startswith("?"):
+            mode = "variants"
+            clean_query = query[1:]
+        elif query.startswith("="):
+            mode = "exact"
+            clean_query = query[1:]
+        elif query.startswith("/"):
+            mode = "Regex"
+            clean_query = query[1:]
+        elif query.startswith("#"):
+            mode = "Shelfmark"
+            clean_query = query[1:]
+        elif query.startswith("$"):
+            mode = "Title"
+            clean_query = query[1:]
+
+        # Update UI to reflect auto-detected mode
+        mode_select.value = mode
 
         # Reset UI
         results_container.clear()
@@ -122,18 +175,22 @@ def create_search_page():
         def run_core_search():
             try:
                 if lab_mode.value:
-                    # Lab Search
+                    # Lab Search (Lab engine handles its own fuzzy logic, usually variants)
+                    # We pass 'variants' unless it's regex
+                    lab_search_mode = 'variants'
+                    if mode == 'Regex': lab_search_mode = 'Regex'
+
                     return state.lab_engine.lab_search(
-                        query,
-                        mode='variants', # Lab uses its own logic
+                        clean_query,
+                        mode=lab_search_mode,
                         gap=int(gap_input.value),
                         progress_callback=progress_cb
                     )
                 else:
                     # Standard Search
                     return state.searcher.execute_search(
-                        query,
-                        mode=mode_select.value,
+                        clean_query,
+                        mode=mode,
                         gap=int(gap_input.value),
                         progress_callback=progress_cb
                     )
@@ -168,25 +225,28 @@ def create_search_page():
             return
 
         with results_container:
-            for i, res in enumerate(results):
-                display = res.get('display', {})
-                shelf = display.get('shelfmark', 'Unknown')
+            # Use a column to ensure vertical stacking within the scroll area
+            with ui.column().classes('w-full gap-2'):
+                for i, res in enumerate(results):
+                    display = res.get('display', {})
+                    shelf = display.get('shelfmark', 'Unknown')
 
-                # Card
-                with ui.card().classes('w-full cursor-pointer hover:bg-green-50 transition-colors p-3 gap-1').on('click', lambda _, r=res: load_in_viewer(r)):
+                    # Card
+                    # Note: We bind 'r=res' to capture the current item in the closure
+                    with ui.card().classes('w-full cursor-pointer hover:bg-green-50 transition-colors p-3 gap-1').on('click', lambda _, r=res: load_in_viewer(r)):
 
-                    # Header: Shelfmark + Title
-                    with ui.row().classes('w-full justify-between'):
-                        ui.label(shelf).classes('font-bold text-primary text-sm')
-                        ui.label(f"#{i+1}").classes('text-xs text-gray-400')
+                        # Header: Shelfmark + Title
+                        with ui.row().classes('w-full justify-between'):
+                            ui.label(shelf).classes('font-bold text-primary text-sm')
+                            ui.label(f"#{i+1}").classes('text-xs text-gray-400')
 
-                    # Title
-                    if display.get('title'):
-                        ui.label(display['title']).classes('text-xs text-gray-600 truncate w-full')
+                        # Title
+                        if display.get('title'):
+                            ui.label(display['title']).classes('text-xs text-gray-600 truncate w-full')
 
-                    # Snippet
-                    snippet_html = format_snippet(str(res.get('snippet', '')))
-                    ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800 line-clamp-3'>{snippet_html}</div>")
+                        # Snippet
+                        snippet_html = format_snippet(str(res.get('snippet', '')))
+                        ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800 line-clamp-3'>{snippet_html}</div>")
 
     # --- Viewer Integration (Step 6 Hook) ---
     def load_in_viewer(result):

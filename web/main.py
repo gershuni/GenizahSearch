@@ -34,16 +34,51 @@ init_api_routes()
 
 COMMON_STYLES = '''
 <style>
+    /* Default Theme (Light/Green) */
     :root {
-        --primary-green: #2e7d32;
-        --bg-parchment: #fffef5;
-        --bg-parchment-dark: #f5f0e1;
-        --text-dark: #263238;
+        --primary-color: #2e7d32;
+        --secondary-color: #f5f0e1; /* Parchment */
+        --bg-body: #f8f9fa;
+        --bg-header: #2e7d32;
+        --bg-sidebar: #ffffff;
+        --text-primary: #263238;
+        --text-secondary: #546e7a;
+    }
+
+    /* Parchment Theme */
+    [data-theme="parchment"] {
+        --primary-color: #8d6e63;
+        --secondary-color: #fff8e1;
+        --bg-body: #fdfbf7;
+        --bg-header: #5d4037;
+        --bg-sidebar: #fff8e1;
+        --text-primary: #3e2723;
+        --text-secondary: #5d4037;
+    }
+
+    /* Dark Mode */
+    [data-theme="dark"] {
+        --primary-color: #90caf9;
+        --secondary-color: #424242;
+        --bg-body: #121212;
+        --bg-header: #1f1f1f;
+        --bg-sidebar: #1e1e1e;
+        --text-primary: #e0e0e0;
+        --text-secondary: #b0bec5;
     }
 
     body {
-        background-color: #f8f9fa;
+        background-color: var(--bg-body);
+        color: var(--text-primary);
         font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    .q-header {
+        background-color: var(--bg-header) !important;
+    }
+
+    .q-drawer {
+        background-color: var(--bg-sidebar) !important;
     }
 
     /* Dense Drawer Item */
@@ -54,9 +89,9 @@ COMMON_STYLES = '''
 
     /* Navigation Active State */
     .nav-active {
-        background: #e8f5e9;
-        color: var(--primary-green);
-        border-right: 3px solid var(--primary-green);
+        background: var(--secondary-color);
+        color: var(--primary-color);
+        border-right: 3px solid var(--primary-color);
         font-weight: 600;
     }
 
@@ -76,7 +111,7 @@ def create_layout():
     """Create the main application layout with Header and Sidebar."""
 
     # Header
-    with ui.header().classes('bg-green-8 text-white shadow-md q-py-xs').style('height: 50px;'):
+    with ui.header().classes('shadow-md q-py-xs').style('height: 50px;'):
         with ui.row().classes('w-full items-center no-wrap'):
             ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round dense text-color=white')
             ui.icon('auto_stories').classes('text-2xl q-mr-sm')
@@ -101,7 +136,7 @@ def create_layout():
                 ui.timer(2.0, update_status)
 
     # Left Sidebar (Drawer)
-    left_drawer = ui.left_drawer(value=True).classes('bg-white shadow-lg').props('width=240 bordered')
+    left_drawer = ui.left_drawer(value=True).classes('shadow-lg').props('width=240 bordered')
     with left_drawer:
         with ui.column().classes('w-full q-py-md'):
 
@@ -112,19 +147,46 @@ def create_layout():
 
                 # Check active state
                 is_active = app.storage.user.get('current_page') == target
-                classes = 'w-full justify-start text-gray-800 hover:bg-gray-100 rounded-r-full mb-1'
+                classes = 'w-full justify-start hover:opacity-80 rounded-r-full mb-1'
                 if is_active:
                     classes += ' nav-active'
+                else:
+                    # Default text color for inactive items depends on theme context, handled by CSS var inheritance usually
+                    # But nicegui overrides might need specifics. We use CSS class.
+                    pass
 
                 ui.button(label, icon=icon, on_click=go).props('flat dense align=left').classes(classes)
 
-            ui.label('MENU').classes('text-xs font-bold text-gray-500 q-px-md q-mb-sm')
+            ui.label('MENU').classes('text-xs font-bold opacity-60 q-px-md q-mb-sm')
 
             nav_item(tr('Dashboard'), 'dashboard', '/')
             nav_item(tr('Search'), 'search', '/search')
+            nav_item(tr('Find Parallels'), 'compare_arrows', '/parallels')
             nav_item(tr('Browse'), 'menu_book', '/browse')
             nav_item(tr('Personal Lists'), 'star', '/lists')
             nav_item(tr('Settings'), 'settings', '/settings')
+
+            ui.separator().classes('my-2')
+
+            # Language Toggle
+            def toggle_lang():
+                current = get_language()
+                new_lang = 'en' if current == 'he' else 'he'
+                set_language(new_lang)
+                ui.navigate.reload()
+
+            lang_label = "עברית" if get_language() == 'en' else "English"
+            ui.button(lang_label, icon='language', on_click=toggle_lang).props('flat dense align=left').classes('w-full justify-start opacity-80')
+
+            # Theme Toggle
+            def set_theme(theme_name):
+                app.storage.user['theme'] = theme_name
+                ui.run_javascript(f'document.body.setAttribute("data-theme", "{theme_name}")')
+
+            with ui.row().classes('q-px-md gap-2 mt-4'):
+                ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('round flat size=sm').tooltip('Light')
+                ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('round flat size=sm').tooltip('Parchment')
+                ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('round flat size=sm').tooltip('Dark')
 
     # Content Area (Slot for pages)
     return ui.column().classes('w-full p-4 items-stretch flex-grow')
@@ -138,28 +200,48 @@ def create_layout():
 def dashboard_page():
     app.storage.user['current_page'] = '/'
     ui.add_head_html(COMMON_STYLES)
+    # Apply theme on load
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+
     content = create_layout()
     with content:
-        # Placeholder for Dashboard - will implement in Step 4
         from web.pages import home
         if hasattr(home, 'create_page'):
             home.create_page()
         else:
-            ui.label("Dashboard Placeholder").classes('text-2xl text-gray-400')
+            ui.label("Dashboard Placeholder").classes('text-2xl opacity-50')
 
 @ui.page('/search')
 def search_page_route():
     app.storage.user['current_page'] = '/search'
     ui.add_head_html(COMMON_STYLES)
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+
     content = create_layout()
     with content:
         from web.pages.search import create_search_page
         create_search_page()
 
+@ui.page('/parallels')
+def parallels_page_route():
+    app.storage.user['current_page'] = '/parallels'
+    ui.add_head_html(COMMON_STYLES)
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    content = create_layout()
+    with content:
+        from web.pages.parallels import create_parallels_page
+        create_parallels_page()
+
 @ui.page('/browse')
 def browse_page_route():
     app.storage.user['current_page'] = '/browse'
     ui.add_head_html(COMMON_STYLES)
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
@@ -169,17 +251,21 @@ def browse_page_route():
 def lists_page_route():
     app.storage.user['current_page'] = '/lists'
     ui.add_head_html(COMMON_STYLES)
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
     content = create_layout()
     with content:
-        ui.label("Personal Lists").classes('text-2xl font-bold text-primary')
+        ui.label("Personal Lists").classes('text-2xl font-bold opacity-80')
 
 @ui.page('/settings')
 def settings_page_route():
     app.storage.user['current_page'] = '/settings'
     ui.add_head_html(COMMON_STYLES)
+    current_theme = app.storage.user.get('theme', 'light')
+    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
     content = create_layout()
     with content:
-        ui.label("Settings").classes('text-2xl font-bold text-primary')
+        ui.label("Settings").classes('text-2xl font-bold opacity-80')
 
 # ============================================================================
 # Startup Logic (Background)

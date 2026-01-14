@@ -60,7 +60,11 @@ def load_result(container, result):
     # Get Full Text (fetch if missing)
     full_text = result.get('full_text') or result.get('text', '')
     if not full_text and uid and state.searcher:
-        full_text = state.searcher.get_full_text_by_id(uid)
+        try:
+            full_text = state.searcher.get_full_text_by_id(uid)
+        except Exception as e:
+            print(f"Error fetching text for {uid}: {e}")
+            full_text = tr("Error loading text.")
 
     with container:
 
@@ -100,10 +104,9 @@ def load_result(container, result):
                     # Proxy URL
                     proxy_url = f"/api/proxy_image?url={img_url}"
 
-                    # Interactive Image (Zoom/Pan is hard in basic img tag, but we can make it large)
-                    # We use a scroll area for basic panning
-                    with ui.scroll_area().classes('w-full h-[600px] flex items-center justify-center'):
-                        ui.image(proxy_url).classes('max-w-none').style('min-width: 100%; min-height: 100%; object-fit: contain;')
+                    with ui.scroll_area().classes('w-full h-full flex items-center justify-center bg-gray-900'):
+                        # Use min-h-0 to allow proper flex sizing in scroll area
+                        ui.image(proxy_url).props('fit=contain').classes('h-[80vh] w-auto max-w-none')
 
                     ui.label(tr("High-Res via NLI Proxy")).classes('absolute bottom-2 right-2 text-xs text-white/50 bg-black/30 px-2 rounded')
                 else:
@@ -113,21 +116,27 @@ def load_result(container, result):
             with ui.tab_panel(tab_meta).classes('p-4'):
                 # Fetch fresh meta
                 def load_meta_content():
+                    if not sys_id:
+                        ui.label("System ID missing.").classes('text-red-500')
+                        return
+
                     meta = state.meta_mgr.enrich_metadata(sys_id)
                     with ui.column().classes('gap-2'):
-                        if 'marc' in meta:
+                        if 'marc' in meta and meta['marc']:
                             marc = meta['marc']
                             for k, v in marc.items():
-                                if v and isinstance(v, str):
-                                    ui.markdown(f"**{k.replace('_', ' ').title()}:** {v}")
-                                elif isinstance(v, list) and v:
-                                    ui.markdown(f"**{k.replace('_', ' ').title()}:** {', '.join(v)}")
+                                if not v: continue
+                                label = k.replace('_', ' ').title()
+                                if isinstance(v, str):
+                                    ui.markdown(f"**{label}:** {v}")
+                                elif isinstance(v, list):
+                                    ui.markdown(f"**{label}:** {', '.join(str(x) for x in v)}")
                         else:
-                            ui.label("No extended metadata found.")
+                            # Show basic meta if MARC missing
+                            ui.markdown(f"**Shelfmark:** {meta.get('shelfmark', 'Unknown')}")
+                            ui.markdown(f"**Title:** {meta.get('title', 'Unknown')}")
+                            ui.label(tr("No extended bibliographic data available."))
 
-                # Load lazily
-                ui.spinner('dots')
-                ui.timer(0.1, lambda: (container.clear(), load_meta_content()) if False else None, once=True) # Hacky lazy load, just loading directly for now:
                 load_meta_content()
 
             # 4. Source Panel (Lab)
