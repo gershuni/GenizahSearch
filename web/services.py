@@ -514,11 +514,11 @@ class GenizahService:
 
                 return results
 
-        except Exception as e:
-            print(f"Composition search error: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            except Exception as e:
+                print(f"Composition search error: {e}")
+                import traceback
+                traceback.print_exc()
+                return []
 
     def search_composition_logic(
         self,
