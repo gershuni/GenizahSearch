@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 import asyncio
 import re
+import html
 from collections import defaultdict
 
 from web.services import get_service, CompositionResult
@@ -129,16 +130,28 @@ def get_score_badge_style(score: float, max_score: float) -> str:
 
 
 def highlight_matched_text(text: str) -> str:
-    """Convert *marked* text to HTML with highlighting."""
+    """Convert *marked* text to HTML with highlighting.
+    HTML-escapes the text first to prevent broken DOM from special chars.
+    """
     if not text:
         return ''
-    # Replace *text* with highlighted spans
-    result = re.sub(
-        r'\*([^*]+)\*',
-        r'<span class="highlight-match">\1</span>',
-        text
-    )
-    return result
+
+    # First, temporarily replace asterisk markers with placeholders
+    # to preserve them through HTML escaping
+    placeholder_start = '\x00HIGHLIGHT_START\x00'
+    placeholder_end = '\x00HIGHLIGHT_END\x00'
+
+    # Extract markers
+    text = re.sub(r'\*([^*]+)\*', placeholder_start + r'\1' + placeholder_end, text)
+
+    # Now escape HTML entities to prevent broken DOM
+    text = html.escape(text)
+
+    # Restore markers as HTML tags
+    text = text.replace(placeholder_start, '<span class="highlight-match">')
+    text = text.replace(placeholder_end, '</span>')
+
+    return text
 
 
 def group_results_by_manuscript(
@@ -505,184 +518,152 @@ def create_parallels_page():
                         )
                 return
 
-            # Results summary
-            create_results_summary()
-
-            # Filtering controls
-            create_filter_controls()
-
-            # Results list
-            create_results_list()
-
-    def create_results_summary():
-        """Create the results summary header."""
-        with ui.row().classes('w-full summary-card mb-6'):
-            with ui.row().classes('items-center gap-6 flex-wrap'):
-                with ui.row().classes('items-center gap-2'):
-                    ui.icon('check_circle', color='green', size='sm')
-                    ui.label(
-                        f"{state.result_count} {tr('parallels found')}"
-                    ).classes('font-bold text-green-800 text-lg')
-
-                ui.separator().props('vertical')
-
-                with ui.row().classes('items-center gap-2'):
-                    ui.icon('library_books', color='green', size='sm')
-                    ui.label(
-                        f"{tr('in')} {state.manuscript_count} {tr('manuscripts')}"
-                    ).classes('text-green-700')
-
-                if state.grouped_results:
-                    max_score = max(g.total_score for g in state.grouped_results)
-                    ui.separator().props('vertical')
+            # Results summary - inlined for proper context handling
+            with ui.row().classes('w-full summary-card mb-6'):
+                with ui.row().classes('items-center gap-6 flex-wrap'):
                     with ui.row().classes('items-center gap-2'):
-                        ui.icon('stars', color='amber', size='sm')
-                        ui.label(f"{tr('Top score')}: {max_score:.0f}").classes(
-                            'text-gray-600'
-                        )
-
-    def create_filter_controls():
-        """Create sorting and filtering controls."""
-        with ui.row().classes('w-full items-center justify-between mb-4 flex-wrap gap-4'):
-            # Sort control
-            with ui.row().classes('items-center gap-3'):
-                ui.label(tr('Sort by')).classes('text-sm text-gray-600')
-                sort_select = ui.select(
-                    {key: tr(label) for key, label in SORT_OPTIONS},
-                    value=state.sort_by,
-                    on_change=lambda e: (
-                        setattr(state, 'sort_by', e.value),
-                        apply_filters()
-                    )
-                ).classes('w-40').props('outlined dense')
-
-            # Minimum score filter
-            with ui.row().classes('items-center gap-3'):
-                ui.label(tr('Min score')).classes('text-sm text-gray-600')
-                min_score_input = ui.number(
-                    value=state.min_score,
-                    min=0,
-                    max=10000,
-                    step=50,
-                    on_change=lambda e: (
-                        setattr(state, 'min_score', int(e.value or 0)),
-                        apply_filters()
-                    )
-                ).classes('w-24').props('outlined dense')
-
-    def create_results_list():
-        """Create the list of grouped results."""
-        max_score = max(g.total_score for g in state.grouped_results) if state.grouped_results else 1
-
-        for group in state.grouped_results:
-            create_manuscript_group(group, max_score)
-
-    def create_manuscript_group(group: GroupedResult, max_score: float):
-        """Create a manuscript group card with expandable results."""
-        score_style = get_score_badge_style(group.total_score, max_score)
-
-        with ui.card().classes('w-full manuscript-group-card'):
-            # Header (clickable to expand)
-            with ui.expansion(
-                text='',
-                icon='menu_book',
-                value=False
-            ).classes('w-full').props('dense header-class=manuscript-group-header'):
-                # Custom header content
-                with ui.row().classes('w-full items-center justify-between'):
-                    with ui.row().classes('items-center gap-3'):
-                        ui.label(group.shelfmark).classes(
-                            'font-bold text-green-800 text-lg'
-                        )
-                        if group.title:
-                            ui.label(f"- {group.title[:50]}{'...' if len(group.title) > 50 else ''}").classes(
-                                'text-gray-600 rtl-text hebrew-text'
-                            )
-
-                    with ui.row().classes('items-center gap-3'):
-                        # Match count
-                        ui.badge(
-                            f"{group.match_count} {tr('matches')}",
-                            color='blue'
-                        ).props('outline')
-
-                        # Score badge
-                        ui.html(
-                            f'<span class="score-badge {score_style}">'
-                            f'{tr("Score")}: {group.total_score:.0f}</span>'
-                        )
-
-                        # View button
-                        ui.button(
-                            tr('View'),
-                            icon='visibility',
-                            on_click=lambda g=group: ui.navigate.to(f'/browse/{g.sys_id}')
-                        ).props('flat dense color=green')
-
-                # Expanded content - individual results
-                with ui.column().classes('w-full gap-4 p-4 bg-gray-50'):
-                    for i, result in enumerate(group.results[:10]):  # Limit to 10 per group
-                        create_result_comparison(result, max_score, i)
-
-                    if len(group.results) > 10:
+                        ui.icon('check_circle', color='green', size='sm')
                         ui.label(
-                            f"... {tr('and')} {len(group.results) - 10} {tr('more matches')}"
-                        ).classes('text-gray-500 text-sm italic')
+                            f"{state.result_count} {tr('parallels found')}"
+                        ).classes('font-bold text-green-800 text-lg')
 
-    def create_result_comparison(result: CompositionResult, max_score: float, index: int):
-        """Create a side-by-side comparison for a single result."""
-        score_color = get_score_color(result.score, max_score)
+                    ui.separator().props('vertical')
 
-        with ui.card().classes('w-full parallels-result-card p-4'):
-            # Result header
-            with ui.row().classes('w-full items-center justify-between mb-3'):
-                with ui.row().classes('items-center gap-2'):
-                    ui.badge(f"#{index + 1}", color=score_color).props('outline')
-                    ui.badge(
-                        f"{tr('Score')}: {result.score:.0f}",
-                        color=score_color
-                    )
+                    with ui.row().classes('items-center gap-2'):
+                        ui.icon('library_books', color='green', size='sm')
+                        ui.label(
+                            f"{tr('in')} {state.manuscript_count} {tr('manuscripts')}"
+                        ).classes('text-green-700')
 
-                ui.button(
-                    icon='open_in_new',
-                    on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
-                ).props('flat dense round').tooltip(tr('View manuscript'))
-
-            # Side-by-side comparison
-            with ui.row().classes('w-full gap-4'):
-                # Source text (LEFT)
-                with ui.column().classes('flex-1'):
-                    ui.label(tr('Your text')).classes(
-                        'text-sm font-medium text-blue-700 mb-2'
-                    )
-                    with ui.element('div').classes('comparison-panel source-panel'):
-                        if result.src_snippet:
-                            highlighted = highlight_matched_text(result.src_snippet[:600])
-                            ui.html(
-                                f'<div class="rtl-text hebrew-text text-sm" '
-                                f'style="line-height: 1.8">{highlighted}</div>'
-                            )
-                        else:
-                            ui.label(tr('No context available')).classes(
-                                'text-gray-400 italic text-sm'
+                    if state.grouped_results:
+                        top_max_score = max(g.total_score for g in state.grouped_results)
+                        ui.separator().props('vertical')
+                        with ui.row().classes('items-center gap-2'):
+                            ui.icon('stars', color='amber', size='sm')
+                            ui.label(f"{tr('Top score')}: {top_max_score:.0f}").classes(
+                                'text-gray-600'
                             )
 
-                # Manuscript text (RIGHT)
-                with ui.column().classes('flex-1'):
-                    ui.label(tr('Manuscript text')).classes(
-                        'text-sm font-medium text-green-700 mb-2'
-                    )
-                    with ui.element('div').classes('comparison-panel manuscript-panel'):
-                        if result.ms_snippet:
-                            highlighted = highlight_matched_text(result.ms_snippet[:600])
-                            ui.html(
-                                f'<div class="rtl-text hebrew-text text-sm" '
-                                f'style="line-height: 1.8">{highlighted}</div>'
-                            )
-                        else:
-                            ui.label(tr('No text available')).classes(
-                                'text-gray-400 italic text-sm'
-                            )
+            # Filtering controls - inlined for proper context handling
+            with ui.row().classes('w-full items-center justify-between mb-4 flex-wrap gap-4'):
+                with ui.row().classes('items-center gap-3'):
+                    ui.label(tr('Sort by')).classes('text-sm text-gray-600')
+                    ui.select(
+                        {key: tr(label) for key, label in SORT_OPTIONS},
+                        value=state.sort_by,
+                        on_change=lambda e: (
+                            setattr(state, 'sort_by', e.value),
+                            apply_filters()
+                        )
+                    ).classes('w-40').props('outlined dense')
+
+                with ui.row().classes('items-center gap-3'):
+                    ui.label(tr('Min score')).classes('text-sm text-gray-600')
+                    ui.number(
+                        value=state.min_score,
+                        min=0,
+                        max=10000,
+                        step=50,
+                        on_change=lambda e: (
+                            setattr(state, 'min_score', int(e.value or 0)),
+                            apply_filters()
+                        )
+                    ).classes('w-24').props('outlined dense')
+
+            # Results list - fully inlined for proper context handling
+            max_score = max(g.total_score for g in state.grouped_results) if state.grouped_results else 1
+
+            for group in state.grouped_results:
+                score_style = get_score_badge_style(group.total_score, max_score)
+
+                with ui.card().classes('w-full manuscript-group-card'):
+                    with ui.expansion(
+                        text='',
+                        icon='menu_book',
+                        value=False
+                    ).classes('w-full').props('dense header-class=manuscript-group-header'):
+                        with ui.row().classes('w-full items-center justify-between'):
+                            with ui.row().classes('items-center gap-3'):
+                                ui.label(group.shelfmark).classes(
+                                    'font-bold text-green-800 text-lg'
+                                )
+                                if group.title:
+                                    ui.label(f"- {group.title[:50]}{'...' if len(group.title) > 50 else ''}").classes(
+                                        'text-gray-600 rtl-text hebrew-text'
+                                    )
+
+                            with ui.row().classes('items-center gap-3'):
+                                ui.badge(
+                                    f"{group.match_count} {tr('matches')}",
+                                    color='blue'
+                                ).props('outline')
+
+                                ui.html(
+                                    f'<span class="score-badge {score_style}">'
+                                    f'{tr("Score")}: {group.total_score:.0f}</span>'
+                                )
+
+                                ui.button(
+                                    tr('View'),
+                                    icon='visibility',
+                                    on_click=lambda g=group: ui.navigate.to(f'/browse/{g.sys_id}')
+                                ).props('flat dense color=green')
+
+                        with ui.column().classes('w-full gap-4 p-4 bg-gray-50'):
+                            for i, result in enumerate(group.results[:10]):
+                                score_color = get_score_color(result.score, max_score)
+
+                                with ui.card().classes('w-full parallels-result-card p-4'):
+                                    with ui.row().classes('w-full items-center justify-between mb-3'):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.badge(f"#{i + 1}", color=score_color).props('outline')
+                                            ui.badge(
+                                                f"{tr('Score')}: {result.score:.0f}",
+                                                color=score_color
+                                            )
+
+                                        ui.button(
+                                            icon='open_in_new',
+                                            on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
+                                        ).props('flat dense round').tooltip(tr('View manuscript'))
+
+                                    with ui.row().classes('w-full gap-4'):
+                                        with ui.column().classes('flex-1'):
+                                            ui.label(tr('Your text')).classes(
+                                                'text-sm font-medium text-blue-700 mb-2'
+                                            )
+                                            with ui.element('div').classes('comparison-panel source-panel'):
+                                                if result.src_snippet:
+                                                    highlighted = highlight_matched_text(result.src_snippet[:600])
+                                                    ui.html(
+                                                        f'<div class="rtl-text hebrew-text text-sm" '
+                                                        f'style="line-height: 1.8">{highlighted}</div>'
+                                                    )
+                                                else:
+                                                    ui.label(tr('No context available')).classes(
+                                                        'text-gray-400 italic text-sm'
+                                                    )
+
+                                        with ui.column().classes('flex-1'):
+                                            ui.label(tr('Manuscript text')).classes(
+                                                'text-sm font-medium text-green-700 mb-2'
+                                            )
+                                            with ui.element('div').classes('comparison-panel manuscript-panel'):
+                                                if result.ms_snippet:
+                                                    highlighted = highlight_matched_text(result.ms_snippet[:600])
+                                                    ui.html(
+                                                        f'<div class="rtl-text hebrew-text text-sm" '
+                                                        f'style="line-height: 1.8">{highlighted}</div>'
+                                                    )
+                                                else:
+                                                    ui.label(tr('No text available')).classes(
+                                                        'text-gray-400 italic text-sm'
+                                                    )
+
+                            if len(group.results) > 10:
+                                ui.label(
+                                    f"... {tr('and')} {len(group.results) - 10} {tr('more matches')}"
+                                ).classes('text-gray-500 text-sm italic')
 
     # ========================================================================
     # Main Layout

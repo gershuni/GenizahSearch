@@ -356,9 +356,73 @@ def create_search_page():
             page_results = state.results[start_idx:end_idx]
             total_pages = (state.result_count + state.results_per_page - 1) // state.results_per_page
 
-            # Results list
+            # Results list - inline card creation for proper context handling
             for result in page_results:
-                create_result_card(result)
+                display = result.display
+                shelfmark = display.get('shelfmark', '') if isinstance(display, dict) else str(display)
+                title = display.get('title', '') if isinstance(display, dict) else ''
+                img_num = display.get('img', '') if isinstance(display, dict) else ''
+                source = result.source or 'V0.8'
+                source_class = 'source-v08' if 'V0.8' in source or '0.8' in source else 'source-v07'
+
+                with ui.card().classes('w-full result-card'):
+                    # Header row with metadata
+                    with ui.row().classes('w-full items-start justify-between'):
+                        # Left side - metadata
+                        with ui.column().classes('flex-1'):
+                            # Top line: shelfmark, badges
+                            with ui.row().classes('items-center gap-3 flex-wrap'):
+                                ui.label(shelfmark or f"ID: {result.sys_id}").classes(
+                                    'text-lg font-bold text-green-800 cursor-pointer hover:text-green-600'
+                                ).on('click', lambda r=result: ui.navigate.to(f'/document/{r.uid}'))
+
+                                if img_num:
+                                    with ui.element('span').classes('source-badge source-v08'):
+                                        ui.label(f"p. {img_num}")
+
+                                with ui.element('span').classes(f'source-badge {source_class}'):
+                                    ui.label(source)
+
+                                if result.cross_page:
+                                    with ui.element('span').classes('source-badge').style(
+                                        'background-color: #fff3e0; color: #e65100;'
+                                    ):
+                                        ui.icon('layers', size='xs').classes('mr-1')
+                                        ui.label(tr('Cross-page match'))
+
+                            if title:
+                                ui.label(title).classes(
+                                    'text-gray-600 rtl-text hebrew-text mt-2 text-base'
+                                )
+
+                        # Right side - action buttons
+                        with ui.row().classes('gap-2'):
+                            ui.button(
+                                tr('View'),
+                                icon='visibility',
+                                on_click=lambda r=result: ui.navigate.to(f'/document/{r.uid}')
+                            ).props('flat dense color=green').classes('action-btn')
+
+                            if result.sys_id:
+                                ui.button(
+                                    icon='menu_book',
+                                    on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
+                                ).props('flat dense color=grey').tooltip(tr('Browse Manuscripts'))
+
+                            if result.snippet:
+                                ui.button(
+                                    icon='content_copy',
+                                    on_click=lambda r=result: copy_text(r.snippet)
+                                ).props('flat dense color=grey').tooltip(tr('Copy text'))
+
+                    # Snippet with highlighted matches
+                    if result.snippet:
+                        snippet_text = result.snippet[:500]
+                        if len(result.snippet) > 500:
+                            snippet_text += '...'
+                        highlighted_snippet = convert_highlight_markers(snippet_text)
+                        with ui.element('div').classes('snippet-box'):
+                            ui.html(highlighted_snippet)
 
             # Pagination controls
             if total_pages > 1:
@@ -390,87 +454,6 @@ def create_search_page():
         if 0 <= page < total_pages:
             state.current_page = page
             update_results()
-
-    def create_result_card(result: SearchResult):
-        """Create a single result card with actions."""
-        display = result.display
-        shelfmark = display.get('shelfmark', '') if isinstance(display, dict) else str(display)
-        title = display.get('title', '') if isinstance(display, dict) else ''
-        img_num = display.get('img', '') if isinstance(display, dict) else ''
-        source = result.source or 'V0.8'
-
-        # Determine source badge class
-        source_class = 'source-v08' if 'V0.8' in source or '0.8' in source else 'source-v07'
-
-        with ui.card().classes('w-full result-card'):
-            # Header row with metadata
-            with ui.row().classes('w-full items-start justify-between'):
-                # Left side - metadata
-                with ui.column().classes('flex-1'):
-                    # Top line: shelfmark, badges
-                    with ui.row().classes('items-center gap-3 flex-wrap'):
-                        # Shelfmark as main title
-                        ui.label(shelfmark or f"ID: {result.sys_id}").classes(
-                            'text-lg font-bold text-green-800 cursor-pointer hover:text-green-600'
-                        ).on('click', lambda r=result: ui.navigate.to(f'/document/{r.uid}'))
-
-                        # Page number badge
-                        if img_num:
-                            with ui.element('span').classes('source-badge source-v08'):
-                                ui.label(f"p. {img_num}")
-
-                        # Source badge
-                        with ui.element('span').classes(f'source-badge {source_class}'):
-                            ui.label(source)
-
-                        # Cross-page indicator
-                        if result.cross_page:
-                            with ui.element('span').classes('source-badge').style(
-                                'background-color: #fff3e0; color: #e65100;'
-                            ):
-                                ui.icon('layers', size='xs').classes('mr-1')
-                                ui.label(tr('Cross-page match'))
-
-                    # Title line (if available)
-                    if title:
-                        ui.label(title).classes(
-                            'text-gray-600 rtl-text hebrew-text mt-2 text-base'
-                        )
-
-                # Right side - action buttons
-                with ui.row().classes('gap-2'):
-                    # View document
-                    ui.button(
-                        tr('View'),
-                        icon='visibility',
-                        on_click=lambda r=result: ui.navigate.to(f'/document/{r.uid}')
-                    ).props('flat dense color=green').classes('action-btn')
-
-                    # Browse manuscript
-                    if result.sys_id:
-                        ui.button(
-                            icon='menu_book',
-                            on_click=lambda r=result: ui.navigate.to(f'/browse/{r.sys_id}')
-                        ).props('flat dense color=grey').tooltip(tr('Browse Manuscripts'))
-
-                    # Copy text
-                    if result.snippet:
-                        ui.button(
-                            icon='content_copy',
-                            on_click=lambda r=result: copy_text(r.snippet)
-                        ).props('flat dense color=grey').tooltip(tr('Copy text'))
-
-            # Snippet with highlighted matches
-            if result.snippet:
-                snippet_text = result.snippet[:500]
-                if len(result.snippet) > 500:
-                    snippet_text += '...'
-
-                # Convert highlight markers to HTML
-                highlighted_snippet = convert_highlight_markers(snippet_text)
-
-                with ui.element('div').classes('snippet-box'):
-                    ui.html(highlighted_snippet)
 
     # =========================================================================
     # Main Layout
