@@ -78,15 +78,22 @@ def create_parallels_page():
 
         def run_search():
             try:
+                print(f"[DEBUG Parallels] Starting search with text length={len(text)}, mode={mode_select.value}, chunk_size={chunk_size.value}")
                 # Use Lab Engine for composition
-                return state.lab_engine.lab_composition_search(
+                result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
                     chunk_size=int(chunk_size.value),
                     progress_callback=progress_cb
                 )
+                print(f"[DEBUG Parallels] Search completed, result type={type(result)}, is None={result is None}")
+                if result:
+                    print(f"[DEBUG Parallels] Result keys={list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
+                return result
             except Exception as e:
-                print(f"Parallels Error: {e}")
+                print(f"[ERROR Parallels] Exception: {e}")
+                import traceback
+                traceback.print_exc()
                 return None
 
         result_data = await run.io_bound(run_search)
@@ -94,11 +101,19 @@ def create_parallels_page():
         p_state.is_running = False
         p_state.progress = 1.0
 
+        print(f"[DEBUG Parallels] After io_bound: result_data={result_data is not None}")
+
         if result_data:
             main_results = result_data.get('main', [])
-            render_results(main_results)
+            print(f"[DEBUG Parallels] main_results length={len(main_results) if main_results else 0}")
+            if main_results:
+                render_results(main_results)
+            else:
+                with results_container:
+                    ui.label(tr("No matches found. Try different parameters.")).classes('text-center text-gray-500 w-full mt-4')
         else:
-            ui.notify(tr("No parallels found."), type='warning')
+            with results_container:
+                ui.label(tr("No parallels found. Check console for errors.")).classes('text-center text-red-500 w-full mt-4')
 
     def render_results(items):
         results_container.clear()

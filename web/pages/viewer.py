@@ -61,21 +61,23 @@ def load_result(container, result):
     full_text = result.get('full_text') or result.get('text', '')
     snippet = result.get('snippet', '')
 
-    # If no full text, try to fetch it
-    if not full_text and uid and state.searcher:
-        try:
-            full_text = state.searcher.get_full_text_by_id(uid)
-        except Exception as e:
-            print(f"Error fetching text for {uid}: {e}")
-            # Fall back to snippet if available
-            if snippet:
-                full_text = snippet.replace('*', '')  # Remove highlight markers
-            else:
-                full_text = tr("Error loading text.")
+    # Debug print
+    print(f"[DEBUG] uid={uid}, full_text length={len(full_text) if full_text else 0}, snippet length={len(snippet) if snippet else 0}")
 
-    # If still no text, use snippet
-    if not full_text and snippet:
-        full_text = snippet.replace('*', '')
+    # Always prefer snippet if no full text (search results typically have snippets)
+    if not full_text:
+        if snippet:
+            # Use snippet directly
+            full_text = snippet
+            print(f"[DEBUG] Using snippet as full_text")
+        elif uid and state.searcher:
+            # Try to fetch full text
+            try:
+                full_text = state.searcher.get_full_text_by_id(uid)
+                print(f"[DEBUG] Fetched full_text, length={len(full_text) if full_text else 0}")
+            except Exception as e:
+                print(f"[DEBUG] Error fetching text for {uid}: {e}")
+                full_text = tr("Error loading text.")
 
     with container:
 
@@ -105,8 +107,16 @@ def load_result(container, result):
 
             # 1. Text Panel
             with ui.tab_panel(tab_text).classes('p-4 bg-white'):
-                pattern = result.get('highlight_pattern')
-                ui.html(format_text_html(full_text, pattern)).classes('w-full')
+                if full_text:
+                    pattern = result.get('highlight_pattern')
+                    ui.html(format_text_html(full_text, pattern)).classes('w-full')
+                else:
+                    with ui.column().classes('w-full items-center py-8'):
+                        ui.icon('text_snippet', size='3rem').classes('text-gray-300')
+                        ui.label(tr('No text available')).classes('text-gray-400 mt-2')
+                        if snippet:
+                            ui.label(tr('Snippet only:')).classes('text-sm text-gray-500 mt-4')
+                            ui.html(format_text_html(snippet.replace('*', ''), None)).classes('w-full mt-2')
 
             # 2. Image Panel
             with ui.tab_panel(tab_img).classes('p-0 h-full bg-black flex items-center justify-center relative'):

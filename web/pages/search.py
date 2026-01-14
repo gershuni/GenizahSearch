@@ -215,6 +215,33 @@ def create_search_page():
         if len(results) > 100:
             ui.notify(tr("Showing first 100 results. Refine search."), type='info')
 
+    def create_result_card(i, res, display, shelf):
+        """Create a single result card with proper closure capture."""
+        # Card
+        with ui.card().classes('w-full hover:bg-green-50 transition-colors p-3 gap-1'):
+
+            # Header: Shelfmark + Actions
+            with ui.row().classes('w-full justify-between items-start'):
+                with ui.column().classes('flex-grow cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(shelf).classes('font-bold text-primary text-sm')
+                with ui.row().classes('gap-1 items-center'):
+                    # Add to list button
+                    ui.button(
+                        icon='star_border',
+                        on_click=lambda: show_add_to_list_dialog(res)
+                    ).props('flat round dense size=sm').classes('text-yellow-600').tooltip(tr('Add to list'))
+                    ui.label(f"#{i+1}").classes('text-xs text-gray-400')
+
+            # Title
+            if display.get('title'):
+                with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                    ui.label(display['title']).classes('text-xs text-gray-600 w-full')
+
+            # Snippet
+            with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
+                snippet_html = format_snippet(str(res.get('snippet', '')))
+                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>")
+
     def render_results(results):
         results_container.clear()
 
@@ -235,31 +262,8 @@ def create_search_page():
                         display = res.get('display', {})
                         shelf = display.get('shelfmark', 'Unknown')
 
-                        # Card
-                        # Note: We bind 'r=res' to capture the current item in the closure
-                        with ui.card().classes('w-full hover:bg-green-50 transition-colors p-3 gap-1'):
-
-                            # Header: Shelfmark + Actions
-                            with ui.row().classes('w-full justify-between items-start'):
-                                with ui.column().classes('flex-grow cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
-                                    ui.label(shelf).classes('font-bold text-primary text-sm')
-                                with ui.row().classes('gap-1 items-center'):
-                                    # Add to list button
-                                    ui.button(
-                                        icon='star_border',
-                                        on_click=lambda _, r=res: show_add_to_list_dialog(r)
-                                    ).props('flat round dense size=sm').classes('text-yellow-600').tooltip(tr('Add to list'))
-                                    ui.label(f"#{i+1}").classes('text-xs text-gray-400')
-
-                            # Title
-                            if display.get('title'):
-                                with ui.column().classes('w-full cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
-                                    ui.label(display['title']).classes('text-xs text-gray-600 w-full')
-
-                            # Snippet
-                            with ui.column().classes('w-full cursor-pointer').on('click', lambda _, r=res: load_in_viewer(r)):
-                                snippet_html = format_snippet(str(res.get('snippet', '')))
-                                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>")
+                        # Create card with proper closure capture
+                        create_result_card(i, res, display, shelf)
 
     # --- Viewer Integration ---
     def load_in_viewer(result):
