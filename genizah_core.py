@@ -3046,20 +3046,58 @@ class MetadataManager:
         self.save_caches()
 
     def search_by_meta(self, query, field):
-        """Search for system IDs where the specified field matches the query."""
+        """Search for system IDs where the specified field matches the query.
+
+        Uses precise matching to avoid false positives like 120.2 matching 120.25.
+        First tries exact match, then word-boundary aware substring match.
+        """
         results = set()
-        q_norm = query.lower()
+        q_norm = query.lower().strip()
+
+        # Helper function for smart matching
+        def matches(value, query_norm):
+            val_norm = value.lower().strip()
+
+            # 1. Exact match
+            if val_norm == query_norm:
+                return True
+
+            # 2. For shelfmarks, check if query matches a complete token
+            # Split by spaces, dots, hyphens to avoid 120.2 matching 120.25
+            if field == 'shelfmark':
+                # Tokenize both query and value
+                val_tokens = re.split(r'[\s\.\-]+', val_norm)
+                query_tokens = re.split(r'[\s\.\-]+', query_norm)
+
+                # Check if query is a prefix match of value tokens
+                # This allows "T-S 8J6" to match "T-S 8J6.1" but not "120.2" to match "120.25"
+                if all(any(vt.startswith(qt) for vt in val_tokens) for qt in query_tokens):
+                    # Additional check: if query ends with a digit, require exact token match
+                    # to prevent 120.2 from matching 120.25
+                    if query_norm and query_norm[-1].isdigit():
+                        # Check if the last query token has an exact match in value tokens
+                        last_query_token = query_tokens[-1] if query_tokens else ''
+                        if last_query_token:
+                            return any(vt == last_query_token or vt.startswith(last_query_token + '.')
+                                     for vt in val_tokens)
+                    return True
+
+            # 3. For other fields (title), use substring match
+            else:
+                return query_norm in val_norm
+
+            return False
 
         # 1. Search in CSV Bank (Fastest)
         for sys_id, data in self.csv_bank.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         # 2. Search in NLI Cache (for items not in CSV or updated)
         for sys_id, data in self.nli_cache.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         return list(results)

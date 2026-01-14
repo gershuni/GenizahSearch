@@ -126,20 +126,39 @@ VIEWER_STYLES = '''
 
     /* Metadata header */
     .metadata-header {
-        background: linear-gradient(135deg, #15803d, #166534);
+        background: linear-gradient(135deg, #15803d 0%, #166534 50%, #14532d 100%);
         color: white;
-        padding: 24px 28px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(22, 101, 52, 0.25);
+        padding: 28px 32px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 6px 20px rgba(22, 101, 52, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    .metadata-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 10px,
+            rgba(255,255,255,0.03) 10px,
+            rgba(255,255,255,0.03) 20px
+        );
+        pointer-events: none;
     }
 
     .shelfmark-title {
-        font-size: 2rem;
+        font-size: 2.2rem;
         font-weight: 800;
         margin-bottom: 12px;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         letter-spacing: 0.5px;
+        position: relative;
     }
 
     .metadata-row {
@@ -163,11 +182,16 @@ VIEWER_STYLES = '''
     /* Navigation bar */
     .navigation-bar {
         background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
-        border: 2px solid #cbd5e1;
-        border-radius: 10px;
-        padding: 16px 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 2px solid #c8e6c9;
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+    }
+    .navigation-bar:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        border-color: #4caf50;
     }
 
     /* Source badge styling */
@@ -557,19 +581,47 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         with ui.element('div').classes('image-container'):
                             # Determine image URL with fallback logic
                             img_url = None
+                            fallback_url = None
                             if page.image_url and page.image_url.strip():
                                 img_url = page.image_url
                             elif page.fl_id:
                                 digits = re.sub(r"\D", "", str(page.fl_id))
                                 if digits:
                                     img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                                    # Prepare Rosetta fallback URL
+                                    fallback_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
 
                             if img_url:
-                                ui.image(img_url).classes(
-                                    'zoomable-image'
-                                ).style(
-                                    f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                ).props('loading="lazy"')
+                                # Add JavaScript to handle image load errors with fallback
+                                if fallback_url:
+                                    ui.add_head_html(f'''
+                                    <script>
+                                    function handleImageError(img) {{
+                                        if (img.src !== '{fallback_url}') {{
+                                            console.log('IIIF image failed, trying Rosetta fallback');
+                                            img.src = '{fallback_url}';
+                                        }} else {{
+                                            console.log('Rosetta fallback also failed');
+                                            img.style.display = 'none';
+                                            const parent = img.parentElement;
+                                            if (parent) {{
+                                                parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>{tr("Image not available")}</p></div>';
+                                            }}
+                                        }}
+                                    }}
+                                    </script>
+                                    ''')
+                                    ui.image(img_url).classes(
+                                        'zoomable-image'
+                                    ).style(
+                                        f'transform: scale({state.zoom_level}); transform-origin: center;'
+                                    ).props('loading="lazy" onerror="handleImageError(this)"')
+                                else:
+                                    ui.image(img_url).classes(
+                                        'zoomable-image'
+                                    ).style(
+                                        f'transform: scale({state.zoom_level}); transform-origin: center;'
+                                    ).props('loading="lazy"')
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')

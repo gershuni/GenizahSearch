@@ -99,14 +99,32 @@ COMMON_STYLES = '''
 
     /* Home Page Cards */
     .home-card {
-        transition: all 0.35s ease;
+        transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
         cursor: pointer;
         border-radius: 16px;
         background: linear-gradient(145deg, #ffffff, #f8f9fa);
+        border: 2px solid transparent;
+        position: relative;
+        overflow: hidden;
+    }
+    .home-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, transparent, var(--primary-green), transparent);
+        opacity: 0;
+        transition: opacity 0.3s ease;
     }
     .home-card:hover {
         transform: translateY(-8px) scale(1.02);
         box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+        border-color: var(--primary-green-light);
+    }
+    .home-card:hover::before {
+        opacity: 1;
     }
 
     /* Feature Icons */
@@ -119,6 +137,11 @@ COMMON_STYLES = '''
         justify-content: center;
         margin: 0 auto 1.5rem;
         transition: all 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .home-card:hover .feature-icon {
+        transform: scale(1.1) rotate(5deg);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15);
     }
     .feature-icon-search {
         background: linear-gradient(135deg, #e3f2fd, #bbdefb);
@@ -301,14 +324,20 @@ def create_header():
 
 def create_footer():
     """Create the application footer."""
-    with ui.footer().classes('text-center py-4').style(
-        'background: linear-gradient(135deg, #f5f5f5, #e8e8e8); border-top: 1px solid #ddd;'
+    with ui.footer().classes('text-center py-6').style(
+        'background: linear-gradient(135deg, #f5f5f5, #e8e8e8); border-top: 2px solid #c8e6c9;'
     ):
-        with ui.row().classes('items-center justify-center gap-2'):
-            ui.icon('auto_stories', size='1rem').classes('text-green-700')
-            ui.label(tr('Cairo Genizah Search Engine')).classes('text-gray-600 text-sm')
-            ui.label('|').classes('text-gray-400')
-            ui.link(tr('About'), '/about').classes('text-green-700 text-sm no-underline hover:underline')
+        with ui.column().classes('items-center gap-3'):
+            with ui.row().classes('items-center justify-center gap-2'):
+                ui.icon('auto_stories', size='1.2rem').classes('text-green-700')
+                ui.label(tr('Cairo Genizah Search Engine')).classes('text-gray-700 font-semibold')
+
+            with ui.row().classes('items-center justify-center gap-4 text-sm'):
+                ui.link(tr('About'), '/about').classes('text-green-700 no-underline hover:underline')
+                ui.label('•').classes('text-gray-400')
+                ui.label('v0.8').classes('text-gray-500')
+                ui.label('•').classes('text-gray-400')
+                ui.label('450K+ ' + tr('Pages')).classes('text-gray-500')
 
 
 def add_page_head():

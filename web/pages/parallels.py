@@ -12,7 +12,7 @@ import re
 import html
 from collections import defaultdict
 
-from web.services import get_service, CompositionResult
+from web.services import get_service, CompositionResult, get_thumbnail_url
 from web.translations import tr, is_rtl
 
 
@@ -592,7 +592,29 @@ def create_parallels_page():
                         icon='menu_book',
                         value=is_expanded
                     ).classes('w-full').props('dense header-class=manuscript-group-header'):
-                        with ui.row().classes('w-full items-center justify-between'):
+                        with ui.row().classes('w-full items-center gap-4'):
+                            # Add thumbnail image
+                            if group.sys_id:
+                                try:
+                                    # Get the first image for this manuscript as thumbnail
+                                    images = service.get_image_list(group.sys_id)
+                                    if images and len(images) > 0:
+                                        first_img = images[0]
+                                        thumb_url = get_thumbnail_url(first_img.fl_id, size=100)
+                                        if thumb_url:
+                                            with ui.element('div').classes(
+                                                'flex-shrink-0'
+                                            ).style(
+                                                'width: 100px; height: 100px; overflow: hidden; '
+                                                'border-radius: 8px; background: #1a1a1a; '
+                                                'display: flex; align-items: center; justify-content: center;'
+                                            ):
+                                                ui.image(thumb_url).classes('w-full h-full object-cover').props(
+                                                    'loading="lazy"'
+                                                ).style('image-rendering: crisp-edges;')
+                                except:
+                                    pass  # No thumbnail available
+
                             with ui.column().classes('gap-1 flex-1'):
                                 ui.label(group.shelfmark).classes(
                                     'font-bold text-green-800 text-xl'
@@ -602,7 +624,7 @@ def create_parallels_page():
                                         'text-gray-600 rtl-text hebrew-text text-sm'
                                     )
 
-                            with ui.row().classes('items-center gap-3'):
+                            with ui.row().classes('items-center gap-3 flex-shrink-0'):
                                 ui.badge(
                                     f"{group.match_count} {tr('matches')}",
                                     color='blue'
