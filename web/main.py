@@ -100,6 +100,54 @@ COMMON_STYLES = '''
         letter-spacing: 0.5px;
         color: white;
     }
+
+    /* Dark Mode Overrides for Cards and Backgrounds */
+    [data-theme="dark"] .q-card,
+    [data-theme="dark"] .bg-white {
+        background-color: #1e1e1e !important;
+        color: #e0e0e0 !important;
+    }
+
+    [data-theme="dark"] .bg-gray-50,
+    [data-theme="dark"] .bg-gray-100 {
+        background-color: #121212 !important;
+        color: #e0e0e0 !important;
+    }
+
+    [data-theme="dark"] .bg-green-50 {
+        background-color: #1a3a1a !important;
+    }
+
+    [data-theme="dark"] .bg-blue-50 {
+        background-color: #1a2a3a !important;
+    }
+
+    [data-theme="dark"] .bg-yellow-50 {
+        background-color: #3a3a1a !important;
+    }
+
+    [data-theme="dark"] .text-gray-600,
+    [data-theme="dark"] .text-gray-500,
+    [data-theme="dark"] .text-gray-400 {
+        color: #b0bec5 !important;
+    }
+
+    [data-theme="dark"] .text-primary,
+    [data-theme="dark"] .text-green-700,
+    [data-theme="dark"] .text-green-800,
+    [data-theme="dark"] .text-blue-900 {
+        color: #90caf9 !important;
+    }
+
+    [data-theme="dark"] .border-green-200,
+    [data-theme="dark"] .border-blue-500 {
+        border-color: #424242 !important;
+    }
+
+    [data-theme="dark"] .shadow-md,
+    [data-theme="dark"] .shadow-sm {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5) !important;
+    }
 </style>
 '''
 
@@ -236,7 +284,7 @@ def parallels_page_route():
         create_parallels_page()
 
 @ui.page('/browse')
-def browse_page_route(sys_id: str = None, highlight: str = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None):
     app.storage.user['current_page'] = '/browse'
     ui.add_head_html(COMMON_STYLES)
     current_theme = app.storage.user.get('theme', 'light')
@@ -245,7 +293,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None):
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id)
 
 @ui.page('/lists')
 def lists_page_route():

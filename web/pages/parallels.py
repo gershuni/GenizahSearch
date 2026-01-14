@@ -1,4 +1,4 @@
-from nicegui import ui, run
+from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
 import time
@@ -15,6 +15,14 @@ def create_parallels_page():
             self.results = []
 
     p_state = ParallelsState()
+
+    # Restore previous parallels results if available
+    if 'parallels_results' in app.storage.user:
+        try:
+            p_state.results = app.storage.user.get('parallels_results', [])
+            print(f"[DEBUG Parallels] Restored {len(p_state.results)} results from storage")
+        except Exception as e:
+            print(f"[DEBUG Parallels] Failed to restore results: {e}")
 
     # Layout
     with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
@@ -59,8 +67,10 @@ def create_parallels_page():
         # 2. Results Area (Bottom)
         with ui.scroll_area().classes('w-full flex-grow bg-gray-50 p-4'):
             results_container = ui.column().classes('w-full gap-4 max-w-5xl mx-auto')
-            with results_container:
-                ui.label(tr("Results will appear here.")).classes('text-gray-400 text-center w-full mt-10')
+            # Show placeholder only if no restored results
+            if not p_state.results:
+                with results_container:
+                    ui.label(tr("Results will appear here.")).classes('text-gray-400 text-center w-full mt-10')
 
     # Logic
     def update_ui():
@@ -124,6 +134,14 @@ def create_parallels_page():
             main_results = result_data.get('main', [])
             print(f"[DEBUG Parallels] main_results length={len(main_results) if main_results else 0}")
             if main_results:
+                # Save results to persistent storage
+                try:
+                    p_state.results = main_results
+                    app.storage.user['parallels_results'] = main_results
+                    print(f"[DEBUG Parallels] Saved {len(main_results)} results to storage")
+                except Exception as e:
+                    print(f"[DEBUG Parallels] Failed to save results: {e}")
+
                 render_results(main_results)
             else:
                 with results_container:
@@ -146,24 +164,51 @@ def create_parallels_page():
             for idx, item in enumerate(items):
                 score = int(item.get('score', 0))
 
-                # Extract metadata from raw_header
+                # Extract metadata - try multiple methods
                 raw_header = item.get('raw_header', '')
-                shelfmark = item.get('display', {}).get('shelfmark', 'Unknown')
-                title = item.get('display', {}).get('title', '')
-                sys_id = item.get('display', {}).get('id', '')
+                sys_id = None
+                shelfmark = 'Unknown'
+                title = ''
 
-                # If display not present, try to parse from raw_header
-                if shelfmark == 'Unknown' and state.meta_mgr:
-                    # Try to extract sys_id from raw_header
-                    import re as regex
-                    match = regex.search(r'IE(\d+)', raw_header)
-                    if match:
-                        temp_id = match.group(1)
-                        shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(temp_id)
-                        if shelf_temp:
-                            shelfmark = shelf_temp
-                            title = title_temp
-                            sys_id = temp_id
+                # Method 1: Try to extract sys_id from raw_header (99... format)
+                if raw_header and state.meta_mgr:
+                    try:
+                        # Look for 99... system ID (8+ digits)
+                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        if sys_match:
+                            sys_id = sys_match.group(1)
+                            shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                            if shelf_temp:
+                                shelfmark = shelf_temp
+                                title = title_temp
+                        else:
+                            # Try parse_full_id_components
+                            parsed = state.meta_mgr.parse_full_id_components(raw_header)
+                            if parsed and parsed.get('sys_id'):
+                                sys_id = parsed['sys_id']
+                                shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                                if shelf_temp:
+                                    shelfmark = shelf_temp
+                                    title = title_temp
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to extract from raw_header: {e}")
+
+                # Method 2: Try from uid if still unknown
+                if shelfmark == 'Unknown':
+                    uid = item.get('uid', '')
+                    if uid and state.meta_mgr:
+                        try:
+                            temp_id = state.meta_mgr.extract_unique_id(uid)
+                            if temp_id:
+                                sys_id = temp_id
+                                shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                                if shelf_temp:
+                                    shelfmark = shelf_temp
+                                    title = title_temp
+                        except Exception as e:
+                            print(f"[DEBUG] Failed to extract from uid: {e}")
+
+                print(f"[DEBUG Parallels] Result #{idx+1}: raw_header={raw_header[:50]}, sys_id={sys_id}, shelfmark={shelfmark}, title={title}")
 
                 # Format snippet
                 ms_text = item.get('text', '').replace('\n', '<br>')
@@ -252,3 +297,7 @@ def create_parallels_page():
                 ui.label(tr('Lists manager not available')).classes('text-red-500')
 
         dialog.open()
+
+    # Render restored results on page load
+    if p_state.results:
+        render_results(p_state.results)

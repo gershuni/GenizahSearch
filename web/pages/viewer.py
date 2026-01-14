@@ -131,11 +131,15 @@ def load_result(container, result):
         # --- Quick Actions ---
         with ui.row().classes('w-full gap-2 mt-4'):
             # Browse button - go to full manuscript viewer with navigation
+            # Navigate to specific FL page if available
             if sys_id:
+                browse_url = f'/browse?sys_id={sys_id}'
+                if fl_id:
+                    browse_url += f'&fl_id={fl_id}'
                 ui.button(
                     tr('Browse Full Manuscript'),
                     icon='menu_book',
-                    on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    on_click=lambda url=browse_url: ui.navigate.to(url)
                 ).classes('bg-primary text-white')
 
         # --- Content Tabs ---
@@ -162,12 +166,15 @@ def load_result(container, result):
                     pattern = result.get('highlight_pattern')
                     ui.html(format_text_html(display_text, pattern), sanitize=False).classes('w-full')
 
-                    # Add button to go to full view
+                    # Add button to go to full view with specific FL page
                     if is_snippet_only and sys_id:
+                        browse_url = f'/browse?sys_id={sys_id}'
+                        if fl_id:
+                            browse_url += f'&fl_id={fl_id}'
                         ui.button(
                             tr('View Complete Page'),
                             icon='open_in_new',
-                            on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                            on_click=lambda url=browse_url: ui.navigate.to(url)
                         ).classes('mt-4 bg-primary text-white')
                 else:
                     with ui.column().classes('w-full items-center py-8'):

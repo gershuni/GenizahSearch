@@ -1,4 +1,4 @@
-from nicegui import ui, run
+from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
 import time
@@ -22,6 +22,14 @@ def create_search_page():
             self.adv_expanded = False
 
     search_state = SearchUIState()
+
+    # Restore previous search results if available
+    if 'search_results' in app.storage.user:
+        try:
+            search_state.results = app.storage.user.get('search_results', [])
+            print(f"[DEBUG Search] Restored {len(search_state.results)} results from storage")
+        except Exception as e:
+            print(f"[DEBUG Search] Failed to restore results: {e}")
 
     # --- UI Layout ---
     with ui.column().classes('w-full h-[calc(100vh-60px)] gap-0'):
@@ -209,6 +217,13 @@ def create_search_page():
         search_state.results = results
         search_btn.enable()
 
+        # Save results to persistent storage
+        try:
+            app.storage.user['search_results'] = results
+            print(f"[DEBUG Search] Saved {len(results)} results to storage")
+        except Exception as e:
+            print(f"[DEBUG Search] Failed to save results: {e}")
+
         # Render Results (Virtual scroll is harder in NiceGUI, we'll use lazy rendering if needed,
         # but for now standard rendering. Limit to 100 for DOM performance)
         render_results(results[:100])
@@ -340,5 +355,5 @@ def create_search_page():
 
         dialog.open()
 
-    # Initialize with empty results view
-    render_results([])
+    # Initialize with restored results (if any)
+    render_results(search_state.results[:100] if search_state.results else [])
