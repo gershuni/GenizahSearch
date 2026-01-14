@@ -401,9 +401,23 @@ def create_parallels_page():
                 limit=200
             )
 
+        # Keep connection alive with periodic updates
+        async def keep_alive_wrapper():
+            """Wrapper that keeps the connection alive during long search."""
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_composition_search)
+                # Poll for completion while keeping connection alive
+                while not future.done():
+                    await asyncio.sleep(0.5)  # Keep connection alive
+                    # Update progress display to show we're still working
+                    state.progress_text = tr('Searching...') + ' ' + '.' * ((int(asyncio.get_event_loop().time()) % 3) + 1)
+                    update_progress()
+                return future.result()
+
         try:
-            # Execute search in background thread to avoid blocking UI
-            results = await run.io_bound(run_composition_search)
+            # Execute search with keep-alive wrapper
+            results = await keep_alive_wrapper()
 
             if state.is_cancelled:
                 state.error = tr('Search cancelled')

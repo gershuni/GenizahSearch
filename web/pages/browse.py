@@ -516,8 +516,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.column().classes('items-end gap-2'):
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                         with ui.link(target=ktiv_url, new_tab=True).classes(
-                            'flex items-center gap-2 px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg transition-all'
-                        ).style('text-decoration: none; color: white;'):
+                            'flex items-center gap-2 px-4 py-2 rounded-lg transition-all'
+                        ).style('text-decoration: none; color: white; background: rgba(255, 255, 255, 0.25); border: 2px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(4px);'):
                             ui.icon('open_in_new', size='sm')
                             ui.label(tr('Open in Ktiv')).classes('font-semibold')
 
@@ -573,7 +573,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # === Main Viewer Panels ===
             fullscreen_class = 'fullscreen-mode' if state.is_fullscreen else ''
 
-            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}'):
+            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}').style('display: flex; flex-direction: row;'):
                 # LEFT: Image Viewer (60%)
                 with ui.column().classes('image-panel').style('width: 60%;'):
                     with ui.element('div').classes('image-viewer-container'):

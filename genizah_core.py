@@ -3062,25 +3062,53 @@ class MetadataManager:
             if val_norm == query_norm:
                 return True
 
-            # 2. For shelfmarks, check if query matches a complete token
-            # Split by spaces, dots, hyphens to avoid 120.2 matching 120.25
+            # 2. For shelfmarks, use precise sequential token matching
+            # Split by spaces, dots, hyphens to avoid 12.4 matching 121.4
             if field == 'shelfmark':
                 # Tokenize both query and value
-                val_tokens = re.split(r'[\s\.\-]+', val_norm)
-                query_tokens = re.split(r'[\s\.\-]+', query_norm)
+                val_tokens = [t for t in re.split(r'[\s\.\-]+', val_norm) if t]
+                query_tokens = [t for t in re.split(r'[\s\.\-]+', query_norm) if t]
 
-                # Check if query is a prefix match of value tokens
-                # This allows "T-S 8J6" to match "T-S 8J6.1" but not "120.2" to match "120.25"
-                if all(any(vt.startswith(qt) for vt in val_tokens) for qt in query_tokens):
-                    # Additional check: if query ends with a digit, require exact token match
-                    # to prevent 120.2 from matching 120.25
-                    if query_norm and query_norm[-1].isdigit():
-                        # Check if the last query token has an exact match in value tokens
-                        last_query_token = query_tokens[-1] if query_tokens else ''
-                        if last_query_token:
-                            return any(vt == last_query_token or vt.startswith(last_query_token + '.')
-                                     for vt in val_tokens)
-                    return True
+                if not query_tokens:
+                    return False
+
+                # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
+                # Query: ["t", "s", "ns", "12", "4"]
+                # Value: ["t", "s", "ns", "121", "4"] -> NO MATCH (12 != 121)
+                # Value: ["t", "s", "ns", "12", "4"] -> MATCH
+
+                query_idx = 0
+                val_idx = 0
+
+                while query_idx < len(query_tokens) and val_idx < len(val_tokens):
+                    qt = query_tokens[query_idx]
+                    vt = val_tokens[val_idx]
+
+                    # Check if tokens match
+                    if qt == vt:
+                        # Exact match - advance both
+                        query_idx += 1
+                        val_idx += 1
+                    elif vt.startswith(qt):
+                        # Prefix match - only allow if both are not purely numeric
+                        # This prevents "12" from matching "121" but allows "8j6" to match "8j6a"
+                        if qt.isdigit() and vt.isdigit():
+                            # Both numeric: must be exact or vt must start with qt followed by non-digit
+                            # "12" can match "12" but not "121"
+                            # To allow "12" to be prefix of "12a", we need to check the next char
+                            if len(vt) > len(qt) and vt[len(qt)].isdigit():
+                                # Next char is digit, so "12" doesn't match "121"
+                                val_idx += 1  # Try next token
+                                continue
+                        # Valid prefix match
+                        query_idx += 1
+                        val_idx += 1
+                    else:
+                        # No match, try next value token
+                        val_idx += 1
+
+                # Success if all query tokens were matched
+                return query_idx == len(query_tokens)
 
             # 3. For other fields (title), use substring match
             else:

@@ -625,4 +625,5 @@ if __name__ in {'__main__', '__mp_main__'}:
         reload=True,
         show=True,
         favicon='📜',
+        storage_secret='genizah-search-storage-secret-key-2024',
     )
