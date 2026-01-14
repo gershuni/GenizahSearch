@@ -109,14 +109,14 @@ def load_result(container, result):
             with ui.tab_panel(tab_text).classes('p-4 bg-white'):
                 if full_text:
                     pattern = result.get('highlight_pattern')
-                    ui.html(format_text_html(full_text, pattern)).classes('w-full')
+                    ui.html(format_text_html(full_text, pattern), sanitize=False).classes('w-full')
                 else:
                     with ui.column().classes('w-full items-center py-8'):
                         ui.icon('text_snippet', size='3rem').classes('text-gray-300')
                         ui.label(tr('No text available')).classes('text-gray-400 mt-2')
                         if snippet:
                             ui.label(tr('Snippet only:')).classes('text-sm text-gray-500 mt-4')
-                            ui.html(format_text_html(snippet.replace('*', ''), None)).classes('w-full mt-2')
+                            ui.html(format_text_html(snippet.replace('*', ''), None), sanitize=False).classes('w-full mt-2')
 
             # 2. Image Panel
             with ui.tab_panel(tab_img).classes('p-0 h-full bg-black flex items-center justify-center relative'):
@@ -164,4 +164,4 @@ def load_result(container, result):
             if result.get('source_ctx'):
                 with ui.tab_panel(tab_src).classes('p-4'):
                     ui.markdown(f"**Source Context:**")
-                    ui.html(format_text_html(result['source_ctx'], result.get('highlight_pattern')))
+                    ui.html(format_text_html(result['source_ctx'], result.get('highlight_pattern')), sanitize=False)

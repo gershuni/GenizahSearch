@@ -240,7 +240,7 @@ def create_search_page():
             # Snippet
             with ui.column().classes('w-full cursor-pointer').on('click', lambda: load_in_viewer(res)):
                 snippet_html = format_snippet(str(res.get('snippet', '')))
-                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>")
+                ui.html(f"<div dir='rtl' class='text-xs leading-relaxed text-gray-800'>{snippet_html}</div>", sanitize=False)
 
     def render_results(results):
         results_container.clear()
@@ -282,7 +282,7 @@ def create_search_page():
 
                 # Show snippet
                 snippet_html = format_snippet(str(result.get('snippet', '')))
-                ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{snippet_html}</div>").classes('w-full')
+                ui.html(f"<div dir='rtl' class='text-sm leading-relaxed'>{snippet_html}</div>", sanitize=False).classes('w-full')
 
                 # Browse button
                 sys_id = display.get('id')

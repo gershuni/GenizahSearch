@@ -2,6 +2,7 @@ from nicegui import ui, run
 from web.state import state
 from web.translations import tr
 import time
+import re
 
 def create_parallels_page():
 
@@ -141,9 +142,9 @@ def create_parallels_page():
                         # Source Context
                         with ui.column().classes('flex-1 bg-gray-50 p-2 rounded'):
                             ui.label(tr("Source Context")).classes('text-xs font-bold text-gray-500 uppercase')
-                            ui.html(f"<div dir='rtl' class='text-sm'>{src_text}</div>")
+                            ui.html(f"<div dir='rtl' class='text-sm'>{src_text}</div>", sanitize=False)
 
                         # Manuscript Match
                         with ui.column().classes('flex-1 bg-white border p-2 rounded'):
                             ui.label(tr("Manuscript Match")).classes('text-xs font-bold text-gray-500 uppercase')
-                            ui.html(f"<div dir='rtl' class='text-sm'>{ms_text}</div>")
+                            ui.html(f"<div dir='rtl' class='text-sm'>{ms_text}</div>", sanitize=False)
