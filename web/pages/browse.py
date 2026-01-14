@@ -604,24 +604,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Debug: Print image info
                             print(f"[DEBUG] Page FL ID: {page.fl_id}, Image URL: {page.image_url}")
 
-                            if page.image_url and page.image_url.strip():
-                                img_url = page.image_url
-                                print(f"[DEBUG] Using page.image_url: {img_url}")
-                            elif page.fl_id:
-                                digits = re.sub(r"\D", "", str(page.fl_id))
+                            # Extract FL ID from any source
+                            fl_id = page.fl_id
+                            if not fl_id and page.image_url:
+                                # Try to extract FL ID from IIIF URL
+                                match = re.search(r'FL(\d+)', page.image_url)
+                                if match:
+                                    fl_id = match.group(1)
+
+                            if fl_id:
+                                digits = re.sub(r"\D", "", str(fl_id))
                                 if digits:
-                                    # Use Rosetta as primary (more reliable for CORS)
+                                    # Use Rosetta as primary (IIIF has authorization issues)
                                     img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                                    # IIIF as fallback
-                                    fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
-                                    print(f"[DEBUG] Built Rosetta URL from FL ID: {img_url}")
+                                    # Keep original IIIF as fallback (though it may not work)
+                                    if page.image_url and 'iiif.nli.org.il' in page.image_url:
+                                        fallback_url = page.image_url
+                                    else:
+                                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                                    print(f"[DEBUG] Using Rosetta URL (FL{digits}): {img_url}")
                                 else:
-                                    print(f"[DEBUG] No digits found in FL ID: {page.fl_id}")
+                                    print(f"[DEBUG] No digits found in FL ID: {fl_id}")
                             else:
-                                print(f"[DEBUG] No image URL or FL ID available")
+                                print(f"[DEBUG] No FL ID available")
 
                             if img_url:
-                                # Use HTML img tag with crossorigin to avoid CORB issues
+                                # Use HTML img tag without crossorigin (causes issues with Rosetta)
                                 safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                 safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
 
@@ -629,13 +637,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 <img
                                     src="{safe_img_url}"
                                     class="zoomable-image"
-                                    crossorigin="anonymous"
                                     style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
                                     loading="lazy"
                                     onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
                                 />
                                 '''
-                                ui.html(img_html)
+                                ui.html(img_html, sanitize=False)
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')
