@@ -610,31 +610,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             elif page.fl_id:
                                 digits = re.sub(r"\D", "", str(page.fl_id))
                                 if digits:
-                                    img_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
-                                    # Prepare Rosetta fallback URL
-                                    fallback_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                                    print(f"[DEBUG] Built IIIF URL from FL ID: {img_url}")
+                                    # Use Rosetta as primary (more reliable for CORS)
+                                    img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                                    # IIIF as fallback
+                                    fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                                    print(f"[DEBUG] Built Rosetta URL from FL ID: {img_url}")
                                 else:
                                     print(f"[DEBUG] No digits found in FL ID: {page.fl_id}")
                             else:
                                 print(f"[DEBUG] No image URL or FL ID available")
 
                             if img_url:
-                                # Use global error handler function
-                                if fallback_url:
-                                    # Escape quotes in fallback URL for JS
-                                    safe_fallback = fallback_url.replace("'", "\\'")
-                                    ui.image(img_url).classes(
-                                        'zoomable-image'
-                                    ).style(
-                                        f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                    ).props(f'loading="lazy" onerror="handleImageError(this, \'{safe_fallback}\')"')
-                                else:
-                                    ui.image(img_url).classes(
-                                        'zoomable-image'
-                                    ).style(
-                                        f'transform: scale({state.zoom_level}); transform-origin: center;'
-                                    ).props('loading="lazy" onerror="handleImageError(this, null)"')
+                                # Use HTML img tag with crossorigin to avoid CORB issues
+                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+
+                                img_html = f'''
+                                <img
+                                    src="{safe_img_url}"
+                                    class="zoomable-image"
+                                    crossorigin="anonymous"
+                                    style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
+                                    loading="lazy"
+                                    onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                />
+                                '''
+                                ui.html(img_html)
                             else:
                                 with ui.element('div').classes('image-loading'):
                                     ui.icon('image_not_supported', size='4rem')
