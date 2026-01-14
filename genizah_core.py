@@ -3066,15 +3066,22 @@ class MetadataManager:
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
+        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots between digits."""
         if not shelfmark:
             return ""
-        
-        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
-        
+
+        # First, preserve dots that appear between digits (like 120.2) by replacing with a marker
+        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', shelfmark)
+
+        # Remove all other non-alphanumeric characters
+        cleaned = re.sub(r'\W+', '', temp).casefold()
+
+        # Restore the preserved dots
+        cleaned = cleaned.replace('dotmarker', '.')
+
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
-            
+
         return cleaned
 
     def _iter_shelfmark_sources(self):
