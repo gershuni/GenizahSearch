@@ -4,18 +4,18 @@ Parallels Search Page - Genizah Search Pro
 
 Find parallel texts in the Genizah corpus using:
 - Shmidman-Koppel-Porat fingerprinting algorithm
-- Configurable chunk size and overlap
+- Configurable chunk size
 - Advanced filtering options
 """
 
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
-import time
+from urllib.parse import unquote
 import re
 
 
-def create_parallels_page():
+def create_parallels_page(initial_text: str = None):
     """Create the parallels (composition) search page."""
 
     # === State ===
@@ -36,6 +36,14 @@ def create_parallels_page():
         except:
             pass
 
+    # Decode initial text from URL
+    decoded_text = ""
+    if initial_text:
+        try:
+            decoded_text = unquote(initial_text)
+        except:
+            decoded_text = initial_text
+
     # === UI Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto gap-6 fade-in'):
 
@@ -54,7 +62,8 @@ def create_parallels_page():
                     ui.label(tr('Source text')).classes('font-bold').style('color: var(--text-primary);')
 
                     text_input = ui.textarea(
-                        placeholder=tr('Paste your Hebrew text here (minimum 10 words)...')
+                        placeholder=tr('Paste your Hebrew text here...'),
+                        value=decoded_text
                     ).classes('w-full').props('outlined rows=8').style('direction: rtl;')
 
                     # Word count
@@ -66,6 +75,9 @@ def create_parallels_page():
                         word_count_label.text = f"{words} {tr('Words')}"
 
                     text_input.on('input', update_word_count)
+                    # Update immediately if we have initial text
+                    if decoded_text:
+                        update_word_count()
 
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
@@ -88,13 +100,8 @@ def create_parallels_page():
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Overlap
-                    with ui.column().classes('gap-1'):
-                        ui.label(tr('Overlap')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                        overlap_select = ui.select(
-                            {1: tr('Maximum (step=1)'), 2: tr('Medium (step=2)'), 4: tr('Minimal (step=4)')},
-                            value=2
-                        ).classes('w-full').props('outlined dense')
+                    # Deep Scan
+                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
 
                     ui.separator().classes('my-2')
 
@@ -173,8 +180,9 @@ def create_parallels_page():
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
 
-        if words < 10:
-            ui.notify(tr('Enter at least 10 words'), type='warning')
+        # Allow shorter texts (minimum 3 words instead of 10)
+        if words < 3:
+            ui.notify(tr('Enter at least 3 words'), type='warning')
             return
 
         if not state.lab_engine:
@@ -198,13 +206,15 @@ def create_parallels_page():
 
         def run_search():
             try:
+                # Use the correct method signature from genizah_core
+                # lab_composition_search(full_text, mode, progress_callback, chunk_size, excluded_ids, filter_text, deep_scan, scan_limit)
                 result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
+                    progress_callback=progress_cb,
                     chunk_size=int(chunk_size.value),
-                    step=int(overlap_select.value),
                     filter_text=filter_input.value or None,
-                    progress_callback=progress_cb
+                    deep_scan=deep_scan.value
                 )
                 return result
             except InterruptedError:
@@ -325,7 +335,8 @@ def create_parallels_page():
                         )
                         ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
                     if title:
-                        ui.label(title).classes('text-sm').style('color: var(--text-secondary);')
+                        title_short = (title[:80] + '...') if len(title) > 80 else title
+                        ui.label(title_short).classes('text-sm').style('color: var(--text-secondary); direction: rtl;')
 
                 # Score badge
                 score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'

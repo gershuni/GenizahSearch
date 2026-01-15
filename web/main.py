@@ -154,6 +154,47 @@ COMMON_STYLES = '''
         --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
     }
 
+    /* Dark theme input fixes */
+    [data-theme="dark"] .q-field__native,
+    [data-theme="dark"] .q-field__input,
+    [data-theme="dark"] input,
+    [data-theme="dark"] textarea {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-field--outlined .q-field__control {
+        background: var(--bg-tertiary) !important;
+    }
+
+    [data-theme="dark"] .q-field__label {
+        color: var(--text-tertiary) !important;
+    }
+
+    [data-theme="dark"] .result-snippet,
+    [data-theme="dark"] .transcription-panel,
+    [data-theme="dark"] .transcription-content {
+        background: var(--bg-tertiary) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-card {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .highlight-match {
+        background: linear-gradient(120deg, #854d0e 0%, #a16207 100%) !important;
+        color: white !important;
+    }
+
+    /* Parchment theme input fixes */
+    [data-theme="parchment"] .q-field__native,
+    [data-theme="parchment"] .q-field__input,
+    [data-theme="parchment"] input,
+    [data-theme="parchment"] textarea {
+        color: var(--text-primary) !important;
+    }
+
     /* ========================================================================
        Base Styles
        ======================================================================== */
@@ -701,8 +742,8 @@ def create_layout():
                 ui.label(tr('NAVIGATION')).classes('nav-section-label')
 
                 nav_items = [
-                    ('/', 'dashboard', tr('Dashboard'), None),
-                    ('/search', 'search', tr('Search'), 'new'),
+                    ('/', 'home', tr('Home'), None),
+                    ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
                     ('/lists', 'star', tr('My Lists'), None),
@@ -722,7 +763,7 @@ def create_layout():
                 ui.label(tr('TOOLS')).classes('nav-section-label')
 
                 tool_items = [
-                    ('/settings', 'tune', tr('Lab Settings'), None),
+                    ('/settings', 'settings', tr('Settings'), None),
                     ('/help', 'help_center', tr('Help Center'), None),
                 ]
 
@@ -793,12 +834,22 @@ def show_help_dialog():
 # Page Routes
 # ============================================================================
 
+def apply_theme_immediately():
+    """Add script to apply theme before page renders to prevent flash."""
+    current_theme = app.storage.user.get('theme', 'light')
+    return f'''<script>
+        (function() {{
+            document.body.setAttribute("data-theme", "{current_theme}");
+            document.body.style.backgroundColor = "{current_theme}" === "dark" ? "#1e293b" : "{current_theme}" === "parchment" ? "#fef7ed" : "#f8fafc";
+        }})();
+    </script>'''
+
 @ui.page('/')
 def dashboard_page():
     app.storage.user['current_page'] = '/'
-    ui.add_head_html(COMMON_STYLES)
     current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
@@ -807,35 +858,32 @@ def dashboard_page():
             home.create_page()
 
 @ui.page('/search')
-def search_page_route():
+def search_page_route(q: str = None):
     app.storage.user['current_page'] = '/search'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
         from web.pages.search import create_search_page
-        create_search_page()
+        create_search_page(initial_query=q)
 
 @ui.page('/parallels')
-def parallels_page_route():
+def parallels_page_route(text: str = None):
     app.storage.user['current_page'] = '/parallels'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
         from web.pages.parallels import create_parallels_page
-        create_parallels_page()
+        create_parallels_page(initial_text=text)
 
 @ui.page('/browse')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None):
     app.storage.user['current_page'] = '/browse'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
@@ -846,8 +894,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
 def lists_page_route():
     app.storage.user['current_page'] = '/lists'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
@@ -858,8 +905,7 @@ def lists_page_route():
 def settings_page_route():
     app.storage.user['current_page'] = '/settings'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:
@@ -870,8 +916,7 @@ def settings_page_route():
 def help_page_route():
     app.storage.user['current_page'] = '/help'
     ui.add_head_html(COMMON_STYLES)
-    current_theme = app.storage.user.get('theme', 'light')
-    ui.run_javascript(f'document.body.setAttribute("data-theme", "{current_theme}")')
+    ui.add_head_html(apply_theme_immediately())
 
     content = create_layout()
     with content:

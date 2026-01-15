@@ -279,7 +279,22 @@ TRANSLATIONS = {
     "Composition search not available": "חיפוש חיבורים אינו זמין",
     "No manuscript found": "לא נמצא כתב יד",
     "Enter at least 10 words": "הזן לפחות 10 מילים",
+    "Enter at least 3 words": "הזן לפחות 3 מילים",
     "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
+    "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
+    "System ID": "מזהה מערכת",
+    "Search Index": "אינדקס חיפוש",
+    "Final forms": "צורות סופיות",
+    "Theme changed": "ערכת הנושא שונתה",
+    "Configure search and display preferences": "הגדר העדפות חיפוש ותצוגה",
+    "Default word gap": "מרווח מילים ברירת מחדל",
+    "Extended Variants": "וריאנטים מורחבים",
+    "Words per search chunk in composition search": "מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Minimum score for results": "ציון מינימלי לתוצאות",
+    "Number of words per search chunk in composition search": "מספר מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Exclude Words": "מילים להחרגה",
+    "Words to exclude (space separated)": "מילים להחרגה (מופרדות ברווח)",
+    "Results containing these words will be filtered out": "תוצאות המכילות מילים אלה יסוננו",
 
     # =========================================================================
     # Settings Page

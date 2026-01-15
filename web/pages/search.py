@@ -13,7 +13,7 @@ A comprehensive search interface with:
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl
-import time
+from urllib.parse import quote
 import re
 
 
@@ -29,7 +29,7 @@ def format_snippet(text):
     )
 
 
-def create_search_page():
+def create_search_page(initial_query: str = None):
     """Create the advanced search page."""
 
     # === State Management ===
@@ -41,6 +41,7 @@ def create_search_page():
             self.results = []
             self.selected_result = None
             self.total_count = 0
+            self.current_page_idx = 0  # For browse within viewer
 
     search_state = SearchUIState()
 
@@ -65,25 +66,26 @@ def create_search_page():
                 with ui.column().classes('flex-grow min-w-80 gap-1'):
                     ui.label(tr('Search Query')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     query_input = ui.input(
-                        placeholder=tr('Enter Hebrew text to search')
+                        placeholder=tr('Enter Hebrew text to search'),
+                        value=initial_query or ''
                     ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
                     query_input.on('keydown.enter', lambda: execute_search())
 
-                # Mode Selector
+                # Mode Selector - Default to exact
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     mode_select = ui.select(
                         {
+                            'exact': tr('Exact') + ' (=)',
                             'variants': tr('Variants') + ' (?)',
                             'variants_extended': tr('Extended') + ' (??)',
                             'variants_maximum': tr('Maximum') + ' (???)',
-                            'exact': tr('Exact') + ' (=)',
                             'fuzzy': tr('Fuzzy') + ' (~)',
                             'Regex': tr('Regex') + ' (/)',
                             'Shelfmark': tr('Shelfmark') + ' (#)',
                             'Title': tr('Title') + ' ($)',
                         },
-                        value='variants'
+                        value='exact'  # Default to exact
                     ).classes('w-48').props('outlined dense')
 
                 # Gap Control
@@ -116,14 +118,13 @@ def create_search_page():
                                     tr('Searches more candidates for comprehensive results')
                                 )
 
-                        # Boolean Operators Section
+                        # NOT Filter Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Boolean Operators')).classes('font-bold').style('color: var(--text-primary);')
-                            with ui.row().classes('gap-2'):
-                                for op in ['AND', 'OR', 'NOT']:
-                                    ui.button(op, on_click=lambda o=op: append_to_query(f' {o} ')).props(
-                                        'outline dense size=sm'
-                                    )
+                            ui.label(tr('Exclude Words')).classes('font-bold').style('color: var(--text-primary);')
+                            not_filter = ui.input(
+                                placeholder=tr('Words to exclude (space separated)')
+                            ).classes('w-full').props('outlined dense').style('direction: rtl;')
+                            ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
 
                         # Syntax Shortcuts Section
                         with ui.column().classes('gap-3 min-w-64'):
@@ -141,17 +142,6 @@ def create_search_page():
                                     ui.button(prefix, on_click=lambda p=prefix: prepend_to_query(p)).props(
                                         'flat dense size=sm'
                                     ).tooltip(tip)
-
-                    # Filter by Lists
-                    with ui.row().classes('w-full gap-4 items-center pt-4 border-t').style(
-                        'border-color: var(--border-light);'
-                    ):
-                        ui.icon('filter_list').style('color: var(--text-muted);')
-                        ui.label(tr('Filter by lists')).style('color: var(--text-secondary);')
-                        list_filter = ui.select(
-                            {'all': tr('All results'), 'favorites': tr('Favorites only')},
-                            value='all'
-                        ).props('outlined dense').classes('w-48')
 
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
@@ -191,10 +181,6 @@ def create_search_page():
                         ui.label(tr('Select a result to view')).classes('mt-4').style('color: var(--text-muted);')
 
     # === Helper Functions ===
-
-    def append_to_query(text):
-        current = query_input.value or ""
-        query_input.set_value(current + text)
 
     def prepend_to_query(prefix):
         current = query_input.value or ""
@@ -258,6 +244,9 @@ def create_search_page():
                 search_state.progress = current / total
                 search_state.status = f"{current} / {total}"
 
+        # Get NOT filter words
+        not_words = not_filter.value.split() if not_filter.value else []
+
         def run_core_search():
             try:
                 if lab_mode.value:
@@ -270,12 +259,24 @@ def create_search_page():
                         progress_callback=progress_cb
                     )
                 else:
-                    return state.searcher.execute_search(
+                    results = state.searcher.execute_search(
                         clean_query,
                         mode=mode,
                         gap=int(gap_input.value),
                         progress_callback=progress_cb
                     )
+
+                    # Apply NOT filter
+                    if not_words and results:
+                        filtered = []
+                        for r in results:
+                            text = r.get('snippet', '') + ' ' + r.get('full_text', '')
+                            text_lower = text.lower()
+                            if not any(w.lower() in text_lower for w in not_words):
+                                filtered.append(r)
+                        return filtered
+
+                    return results
             except Exception as e:
                 print(f"Search Error: {e}")
                 import traceback
@@ -325,6 +326,9 @@ def create_search_page():
         title = display.get('title', '')
         snippet = result.get('snippet', '')
 
+        # Truncate title for display
+        title_short = (title[:60] + '...') if title and len(title) > 60 else title
+
         with ui.card().classes(
             'w-full p-4 cursor-pointer transition-all hover:shadow-md'
         ).style('border-radius: 10px;').on('click', lambda r=result: load_in_viewer(r)):
@@ -335,9 +339,9 @@ def create_search_page():
                             'background: var(--bg-tertiary); color: var(--text-muted);'
                         )
                         ui.label(shelfmark).classes('font-bold').style('color: var(--primary-700);')
-                    if title:
-                        ui.label(title).classes('text-sm truncate').style(
-                            'color: var(--text-secondary); max-width: 300px;'
+                    if title_short:
+                        ui.label(title_short).classes('text-xs truncate').style(
+                            'color: var(--text-tertiary); max-width: 300px; direction: rtl;'
                         )
 
                 # Actions
@@ -368,10 +372,10 @@ def create_search_page():
 
         with viewer_container:
             # Header
-            with ui.column().classes('w-full gap-2 mb-6'):
+            with ui.column().classes('w-full gap-2 mb-4'):
                 ui.label(shelfmark).classes('text-2xl font-bold').style('color: var(--primary-700);')
                 if title:
-                    ui.label(title).style('color: var(--text-secondary);')
+                    ui.label(title).style('color: var(--text-secondary); direction: rtl;')
 
                 # Metadata badges
                 with ui.row().classes('gap-2 flex-wrap mt-2'):
@@ -384,8 +388,10 @@ def create_search_page():
             with ui.tabs().classes('w-full') as tabs:
                 tab_snippet = ui.tab('snippet', label=tr('Match'))
                 tab_full = ui.tab('full', label=tr('Full Text'))
+                tab_info = ui.tab('info', label=tr('Metadata'))
 
             with ui.tab_panels(tabs, value='snippet').classes('w-full flex-grow'):
+                # Match tab
                 with ui.tab_panel('snippet'):
                     if snippet:
                         snippet_html = format_snippet(snippet)
@@ -394,7 +400,17 @@ def create_search_page():
                         ):
                             ui.html(snippet_html, sanitize=False)
 
+                # Full Text tab with navigation arrows
                 with ui.tab_panel('full'):
+                    # Navigation bar for browsing pages
+                    if sys_id:
+                        with ui.row().classes('w-full items-center justify-center gap-4 mb-4 p-2 rounded').style(
+                            'background: var(--bg-tertiary);'
+                        ):
+                            ui.button(icon='chevron_right', on_click=lambda: browse_prev()).props('flat round').tooltip(tr('Previous'))
+                            ui.label(f"{tr('Page')} {display.get('img', '1')}").style('color: var(--text-secondary);')
+                            ui.button(icon='chevron_left', on_click=lambda: browse_next()).props('flat round').tooltip(tr('Next'))
+
                     if full_text:
                         with ui.scroll_area().classes('w-full h-64'):
                             ui.label(full_text).classes('whitespace-pre-wrap').style(
@@ -402,6 +418,21 @@ def create_search_page():
                             )
                     else:
                         ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+
+                # Info tab
+                with ui.tab_panel('info'):
+                    with ui.column().classes('w-full gap-4'):
+                        info_items = [
+                            (tr('Shelfmark'), shelfmark),
+                            (tr('Title'), title or tr('Not available')),
+                            (tr('System ID'), sys_id or tr('Not available')),
+                            (tr('Source'), display.get('source', tr('Not available'))),
+                            (tr('Page'), display.get('img', tr('Not available'))),
+                        ]
+                        for label, value in info_items:
+                            with ui.row().classes('w-full items-start gap-4'):
+                                ui.label(label).classes('font-bold w-32').style('color: var(--text-secondary);')
+                                ui.label(value).style('color: var(--text-primary); direction: rtl;')
 
             # Actions
             with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
@@ -412,11 +443,29 @@ def create_search_page():
                         on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
                     ).classes('btn-primary')
 
+                # Find Parallels - pass the full text to parallels page
+                text_for_parallels = full_text or snippet.replace('*', '')
                 ui.button(
                     tr('Find Parallels'),
                     icon='compare_arrows',
-                    on_click=lambda: ui.navigate.to(f'/parallels')
+                    on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
                 ).props('outline')
+
+    def browse_prev():
+        """Navigate to previous page in current manuscript."""
+        if search_state.selected_result:
+            display = search_state.selected_result.get('display', {})
+            sys_id = display.get('id')
+            if sys_id:
+                ui.navigate.to(f'/browse?sys_id={sys_id}')
+
+    def browse_next():
+        """Navigate to next page in current manuscript."""
+        if search_state.selected_result:
+            display = search_state.selected_result.get('display', {})
+            sys_id = display.get('id')
+            if sys_id:
+                ui.navigate.to(f'/browse?sys_id={sys_id}')
 
     def show_add_to_list_dialog(result):
         display = result.get('display', {})
@@ -457,7 +506,9 @@ def create_search_page():
 
         dialog.open()
 
-    # Initialize with restored results
-    if search_state.results:
+    # Initialize with restored results or initial query
+    if initial_query:
+        ui.timer(0.5, execute_search, once=True)
+    elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results[:200])
