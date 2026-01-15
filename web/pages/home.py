@@ -193,28 +193,34 @@ def create_page():
                 recent_container.clear()
                 with recent_container:
                     if state.lists_mgr:
-                        recent_items = state.lists_mgr.data.get('recent_items', [])[:6]
+                        # Use get_items_in_list to get properly structured data
+                        recent_items = state.lists_mgr.get_items_in_list('recent')[:6]
                         if recent_items:
                             for item in recent_items:
-                                # Handle both dict and string formats
-                                if isinstance(item, dict):
-                                    sys_id = item.get('sys_id', '')
-                                    shelfmark = item.get('shelfmark', 'Unknown')
-                                    title = item.get('title', '')
-                                else:
-                                    # Item is just a sys_id string
-                                    sys_id = str(item)
-                                    shelfmark = 'Unknown'
-                                    title = ''
+                                item_id = item.get('item_id', '')
+                                sys_id = item.get('sys_id', '')
+
+                                # Parse sys_id from item_id if needed (format: sys_id::fl::xxx or sys_id::img::xxx)
+                                if not sys_id and item_id:
+                                    if '::' in item_id:
+                                        sys_id = item_id.split('::')[0]
+                                    else:
+                                        sys_id = item_id
 
                                 if not sys_id:
                                     continue
 
-                                # Enrich if needed
+                                # Get metadata
+                                shelfmark = item.get('shelfmark') or item.get('shelfmark_override') or 'Unknown'
+                                title = item.get('title', '')
+
+                                # Enrich from metadata manager
                                 if (not shelfmark or shelfmark == 'Unknown') and state.meta_mgr:
                                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
-                                    shelfmark = shelf_temp or shelfmark
-                                    title = title or title_temp or ''
+                                    if shelf_temp:
+                                        shelfmark = shelf_temp
+                                    if not title and title_temp:
+                                        title = title_temp
 
                                 with ui.card().classes('p-4 min-w-48 cursor-pointer hover:shadow-md transition-all').on(
                                     'click', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
@@ -224,7 +230,7 @@ def create_page():
                                     )
                                     if title:
                                         ui.label(title).classes('text-xs truncate').style(
-                                            'color: var(--text-muted); max-width: 180px;'
+                                            'color: var(--text-muted); max-width: 180px; direction: rtl;'
                                         )
                         else:
                             with ui.column().classes('w-full items-center py-8'):
