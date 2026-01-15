@@ -61,6 +61,16 @@ class BrowsePage:
     internal_index: int = 0
 
 @dataclass
+class DocumentPage:
+    """Single page data for document viewer."""
+    uid: str
+    p_num: int
+    text: str
+    full_header: str
+    fl_id: Optional[str] = None
+    sys_id: str = ''
+
+@dataclass
 class ManuscriptInfo:
     sys_id: str
     shelfmark: str
