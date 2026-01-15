@@ -231,6 +231,18 @@ TRANSLATIONS = {
     "pages": "עמודים",
     "Examples": "דוגמאות",
     "Folio": "דף",
+    "Previous manuscript": "כתב היד הקודם",
+    "Next manuscript": "כתב היד הבא",
+    "Show Full Manuscript": "הצג כתב יד מלא",
+    "Hide Full Manuscript": "הסתר כתב יד מלא",
+    "Search for Parallels": "חפש מקבילות",
+    "Full Manuscript View": "תצוגת כתב יד מלא",
+    "No more manuscripts": "אין עוד כתבי יד",
+    "At first manuscript": "בכתב היד הראשון",
+    "Could not load full manuscript": "לא ניתן לטעון את כתב היד המלא",
+    "Manuscript Image": "תמונת כתב היד",
+    "Toggle Image": "הצג/הסתר תמונה",
+    "Reset": "אפס",
 
     # =========================================================================
     # Image Viewer Controls

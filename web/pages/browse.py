@@ -15,7 +15,7 @@ from typing import Optional
 import re
 import html as html_module
 
-from web.services import get_service, BrowsePage, get_thumbnail_url, get_full_image_url
+from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
 
 
@@ -303,6 +303,8 @@ class BrowseState:
         self.is_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None
         self.page_input_value: int = 1
+        self.view_all: bool = False
+        self.full_manuscript: List[DocumentPage] = []
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None):
@@ -413,6 +415,93 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         if state.current_page and new_page > state.current_page.total_pages:
             new_page = state.current_page.total_pages
         load_page(p_num=new_page)
+
+    def navigate_shelfmark(direction: int):
+        """Navigate to next/prev shelfmark based on file order."""
+        if not state.sys_id:
+            return
+
+        state.is_loading = True
+        update_content()
+
+        try:
+            adjacent_sys_id = service.get_adjacent_shelfmark(state.sys_id, direction)
+            if adjacent_sys_id:
+                state.sys_id = adjacent_sys_id
+                state.view_all = False  # Reset to single page view
+                state.full_manuscript = []
+                load_page(p_num=1)  # Load first page of new manuscript
+            else:
+                state.is_loading = False
+                # Show message: at first/last manuscript
+                state.error = tr('No more manuscripts') if direction > 0 else tr('At first manuscript')
+                update_content()
+        except Exception as e:
+            state.error = f"{tr('Error')}: {str(e)}"
+            state.is_loading = False
+            update_content()
+
+    def toggle_view_all():
+        """Toggle between single page and full manuscript view."""
+        if state.view_all:
+            # Switch back to single page
+            state.view_all = False
+            state.full_manuscript = []
+            update_content()
+        else:
+            # Load full manuscript
+            state.is_loading = True
+            update_content()
+
+            try:
+                pages = service.get_full_manuscript(state.sys_id)
+                if pages:
+                    state.full_manuscript = pages
+                    state.view_all = True
+                    state.error = None
+                else:
+                    state.error = tr('Could not load full manuscript')
+            except Exception as e:
+                state.error = f"{tr('Error')}: {str(e)}"
+            finally:
+                state.is_loading = False
+                update_content()
+
+    def search_for_parallels():
+        """Navigate to parallels page with current text."""
+        if not state.sys_id:
+            return
+
+        # Get text to search for parallels
+        if state.view_all and state.full_manuscript:
+            # Use all pages
+            text_content = "\n\n".join([p.text for p in state.full_manuscript if p.text])
+        elif state.current_page:
+            # Use current page only
+            text_content = state.current_page.text
+        else:
+            return
+
+        # Get title (truncated to first 6 words like desktop app)
+        title = state.current_page.title if state.current_page else ''
+        if title:
+            words = title.split()[:6]
+            short_title = ' '.join(words)
+        else:
+            short_title = state.current_page.shelfmark if state.current_page else state.sys_id
+
+        # Navigate to parallels page with text
+        # Store in session storage for parallels page to read
+        try:
+            from nicegui import app
+            app.storage.user['parallels_source'] = {
+                'text': text_content,
+                'title': short_title,
+                'sys_id': state.sys_id
+            }
+            ui.navigate.to('/parallels')
+        except Exception as e:
+            print(f"Error navigating to parallels: {e}")
 
     def zoom_in():
         """Increase zoom level."""
@@ -539,198 +628,260 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             page = state.current_page
 
-            # === Metadata Header ===
-            with ui.element('div').classes('metadata-header'):
-                with ui.row().classes('w-full items-start justify-between'):
-                    with ui.column().classes('flex-1'):
-                        # Shelfmark (prominent)
-                        ui.label(page.shelfmark or f"ID: {page.sys_id}").classes('shelfmark-title')
+            # === Compact Metadata Header ===
+            with ui.card().classes('w-full p-3 mb-3').style('background: linear-gradient(135deg, #15803d 0%, #166534 100%);'):
+                with ui.row().classes('w-full items-center justify-between'):
+                    # Prev Shelfmark Button
+                    ui.button(
+                        icon='skip_previous',
+                        on_click=lambda: navigate_shelfmark(-1)
+                    ).props('flat round color=white').classes('text-white').tooltip(tr('Previous manuscript'))
 
-                        # Metadata row
-                        with ui.element('div').classes('metadata-row'):
-                            if page.title:
-                                with ui.element('span').classes('metadata-item'):
-                                    ui.icon('description', size='sm')
-                                    ui.label(page.title).classes('rtl-text hebrew-text')
+                    # Shelfmark and Title
+                    with ui.row().classes('flex-1 items-center justify-center gap-4'):
+                        # Shelfmark
+                        ui.label(page.shelfmark or f"ID: {page.sys_id}").classes(
+                            'text-xl font-bold text-white'
+                        ).style('text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
 
-                            # Page info
-                            with ui.element('span').classes('metadata-item'):
-                                ui.icon('layers', size='sm')
-                                ui.label(f"{page.p_num} / {page.total_pages} {tr('pages')}")
+                        # Title (truncated with tooltip)
+                        if page.title:
+                            words = page.title.split()
+                            if len(words) > 5:
+                                short_title = ' '.join(words[:5]) + '...'
+                                ui.label(short_title).classes(
+                                    'text-white rtl-text hebrew-text'
+                                ).style('opacity: 0.9;').tooltip(page.title)
+                            else:
+                                ui.label(page.title).classes(
+                                    'text-white rtl-text hebrew-text'
+                                ).style('opacity: 0.9;')
 
-                    # External links
-                    with ui.column().classes('items-end gap-2'):
+                        # Ktiv link
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                         with ui.link(target=ktiv_url, new_tab=True).classes(
-                            'flex items-center gap-2 px-4 py-2 rounded-lg transition-all'
-                        ).style('text-decoration: none; color: white; background: rgba(255, 255, 255, 0.25); border: 2px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(4px);'):
+                            'flex items-center gap-1 px-2 py-1 rounded'
+                        ).style('text-decoration: none; color: white; background: rgba(255, 255, 255, 0.2);'):
                             ui.icon('open_in_new', size='sm')
-                            ui.label(tr('Open in Ktiv')).classes('font-semibold')
+                            ui.label('Ktiv').classes('text-sm font-semibold')
 
-            # === Navigation Bar ===
-            with ui.element('div').classes('navigation-bar'):
-                with ui.row().classes('w-full items-center justify-between'):
-                    # Previous button
-                    prev_disabled = page.current_idx <= 1
+                    # Next Shelfmark Button
                     ui.button(
-                        icon='chevron_right' if is_rtl() else 'chevron_left',
-                        on_click=lambda: load_page(direction=-1)
-                    ).props(f'flat round {"disabled" if prev_disabled else ""}').classes(
-                        'text-green-700' if not prev_disabled else 'text-gray-300'
+                        icon='skip_next',
+                        on_click=lambda: navigate_shelfmark(1)
+                    ).props('flat round color=white').classes('text-white').tooltip(tr('Next manuscript'))
+
+            # === Action Buttons Row ===
+            with ui.row().classes('w-full gap-2 mb-3 items-center justify-between'):
+                with ui.row().classes('gap-2'):
+                    # Show Full Manuscript button
+                    ui.button(
+                        tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
+                        icon='view_agenda' if not state.view_all else 'view_day',
+                        on_click=toggle_view_all
+                    ).props('outline color=green')
+
+                    # Search for Parallels button
+                    ui.button(
+                        tr('Search for Parallels'),
+                        icon='search',
+                        on_click=search_for_parallels
+                    ).props('outline color=green')
+
+                # Page count info (only show in single page mode)
+                if not state.view_all:
+                    ui.label(f"{page.p_num} / {page.total_pages} {tr('pages')}").classes(
+                        'text-gray-600 text-sm'
                     )
 
-                    # Page selector
-                    with ui.row().classes('items-center gap-3'):
-                        ui.label(tr('Page')).classes('text-gray-600')
+            # === Main Content ===
+            if state.view_all:
+                # Show all pages
+                with ui.card().classes('w-full').style('min-height: 60vh;'):
+                    # Header
+                    with ui.row().classes('w-full items-center p-4 border-b').style('background: var(--bg-tertiary);'):
+                        ui.label(tr('Full Manuscript View')).classes('font-bold text-lg')
+                        ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('text-gray-600 ml-2')
 
-                        page_input = ui.number(
-                            value=page.p_num,
-                            min=1,
-                            max=page.total_pages
-                        ).classes('w-20').props('dense outlined')
+                    # All pages in scroll area
+                    with ui.scroll_area().classes('w-full').style('height: 70vh; padding: 24px;'):
+                        for idx, doc_page in enumerate(state.full_manuscript):
+                            # Page separator
+                            if idx > 0:
+                                ui.separator().classes('my-6')
 
-                        ui.label(f"{tr('of')} {page.total_pages}").classes('text-gray-600')
+                            # Page header
+                            with ui.row().classes('w-full items-center gap-2 mb-2'):
+                                ui.label(f"{tr('Page')} {doc_page.p_num}").classes('font-bold text-green-700')
+                                if doc_page.full_header:
+                                    ui.label(doc_page.full_header).classes('text-xs text-gray-500 font-mono')
 
-                        def handle_go_click():
-                            try:
-                                page_num = int(page_input.value) if page_input.value is not None else 1
-                                go_to_page(page_num)
-                            except (ValueError, TypeError):
-                                go_to_page(1)
-
-                        ui.button(
-                            tr('Go'),
-                            on_click=handle_go_click
-                        ).props('flat dense color=green')
-
-                    # Next button
-                    next_disabled = page.current_idx >= page.total_pages
-                    ui.button(
-                        icon='chevron_left' if is_rtl() else 'chevron_right',
-                        on_click=lambda: load_page(direction=1)
-                    ).props(f'flat round {"disabled" if next_disabled else ""}').classes(
-                        'text-green-700' if not next_disabled else 'text-gray-300'
-                    )
-
-                    # Keyboard shortcuts hint
-                    with ui.element('div').classes('shortcuts-hint hidden lg:block'):
-                        ui.html(f'''
-                            <span class="kbd">←</span> <span class="kbd">→</span> {tr('Navigate')} |
-                            <span class="kbd">+</span> <span class="kbd">-</span> {tr('Zoom')} |
-                            <span class="kbd">F</span> {tr('Fullscreen')}
-                        ''', sanitize=False)
-
-            # === Main Content - TEXT FIRST Layout ===
-            # Extract FL ID and check if we have an image
-            fl_id = page.fl_id
-            if not fl_id and page.image_url:
-                match = re.search(r'FL(\d+)', page.image_url)
-                if match:
-                    fl_id = match.group(1)
-
-            # Prepare image URLs
-            img_url = None
-            fallback_url = None
-            has_image = False
-
-            if fl_id:
-                digits = re.sub(r"\D", "", str(fl_id))
-                if digits:
-                    has_image = True
-                    img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                    fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
-
-            # Main text area - ALWAYS visible and prominent
-            with ui.card().classes('w-full').style('min-height: 60vh;'):
-                # Header with folio, source, and image toggle
-                with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
-                    'background: var(--bg-tertiary);'
-                ):
-                    with ui.row().classes('items-center gap-4'):
-                        # Folio/Page info
-                        folio = extract_folio_number(page.full_header)
-                        if folio:
-                            ui.label(f"{tr('Folio')} {folio}").classes('font-bold text-lg')
-                        else:
-                            ui.label(f"{tr('Page')} {page.p_num}").classes('font-bold text-lg')
-
-                        # Source badge - default to V0.8 unless explicitly V0.7
-                        source_class = get_source_badge_class(page.full_header)
-                        source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
-                        ui.label(source_text).classes(f'source-badge {source_class}')
-
-                    # Image toggle button (only if image available)
-                    if has_image:
-                        show_image = {'value': False}
-                        image_container = None
-
-                        def toggle_image():
-                            show_image['value'] = not show_image['value']
-                            if image_container:
-                                if show_image['value']:
-                                    image_container.classes(remove='hidden')
+                            # Page text
+                            if doc_page.text:
+                                display_text = doc_page.text
+                                if state.highlight_terms:
+                                    display_text = highlight_text(doc_page.text)
+                                    ui.html(f'<div class="transcription-text" style="font-size: 1.3rem; line-height: 2.0;">{display_text}</div>', sanitize=False)
                                 else:
-                                    image_container.classes(add='hidden')
+                                    ui.label(doc_page.text).style(
+                                        'font-size: 1.3rem; line-height: 2.0; direction: rtl; text-align: right; '
+                                        'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                    )
+                            else:
+                                ui.label(tr('No text available')).classes('text-gray-400 italic')
+            else:
+                # Single page view
+                # Extract FL ID and check if we have an image
+                fl_id = page.fl_id
+                if not fl_id and page.image_url:
+                    match = re.search(r'FL(\d+)', page.image_url)
+                    if match:
+                        fl_id = match.group(1)
 
-                        ui.button(
-                            tr('Show Image'),
-                            icon='image',
-                            on_click=toggle_image
-                        ).props('flat dense').classes('text-green-700')
+                # Prepare image URLs
+                img_url = None
+                fallback_url = None
+                has_image = False
 
-                # Main text content - LARGE and readable
-                with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
-                    if page.text:
-                        # Apply highlighting if we have search terms
-                        display_text = page.text
-                        if state.highlight_terms:
-                            display_text = highlight_text(page.text)
-                            ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
-                        else:
-                            ui.label(page.text).style(
-                                'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                if fl_id:
+                    digits = re.sub(r"\D", "", str(fl_id))
+                    if digits:
+                        has_image = True
+                        img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+
+                # Main text area
+                with ui.card().classes('w-full').style('min-height: 60vh;'):
+                    # Header with folio, source, navigation, and image toggle
+                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                        'background: var(--bg-tertiary);'
+                    ):
+                        with ui.row().classes('items-center gap-4'):
+                            # Folio/Page info
+                            folio = extract_folio_number(page.full_header)
+                            if folio:
+                                ui.label(f"{tr('Folio')} {folio}").classes('font-bold text-lg')
+                            else:
+                                ui.label(f"{tr('Page')} {page.p_num}").classes('font-bold text-lg')
+
+                            # Source badge - default to V0.8 unless explicitly V0.7
+                            source_class = get_source_badge_class(page.full_header)
+                            source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
+                            ui.label(source_text).classes(f'source-badge {source_class}')
+
+                        # Navigation and controls
+                        with ui.row().classes('items-center gap-2'):
+                            # Previous page button
+                            prev_disabled = page.current_idx <= 1
+                            ui.button(
+                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                on_click=lambda: load_page(direction=-1)
+                            ).props(f'flat round dense {"disabled" if prev_disabled else ""}').classes(
+                                'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
-                    else:
-                        with ui.column().classes('items-center justify-center h-full'):
-                            ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                            ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
 
-            # Image panel - BELOW text, collapsible, only if available
-            if has_image:
-                image_container = ui.card().classes('w-full mt-4 hidden')
-                with image_container:
-                    with ui.column().classes('w-full'):
-                        # Image header with controls
-                        with ui.row().classes('w-full items-center justify-between p-3 border-b').style(
-                            'background: #1a1a1a;'
-                        ):
-                            ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+                            # Page input
+                            page_input = ui.number(
+                                value=page.p_num,
+                                min=1,
+                                max=page.total_pages
+                            ).classes('w-16').props('dense outlined')
 
-                            with ui.row().classes('gap-2'):
-                                ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
-                                ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
-                                ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
-                                ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
+                            ui.label(f"/ {page.total_pages}").classes('text-gray-600 text-sm')
 
-                        # Image display
-                        with ui.element('div').style(
-                            'background: #1a1a1a; display: flex; align-items: center; justify-content: center; '
-                            'min-height: 400px; max-height: 70vh; overflow: auto;'
-                        ):
-                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                            safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+                            # Go button
+                            def handle_go_click():
+                                try:
+                                    page_num = int(page_input.value) if page_input.value is not None else 1
+                                    go_to_page(page_num)
+                                except (ValueError, TypeError):
+                                    go_to_page(1)
 
-                            img_html = f'''
-                            <img
-                                src="{safe_img_url}"
-                                class="zoomable-image"
-                                style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 70vh; object-fit: contain;"
-                                loading="lazy"
-                                onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
-                            />
-                            '''
-                            ui.html(img_html, sanitize=False)
+                            ui.button(
+                                tr('Go'),
+                                on_click=handle_go_click
+                            ).props('flat dense color=green')
+
+                            # Next page button
+                            next_disabled = page.current_idx >= page.total_pages
+                            ui.button(
+                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                on_click=lambda: load_page(direction=1)
+                            ).props(f'flat round dense {"disabled" if next_disabled else ""}').classes(
+                                'text-green-700' if not next_disabled else 'text-gray-300'
+                            )
+
+                            # Image toggle button (only if image available)
+                            if has_image:
+                                show_image = {'value': False}
+                                image_container = None
+
+                                def toggle_image():
+                                    show_image['value'] = not show_image['value']
+                                    if image_container:
+                                        if show_image['value']:
+                                            image_container.classes(remove='hidden')
+                                        else:
+                                            image_container.classes(add='hidden')
+
+                                ui.button(
+                                    icon='image',
+                                    on_click=toggle_image
+                                ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
+
+                    # Main text content
+                    with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
+                        if page.text:
+                            # Apply highlighting if we have search terms
+                            display_text = page.text
+                            if state.highlight_terms:
+                                display_text = highlight_text(page.text)
+                                ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                            else:
+                                ui.label(page.text).style(
+                                    'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                )
+                        else:
+                            with ui.column().classes('items-center justify-center h-full'):
+                                ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                                ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+
+                # Image panel - BELOW text, collapsible, only if available
+                if has_image:
+                    image_container = ui.card().classes('w-full mt-4 hidden')
+                    with image_container:
+                        with ui.column().classes('w-full'):
+                            # Image header with controls
+                            with ui.row().classes('w-full items-center justify-between p-3 border-b').style(
+                                'background: #1a1a1a;'
+                            ):
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+
+                                with ui.row().classes('gap-2'):
+                                    ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
+                                    ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                    ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
+
+                            # Image display
+                            with ui.element('div').style(
+                                'background: #1a1a1a; display: flex; align-items: center; justify-content: center; '
+                                'min-height: 400px; max-height: 70vh; overflow: auto;'
+                            ):
+                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+
+                                img_html = f'''
+                                <img
+                                    src="{safe_img_url}"
+                                    class="zoomable-image"
+                                    style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 70vh; object-fit: contain;"
+                                    loading="lazy"
+                                    onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                />
+                                '''
+                                ui.html(img_html, sanitize=False)
 
     def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""

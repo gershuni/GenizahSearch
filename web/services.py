@@ -235,6 +235,50 @@ class GenizahService:
             print(f"Browse page by FL error: {e}")
             return None
 
+    def get_full_manuscript(self, sys_id: str) -> List[DocumentPage]:
+        """Get all pages for a manuscript."""
+        if not self.is_ready: return []
+        try:
+            pages = state.searcher.get_full_manuscript(sys_id)
+            result = []
+            for p in pages:
+                fl_id = None
+                try:
+                    parsed = state.meta_mgr.parse_full_id_components(p.get('full_header', ''))
+                    fl_id = parsed.get('fl_id')
+                except Exception:
+                    pass
+
+                result.append(DocumentPage(
+                    uid=p.get('uid', ''),
+                    p_num=p.get('p_num', 0),
+                    text=p.get('text', ''),
+                    full_header=p.get('full_header', ''),
+                    fl_id=fl_id,
+                    sys_id=sys_id
+                ))
+            return result
+        except Exception as e:
+            print(f"Get full manuscript error: {e}")
+            return []
+
+    def get_adjacent_shelfmark(self, sys_id: str, direction: int) -> Optional[str]:
+        """Get next/prev shelfmark based on file order in Transcriptions.txt.
+
+        Args:
+            sys_id: Current system ID
+            direction: 1 for next, -1 for previous
+
+        Returns:
+            Adjacent system ID or None if at boundary
+        """
+        if not self.is_ready: return None
+        try:
+            return state.searcher.get_adjacent_sys_id_by_file_order(sys_id, direction)
+        except Exception as e:
+            print(f"Get adjacent shelfmark error: {e}")
+            return None
+
 _service_instance = GenizahService()
 
 def get_service():
