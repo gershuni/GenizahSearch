@@ -654,9 +654,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         else:
                             ui.label(f"{tr('Page')} {page.p_num}").classes('font-bold text-lg')
 
-                        # Source badge
+                        # Source badge - default to V0.8 unless explicitly V0.7
                         source_class = get_source_badge_class(page.full_header)
-                        source_text = 'V0.8' if 'V0.8' in page.full_header else 'V0.7'
+                        source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
                         ui.label(source_text).classes(f'source-badge {source_class}')
 
                     # Image toggle button (only if image available)
