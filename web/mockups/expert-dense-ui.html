@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genizah Search Pro - ממשק חוקרים ותיק</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --panel: #ffffff;
+      --border: #cbd5f5;
+      --muted: #475569;
+      --accent: #0f172a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans Hebrew", "Assistant", "Rubik", sans-serif;
+      background: var(--bg);
+      color: #0f172a;
+    }
+    header {
+      background: var(--accent);
+      color: #fff;
+      padding: 12px 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+    }
+    header .query {
+      display: grid;
+      grid-template-columns: 1.6fr 0.5fr 0.5fr 0.7fr 0.7fr;
+      gap: 8px;
+    }
+    header input, header select {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.85rem;
+    }
+    header button {
+      background: #22c55e;
+      border: none;
+      color: #0f172a;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: 700;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 2.2fr 2fr 1.3fr;
+      gap: 12px;
+      padding: 12px;
+      height: calc(100vh - 56px);
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 6px 4px;
+      text-align: right;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .mono { font-family: "Courier New", monospace; }
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .actions button {
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+    .hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="query">
+      <input value="?מועד" />
+      <select>
+        <option>Variants (?)</option>
+        <option>Exact (=)</option>
+        <option>Fuzzy (~)</option>
+        <option>Regex (/)</option>
+      </select>
+      <input value="Gap 1" />
+      <input value="Cambridge" />
+      <input value="רשימה: מסמכי מיסוי" />
+    </div>
+    <button>RUN</button>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="actions">
+        <button>ייצוא CSV</button>
+        <button>ייצוא Word</button>
+        <button>שמור לרשימה</button>
+        <button>Lab Mode</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>סימון מדף</th>
+            <th>שפה</th>
+            <th>תקופה</th>
+            <th>עמוד</th>
+            <th>קטע</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">TS 12.345</td>
+            <td>עברית</td>
+            <td>מאה 11</td>
+            <td>2r</td>
+            <td>...מועד התפילה...</td>
+          </tr>
+          <tr>
+            <td class="mono">ENY 4.56</td>
+            <td>ערבית־יהודית</td>
+            <td>מאה 12</td>
+            <td>7v</td>
+            <td>...מועד המסחר...</td>
+          </tr>
+          <tr>
+            <td class="mono">BODL 1123</td>
+            <td>עברית</td>
+            <td>מאה 11</td>
+            <td>1r</td>
+            <td>...תאריך ומועד...</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="hint">טיפ: Ctrl+F לסינון מהיר • Alt+R לייצוא • / להחלפת מצב חיפוש</div>
+    </section>
+
+    <section class="panel">
+      <strong>טקסט מלא (מודגש)</strong>
+      <div style="overflow:auto; line-height:1.9;">
+        ...מצאנו את <mark>המועד</mark> לפעולה זו במכתב מן הגניזה...
+      </div>
+      <strong>תצוגת תמונה</strong>
+      <div style="background:#0f172a; color:#fff; border-radius:8px; height:220px; display:flex; align-items:center; justify-content:center;">IIIF Viewer</div>
+    </section>
+
+    <section class="panel">
+      <strong>מטא־דאטה קומפקטי</strong>
+      <div class="hint">Catalog: Neubauer Part 5</div>
+      <div class="hint">Repository: Bodleian</div>
+      <div class="hint">Script: Hebrew square</div>
+      <div class="hint">Links: NLI / Cambridge / IIIF</div>
+      <div class="hint">Personal List: מסמכי מיסוי</div>
+    </section>
+  </main>
+</body>
+</html>

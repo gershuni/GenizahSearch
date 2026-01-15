@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genizah Search Pro - שולחן עבודה מחקרי</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --accent-2: #1e40af;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --highlight: #fef08a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans Hebrew", "Assistant", "Rubik", sans-serif;
+      background: var(--bg);
+      color: #0f172a;
+    }
+    header {
+      background: #0f172a;
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header .title {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    header .actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    header .chip {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr 1.2fr;
+      gap: 16px;
+      padding: 20px;
+      height: calc(100vh - 64px);
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+    .panel h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .section {
+      border-top: 1px dashed var(--border);
+      padding-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    input, select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.95rem;
+      width: 100%;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip-outline {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .button {
+      background: var(--accent);
+      color: #fff;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+    .results {
+      overflow: auto;
+      gap: 10px;
+    }
+    .result-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .result-card .meta {
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .viewer {
+      overflow: auto;
+      gap: 14px;
+    }
+    .image-box {
+      background: #0f172a;
+      border-radius: 12px;
+      height: 260px;
+      position: relative;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toolbar button {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+    }
+    .highlight {
+      background: var(--highlight);
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">Genizah Search Pro • שולחן עבודה מחקרי</div>
+    <div class="actions">
+      <span class="chip">Lab Mode פעיל</span>
+      <span class="chip">IIIF מחובר</span>
+      <span class="chip">עברית/אנגלית</span>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>חיפוש מתקדם</h2>
+      <label>שאילתא</label>
+      <input placeholder="טקסט עברי לחיפוש" value="=ברוך אתה" />
+      <label>מצב</label>
+      <select>
+        <option>Exact (=)</option>
+        <option>Variants (?)</option>
+        <option>Fuzzy (~)</option>
+        <option>Regex (/)</option>
+      </select>
+      <label>Gap</label>
+      <input type="number" value="2" />
+      <div class="section">
+        <h2>סינון</h2>
+        <label>תקופה</label>
+        <select>
+          <option>מאה 10-11</option>
+          <option>מאה 12</option>
+        </select>
+        <label>אוסף</label>
+        <select>
+          <option>NLI</option>
+          <option>Cambridge</option>
+        </select>
+        <label>רשימה אישית</label>
+        <select>
+          <option>החיבורים שלי</option>
+        </select>
+      </div>
+      <div class="section">
+        <h2>קיצורים</h2>
+        <div class="chips">
+          <span class="chip-outline">= Exact</span>
+          <span class="chip-outline">? Variants</span>
+          <span class="chip-outline">~ Fuzzy</span>
+          <span class="chip-outline">/ Regex</span>
+          <span class="chip-outline"># Shelfmark</span>
+        </div>
+      </div>
+      <button class="button">הרץ חיפוש</button>
+    </section>
+
+    <section class="panel results">
+      <h2>תוצאות (124)</h2>
+      <div class="result-card">
+        <strong>TS 12.345</strong>
+        <div class="meta">
+          <span>עברית</span>
+          <span>מאה 11</span>
+          <span>עמוד 2</span>
+        </div>
+        <div>...<span class="highlight">ברוך</span> אתה ה' אלוהינו...</div>
+      </div>
+      <div class="result-card">
+        <strong>ENY 4.56</strong>
+        <div class="meta">
+          <span>ערבית יהודית</span>
+          <span>מאה 12</span>
+          <span>עמוד 7</span>
+        </div>
+        <div>...<span class="highlight">ברוך</span> אתה עליון...</div>
+      </div>
+      <div class="result-card">
+        <strong>BODL 1123</strong>
+        <div class="meta">
+          <span>Neubauer Part 5</span>
+          <span>מאה 11</span>
+          <span>עמוד 1</span>
+        </div>
+        <div>...נוסח תפילה <span class="highlight">ברוך</span>...</div>
+      </div>
+    </section>
+
+    <section class="panel viewer">
+      <h2>מסמך נבחר: TS 12.345</h2>
+      <div class="toolbar">
+        <button>ייצוא</button>
+        <button>שמור לרשימה</button>
+        <button>ציטוט</button>
+        <button>פריטים דומים</button>
+      </div>
+      <div class="image-box">IIIF Viewer</div>
+      <div class="section">
+        <h2>תמלול</h2>
+        <div>
+          ...<span class="highlight">ברוך</span> אתה ה' אלוהינו מלך העולם...
+        </div>
+      </div>
+      <div class="section">
+        <h2>מטא-דאטה</h2>
+        <div class="meta">
+          <span>Cambridge University Library</span>
+          <span>דף 2, recto</span>
+          <span>Catalog: Neubauer</span>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

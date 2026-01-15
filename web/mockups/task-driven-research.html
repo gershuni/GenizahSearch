@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genizah Search Pro - מחקר ממוקד משימה</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --accent: #2563eb;
+      --muted: #6b7280;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans Hebrew", "Assistant", "Rubik", sans-serif;
+      background: var(--bg);
+      color: #0f172a;
+    }
+    header {
+      padding: 20px 28px;
+      background: #0f172a;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .wizard {
+      max-width: 1100px;
+      margin: 20px auto;
+      background: var(--panel);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      display: grid;
+      gap: 20px;
+    }
+    .steps {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .step {
+      background: #e0e7ff;
+      color: #3730a3;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      background: #fff;
+      display: grid;
+      gap: 10px;
+    }
+    .card h3 { margin: 0; }
+    .button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .task-panel {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .task-panel .panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      background: #fff;
+    }
+    .progress {
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress span {
+      display: block;
+      height: 100%;
+      width: 45%;
+      background: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Genizah Search Pro • מחקר ממוקד משימה</strong>
+    <span>שלב 2 מתוך 4</span>
+  </header>
+
+  <section class="wizard">
+    <div class="steps">
+      <span class="step">1. הגדרת יעד</span>
+      <span class="step">2. סינון</span>
+      <span class="step">3. בדיקת תוצאות</span>
+      <span class="step">4. ייצוא ושמירה</span>
+    </div>
+    <div class="progress"><span></span></div>
+
+    <div class="flow">
+      <div class="card">
+        <h3>מציאת מקבילות</h3>
+        <p>הפעל Lab Mode וסריקה עמוקה לטקסטים מקבילים.</p>
+        <button class="button">המשך למסלול</button>
+      </div>
+      <div class="card">
+        <h3>חיפוש טקסט קלאסי</h3>
+        <p>בחר מצב חיפוש (Exact / Variants) והתחל איסוף תוצאות.</p>
+        <button class="button">המשך למסלול</button>
+      </div>
+      <div class="card">
+        <h3>בניית קורפוס אישי</h3>
+        <p>שמור מסמכים לרשימות אישיות והוסף תגיות מחקר.</p>
+        <button class="button">המשך למסלול</button>
+      </div>
+    </div>
+
+    <div class="task-panel">
+      <div class="panel">
+        <h3>שלב 2: סינון</h3>
+        <label>תקופה</label>
+        <input placeholder="מאה 10-11" />
+        <label>שפה</label>
+        <input placeholder="עברית, ערבית־יהודית" />
+        <label>אוסף</label>
+        <input placeholder="Cambridge, NLI" />
+      </div>
+      <div class="panel">
+        <h3>תצוגה מהירה</h3>
+        <p>20 תוצאות עומדות בקריטריונים. ניתן לעבור לשלב הבא.</p>
+        <button class="button">הצג תוצאות</button>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

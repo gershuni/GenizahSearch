@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genizah Search Pro - ספריית גניזה חיה</title>
+  <style>
+    :root {
+      --bg: #f5f1eb;
+      --panel: #ffffff;
+      --accent: #b45309;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans Hebrew", "Assistant", "Rubik", sans-serif;
+      background: var(--bg);
+      color: #111827;
+    }
+    header {
+      background: linear-gradient(120deg, #92400e, #b45309);
+      color: #fff;
+      padding: 28px 32px;
+    }
+    header h1 { margin: 0 0 8px; font-size: 1.8rem; }
+    header p { margin: 0; opacity: 0.9; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .stat {
+      background: rgba(255,255,255,0.12);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 260px 1fr 280px;
+      gap: 16px;
+      padding: 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .facet-group {
+      border-top: 1px dashed var(--border);
+      padding-top: 12px;
+    }
+    .facet-group h3 { margin: 0 0 8px; font-size: 0.95rem; }
+    .facet-group label { font-size: 0.85rem; color: var(--muted); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      display: grid;
+      gap: 8px;
+    }
+    .thumb {
+      height: 120px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+    }
+    .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.75rem;
+    }
+    .tag {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 3px 8px;
+      border-radius: 999px;
+    }
+    .preview {
+      background: #111827;
+      color: #fff;
+      border-radius: 14px;
+      padding: 16px;
+      min-height: 200px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ספריית הגניזה החיה</h1>
+    <p>קטלוג חזותי המשלב מטא־דאטה, תמונות IIIF, ורשימות מחקר אישיות.</p>
+    <div class="stats">
+      <div class="stat">1.1M דפים מתועתקים</div>
+      <div class="stat">16 אוספים</div>
+      <div class="stat">שליפת IIIF בזמן אמת</div>
+      <div class="stat">רשימות אישיות פעילות</div>
+    </div>
+  </header>
+
+  <main>
+    <aside class="panel">
+      <h2>סינון קטלוג</h2>
+      <div class="facet-group">
+        <h3>שפה</h3>
+        <label><input type="checkbox" checked /> עברית</label><br />
+        <label><input type="checkbox" /> ערבית־יהודית</label><br />
+        <label><input type="checkbox" /> ארמית</label>
+      </div>
+      <div class="facet-group">
+        <h3>תקופה</h3>
+        <label><input type="checkbox" checked /> מאה 10-11</label><br />
+        <label><input type="checkbox" /> מאה 12</label><br />
+        <label><input type="checkbox" /> מאה 13+</label>
+      </div>
+      <div class="facet-group">
+        <h3>רשימות אישיות</h3>
+        <label><input type="checkbox" checked /> תפילות שבת</label><br />
+        <label><input type="checkbox" /> חוזים מסחריים</label>
+      </div>
+      <div class="facet-group">
+        <h3>אוסף</h3>
+        <label><input type="checkbox" checked /> Cambridge</label><br />
+        <label><input type="checkbox" /> NLI</label>
+      </div>
+    </aside>
+
+    <section class="panel">
+      <div class="cards">
+        <div class="card">
+          <div class="thumb">תמונה IIIF</div>
+          <strong>TS 12.345</strong>
+          <div class="tags">
+            <span class="tag">עברית</span>
+            <span class="tag">מאה 11</span>
+          </div>
+          <div>קטע תפילה עם נוסח ייחודי.</div>
+        </div>
+        <div class="card">
+          <div class="thumb">תמונה IIIF</div>
+          <strong>ENY 4.56</strong>
+          <div class="tags">
+            <span class="tag">ערבית־יהודית</span>
+            <span class="tag">מאה 12</span>
+          </div>
+          <div>מכתב מסחרי מן השוק הפאטימי.</div>
+        </div>
+        <div class="card">
+          <div class="thumb">תמונה IIIF</div>
+          <strong>BODL 1123</strong>
+          <div class="tags">
+            <span class="tag">Neubauer</span>
+            <span class="tag">מאה 11</span>
+          </div>
+          <div>אוסף קודיקולוגי עשיר.</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2>תצוגה מהירה</h2>
+      <div class="preview">IIIF Viewer</div>
+      <p>טקסט מדוגם עם הדגשות והקשרים.</p>
+      <button style="background: var(--accent); color:#fff; border:none; padding:10px; border-radius:8px;">פתח מסמך מלא</button>
+    </aside>
+  </main>
+</body>
+</html>
