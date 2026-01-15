@@ -41,8 +41,8 @@ def create_settings_page():
                         value=current_theme
                     ).classes('w-full').props('outlined dense')
 
-                    def change_theme(e):
-                        theme = e.value
+                    def change_theme():
+                        theme = theme_select.value
                         app.storage.user['theme'] = theme
                         ui.run_javascript(f'document.body.setAttribute("data-theme", "{theme}")')
                         ui.notify(tr('Theme changed'), type='positive')
@@ -58,8 +58,8 @@ def create_settings_page():
                         value=results_per_page
                     ).classes('w-full').props('outlined dense')
 
-                    def change_rpp(e):
-                        app.storage.user['results_per_page'] = e.value
+                    def change_rpp():
+                        app.storage.user['results_per_page'] = rpp_select.value
 
                     rpp_select.on('update:model-value', change_rpp)
 
@@ -84,8 +84,8 @@ def create_settings_page():
                         value=default_mode
                     ).classes('w-full').props('outlined dense')
 
-                    def change_mode(e):
-                        app.storage.user['default_search_mode'] = e.value
+                    def change_mode():
+                        app.storage.user['default_search_mode'] = mode_select.value
 
                     mode_select.on('update:model-value', change_mode)
 
@@ -99,8 +99,8 @@ def create_settings_page():
                         max=10
                     ).classes('w-full').props('outlined dense')
 
-                    def change_gap(e):
-                        app.storage.user['default_gap'] = int(e.value) if e.value else 0
+                    def change_gap():
+                        app.storage.user['default_gap'] = int(gap_input.value) if gap_input.value else 0
 
                     gap_input.on('update:model-value', change_gap)
 
@@ -109,8 +109,8 @@ def create_settings_page():
             lab_default = app.storage.user.get('lab_mode_default', False)
             lab_switch = ui.switch(tr('Enable Lab Mode by default'), value=lab_default)
 
-            def toggle_lab(e):
-                app.storage.user['lab_mode_default'] = e.value
+            def toggle_lab():
+                app.storage.user['lab_mode_default'] = lab_switch.value
 
             lab_switch.on('update:model-value', toggle_lab)
 

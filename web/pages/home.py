@@ -196,15 +196,25 @@ def create_page():
                         recent_items = state.lists_mgr.data.get('recent_items', [])[:6]
                         if recent_items:
                             for item in recent_items:
-                                sys_id = item.get('sys_id', '')
-                                shelfmark = item.get('shelfmark', 'Unknown')
-                                title = item.get('title', '')
+                                # Handle both dict and string formats
+                                if isinstance(item, dict):
+                                    sys_id = item.get('sys_id', '')
+                                    shelfmark = item.get('shelfmark', 'Unknown')
+                                    title = item.get('title', '')
+                                else:
+                                    # Item is just a sys_id string
+                                    sys_id = str(item)
+                                    shelfmark = 'Unknown'
+                                    title = ''
+
+                                if not sys_id:
+                                    continue
 
                                 # Enrich if needed
                                 if (not shelfmark or shelfmark == 'Unknown') and state.meta_mgr:
                                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                                     shelfmark = shelf_temp or shelfmark
-                                    title = title or title_temp
+                                    title = title or title_temp or ''
 
                                 with ui.card().classes('p-4 min-w-48 cursor-pointer hover:shadow-md transition-all').on(
                                     'click', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')

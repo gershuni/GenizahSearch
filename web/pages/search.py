@@ -346,9 +346,13 @@ def create_search_page(initial_query: str = None):
 
                 # Actions
                 with ui.row().classes('gap-1'):
+                    def make_star_handler(r):
+                        def handler():
+                            show_add_to_list_dialog(r)
+                        return handler
                     ui.button(
                         icon='star_border',
-                        on_click=lambda e, r=result: (e.stop_propagation(), show_add_to_list_dialog(r))
+                        on_click=make_star_handler(result)
                     ).props('flat round dense size=sm').style('color: var(--accent-amber);')
 
             # Snippet
