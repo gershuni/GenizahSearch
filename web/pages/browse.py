@@ -10,7 +10,7 @@ Features:
 - Metadata header with external links
 """
 
-from nicegui import ui
+from nicegui import ui, app
 from typing import Optional
 import re
 
@@ -377,6 +377,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.page_input_value = page.p_num
                 state.error = None
 
+                # Save position to storage for persistence
+                try:
+                    app.storage.user['browse_position'] = {
+                        'sys_id': state.sys_id,
+                        'p_num': page.p_num,
+                        'shelfmark': page.shelfmark
+                    }
+                except Exception:
+                    pass
+
                 # Track recently viewed item
                 if state.sys_id and service.is_ready:
                     try:
@@ -598,134 +608,117 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             <span class="kbd">F</span> {tr('Fullscreen')}
                         ''', sanitize=False)
 
-            # === Main Viewer Panels ===
-            fullscreen_class = 'fullscreen-mode' if state.is_fullscreen else ''
+            # === Main Content - TEXT FIRST Layout ===
+            # Extract FL ID and check if we have an image
+            fl_id = page.fl_id
+            if not fl_id and page.image_url:
+                match = re.search(r'FL(\d+)', page.image_url)
+                if match:
+                    fl_id = match.group(1)
 
-            with ui.row().classes(f'w-full gap-4 viewer-panels {fullscreen_class}').style('display: flex; flex-direction: row; height: calc(100vh - 300px);'):
-                # Extract FL ID and check if we have an image
-                fl_id = page.fl_id
-                if not fl_id and page.image_url:
-                    match = re.search(r'FL(\d+)', page.image_url)
-                    if match:
-                        fl_id = match.group(1)
+            # Prepare image URLs
+            img_url = None
+            fallback_url = None
+            has_image = False
 
-                # Prepare image URLs
-                img_url = None
-                fallback_url = None
-                has_image = False
+            if fl_id:
+                digits = re.sub(r"\D", "", str(fl_id))
+                if digits:
+                    has_image = True
+                    img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
+                    fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
 
-                if fl_id:
-                    digits = re.sub(r"\D", "", str(fl_id))
-                    if digits:
-                        has_image = True
-                        img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
-                        print(f"[DEBUG] Image available - FL{digits}")
+            # Main text area - ALWAYS visible and prominent
+            with ui.card().classes('w-full').style('min-height: 60vh;'):
+                # Header with folio, source, and image toggle
+                with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                    'background: var(--bg-tertiary);'
+                ):
+                    with ui.row().classes('items-center gap-4'):
+                        # Folio/Page info
+                        folio = extract_folio_number(page.full_header)
+                        if folio:
+                            ui.label(f"{tr('Folio')} {folio}").classes('font-bold text-lg')
+                        else:
+                            ui.label(f"{tr('Page')} {page.p_num}").classes('font-bold text-lg')
 
-                # LEFT: Image Viewer (50%) - only show if image exists
-                if has_image:
-                    with ui.column().classes('image-panel').style('width: 50%; height: 100%;'):
-                        with ui.element('div').classes('image-viewer-container'):
-                            # Image container
-                            with ui.element('div').classes('image-container'):
-                                if img_url:
-                                    # Use HTML img tag without crossorigin (causes issues with Rosetta)
-                                    safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                                    safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+                        # Source badge
+                        source_class = get_source_badge_class(page.full_header)
+                        source_text = 'V0.8' if 'V0.8' in page.full_header else 'V0.7'
+                        ui.label(source_text).classes(f'source-badge {source_class}')
 
-                                    img_html = f'''
-                                    <img
-                                        src="{safe_img_url}"
-                                        class="zoomable-image"
-                                        style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 100%; object-fit: contain;"
-                                        loading="lazy"
-                                        onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
-                                    />
-                                    '''
-                                    ui.html(img_html, sanitize=False)
+                    # Image toggle button (only if image available)
+                    if has_image:
+                        show_image = {'value': False}
+                        image_container = None
+
+                        def toggle_image():
+                            show_image['value'] = not show_image['value']
+                            if image_container:
+                                if show_image['value']:
+                                    image_container.classes(remove='hidden')
                                 else:
-                                    with ui.element('div').classes('image-loading'):
-                                        ui.icon('image_not_supported', size='4rem')
-                                        ui.label(tr('Image not available')).classes('mt-2')
+                                    image_container.classes(add='hidden')
 
-                            # Image controls overlay
-                            with ui.element('div').classes('image-controls'):
-                                ui.button(icon='remove', on_click=zoom_out).props(
-                                    'flat round size=sm'
-                                ).tooltip(tr('Zoom out'))
+                        ui.button(
+                            tr('Show Image'),
+                            icon='image',
+                            on_click=toggle_image
+                        ).props('flat dense').classes('text-green-700')
 
-                                ui.label(f'{int(state.zoom_level * 100)}%').classes(
-                                    'zoom-level-label text-white text-sm px-2'
-                                )
+                # Main text content - LARGE and readable
+                with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
+                    if page.text:
+                        # Apply highlighting if we have search terms
+                        display_text = page.text
+                        if state.highlight_terms:
+                            display_text = highlight_text(page.text)
+                            ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                        else:
+                            ui.label(page.text).style(
+                                'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                            )
+                    else:
+                        with ui.column().classes('items-center justify-center h-full'):
+                            ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                            ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
 
-                                ui.button(icon='add', on_click=zoom_in).props(
-                                    'flat round size=sm'
-                                ).tooltip(tr('Zoom in'))
+            # Image panel - BELOW text, collapsible, only if available
+            if has_image:
+                image_container = ui.card().classes('w-full mt-4 hidden')
+                with image_container:
+                    with ui.column().classes('w-full'):
+                        # Image header with controls
+                        with ui.row().classes('w-full items-center justify-between p-3 border-b').style(
+                            'background: #1a1a1a;'
+                        ):
+                            ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
 
-                                ui.separator().props('vertical').classes('mx-1')
+                            with ui.row().classes('gap-2'):
+                                ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
+                                ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
 
-                                ui.button(icon='fit_screen', on_click=zoom_reset).props(
-                                    'flat round size=sm'
-                                ).tooltip(tr('Reset zoom'))
+                        # Image display
+                        with ui.element('div').style(
+                            'background: #1a1a1a; display: flex; align-items: center; justify-content: center; '
+                            'min-height: 400px; max-height: 70vh; overflow: auto;'
+                        ):
+                            safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                            safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
 
-                                ui.button(icon='width_full', on_click=fit_width).props(
-                                    'flat round size=sm'
-                                ).tooltip(tr('Fit to width'))
-
-                                ui.button(icon='height', on_click=fit_height).props(
-                                    'flat round size=sm'
-                                ).tooltip(tr('Fit to height'))
-
-                                ui.separator().props('vertical').classes('mx-1')
-
-                                ui.button(
-                                    icon='fullscreen_exit' if state.is_fullscreen else 'fullscreen',
-                                    on_click=toggle_fullscreen
-                                ).props('flat round size=sm').tooltip(
-                                    tr('Exit fullscreen') if state.is_fullscreen else tr('Fullscreen')
-                                )
-
-                # RIGHT: Transcription Panel (50% if image, 100% if no image)
-                transcription_width = '50%' if has_image else '100%'
-                with ui.column().classes('transcription-panel-wrapper').style(f'width: {transcription_width};'):
-                    with ui.element('div').classes('transcription-panel'):
-                        # Header with folio and source
-                        with ui.element('div').classes('transcription-header'):
-                            with ui.row().classes('w-full items-center justify-between'):
-                                # Folio number
-                                folio = extract_folio_number(page.full_header)
-                                if folio:
-                                    ui.label(f"{tr('Folio')} {folio}").classes(
-                                        'font-semibold text-gray-700'
-                                    )
-                                else:
-                                    ui.label(f"{tr('Page')} {page.p_num}").classes(
-                                        'font-semibold text-gray-700'
-                                    )
-
-                                # Source badge
-                                source_class = get_source_badge_class(page.full_header)
-                                source_text = 'V0.8' if 'V0.8' in page.full_header else 'V0.7'
-                                ui.label(source_text).classes(
-                                    f'source-badge {source_class}'
-                                )
-
-                        # Transcription content
-                        with ui.scroll_area().classes('transcription-content'):
-                            if page.text:
-                                # Apply highlighting if we have search terms
-                                display_text = page.text
-                                if state.highlight_terms:
-                                    display_text = highlight_text(page.text)
-                                    ui.html(f'<div class="transcription-text">{display_text}</div>', sanitize=False)
-                                else:
-                                    ui.label(page.text).classes('transcription-text')
-                            else:
-                                with ui.column().classes('items-center justify-center h-full'):
-                                    ui.icon('text_snippet', size='3rem').classes('text-gray-300')
-                                    ui.label(tr('No text available')).classes(
-                                        'text-gray-400 mt-2'
-                                    )
+                            img_html = f'''
+                            <img
+                                src="{safe_img_url}"
+                                class="zoomable-image"
+                                style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 70vh; object-fit: contain;"
+                                loading="lazy"
+                                onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                            />
+                            '''
+                            ui.html(img_html, sanitize=False)
 
     def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""
@@ -739,27 +732,34 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             'text-3xl font-bold mb-6 text-center text-green-800'
         )
 
-        # Shelfmark Search Box
-        with ui.card().classes('w-full p-4 mb-6 bg-green-50 border border-green-200'):
-            with ui.row().classes('w-full gap-4 items-end'):
+        # Shelfmark Search Box - Simple and Working
+        with ui.card().classes('w-full p-4 mb-6').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
+            with ui.row().classes('w-full gap-4 items-center'):
                 # Search icon
-                ui.icon('search', size='md').classes('text-green-600 mb-2')
+                ui.icon('search', size='md').classes('text-green-600')
 
-                # Shelfmark input
+                # Simple input that works
                 search_input = ui.input(
                     placeholder=tr('e.g. T-S 8J6.1'),
-                    label=tr('Enter shelfmark'),
-                    value=state.shelfmark_query
+                    label=tr('Enter shelfmark')
                 ).classes('flex-1').props('outlined dense clearable color=green')
 
-                search_input.bind_value(state, 'shelfmark_query')
-                search_input.on('keydown.enter', search_shelfmark)
+                # Set initial value if we have one
+                if state.shelfmark_query:
+                    search_input.value = state.shelfmark_query
+
+                def do_search():
+                    state.shelfmark_query = search_input.value or ''
+                    if state.shelfmark_query.strip():
+                        search_shelfmark()
+
+                search_input.on('keydown.enter', do_search)
 
                 # Go button
                 ui.button(
                     tr('Go'),
                     icon='arrow_forward',
-                    on_click=search_shelfmark
+                    on_click=do_search
                 ).props('color=green').classes('px-6')
 
         # Service status warning
@@ -794,7 +794,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         elif initial_sys_id:
             load_page()
         else:
-            update_content()
+            # Try to restore previous position
+            saved_position = app.storage.user.get('browse_position')
+            if saved_position and saved_position.get('sys_id'):
+                state.sys_id = saved_position['sys_id']
+                state.shelfmark_query = saved_position.get('shelfmark', '')
+                load_page(p_num=saved_position.get('p_num', 1))
+            else:
+                update_content()
 
         # Add keyboard event handlers
         ui.add_body_html('''

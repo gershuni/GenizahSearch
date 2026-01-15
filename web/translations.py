@@ -34,19 +34,52 @@ TRANSLATIONS = {
     "Language": "שפה",
     "Hebrew": "עברית",
     "English": "אנגלית",
+    "Done": "סיים",
+    "Save": "שמור",
+    "Create": "צור",
+    "recommended": "מומלץ",
+    "results": "תוצאות",
 
     # =========================================================================
-    # Home Page Cards
+    # Navigation
+    # =========================================================================
+    "NAVIGATION": "ניווט",
+    "TOOLS": "כלים",
+    "Dashboard": "לוח בקרה",
+    "Home": "בית",
+    "About": "אודות",
+    "Help": "עזרה",
+    "Quick search...": "חיפוש מהיר...",
+    "Lab Settings": "הגדרות מעבדה",
+    "Help Center": "מרכז עזרה",
+
+    # =========================================================================
+    # Home Page / Dashboard
     # =========================================================================
     "Genizah Search": "חיפוש גניזה",
     "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
+    "Welcome to Genizah Search Pro": "ברוכים הבאים ל-Genizah Search Pro",
+    "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
+    "Research Tools": "כלי מחקר",
     "Pages": "עמודים",
+    "Lists": "רשימות",
     "Latest Data": "נתונים עדכניים",
     "Chunk Analysis": "ניתוח קטעים",
     "Scoring": "ניקוד",
     "Images": "תמונות",
     "Transcriptions": "תעתיקים",
     "Browse": "דפדוף",
+    "Start Search": "התחל חיפוש",
+    "Recent Activity": "פעילות אחרונה",
+    "View All": "הצג הכל",
+    "No recent activity": "אין פעילות אחרונה",
+    "System Status": "סטטוס מערכת",
+    "Indexed Pages": "עמודים באינדקס",
+    "Cached Metadata": "מטא-דאטא במטמון",
+    "Lab Index": "אינדקס מעבדה",
+    "Rebuild Needed": "נדרשת בנייה מחדש",
+    "Configure advanced search parameters": "הגדר פרמטרים מתקדמים לחיפוש",
+    "Learn how to use Genizah Search": "למד כיצד להשתמש ב-Genizah Search",
 
     # Search Card
     "Text Search": "חיפוש טקסט",
@@ -60,6 +93,7 @@ TRANSLATIONS = {
     "Find similar texts": "מצא טקסטים דומים",
     "Enter a long text and find parallel texts in the Genizah": "הזן טקסט ארוך ומצא טקסטים מקבילים בגניזה",
     "Paste your text to discover parallels": "הדבק טקסט כדי לגלות מקבילות",
+    "Lab Mode": "מצב מעבדה",
 
     # Browse Card
     "Browse Manuscripts": "דפדוף בכתבי יד",
@@ -76,6 +110,8 @@ TRANSLATIONS = {
     "Maximum": "מקסימלי",
     "Fuzzy": "מטושטש",
     "Regex": "ביטוי רגולרי",
+    "Shelfmark": "מספר מדף",
+    "Title": "כותרת",
 
     # =========================================================================
     # Search UI
@@ -83,9 +119,11 @@ TRANSLATIONS = {
     "Enter search terms": "הזן מילות חיפוש",
     "Enter Hebrew text to search": "הזן טקסט עברי לחיפוש",
     "Search mode": "מצב חיפוש",
+    "Search Mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
     "Searching...": "מחפש...",
     "Advanced options": "אפשרויות מתקדמות",
+    "Advanced Options": "אפשרויות מתקדמות",
     "Word gap": "מרווח מילים",
     "Gap description": "מספר המילים המותר בין מילות החיפוש (0 = רק מילים צמודות)",
     "Start search": "התחל חיפוש",
@@ -97,6 +135,28 @@ TRANSLATIONS = {
     "Text copied": "הטקסט הועתק",
     "Copy text": "העתק טקסט",
     "Search functionality is currently unavailable": "פונקציית החיפוש אינה זמינה כרגע",
+    "Search Query": "מילות חיפוש",
+    "Mode": "מצב",
+    "Gap": "מרווח",
+    "Enable Lab Mode algorithms": "הפעל אלגוריתמים של מצב מעבדה",
+    "Deep Scan": "סריקה מעמיקה",
+    "Searches more candidates for comprehensive results": "מחפש יותר מועמדים לתוצאות מקיפות",
+    "Export Word": "ייצא Word",
+    "Export Excel": "ייצא Excel",
+    "Advanced Filters": "סינונים מתקדמים",
+    "Boolean Operators": "אופרטורים בוליאניים",
+    "Shortcuts": "קיצורי דרך",
+    "Engine not ready.": "המנוע אינו מוכן.",
+    "Starting...": "מתחיל...",
+    "Ready to search.": "מוכן לחיפוש.",
+    "Select a result to view": "בחר תוצאה לצפייה",
+    "Showing first 200 results. Refine search.": "מציג 200 תוצאות ראשונות. דייק את החיפוש.",
+    "Browse Full Manuscript": "עיין בכתב יד מלא",
+    "Done. Found {} results.": "סיים. נמצאו {} תוצאות.",
+    "Filter by lists": "סינון לפי רשימות",
+    "All results": "כל התוצאות",
+    "Favorites only": "מועדפים בלבד",
+    "Full text not available": "טקסט מלא לא זמין",
 
     # =========================================================================
     # Composition Search UI
@@ -114,8 +174,6 @@ TRANSLATIONS = {
     "Source": "מקור",
     "Manuscript text": "טקסט כתב היד",
     "Your text": "הטקסט שלך",
-
-    # Parallels Page - Enhanced UI
     "Discover parallel texts in the Genizah corpus": "גלה טקסטים מקבילים בגניזה",
     "Words": "מילים",
     "Characters": "תווים",
@@ -124,12 +182,12 @@ TRANSLATIONS = {
     "Matches containing text from this field will be filtered out": "התאמות המכילות טקסט משדה זה יסוננו",
     "Paste text to exclude from results...": "הדבק טקסט להסרה מהתוצאות...",
     "Words per search chunk": "מילים לכל קטע חיפוש",
+    "Words per search chunk (recommended: 4-7)": "מילים לכל קטע חיפוש (מומלץ: 4-7)",
     "Skip common phrases": "דלג על ביטויים נפוצים",
     "Overlap": "חפיפה",
     "Maximum (step=1)": "מקסימלית (צעד=1)",
     "Medium (step=2)": "בינונית (צעד=2)",
     "Minimal (step=4)": "מינימלית (צעד=4)",
-    "Find Parallels": "מצא מקבילות",
     "Searching for parallels...": "מחפש מקבילות...",
     "Cancel": "בטל",
     "Cancelling...": "מבטל...",
@@ -153,6 +211,8 @@ TRANSLATIONS = {
     "View manuscript": "צפה בכתב היד",
     "No context available": "אין הקשר זמין",
     "Please ensure the search index is loaded": "אנא ודא שאינדקס החיפוש נטען",
+    "Showing first 100 of": "מציג 100 ראשונות מתוך",
+    "Export coming soon": "ייצוא בקרוב",
 
     # =========================================================================
     # Browse UI
@@ -194,19 +254,20 @@ TRANSLATIONS = {
     "Manuscript": "כתב יד",
     "Full Text": "טקסט מלא",
     "Metadata": "מטא-דאטא",
-    "Shelfmark": "מספר מדף",
-    "Title": "כותרת",
     "Library": "ספרייה",
     "No text available": "אין טקסט זמין",
     "View": "צפה",
     "Cross-page match": "התאמה חוצת עמודים",
-
-    # =========================================================================
-    # Navigation
-    # =========================================================================
-    "Home": "בית",
-    "About": "אודות",
-    "Help": "עזרה",
+    "Showing match context only": "מציג הקשר התאמה בלבד",
+    "Click \"Browse Full Manuscript\" to view the complete page with navigation": "לחץ על \"עיין בכתב יד מלא\" לצפייה בעמוד המלא עם ניווט",
+    "View Complete Page": "צפה בעמוד המלא",
+    "Manuscript Match": "התאמה בכתב יד",
+    "Source Context": "הקשר מקור",
+    "View Result": "צפה בתוצאה",
+    "Quick View": "צפייה מהירה",
+    "Add to Favorites": "הוסף למועדפים",
+    "How does it work?": "איך זה עובד?",
+    "found": "נמצאו",
 
     # =========================================================================
     # Status Messages
@@ -218,17 +279,77 @@ TRANSLATIONS = {
     "Composition search not available": "חיפוש חיבורים אינו זמין",
     "No manuscript found": "לא נמצא כתב יד",
     "Enter at least 10 words": "הזן לפחות 10 מילים",
+    "Enter at least 3 words": "הזן לפחות 3 מילים",
+    "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
+    "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
+    "System ID": "מזהה מערכת",
+    "Search Index": "אינדקס חיפוש",
+    "Final forms": "צורות סופיות",
+    "Theme changed": "ערכת הנושא שונתה",
+    "Configure search and display preferences": "הגדר העדפות חיפוש ותצוגה",
+    "Default word gap": "מרווח מילים ברירת מחדל",
+    "Extended Variants": "וריאנטים מורחבים",
+    "Words per search chunk in composition search": "מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Minimum score for results": "ציון מינימלי לתוצאות",
+    "Number of words per search chunk in composition search": "מספר מילים לכל קטע חיפוש בחיפוש חיבורים",
+    "Exclude Words": "מילים להחרגה",
+    "Words to exclude (space separated)": "מילים להחרגה (מופרדות ברווח)",
+    "Results containing these words will be filtered out": "תוצאות המכילות מילים אלה יסוננו",
 
     # =========================================================================
-    # Settings
+    # Settings Page
     # =========================================================================
     "Display settings": "הגדרות תצוגה",
     "Search settings": "הגדרות חיפוש",
     "Default search mode": "מצב חיפוש ברירת מחדל",
-    "Results per page": "תוצאות לעמוד",
     "Theme": "ערכת נושא",
     "Light": "בהיר",
     "Dark": "כהה",
+    "Configure advanced search parameters and algorithms": "הגדר פרמטרים ואלגוריתמים מתקדמים לחיפוש",
+    "Lab Mode Parameters": "פרמטרים של מצב מעבדה",
+    "Min Should Match (%)": "אחוז התאמה מינימלי (%)",
+    "Percentage of query terms that must match": "אחוז מילות החיפוש שחייבות להתאים",
+    "Gap Penalty": "עונש מרווח",
+    "Penalty applied for gaps between matched terms": "עונש על פערים בין מילים שנמצאו",
+    "Candidate Limit": "מגבלת מועמדים",
+    "Maximum candidates to scan per query": "מספר מועמדים מקסימלי לסריקה בחיפוש",
+    "Display Limit": "מגבלת תצוגה",
+    "Maximum results to display": "מספר תוצאות מקסימלי להצגה",
+    "Default Chunk Size": "גודל קטע ברירת מחדל",
+    "Save Settings": "שמור הגדרות",
+    "Settings saved": "ההגדרות נשמרו",
+    "Variant Search": "חיפוש וריאנטים",
+    "Common Variant Pairs": "זוגות וריאנטים נפוצים",
+    "Common HTR confusion": "טעות HTR נפוצה",
+    "Similar shapes": "צורות דומות",
+    "Vertical strokes": "קווים אנכיים",
+    "Gutturals": "גרוניות",
+    "Index Management": "ניהול אינדקס",
+    "Index Status": "סטטוס אינדקס",
+    "Active": "פעיל",
+    "Not loaded": "לא נטען",
+    "Documents": "מסמכים",
+    "Not available": "לא זמין",
+    "Rebuild Lab Index": "בנה מחדש אינדקס מעבדה",
+    "Rebuilding Lab Index...": "בונה מחדש אינדקס מעבדה...",
+    "Lab Index rebuilt": "אינדקס המעבדה נבנה מחדש",
+
+    # =========================================================================
+    # Help Page
+    # =========================================================================
+    "Learn how to use Genizah Search effectively": "למד כיצד להשתמש ב-Genizah Search ביעילות",
+    "Quick Start": "התחלה מהירה",
+    "Getting Started": "להתחיל",
+    "Search Modes": "מצבי חיפוש",
+    "Keyboard Shortcuts": "קיצורי מקלדת",
+    "Focus search": "מיקוד חיפוש",
+    "Execute search": "הפעל חיפוש",
+    "Close dialogs": "סגור דיאלוגים",
+    "Navigate results": "נווט בתוצאות",
+    "Open selected result": "פתח תוצאה נבחרת",
+    "Parallels Search": "חיפוש מקבילות",
+    "Data Sources": "מקורות נתונים",
+    "Feedback": "משוב",
 
     # =========================================================================
     # Personal Lists
@@ -280,44 +401,6 @@ TRANSLATIONS = {
     "Item updated": "הפריט עודכן",
     "Remove": "הסר",
     "Item removed from list": "הפריט הוסר מהרשימה",
-    "Browse": "דפדוף",
-
-    # Search Page
-    "Search Query": "מילות חיפוש",
-    "Mode": "מצב",
-    "Gap": "מרווח",
-    "Enable Lab Mode algorithms": "הפעל אלגוריתמים של מצב מעבדה",
-    "Export Word": "ייצא Word",
-    "Export Excel": "ייצא Excel",
-    "Advanced Filters": "סינונים מתקדמים",
-    "Boolean Operators": "אופרטורים בוליאניים",
-    "Shortcuts": "קיצורי דרך",
-    "Engine not ready.": "המנוע אינו מוכן.",
-    "Starting...": "מתחיל...",
-    "Ready to search.": "מוכן לחיפוש.",
-    "Select a result to view": "בחר תוצאה לצפייה",
-    "Showing first 100 results. Refine search.": "מציג 100 תוצאות ראשונות. דייק את החיפוש.",
-    "Browse Full Manuscript": "עיין בכתב יד מלא",
-    "Dashboard": "לוח בקרה",
-
-    # Dashboard/Home
-    "Done. Found {} results.": "סיים. נמצאו {} תוצאות.",
-
-    # Viewer
-    "Showing match context only": "מציג הקשר התאמה בלבד",
-    "Click \"Browse Full Manuscript\" to view the complete page with navigation": "לחץ על \"עיין בכתב יד מלא\" לצפייה בעמוד המלא עם ניווט",
-    "View Complete Page": "צפה בעמוד המלא",
-
-    # Parallels
-    "Composition Search": "חיפוש חיבורים",
-    "Find parallel texts in the Genizah corpus": "מצא טקסטים מקבילים בגניזה",
-    "Manuscript Match": "התאמה בכתב יד",
-    "Source Context": "הקשר מקור",
-    "View Result": "צפה בתוצאה",
-    "Quick View": "צפייה מהירה",
-    "Add to Favorites": "הוסף למועדפים",
-    "How does it work?": "איך זה עובד?",
-    "found": "נמצאו",
 }
 
 
