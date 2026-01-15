@@ -6,20 +6,10 @@ import os
 import re
 import threading
 import json
-import requests
-import urllib3
 import csv
-import openpyxl
-from docx import Document
-from docx.enum.section import WD_ORIENTATION
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import RGBColor
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.cell.rich_text import TextBlock, CellRichText
-from openpyxl.cell.text import InlineFont
+from collections import defaultdict
 
+# PyQt6 imports first - needed for error display
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QListWidgetItem, QHeaderView, QComboBox, QCheckBox,
@@ -34,10 +24,39 @@ from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLo
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
 
+def _show_import_error_and_exit(err, title="Missing dependency"):
+    """Show import error in a message box and exit."""
+    app = QApplication.instance() or QApplication(sys.argv)
+    QMessageBox.critical(None, title, str(err))
+    sys.exit(1)
+
+# Third-party imports with error handling
+_IMPORT_ERROR = None
+try:
+    import requests
+    import urllib3
+    import openpyxl
+    from docx import Document
+    from docx.enum.section import WD_ORIENTATION
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import RGBColor
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.cell.rich_text import TextBlock, CellRichText
+    from openpyxl.cell.text import InlineFont
+except ImportError as import_error:
+    _IMPORT_ERROR = import_error
+
+if _IMPORT_ERROR:
+    if __name__ == "__main__":
+        _show_import_error_and_exit(_IMPORT_ERROR)
+    else:
+        raise _IMPORT_ERROR
+
 from version import APP_VERSION
 
-from collections import defaultdict
-
+# Core module imports with error handling
 _CORE_IMPORT_ERROR = None
 try:
     from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
@@ -45,15 +64,11 @@ except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
 if _CORE_IMPORT_ERROR:
-    def _show_core_import_error(err):
-        app = QApplication.instance() or QApplication(sys.argv)
-        QMessageBox.critical(None, "Missing dependency", str(err))
-
     if __name__ == "__main__":
-        _show_core_import_error(_CORE_IMPORT_ERROR)
-        sys.exit(1)
+        _show_import_error_and_exit(_CORE_IMPORT_ERROR)
     else:
         raise _CORE_IMPORT_ERROR
+
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
