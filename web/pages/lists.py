@@ -414,9 +414,18 @@ def create_lists_page():
         """Export list to Excel."""
         if state.lists_mgr:
             try:
-                # This would need to be implemented with proper file download
-                # For now, just notify
-                ui.notify(tr('Export functionality coming soon'), type='info')
+                list_data = state.lists_mgr.data.get('lists', {}).get(list_id)
+                if not list_data:
+                    ui.notify(tr('List not found'), type='warning')
+                    return
+
+                items = list_data.get('items', [])
+                if not items:
+                    ui.notify(tr('This list is empty'), type='warning')
+                    return
+
+                # Trigger download
+                ui.download(f'/api/export/list/{list_id}/excel')
             except Exception as e:
                 ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
 

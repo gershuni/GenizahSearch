@@ -148,9 +148,12 @@ def create_parallels_page(initial_text: str = None):
                         value='score'
                     ).props('outlined dense').classes('w-40')
 
-                    ui.button(icon='download', on_click=lambda: ui.notify(tr('Export coming soon'))).props(
+                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/parallels/word')).props(
                         'flat round dense'
-                    ).tooltip(tr('Export'))
+                    ).tooltip(tr('Export Word'))
+                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/parallels/excel')).props(
+                        'flat round dense'
+                    ).tooltip(tr('Export Excel'))
 
             results_container = ui.column().classes('w-full gap-4')
 
@@ -389,8 +392,8 @@ def create_parallels_page(initial_text: str = None):
                 list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
 
                 if list_options:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2')
+                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
 
                     def do_add():
                         if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):

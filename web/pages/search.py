@@ -544,8 +544,8 @@ def create_search_page(initial_query: str = None):
                     ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
                     ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
                 else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2')
+                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
 
                     def add_to_list():
                         if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):

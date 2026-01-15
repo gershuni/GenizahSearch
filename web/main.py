@@ -837,32 +837,44 @@ def show_help_dialog():
 def apply_theme_immediately():
     """Add script to apply theme before page renders to prevent flash."""
     current_theme = app.storage.user.get('theme', 'light')
-    # Use DOMContentLoaded and also immediate execution for fastest application
-    return f'''<script>
+    bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
+
+    # Use immediate inline script that runs before any rendering
+    return f'''<style>
+        /* Pre-set theme to prevent flash - must be first */
+        html, body {{
+            background-color: {bg_color} !important;
+        }}
+        html[data-theme="dark"], body[data-theme="dark"] {{
+            background-color: #0f172a !important;
+        }}
+        html[data-theme="parchment"], body[data-theme="parchment"] {{
+            background-color: #fffbf5 !important;
+        }}
+        html[data-theme="light"], body[data-theme="light"] {{
+            background-color: #f8fafc !important;
+        }}
+    </style>
+    <script>
         (function() {{
             var theme = "{current_theme}";
+            // Apply to html immediately (before DOM ready)
+            document.documentElement.setAttribute("data-theme", theme);
+            // Apply theme function
             var applyTheme = function() {{
+                document.documentElement.setAttribute("data-theme", theme);
                 if (document.body) {{
                     document.body.setAttribute("data-theme", theme);
-                    document.body.style.backgroundColor = theme === "dark" ? "#0f172a" : theme === "parchment" ? "#fffbf5" : "#f8fafc";
                 }}
             }};
-            // Try immediately
+            // Execute immediately
             applyTheme();
-            // Also on DOMContentLoaded as backup
+            // Backup for body element when it exists
             if (document.readyState === 'loading') {{
                 document.addEventListener('DOMContentLoaded', applyTheme);
             }}
-            // Also on load
-            window.addEventListener('load', applyTheme);
         }})();
-    </script>
-    <style>
-        /* Pre-set body background based on theme to prevent flash */
-        body[data-theme="dark"] {{ background-color: #0f172a !important; }}
-        body[data-theme="parchment"] {{ background-color: #fffbf5 !important; }}
-        body {{ background-color: #f8fafc; }}
-    </style>'''
+    </script>'''
 
 @ui.page('/')
 def dashboard_page():

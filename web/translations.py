@@ -237,12 +237,16 @@ TRANSLATIONS = {
     "Hide Full Manuscript": "הסתר כתב יד מלא",
     "Search for Parallels": "חפש מקבילות",
     "Full Manuscript View": "תצוגת כתב יד מלא",
+    "Back to Page View": "חזרה לתצוגת עמוד",
+    "Ktiv": "כתיב",
     "No more manuscripts": "אין עוד כתבי יד",
     "At first manuscript": "בכתב היד הראשון",
     "Could not load full manuscript": "לא ניתן לטעון את כתב היד המלא",
     "Manuscript Image": "תמונת כתב היד",
     "Toggle Image": "הצג/הסתר תמונה",
     "Reset": "אפס",
+    "Show Metadata": "הצג מטא-דאטא",
+    "Hide Metadata": "הסתר מטא-דאטא",
 
     # =========================================================================
     # Image Viewer Controls
@@ -280,6 +284,10 @@ TRANSLATIONS = {
     "Add to Favorites": "הוסף למועדפים",
     "How does it work?": "איך זה עובד?",
     "found": "נמצאו",
+    "Transcriptions provided by the MiDRASH Project": "תעתיקים מסופקים על ידי פרויקט MiDRASH",
+    "Citation:": "ציטוט:",
+    "View Dataset on Zenodo": "צפה במאגר הנתונים ב-Zenodo",
+    "Licensed under CC BY 4.0": "ברישיון CC BY 4.0",
 
     # =========================================================================
     # Status Messages

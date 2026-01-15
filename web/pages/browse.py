@@ -11,7 +11,7 @@ Features:
 """
 
 from nicegui import ui, app
-from typing import Optional
+from typing import Optional, List
 import re
 import html as html_module
 
@@ -312,8 +312,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     state = BrowseState()
     service = get_service()
 
+    # Track metadata panel visibility
+    show_metadata = {'value': False}
+
     # UI component references
     content_container = None
+    metadata_panel = None
     image_element = None
     viewer_container = None
     initial_fl_id_value = initial_fl_id
@@ -482,26 +486,139 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         else:
             return
 
-        # Get title (truncated to first 6 words like desktop app)
-        title = state.current_page.title if state.current_page else ''
-        if title:
-            words = title.split()[:6]
-            short_title = ' '.join(words)
-        else:
-            short_title = state.current_page.shelfmark if state.current_page else state.sys_id
+        if not text_content:
+            ui.notify(tr('No text available'), type='warning')
+            return
 
-        # Navigate to parallels page with text
-        # Store in session storage for parallels page to read
+        # Navigate to parallels page with text as URL parameter
         try:
-            from nicegui import app
-            app.storage.user['parallels_source'] = {
-                'text': text_content,
-                'title': short_title,
-                'sys_id': state.sys_id
-            }
-            ui.navigate.to('/parallels')
+            from urllib.parse import quote
+            encoded_text = quote(text_content)
+            ui.navigate.to(f'/parallels?text={encoded_text}')
         except Exception as e:
             print(f"Error navigating to parallels: {e}")
+            ui.notify(tr('Error'), type='negative')
+
+    def toggle_metadata():
+        """Toggle metadata panel visibility."""
+        show_metadata['value'] = not show_metadata['value']
+        update_content()
+
+    def export_browse_data():
+        """Prepare browse data for export."""
+        if not state.current_page:
+            ui.notify(tr('No text available'), type='warning')
+            return
+
+        # Prepare export data
+        export_data = {
+            'shelfmark': state.current_page.shelfmark,
+            'title': state.current_page.title,
+            'sys_id': state.sys_id,
+            'view_all': state.view_all
+        }
+
+        if state.view_all and state.full_manuscript:
+            # Export all pages
+            export_data['pages'] = [
+                {
+                    'p_num': p.p_num,
+                    'text': p.text,
+                    'full_header': p.full_header
+                }
+                for p in state.full_manuscript
+            ]
+        else:
+            # Export current page
+            export_data['p_num'] = state.current_page.p_num
+            export_data['text'] = state.current_page.text
+
+        # Store in session storage
+        app.storage.user['browse_export_data'] = export_data
+
+        # Trigger download
+        ui.download('/api/export/browse/word')
+
+    def add_manuscript_to_list():
+        """Add entire manuscript to a list."""
+        if not state.sys_id or not state.current_page:
+            return
+
+        from web.state import state as app_state
+        if not app_state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
+            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            ui.label(f"{tr('Item')}: {state.current_page.shelfmark}").style('color: var(--text-secondary);')
+
+            lists = app_state.lists_mgr.data.get('lists', {})
+            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+
+            if list_options:
+                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
+
+                def do_add():
+                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value):
+                        ui.notify(tr('Added to list'), type='positive')
+                        dialog.close()
+                    else:
+                        ui.notify(tr('Already in list'), type='info')
+
+                with ui.row().classes('w-full justify-end gap-2 mt-6'):
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
+            else:
+                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
+                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
+
+        dialog.open()
+
+    def add_page_to_list():
+        """Add specific page/image to a list."""
+        if not state.sys_id or not state.current_page:
+            return
+
+        from web.state import state as app_state
+        if not app_state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
+
+        # Use FL ID if available for specific page reference
+        fl_id = state.current_page.fl_id
+        note_text = f"Page {state.current_page.p_num}"
+        if fl_id:
+            note_text += f" (FL{fl_id})"
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
+            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            ui.label(f"{tr('Item')}: {state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}").style('color: var(--text-secondary);')
+
+            lists = app_state.lists_mgr.data.get('lists', {})
+            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+
+            if list_options:
+                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                note_input = ui.input(label=tr('Note (optional)'), value=note_text).classes('w-full mt-2').props('outlined')
+
+                def do_add():
+                    # Add with FL ID if available
+                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value, fl_id=fl_id):
+                        ui.notify(tr('Added to list'), type='positive')
+                        dialog.close()
+                    else:
+                        ui.notify(tr('Already in list'), type='info')
+
+                with ui.row().classes('w-full justify-end gap-2 mt-6'):
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
+            else:
+                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
+                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
+
+        dialog.open()
 
     def zoom_in():
         """Increase zoom level."""
@@ -585,10 +702,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Extract folio number from header if available."""
         if not full_header:
             return ''
-        # Try to extract folio info like "1r", "2v", etc.
-        match = re.search(r'(\d+[rv]?)', full_header)
+        # Try to extract folio info like "1r", "2v", etc. (but not long sys_ids)
+        match = re.search(r'\b(\d{1,3}[rv]?)\b', full_header)
         if match:
-            return match.group(1)
+            folio = match.group(1)
+            # Only return if it looks like a valid folio (not a long ID)
+            if len(folio) <= 4:
+                return folio
         return ''
 
     def update_content():
@@ -629,20 +749,26 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             page = state.current_page
 
             # === Compact Metadata Header ===
-            with ui.card().classes('w-full p-3 mb-3').style('background: linear-gradient(135deg, #15803d 0%, #166534 100%);'):
+            with ui.card().classes('w-full p-3 mb-3').style(
+                'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important; '
+                'border: none;'
+            ):
                 with ui.row().classes('w-full items-center justify-between'):
                     # Prev Shelfmark Button
                     ui.button(
                         icon='skip_previous',
                         on_click=lambda: navigate_shelfmark(-1)
-                    ).props('flat round color=white').classes('text-white').tooltip(tr('Previous manuscript'))
+                    ).props('flat round').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4'):
                         # Shelfmark
                         ui.label(page.shelfmark or f"ID: {page.sys_id}").classes(
-                            'text-xl font-bold text-white'
-                        ).style('text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
+                            'text-xl font-bold'
+                        ).style(
+                            'color: #ffffff !important; '
+                            'text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);'
+                        )
 
                         # Title (truncated with tooltip)
                         if page.title:
@@ -650,58 +776,143 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             if len(words) > 5:
                                 short_title = ' '.join(words[:5]) + '...'
                                 ui.label(short_title).classes(
-                                    'text-white rtl-text hebrew-text'
-                                ).style('opacity: 0.9;').tooltip(page.title)
+                                    'rtl-text hebrew-text'
+                                ).style(
+                                    'color: #ffffff !important; '
+                                    'opacity: 0.95;'
+                                ).tooltip(page.title)
                             else:
                                 ui.label(page.title).classes(
-                                    'text-white rtl-text hebrew-text'
-                                ).style('opacity: 0.9;')
+                                    'rtl-text hebrew-text'
+                                ).style(
+                                    'color: #ffffff !important; '
+                                    'opacity: 0.95;'
+                                )
 
                         # Ktiv link
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                         with ui.link(target=ktiv_url, new_tab=True).classes(
                             'flex items-center gap-1 px-2 py-1 rounded'
-                        ).style('text-decoration: none; color: white; background: rgba(255, 255, 255, 0.2);'):
-                            ui.icon('open_in_new', size='sm')
-                            ui.label('Ktiv').classes('text-sm font-semibold')
+                        ).style(
+                            'text-decoration: none; '
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.2);'
+                        ):
+                            ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                            ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+                        # Search for Parallels button
+                        ui.button(
+                            tr('Search for Parallels'),
+                            icon='search',
+                            on_click=search_for_parallels
+                        ).props('flat dense').style(
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.15);'
+                        ).tooltip(tr('Search for Parallels'))
+
+                        # Metadata button
+                        ui.button(
+                            tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata'),
+                            icon='info',
+                            on_click=toggle_metadata
+                        ).props('flat dense').style(
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.15);'
+                        ).tooltip(tr('Show Metadata'))
+
+                        # Add manuscript to list (star button)
+                        ui.button(
+                            icon='star_border',
+                            on_click=add_manuscript_to_list
+                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Favorites'))
 
                     # Next Shelfmark Button
                     ui.button(
                         icon='skip_next',
                         on_click=lambda: navigate_shelfmark(1)
-                    ).props('flat round color=white').classes('text-white').tooltip(tr('Next manuscript'))
+                    ).props('flat round').style('color: white !important;').tooltip(tr('Next manuscript'))
 
             # === Action Buttons Row ===
-            with ui.row().classes('w-full gap-2 mb-3 items-center justify-between'):
-                with ui.row().classes('gap-2'):
-                    # Show Full Manuscript button
-                    ui.button(
-                        tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
-                        icon='view_agenda' if not state.view_all else 'view_day',
-                        on_click=toggle_view_all
-                    ).props('outline color=green')
+            # Removed - buttons moved to appropriate headers
 
-                    # Search for Parallels button
-                    ui.button(
-                        tr('Search for Parallels'),
-                        icon='search',
-                        on_click=search_for_parallels
-                    ).props('outline color=green')
+            # === Metadata Panel (Expandable) ===
+            if show_metadata['value']:
+                with ui.card().classes('w-full p-4 mb-3').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
+                    with ui.row().classes('w-full items-center justify-between mb-3'):
+                        ui.label(tr('Metadata')).classes('text-lg font-bold').style('color: var(--text-primary);')
+                        ui.button(
+                            icon='close',
+                            on_click=toggle_metadata
+                        ).props('flat round dense size=sm').tooltip(tr('Close'))
 
-                # Page count info (only show in single page mode)
-                if not state.view_all:
-                    ui.label(f"{page.p_num} / {page.total_pages} {tr('pages')}").classes(
-                        'text-gray-600 text-sm'
-                    )
+                    # Metadata grid
+                    with ui.grid(columns=2).classes('w-full gap-4'):
+                        # Shelfmark
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(page.shelfmark or 'N/A').classes('text-sm').style('color: var(--text-primary);')
+
+                        # System ID
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('System ID')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(page.sys_id).classes('text-sm font-mono').style('color: var(--text-primary);')
+
+                        # Title
+                        if page.title:
+                            with ui.column().classes('gap-1 col-span-2'):
+                                ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(page.title).classes('text-sm rtl-text hebrew-text').style('color: var(--text-primary);')
+
+                        # Total Pages
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Pages')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(str(page.total_pages)).classes('text-sm').style('color: var(--text-primary);')
+
+                        # FL ID (if available)
+                        if page.fl_id:
+                            with ui.column().classes('gap-1'):
+                                ui.label('FL ID').classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(f'FL{page.fl_id}').classes('text-sm font-mono').style('color: var(--text-primary);')
+
+                    # External Links
+                    ui.separator().classes('my-3')
+                    ui.label(tr('External link')).classes('text-xs font-bold mb-2').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 flex-wrap'):
+                        # NLI Ktiv
+                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                        ui.link('NLI Ktiv', ktiv_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                        # Friedberg (if applicable)
+                        friedberg_url = f"https://fjms.genizah.org/{page.sys_id}"
+                        ui.link('Friedberg', friedberg_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                    # Export
+                    ui.separator().classes('my-3')
+                    ui.label(tr('Export')).classes('text-xs font-bold mb-2').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2'):
+                        ui.button(
+                            tr('Export Word'),
+                            icon='description',
+                            on_click=export_browse_data
+                        ).props('flat dense color=green')
 
             # === Main Content ===
             if state.view_all:
                 # Show all pages
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
                     # Header
-                    with ui.row().classes('w-full items-center p-4 border-b').style('background: var(--bg-tertiary);'):
-                        ui.label(tr('Full Manuscript View')).classes('font-bold text-lg')
-                        ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('text-gray-600 ml-2')
+                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style('background: var(--bg-tertiary);'):
+                        with ui.row().classes('items-center gap-2'):
+                            ui.label(tr('Full Manuscript View')).classes('font-bold text-lg')
+                            ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('text-gray-600 ml-2')
+
+                        # Back to single page button
+                        ui.button(
+                            tr('Back to Page View'),
+                            icon='arrow_back',
+                            on_click=toggle_view_all
+                        ).props('flat dense color=green')
 
                     # All pages in scroll area
                     with ui.scroll_area().classes('w-full').style('height: 70vh; padding: 24px;'):
@@ -771,10 +982,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Navigation and controls
                         with ui.row().classes('items-center gap-2'):
-                            # Previous page button
+                            # Previous page button (left arrow < for going backwards)
                             prev_disabled = page.current_idx <= 1
                             ui.button(
-                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                icon='chevron_left',
                                 on_click=lambda: load_page(direction=-1)
                             ).props(f'flat round dense {"disabled" if prev_disabled else ""}').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
@@ -802,14 +1013,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=handle_go_click
                             ).props('flat dense color=green')
 
-                            # Next page button
+                            # Next page button (right arrow > for going forwards)
                             next_disabled = page.current_idx >= page.total_pages
                             ui.button(
-                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                icon='chevron_right',
                                 on_click=lambda: load_page(direction=1)
                             ).props(f'flat round dense {"disabled" if next_disabled else ""}').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
+
+                            # Show Full Manuscript button
+                            ui.button(
+                                tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
+                                icon='view_agenda' if not state.view_all else 'view_day',
+                                on_click=toggle_view_all
+                            ).props('flat dense color=green')
+
+                            # Add page to list (star button)
+                            ui.button(
+                                icon='star_border',
+                                on_click=add_page_to_list
+                            ).props('flat round dense').classes('text-green-700').tooltip(tr('Add to Favorites'))
 
                             # Image toggle button (only if image available)
                             if has_image:

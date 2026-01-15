@@ -280,3 +280,24 @@ def create_page():
                     lambda: tr("Ready") if state.lab_engine and not state.lab_engine.lab_index_needs_rebuild else tr("Rebuild Needed"),
                     'science'
                 )
+
+        # === Credits Section ===
+        with ui.card().classes('w-full p-6 mt-4').style('background: var(--bg-tertiary);'):
+            with ui.row().classes('w-full items-start gap-4'):
+                ui.icon('info').classes('text-2xl').style('color: var(--primary-600);')
+                with ui.column().classes('flex-1 gap-2'):
+                    ui.label(tr('Data Source')).classes('text-lg font-bold').style('color: var(--text-primary);')
+                    ui.label(tr('Transcriptions provided by the MiDRASH Project')).classes('text-sm').style('color: var(--text-secondary);')
+
+                    # Citation
+                    with ui.row().classes('items-center gap-2 mt-2'):
+                        ui.label(tr('Citation:')).classes('text-xs font-semibold').style('color: var(--text-muted);')
+                        ui.label('Stoekl Ben Ezra, D., et al. (2025). MiDRASH Automatic Transcriptions.').classes('text-xs').style('color: var(--text-muted);')
+
+                    # Zenodo link
+                    with ui.row().classes('items-center gap-2 mt-1'):
+                        ui.icon('open_in_new').classes('text-sm').style('color: var(--primary-600);')
+                        ui.link('View Dataset on Zenodo', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-sm').style('color: var(--primary-600); text-decoration: none;')
+
+                    # License
+                    ui.label('Licensed under CC BY 4.0').classes('text-xs mt-2').style('color: var(--text-muted);')
