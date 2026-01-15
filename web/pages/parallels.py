@@ -345,31 +345,36 @@ def create_parallels_page(initial_text: str = None):
 
         with ui.card().classes('w-full p-0 overflow-hidden').style('border: 2px solid var(--border-light);'):
             # Header (always visible)
-            with ui.expansion().classes('w-full').props('default-opened') as expansion:
-                # Custom header slot
-                with expansion.add_slot('header'):
-                    with ui.row().classes('w-full items-center justify-between p-4'):
-                        with ui.column().classes('gap-1'):
-                            with ui.row().classes('items-center gap-3'):
-                                ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
-                                ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
-                                ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
+            with ui.row().classes('w-full items-center justify-between p-4').style('background: var(--bg-card);'):
+                with ui.column().classes('gap-1 flex-grow'):
+                    with ui.row().classes('items-center gap-3'):
+                        ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
+                        ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
+                        ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
 
-                            if title:
-                                title_short = (title[:100] + '...') if len(title) > 100 else title
-                                ui.label(title_short).classes('text-xs').style('color: var(--text-secondary); direction: rtl;')
+                    if title:
+                        title_short = (title[:100] + '...') if len(title) > 100 else title
+                        ui.label(title_short).classes('text-xs').style('color: var(--text-secondary); direction: rtl;')
 
-                        with ui.row().classes('items-center gap-3'):
-                            # Score badges
-                            max_color = 'green' if max_score > 70 else 'amber' if max_score > 40 else 'gray'
-                            ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
-                            avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
-                            ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
+                with ui.row().classes('items-center gap-3'):
+                    # Score badges
+                    max_color = 'green' if max_score > 70 else 'amber' if max_score > 40 else 'gray'
+                    ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
+                    avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
+                    ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
 
-                # Content (expandable)
-                with ui.column().classes('w-full p-4 gap-3').style('background: var(--bg-secondary);'):
-                    for idx, item in enumerate(items):
-                        create_parallel_item(idx, item, sys_id)
+            # First match (always visible)
+            with ui.column().classes('w-full p-4').style('background: var(--bg-secondary);'):
+                create_parallel_item(0, items[0], sys_id)
+
+            # Additional matches (expandable)
+            if len(items) > 1:
+                with ui.expansion(f"{tr('Show')} {len(items) - 1} {tr('more matches')}", icon='expand_more').classes('w-full').style(
+                    'background: var(--bg-secondary);'
+                ):
+                    with ui.column().classes('w-full p-4 gap-3').style('background: var(--bg-secondary);'):
+                        for idx, item in enumerate(items[1:], start=1):
+                            create_parallel_item(idx, item, sys_id)
 
     def create_parallel_item(idx, item, sys_id):
         """Create a single parallel match item within a manuscript group."""
@@ -397,7 +402,7 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('flex-1 gap-2'):
                     ui.label(tr('Source Context')).classes('text-xs font-bold uppercase').style('color: var(--success);')
                     with ui.element('div').classes('p-3 rounded-lg text-sm').style(
-                        'background: #ecfdf5; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #a7f3d0;'
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                     ):
                         ui.html(src_text_html, sanitize=False)
 
@@ -405,7 +410,7 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('flex-1 gap-2'):
                     ui.label(tr('Manuscript Match')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
                     with ui.element('div').classes('p-3 rounded-lg text-sm').style(
-                        'background: #fef3c7; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #fde68a;'
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
                     ):
                         ui.html(ms_text_html, sanitize=False)
 
@@ -481,7 +486,7 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('flex-1 gap-2'):
                     ui.label(tr('Source Context')).classes('text-xs font-bold uppercase').style('color: var(--success);')
                     with ui.element('div').classes('p-4 rounded-lg text-sm').style(
-                        'background: #ecfdf5; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #a7f3d0;'
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                     ):
                         ui.html(src_text_html, sanitize=False)
 
@@ -489,7 +494,7 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('flex-1 gap-2'):
                     ui.label(tr('Manuscript Match')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
                     with ui.element('div').classes('p-4 rounded-lg text-sm').style(
-                        'background: #fef3c7; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #fde68a;'
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
                     ):
                         ui.html(ms_text_html, sanitize=False)
 

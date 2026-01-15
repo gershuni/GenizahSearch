@@ -37,6 +37,7 @@ TRANSLATIONS = {
     "Done": "סיים",
     "Save": "שמור",
     "Create": "צור",
+    "Show": "הצג",
     "recommended": "מומלץ",
     "results": "תוצאות",
 
