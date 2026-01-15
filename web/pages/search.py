@@ -451,10 +451,24 @@ def create_search_page(initial_query: str = None):
             # Actions
             with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
                 if sys_id:
+                    # Extract FL ID from result to jump to correct page
+                    fl_id = None
+                    if 'raw_header' in result and state.meta_mgr:
+                        try:
+                            parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                            fl_id = parsed.get('fl_id')
+                        except Exception:
+                            pass
+
+                    # Build browse URL with FL ID if available
+                    browse_url = f'/browse?sys_id={sys_id}'
+                    if fl_id:
+                        browse_url += f'&fl_id={fl_id}'
+
                     ui.button(
                         tr('Browse Full Manuscript'),
                         icon='menu_book',
-                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                        on_click=lambda url=browse_url: ui.navigate.to(url)
                     ).classes('btn-primary')
 
                 # Find Parallels - pass the full text to parallels page
