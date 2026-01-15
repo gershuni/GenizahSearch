@@ -162,7 +162,8 @@ class GenizahService:
             try:
                 parsed = state.meta_mgr.parse_full_id_components(result.get('full_header', ''))
                 fl_id = parsed.get('fl_id')
-            except: pass
+            except Exception:
+                pass
 
             thumb_url = get_thumbnail_url(fl_id) if fl_id else None
             image_url = get_full_image_url(fl_id) if fl_id else None
@@ -199,7 +200,8 @@ class GenizahService:
             try:
                 parsed = state.meta_mgr.parse_full_id_components(result.get('full_header', ''))
                 fl_id_parsed = parsed.get('fl_id')
-            except: pass
+            except Exception:
+                pass
 
             thumb_url = get_thumbnail_url(fl_id_parsed) if fl_id_parsed else None
             image_url = get_full_image_url(fl_id_parsed) if fl_id_parsed else None

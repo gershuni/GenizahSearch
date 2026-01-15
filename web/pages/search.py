@@ -15,17 +15,20 @@ from web.state import state
 from web.translations import tr, is_rtl
 from urllib.parse import quote
 import re
+import html
 
 
 def format_snippet(text):
-    """Format snippet with highlighted matches."""
+    """Format snippet with highlighted matches, safely escaping HTML."""
     if not text:
         return ""
-    # Convert *word* to highlighted span
+    # First escape HTML to prevent XSS
+    escaped = html.escape(text)
+    # Convert *word* to highlighted span (after escaping, markers are safe)
     return re.sub(
         r'\*(.*?)\*',
         r'<span class="highlight-match">\1</span>',
-        text
+        escaped
     )
 
 
@@ -49,7 +52,7 @@ def create_search_page(initial_query: str = None):
     if 'search_results' in app.storage.user:
         try:
             search_state.results = app.storage.user.get('search_results', [])
-        except:
+        except Exception:
             pass
 
     # === UI Layout ===
@@ -294,7 +297,7 @@ def create_search_page(initial_query: str = None):
 
         try:
             app.storage.user['search_results'] = results
-        except:
+        except Exception:
             pass
 
         # Update count

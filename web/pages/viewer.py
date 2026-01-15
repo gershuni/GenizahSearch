@@ -2,6 +2,7 @@ from nicegui import ui
 from web.state import state
 from web.translations import tr
 import re
+import html
 
 # --- Helpers ---
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
@@ -15,29 +16,32 @@ def get_full_image_url(fl_id):
 def format_text_html(text, pattern=None):
     if not text: return ""
 
+    # First escape HTML to prevent XSS
+    escaped_text = html.escape(text)
+
     # 1. Apply Pattern Highlighting if Regex provided
     if pattern:
         try:
-            # We use a simple replacement for now.
-            # In a real app we might want to be more careful with overlapping HTML.
-            regex = re.compile(f"({pattern})", re.IGNORECASE)
+            # Escape the pattern for safe matching
+            escaped_pattern = html.escape(pattern)
+            regex = re.compile(f"({re.escape(escaped_pattern)})", re.IGNORECASE)
             # Replace with a marker first to avoid messing up HTML tags
-            text = regex.sub(r'___HL_START___\1___HL_END___', text)
-        except:
+            escaped_text = regex.sub(r'___HL_START___\1___HL_END___', escaped_text)
+        except Exception:
             pass
 
     # 2. Handle Asterisk Markers (*word*) from Indexer
-    # Replace *...* with highlight span
-    text = re.sub(r'\*(.*?)\*', r'___HL_START___\1___HL_END___', text)
+    # Replace *...* with highlight span (markers are already escaped)
+    escaped_text = re.sub(r'\*(.*?)\*', r'___HL_START___\1___HL_END___', escaped_text)
 
     # 3. HTML formatting
-    html = text.replace('\n', '<br>')
+    formatted = escaped_text.replace('\n', '<br>')
 
     # 4. Apply actual HTML for markers
-    html = html.replace('___HL_START___', '<span class="bg-yellow-200 text-black font-bold px-1 rounded">')
-    html = html.replace('___HL_END___', '</span>')
+    formatted = formatted.replace('___HL_START___', '<span class="bg-yellow-200 text-black font-bold px-1 rounded">')
+    formatted = formatted.replace('___HL_END___', '</span>')
 
-    return f"<div dir='rtl' class='text-lg leading-loose font-serif text-right'>{html}</div>"
+    return f"<div dir='rtl' class='text-lg leading-loose font-serif text-right'>{formatted}</div>"
 
 # --- Viewer Component ---
 

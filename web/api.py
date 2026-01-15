@@ -6,6 +6,15 @@ from genizah_core import Config
 import io
 import openpyxl
 from docx import Document
+from urllib.parse import urlparse
+
+# Allowed domains for image proxy (prevents SSRF attacks)
+ALLOWED_IMAGE_DOMAINS = [
+    'rosetta.nli.org.il',
+    'iiif.nli.org.il',
+    'www.nli.org.il',
+    'nli.org.il',
+]
 
 def init_api_routes():
     """Register API routes."""
@@ -19,12 +28,24 @@ def init_api_routes():
         if not url:
             return Response(status_code=400)
 
+        # Validate URL format and domain to prevent SSRF attacks
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return Response(content="Invalid URL scheme", status_code=400)
+            if not parsed.netloc:
+                return Response(content="Invalid URL", status_code=400)
+            if parsed.netloc not in ALLOWED_IMAGE_DOMAINS:
+                return Response(content="Domain not allowed", status_code=403)
+        except Exception:
+            return Response(content="Invalid URL format", status_code=400)
+
         headers = dict(Config.HTTP_HEADERS)
         headers["Referer"] = "https://www.nli.org.il/"
 
         try:
-            # Stream the request to avoid loading large images into memory
-            resp = requests.get(url, headers=headers, stream=True, timeout=10, verify=False)
+            # Fetch the image with timeout
+            resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 return Response(
                     content=resp.content,
@@ -32,6 +53,9 @@ def init_api_routes():
                 )
             else:
                 return Response(status_code=resp.status_code)
+        except requests.Timeout:
+            print(f"Proxy timeout for URL: {url}")
+            return Response(content="Request timeout", status_code=504)
         except Exception as e:
             print(f"Proxy error: {e}")
             return Response(status_code=500)

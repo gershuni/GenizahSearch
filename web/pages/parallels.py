@@ -13,6 +13,7 @@ from web.state import state
 from web.translations import tr
 from urllib.parse import unquote
 import re
+import html
 
 
 def create_parallels_page(initial_text: str = None):
@@ -33,7 +34,7 @@ def create_parallels_page(initial_text: str = None):
     if 'parallels_results' in app.storage.user:
         try:
             p_state.results = app.storage.user.get('parallels_results', [])
-        except:
+        except Exception:
             pass
 
     # Decode initial text from URL
@@ -41,7 +42,7 @@ def create_parallels_page(initial_text: str = None):
     if initial_text:
         try:
             decoded_text = unquote(initial_text)
-        except:
+        except Exception:
             decoded_text = initial_text
 
     # === UI Layout ===
@@ -240,7 +241,7 @@ def create_parallels_page(initial_text: str = None):
                 p_state.results = main_results
                 try:
                     app.storage.user['parallels_results'] = main_results
-                except:
+                except Exception:
                     pass
                 render_results(main_results)
             else:
@@ -294,7 +295,7 @@ def create_parallels_page(initial_text: str = None):
                     sys_id = sys_match.group(1)
                     shelf, _ = state.meta_mgr.get_meta_for_id(sys_id)
                     return shelf or 'Unknown'
-            except:
+            except Exception:
                 pass
         return 'Unknown'
 
@@ -315,14 +316,14 @@ def create_parallels_page(initial_text: str = None):
                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                     shelfmark = shelf_temp or shelfmark
                     title = title_temp or ''
-            except:
+            except Exception:
                 pass
 
-        # Format text snippets
-        ms_text = item.get('text', '').replace('\n', ' ')
+        # Format text snippets (escape HTML first to prevent XSS)
+        ms_text = html.escape(item.get('text', '').replace('\n', ' '))
         ms_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', ms_text)
 
-        src_text = item.get('source_ctx', '').replace('\n', ' ')
+        src_text = html.escape(item.get('source_ctx', '').replace('\n', ' '))
         src_text_html = re.sub(r'\*(.*?)\*', r'<span style="background: #bbf7d0; padding: 2px 4px; border-radius: 3px;">\1</span>', src_text)
 
         with ui.card().classes('w-full p-5 hover:shadow-lg transition-all'):

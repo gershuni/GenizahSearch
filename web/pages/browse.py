@@ -13,6 +13,7 @@ Features:
 from nicegui import ui, app
 from typing import Optional
 import re
+import html as html_module
 
 from web.services import get_service, BrowsePage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
@@ -458,19 +459,26 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ''')
 
     def highlight_text(text: str) -> str:
-        """Apply highlighting to search terms in text."""
-        if not state.highlight_terms or not text:
-            return text
+        """Apply highlighting to search terms in text, safely escaping HTML."""
+        if not text:
+            return ""
 
-        # Split highlight terms and escape for HTML
+        # First escape HTML to prevent XSS
+        escaped_text = html_module.escape(text)
+
+        if not state.highlight_terms:
+            return escaped_text
+
+        # Split highlight terms and apply highlighting
         terms = state.highlight_terms.split()
-        highlighted = text
+        highlighted = escaped_text
 
         for term in terms:
-            # Simple case-insensitive replacement
-            pattern = re.compile(re.escape(term), re.IGNORECASE)
+            # Escape the term for safe display, then do case-insensitive replacement
+            escaped_term = html_module.escape(term)
+            pattern = re.compile(re.escape(escaped_term), re.IGNORECASE)
             highlighted = pattern.sub(
-                f'<span class="highlight-term">{term}</span>',
+                f'<span class="highlight-term">{escaped_term}</span>',
                 highlighted
             )
 
@@ -584,7 +592,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.label(f"{tr('of')} {page.total_pages}").classes('text-gray-600')
 
                         def handle_go_click():
-                            go_to_page(int(page_input.value))
+                            try:
+                                page_num = int(page_input.value) if page_input.value is not None else 1
+                                go_to_page(page_num)
+                            except (ValueError, TypeError):
+                                go_to_page(1)
 
                         ui.button(
                             tr('Go'),

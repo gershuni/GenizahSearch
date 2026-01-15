@@ -193,13 +193,14 @@ def create_lists_page():
 
                             # Delete button (only for non-system lists)
                             if not is_system:
+                                def make_delete_handler(lid, lname):
+                                    def handler():
+                                        show_delete_list_dialog(lid, lname)
+                                    return handler
                                 ui.button(
                                     icon='delete',
-                                    on_click=lambda e, lid=list_id, lname=list_data.get('name'): (
-                                        e.stopPropagation(),
-                                        show_delete_list_dialog(lid, lname)
-                                    )
-                                ).props('flat round dense size=sm').classes('text-red-400').tooltip(tr('Delete list'))
+                                    on_click=make_delete_handler(list_id, list_data.get('name'))
+                                ).props('flat round dense size=sm stop-propagation').classes('text-red-400').tooltip(tr('Delete list'))
 
     # --- Select List ---
     def select_list(list_id: str):

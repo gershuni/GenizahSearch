@@ -130,7 +130,7 @@ def create_settings_page():
             if state.lab_engine:
                 try:
                     settings = state.lab_engine.settings
-                except:
+                except Exception:
                     pass
 
             if settings:
@@ -256,7 +256,7 @@ def create_settings_page():
                             with ui.row().classes('items-center gap-4'):
                                 ui.label(tr('Documents')).classes('font-medium w-40').style('color: var(--text-secondary);')
                                 ui.label(f'{doc_count:,}').style('color: var(--text-primary);')
-                    except:
+                    except Exception:
                         pass
 
             ui.separator().classes('my-4')
