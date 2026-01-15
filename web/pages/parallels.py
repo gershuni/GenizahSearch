@@ -363,20 +363,12 @@ def create_parallels_page(initial_text: str = None):
                     avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
                     ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
 
-            # First match (always visible)
-            with ui.column().classes('w-full p-4').style('background: var(--bg-secondary);'):
-                create_parallel_item(0, items[0], sys_id)
+            # All matches (initially visible in compact form)
+            with ui.column().classes('w-full').style('background: var(--bg-secondary);'):
+                for idx, item in enumerate(items):
+                    create_parallel_item(idx, item, sys_id, shelfmark)
 
-            # Additional matches (expandable)
-            if len(items) > 1:
-                with ui.expansion(f"{tr('Show')} {len(items) - 1} {tr('more matches')}", icon='expand_more').classes('w-full').style(
-                    'background: var(--bg-secondary);'
-                ):
-                    with ui.column().classes('w-full p-4 gap-3').style('background: var(--bg-secondary);'):
-                        for idx, item in enumerate(items[1:], start=1):
-                            create_parallel_item(idx, item, sys_id)
-
-    def create_parallel_item(idx, item, sys_id):
+    def create_parallel_item(idx, item, sys_id, shelfmark):
         """Create a single parallel match item within a manuscript group."""
         score = int(item.get('score', 0))
 
@@ -385,43 +377,144 @@ def create_parallels_page(initial_text: str = None):
         ms_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', ms_text)
 
         src_text = html.escape(item.get('source_ctx', '').replace('\n', ' '))
-        src_text_html = re.sub(r'\*(.*?)\*', r'<span style="background: #bbf7d0; padding: 2px 4px; border-radius: 3px;">\1</span>', src_text)
+        src_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', src_text)
 
-        with ui.card().classes('w-full p-4').style('background: var(--bg-card);'):
-            # Header
-            with ui.row().classes('w-full items-center justify-between mb-3'):
-                ui.label(f"#{idx + 1}").classes('text-xs px-2 py-1 rounded').style(
-                    'background: var(--bg-tertiary); color: var(--text-muted);'
-                )
-                score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'
-                ui.badge(f"{tr('Score')}: {score}", color=score_color).classes('text-sm')
+        # Create short preview (first 80 chars)
+        ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
+        preview = (ms_text_clean[:80] + '...') if len(ms_text_clean) > 80 else ms_text_clean
 
-            # Content comparison
-            with ui.row().classes('w-full gap-3'):
-                # Source context
-                with ui.column().classes('flex-1 gap-2'):
-                    ui.label(tr('Source Context')).classes('text-xs font-bold uppercase').style('color: var(--success);')
-                    with ui.element('div').classes('p-3 rounded-lg text-sm').style(
-                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
-                    ):
-                        ui.html(src_text_html, sanitize=False)
+        with ui.expansion().classes('w-full').style('border-bottom: 1px solid var(--border-light);'):
+            # Compact header (always visible)
+            with ui.expansion().add_slot('header'):
+                with ui.row().classes('w-full items-center gap-3 py-2 px-4'):
+                    ui.label(f"#{idx + 1}").classes('text-xs px-2 py-0.5 rounded').style(
+                        'background: var(--bg-tertiary); color: var(--text-muted);'
+                    )
+                    score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'
+                    ui.badge(f"{score}", color=score_color).classes('text-xs')
 
-                # Manuscript match
-                with ui.column().classes('flex-1 gap-2'):
-                    ui.label(tr('Manuscript Match')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
-                    with ui.element('div').classes('p-3 rounded-lg text-sm').style(
-                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
-                    ):
-                        ui.html(ms_text_html, sanitize=False)
+                    # Preview snippet
+                    ui.label(preview).classes('text-sm flex-grow').style(
+                        'color: var(--text-secondary); direction: rtl; text-align: right;'
+                    )
 
-            # Actions
-            with ui.row().classes('w-full justify-end gap-2 mt-2'):
-                if sys_id:
-                    ui.button(
-                        tr('View Complete Page'),
-                        icon='menu_book',
-                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
-                    ).props('flat dense size=sm color=primary')
+            # Expanded content (shown on click)
+            with ui.column().classes('w-full p-4 gap-4').style('background: var(--bg-card);'):
+                # Content comparison
+                with ui.row().classes('w-full gap-3'):
+                    # Source context
+                    with ui.column().classes('flex-1 gap-2'):
+                        ui.label(tr('Your Text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                        with ui.element('div').classes('p-3 rounded-lg text-sm').style(
+                            'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
+                        ):
+                            ui.html(src_text_html, sanitize=False)
+
+                    # Manuscript match
+                    with ui.column().classes('flex-1 gap-2'):
+                        ui.label(tr('Manuscript Text')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
+                        with ui.element('div').classes('p-3 rounded-lg text-sm').style(
+                            'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
+                        ):
+                            ui.html(ms_text_html, sanitize=False)
+
+                # Action buttons
+                with ui.row().classes('w-full gap-2 mt-2'):
+                    if sys_id:
+                        # Browse button
+                        ui.button(
+                            tr('Browse'),
+                            icon='menu_book',
+                            on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                        ).props('flat dense size=sm color=primary')
+
+                        # Metadata button
+                        def show_metadata_dialog(sid=sys_id, shelf=shelfmark):
+                            show_parallel_metadata(sid, shelf, item)
+
+                        ui.button(
+                            tr('Metadata'),
+                            icon='info',
+                            on_click=show_metadata_dialog
+                        ).props('flat dense size=sm')
+
+                        # Add to list button
+                        def show_add_dialog(sid=sys_id, shelf=shelfmark):
+                            show_add_to_list_dialog_parallel(sid, shelf)
+
+                        ui.button(
+                            tr('Add to List'),
+                            icon='star',
+                            on_click=show_add_dialog
+                        ).props('flat dense size=sm').style('color: var(--accent-amber);')
+
+    def show_parallel_metadata(sys_id, shelfmark, item):
+        """Show metadata dialog for a parallel result."""
+        # Get full metadata
+        title = ''
+        if sys_id and state.meta_mgr:
+            try:
+                _, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                title = title_temp or ''
+            except Exception:
+                pass
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96 max-w-2xl'):
+            ui.label(tr('Metadata')).classes('text-xl font-bold mb-4')
+
+            with ui.column().classes('w-full gap-3'):
+                metadata_items = [
+                    (tr('Shelfmark'), shelfmark),
+                    (tr('Title'), title or tr('Not available')),
+                    (tr('System ID'), sys_id or tr('Not available')),
+                    (tr('Score'), str(int(item.get('score', 0)))),
+                ]
+
+                for label, value in metadata_items:
+                    with ui.row().classes('w-full items-start gap-4'):
+                        ui.label(label + ':').classes('font-bold w-32').style('color: var(--text-secondary);')
+                        ui.label(value).classes('flex-grow').style('color: var(--text-primary); direction: rtl;')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-6'):
+                ui.button(tr('Close'), on_click=dialog.close).classes('btn-primary')
+
+        dialog.open()
+
+    def show_add_to_list_dialog_parallel(sys_id, shelfmark):
+        """Show add to list dialog for a parallel result."""
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
+            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
+
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
+                else:
+                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
+
+                    def add_to_list():
+                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
+                            ui.notify(tr('Added to list'), type='positive')
+                            dialog.close()
+                        else:
+                            ui.notify(tr('Already in list'), type='info')
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
+            else:
+                ui.label(tr('Lists manager not available')).style('color: var(--error);')
+
+        dialog.open()
 
     def extract_shelfmark(item):
         raw_header = item.get('raw_header', '')
