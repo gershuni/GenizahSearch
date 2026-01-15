@@ -163,12 +163,47 @@ def create_search_page(initial_query: str = None):
                 with results_header:
                     results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
                     with ui.row().classes('gap-2'):
+                        # Filter toggle button
+                        filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
+                            'flat round dense size=sm'
+                        ).tooltip(tr('Toggle Filters'))
+
                         ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
                             'flat round dense size=sm'
                         ).tooltip(tr('Export Word'))
                         ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
                             'flat round dense size=sm'
                         ).tooltip(tr('Export Excel'))
+
+                # Filters Panel (initially hidden)
+                filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
+                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); display: none;'
+                )
+                with filters_panel:
+                    with ui.row().classes('w-full gap-2 items-center'):
+                        ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
+                        ui.label(tr('Filter Results')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+
+                    with ui.grid(columns=3).classes('w-full gap-2'):
+                        filter_shelfmark = ui.input(
+                            placeholder=tr('Filter by shelfmark')
+                        ).classes('w-full').props('outlined dense clearable')
+
+                        filter_title = ui.input(
+                            placeholder=tr('Filter by title')
+                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+
+                        filter_snippet = ui.input(
+                            placeholder=tr('Filter by text')
+                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+
+                    with ui.row().classes('gap-2'):
+                        ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
+                            'flat dense color=green size=sm'
+                        )
+                        ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
+                            'flat dense size=sm'
+                        )
 
                 results_container = ui.scroll_area().classes('w-full flex-grow').style(
                     'background: var(--bg-secondary);'
@@ -189,6 +224,57 @@ def create_search_page(initial_query: str = None):
         current = query_input.value or ""
         if not current.startswith(prefix):
             query_input.set_value(prefix + current)
+
+    # === Filtering Functions ===
+
+    def toggle_filters():
+        """Toggle visibility of filters panel."""
+        current_display = filters_panel.style or ''
+        if 'display: none' in current_display:
+            filters_panel.style('background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);')
+        else:
+            filters_panel.style('background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); display: none;')
+
+    def apply_filters():
+        """Apply filters to results."""
+        if not search_state.results:
+            return
+
+        filtered = []
+        shelfmark_filter = (filter_shelfmark.value or '').lower().strip()
+        title_filter = (filter_title.value or '').lower().strip()
+        snippet_filter = (filter_snippet.value or '').lower().strip()
+
+        for res in search_state.results:
+            display = res.get('display', {})
+            shelfmark = (display.get('shelfmark', '') or '').lower()
+            title = (display.get('title', '') or '').lower()
+            snippet = (res.get('snippet', '') or '').lower()
+
+            # All filters must match
+            if shelfmark_filter and shelfmark_filter not in shelfmark:
+                continue
+            if title_filter and title_filter not in title:
+                continue
+            if snippet_filter and snippet_filter not in snippet:
+                continue
+
+            filtered.append(res)
+
+        render_results(filtered)
+        results_count.text = f"{len(filtered)} / {len(search_state.results)} {tr('Results')}"
+        ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+
+    def clear_filters():
+        """Clear all filters and show all results."""
+        filter_shelfmark.value = ''
+        filter_title.value = ''
+        filter_snippet.value = ''
+
+        if search_state.results:
+            render_results(search_state.results)
+            results_count.text = f"{len(search_state.results)} {tr('Results')}"
+            ui.notify(tr('Filters cleared'), type='info')
 
     def update_progress_ui():
         if search_state.is_running:

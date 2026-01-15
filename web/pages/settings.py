@@ -201,30 +201,119 @@ def create_settings_page():
                     ui.icon('science').classes('text-5xl').style('color: var(--text-muted);')
                     ui.label(tr('Lab Engine not initialized')).classes('mt-4').style('color: var(--text-muted);')
 
-        # === Variant Search Info ===
+        # === Variant Search Configuration ===
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
-                ui.icon('spellcheck').classes('text-3xl').style('color: var(--text-muted);')
-                ui.label(tr('Variant Search')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                ui.icon('spellcheck').classes('text-3xl').style('color: var(--primary-600);')
+                ui.label(tr('Variant Search Configuration')).classes('text-xl font-bold').style('color: var(--text-primary);')
 
-            ui.label(tr('Common Variant Pairs')).classes('font-medium mb-4').style('color: var(--text-secondary);')
+            # Get lab settings
+            lab_settings = None
+            if state.lab_engine:
+                try:
+                    lab_settings = state.lab_engine.settings
+                except Exception:
+                    pass
 
-            variant_pairs = [
-                ('ד ↔ ר', tr('Common HTR confusion')),
-                ('ה ↔ ח ↔ ת', tr('Similar shapes')),
-                ('ו ↔ י ↔ ן', tr('Vertical strokes')),
-                ('כ ↔ ב', tr('Similar shapes')),
-                ('א ↔ ע ↔ ה', tr('Gutturals')),
-                ('מ ↔ ם', tr('Final forms')),
-            ]
+            if lab_settings:
+                # Custom Variants Editor
+                ui.label(tr('Custom Variant Pairs')).classes('font-medium mb-2').style('color: var(--text-secondary);')
+                ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-4').style('color: var(--text-muted);')
 
-            with ui.row().classes('gap-3 flex-wrap'):
-                for pair, desc in variant_pairs:
-                    with ui.element('div').classes('px-4 py-3 rounded-lg').style(
-                        'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
-                    ):
-                        ui.label(pair).classes('font-mono text-lg font-bold').style('color: var(--primary-700);')
-                        ui.label(desc).classes('text-xs mt-1').style('color: var(--text-muted);')
+                # Get existing custom variants
+                custom_variants = getattr(lab_settings, 'custom_variants', {})
+                existing_text = '\n'.join(custom_variants.keys()) if custom_variants else ''
+
+                custom_textarea = ui.textarea(
+                    label=tr('Custom Variants'),
+                    placeholder='ק=א\nכו=מ\nב=פ',
+                    value=existing_text
+                ).classes('w-full').props('outlined rows=6')
+
+                # Variant Search Limits
+                ui.separator().classes('my-6')
+                ui.label(tr('Variant Search Limits')).classes('font-medium mb-4').style('color: var(--text-secondary);')
+
+                with ui.grid(columns=2).classes('w-full gap-6'):
+                    # Min word length
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Limit Short Words (≤N chars)')).classes('font-medium').style('color: var(--text-secondary);')
+                        min_len_val = getattr(lab_settings, 'variant_min_word_len', 2)
+                        variant_min_len = ui.number(
+                            value=min_len_val, min=1, max=5
+                        ).props('outlined dense').classes('w-full')
+                        ui.label(tr('Words this length or shorter get only 1 character change')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Max changes
+                    with ui.column().classes('gap-2'):
+                        ui.label(tr('Max Changes per Word')).classes('font-medium').style('color: var(--text-secondary);')
+                        max_changes_val = getattr(lab_settings, 'variant_max_changes', 2)
+                        variant_max_changes = ui.number(
+                            value=max_changes_val, min=1, max=3
+                        ).props('outlined dense').classes('w-full')
+                        ui.label(tr('Maximum character substitutions per word')).classes('text-xs').style('color: var(--text-muted);')
+
+                # Aggressive mode toggle
+                aggressive_val = getattr(lab_settings, 'variant_aggressive', False)
+                variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'), value=aggressive_val).classes('mt-4')
+                ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs ml-12').style('color: var(--text-muted);')
+
+                # Save Button
+                def save_variant_settings():
+                    try:
+                        # Parse custom variants
+                        text = custom_textarea.value.strip()
+                        custom = {}
+                        if text:
+                            for line in text.split('\n'):
+                                line = line.strip()
+                                if '=' in line:
+                                    custom[line] = True
+
+                        lab_settings.custom_variants = custom
+                        lab_settings.variant_min_word_len = int(variant_min_len.value)
+                        lab_settings.variant_max_changes = int(variant_max_changes.value)
+                        lab_settings.variant_aggressive = variant_aggressive.value
+
+                        # Update VariantManager if available
+                        if state.var_mgr:
+                            state.var_mgr.load_custom_variant_pairs(custom.keys() if custom else [])
+
+                        if hasattr(lab_settings, 'save'):
+                            lab_settings.save()
+
+                        ui.notify(tr('Variant settings saved'), type='positive')
+                    except Exception as e:
+                        print(f"Variant settings save error: {e}")
+                        ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
+
+                ui.button(tr('Save Variant Settings'), icon='save', on_click=save_variant_settings).classes('btn-primary mt-6')
+
+                # Common Variants Info
+                ui.separator().classes('my-6')
+                ui.label(tr('Common Built-in Variant Pairs')).classes('font-medium mb-4').style('color: var(--text-secondary);')
+
+                variant_pairs = [
+                    ('ד ↔ ר', tr('Common HTR confusion')),
+                    ('ה ↔ ח ↔ ת', tr('Similar shapes')),
+                    ('ו ↔ י ↔ ן', tr('Vertical strokes')),
+                    ('כ ↔ ב', tr('Similar shapes')),
+                    ('א ↔ ע ↔ ה', tr('Gutturals')),
+                    ('מ ↔ ם', tr('Final forms')),
+                ]
+
+                with ui.row().classes('gap-3 flex-wrap'):
+                    for pair, desc in variant_pairs:
+                        with ui.element('div').classes('px-4 py-3 rounded-lg').style(
+                            'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
+                        ):
+                            ui.label(pair).classes('font-mono text-lg font-bold').style('color: var(--primary-700);')
+                            ui.label(desc).classes('text-xs mt-1').style('color: var(--text-muted);')
+
+            else:
+                with ui.column().classes('items-center py-8'):
+                    ui.icon('spellcheck').classes('text-5xl').style('color: var(--text-muted);')
+                    ui.label(tr('Lab Engine not initialized')).classes('mt-4').style('color: var(--text-muted);')
 
         # === System Status ===
         with ui.card().classes('w-full p-6'):

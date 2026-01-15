@@ -268,9 +268,6 @@ def create_parallels_page(initial_text: str = None):
                 show_empty_state()
             return
 
-        # Update header
-        results_header.text = f"{len(results)} {tr('parallels found')}"
-
         # Sort if needed
         sort_by = sort_select.value
         if sort_by == 'score':
@@ -280,14 +277,146 @@ def create_parallels_page(initial_text: str = None):
         else:
             sorted_results = results
 
-        with results_container:
-            for idx, item in enumerate(sorted_results[:100]):
-                create_result_card(idx, item)
+        # Group results by manuscript
+        grouped = {}
+        for item in sorted_results:
+            raw_header = item.get('raw_header', '')
+            sys_id = None
+            shelfmark = 'Unknown'
 
-            if len(results) > 100:
-                ui.label(f"{tr('Showing first 100 of')} {len(results)} {tr('results')}").classes(
-                    'text-sm text-center w-full mt-4'
-                ).style('color: var(--text-muted);')
+            if raw_header and state.meta_mgr:
+                try:
+                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    if sys_match:
+                        sys_id = sys_match.group(1)
+                        shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
+                        shelfmark = shelf_temp or shelfmark
+                except Exception:
+                    pass
+
+            # Use sys_id as key, fallback to shelfmark
+            key = sys_id if sys_id else shelfmark
+
+            if key not in grouped:
+                grouped[key] = {
+                    'sys_id': sys_id,
+                    'shelfmark': shelfmark,
+                    'items': [],
+                    'max_score': 0,
+                    'avg_score': 0
+                }
+
+            grouped[key]['items'].append(item)
+            grouped[key]['max_score'] = max(grouped[key]['max_score'], item.get('score', 0))
+
+        # Calculate average scores
+        for key in grouped:
+            scores = [item.get('score', 0) for item in grouped[key]['items']]
+            grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
+
+        # Sort groups by max score
+        sorted_groups = sorted(grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+
+        # Update header with manuscript count
+        total_results = len(results)
+        total_manuscripts = len(sorted_groups)
+        results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
+
+        with results_container:
+            for group_key, group_data in sorted_groups:
+                create_manuscript_group(group_data)
+
+    def create_manuscript_group(group_data):
+        """Create an expandable manuscript group with its parallels."""
+        shelfmark = group_data['shelfmark']
+        sys_id = group_data['sys_id']
+        items = group_data['items']
+        max_score = group_data['max_score']
+        avg_score = group_data['avg_score']
+
+        # Get title
+        title = ''
+        if sys_id and state.meta_mgr:
+            try:
+                _, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                title = title_temp or ''
+            except Exception:
+                pass
+
+        with ui.card().classes('w-full p-0 overflow-hidden').style('border: 2px solid var(--border-light);'):
+            # Header (always visible)
+            with ui.expansion().classes('w-full').props('default-opened') as expansion:
+                # Custom header slot
+                with expansion.add_slot('header'):
+                    with ui.row().classes('w-full items-center justify-between p-4'):
+                        with ui.column().classes('gap-1'):
+                            with ui.row().classes('items-center gap-3'):
+                                ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
+                                ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
+                                ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
+
+                            if title:
+                                title_short = (title[:100] + '...') if len(title) > 100 else title
+                                ui.label(title_short).classes('text-xs').style('color: var(--text-secondary); direction: rtl;')
+
+                        with ui.row().classes('items-center gap-3'):
+                            # Score badges
+                            max_color = 'green' if max_score > 70 else 'amber' if max_score > 40 else 'gray'
+                            ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
+                            avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
+                            ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
+
+                # Content (expandable)
+                with ui.column().classes('w-full p-4 gap-3').style('background: var(--bg-secondary);'):
+                    for idx, item in enumerate(items):
+                        create_parallel_item(idx, item, sys_id)
+
+    def create_parallel_item(idx, item, sys_id):
+        """Create a single parallel match item within a manuscript group."""
+        score = int(item.get('score', 0))
+
+        # Format text snippets
+        ms_text = html.escape(item.get('text', '').replace('\n', ' '))
+        ms_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', ms_text)
+
+        src_text = html.escape(item.get('source_ctx', '').replace('\n', ' '))
+        src_text_html = re.sub(r'\*(.*?)\*', r'<span style="background: #bbf7d0; padding: 2px 4px; border-radius: 3px;">\1</span>', src_text)
+
+        with ui.card().classes('w-full p-4').style('background: var(--bg-card);'):
+            # Header
+            with ui.row().classes('w-full items-center justify-between mb-3'):
+                ui.label(f"#{idx + 1}").classes('text-xs px-2 py-1 rounded').style(
+                    'background: var(--bg-tertiary); color: var(--text-muted);'
+                )
+                score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'
+                ui.badge(f"{tr('Score')}: {score}", color=score_color).classes('text-sm')
+
+            # Content comparison
+            with ui.row().classes('w-full gap-3'):
+                # Source context
+                with ui.column().classes('flex-1 gap-2'):
+                    ui.label(tr('Source Context')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                    with ui.element('div').classes('p-3 rounded-lg text-sm').style(
+                        'background: #ecfdf5; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #a7f3d0;'
+                    ):
+                        ui.html(src_text_html, sanitize=False)
+
+                # Manuscript match
+                with ui.column().classes('flex-1 gap-2'):
+                    ui.label(tr('Manuscript Match')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
+                    with ui.element('div').classes('p-3 rounded-lg text-sm').style(
+                        'background: #fef3c7; direction: rtl; text-align: right; line-height: 1.8; border: 1px solid #fde68a;'
+                    ):
+                        ui.html(ms_text_html, sanitize=False)
+
+            # Actions
+            with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                if sys_id:
+                    ui.button(
+                        tr('View Complete Page'),
+                        icon='menu_book',
+                        on_click=lambda: ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    ).props('flat dense size=sm color=primary')
 
     def extract_shelfmark(item):
         raw_header = item.get('raw_header', '')
