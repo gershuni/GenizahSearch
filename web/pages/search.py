@@ -401,10 +401,12 @@ def create_search_page(initial_query: str = None):
             compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
 
         final_text = '\n'.join(compiled_text)
+        # Escape backticks for JavaScript
+        escaped_text = final_text.replace('`', '\\`')
 
         # Copy to clipboard
         ui.run_javascript(f'''
-            navigator.clipboard.writeText(`{final_text.replace("`", "\\`")}`).then(() => {{
+            navigator.clipboard.writeText(`{escaped_text}`).then(() => {{
                 console.log('Bulk text copied to clipboard');
             }});
         ''')
@@ -747,8 +749,10 @@ def create_search_page(initial_query: str = None):
     def copy_result_text(text):
         """Copy text to clipboard."""
         if text:
+            # Escape backticks for JavaScript
+            escaped_text = text.replace('`', '\\`')
             ui.run_javascript(f'''
-                navigator.clipboard.writeText(`{text.replace("`", "\\`")}`).then(() => {{
+                navigator.clipboard.writeText(`{escaped_text}`).then(() => {{
                     console.log('Text copied to clipboard');
                 }});
             ''')
