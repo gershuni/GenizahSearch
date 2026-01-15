@@ -27,7 +27,12 @@ from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontM
 def _show_import_error_and_exit(err, title="Missing dependency"):
     """Show import error in a message box and exit."""
     app = QApplication.instance() or QApplication(sys.argv)
-    QMessageBox.critical(None, title, str(err))
+    msg = QMessageBox()
+    msg.setIcon(QMessageBox.Icon.Critical)
+    msg.setWindowTitle(title)
+    msg.setText(f"Failed to start application:\n\n{err}\n\nPlease install missing dependencies.")
+    msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+    msg.exec()
     sys.exit(1)
 
 # Third-party imports with error handling
@@ -69,10 +74,21 @@ if _CORE_IMPORT_ERROR:
     else:
         raise _CORE_IMPORT_ERROR
 
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
-from filter_text_dialog import FilterTextDialog
-from column_filter_dialog import ColumnFilterDialog
-from list_filter_dialog import ListFilterDialog
+# Local module imports with error handling
+_LOCAL_IMPORT_ERROR = None
+try:
+    from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
+    from filter_text_dialog import FilterTextDialog
+    from column_filter_dialog import ColumnFilterDialog
+    from list_filter_dialog import ListFilterDialog
+except ImportError as import_error:
+    _LOCAL_IMPORT_ERROR = import_error
+
+if _LOCAL_IMPORT_ERROR:
+    if __name__ == "__main__":
+        _show_import_error_and_exit(_LOCAL_IMPORT_ERROR)
+    else:
+        raise _LOCAL_IMPORT_ERROR
 
 logger = get_logger(__name__)
 
