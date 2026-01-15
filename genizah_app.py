@@ -9,20 +9,53 @@ import json
 import csv
 from collections import defaultdict
 
-# PyQt6 imports first - needed for error display
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
-                             QTableWidgetItem, QListWidgetItem, QHeaderView, QComboBox, QCheckBox,
-                             QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
-                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
-                             QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
-                             QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
-                             QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
-                             QCompleter, QAbstractItemView)
-from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
-from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
+def _show_error_fallback(err, title="Error"):
+    """Show error using fallback methods when PyQt6 is not available."""
+    error_msg = f"{title}: {err}"
+    print("\n" + "="*60)
+    print(error_msg)
+    print("="*60)
+    # Try tkinter as fallback
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(title, f"{err}\n\nPlease install missing dependencies.")
+        root.destroy()
+    except:
+        # Last resort - just pause console so user can read the error
+        print("\nPress Enter to exit...")
+        try:
+            input()
+        except:
+            pass
+    sys.exit(1)
+
+# PyQt6 imports - needed for GUI
+_PYQT_ERROR = None
+try:
+    from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                                 QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
+                                 QTableWidgetItem, QListWidgetItem, QHeaderView, QComboBox, QCheckBox,
+                                 QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
+                                 QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
+                                 QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
+                                 QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
+                                 QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
+                                 QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
+                                 QCompleter, QAbstractItemView)
+    from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
+    from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
+                             QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
+except ImportError as e:
+    _PYQT_ERROR = e
+
+if _PYQT_ERROR:
+    if __name__ == "__main__":
+        _show_error_fallback(_PYQT_ERROR, "PyQt6 not installed")
+    else:
+        raise _PYQT_ERROR
 
 def _show_import_error_and_exit(err, title="Missing dependency"):
     """Show import error in a message box and exit."""
