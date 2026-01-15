@@ -374,6 +374,12 @@ def create_search_page(initial_query: str = None):
         snippet = result.get('snippet', '')
         full_text = result.get('full_text', '')
 
+        # Initialize page index from display.img if not already set
+        try:
+            search_state.current_page_idx = int(display.get('img', '1'))
+        except (ValueError, TypeError):
+            search_state.current_page_idx = 1
+
         with viewer_container:
             # Header
             with ui.column().classes('w-full gap-2 mb-4'):
@@ -411,9 +417,10 @@ def create_search_page(initial_query: str = None):
                         with ui.row().classes('w-full items-center justify-center gap-4 mb-4 p-2 rounded').style(
                             'background: var(--bg-tertiary);'
                         ):
-                            ui.button(icon='chevron_right', on_click=lambda: browse_prev()).props('flat round').tooltip(tr('Previous'))
-                            ui.label(f"{tr('Page')} {display.get('img', '1')}").style('color: var(--text-secondary);')
-                            ui.button(icon='chevron_left', on_click=lambda: browse_next()).props('flat round').tooltip(tr('Next'))
+                            # RTL: chevron_right = previous, chevron_left = next
+                            ui.button(icon='chevron_right', on_click=browse_prev).props('flat round').tooltip(tr('Previous'))
+                            page_label = ui.label(f"{tr('Page')} {search_state.current_page_idx}").style('color: var(--text-secondary);')
+                            ui.button(icon='chevron_left', on_click=browse_next).props('flat round').tooltip(tr('Next'))
 
                     if full_text:
                         with ui.scroll_area().classes('w-full h-64'):
@@ -455,21 +462,49 @@ def create_search_page(initial_query: str = None):
                     on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
                 ).props('outline')
 
-    def browse_prev():
-        """Navigate to previous page in current manuscript."""
+    async def browse_prev():
+        """Navigate to previous page in current manuscript (within viewer)."""
         if search_state.selected_result:
             display = search_state.selected_result.get('display', {})
             sys_id = display.get('id')
-            if sys_id:
-                ui.navigate.to(f'/browse?sys_id={sys_id}')
+            current_page = search_state.current_page_idx
 
-    def browse_next():
-        """Navigate to next page in current manuscript."""
+            if sys_id and current_page > 1:
+                from web.services import get_service
+                service = get_service()
+
+                def load_prev():
+                    return service.get_browse_page(sys_id, p_num=current_page, direction=-1)
+
+                page_data = await run.io_bound(load_prev)
+                if page_data:
+                    search_state.current_page_idx = page_data.p_num
+                    # Update the selected result with new page info
+                    search_state.selected_result['full_text'] = page_data.text or ''
+                    search_state.selected_result['display']['img'] = str(page_data.p_num)
+                    load_in_viewer(search_state.selected_result)
+
+    async def browse_next():
+        """Navigate to next page in current manuscript (within viewer)."""
         if search_state.selected_result:
             display = search_state.selected_result.get('display', {})
             sys_id = display.get('id')
+            current_page = search_state.current_page_idx
+
             if sys_id:
-                ui.navigate.to(f'/browse?sys_id={sys_id}')
+                from web.services import get_service
+                service = get_service()
+
+                def load_next():
+                    return service.get_browse_page(sys_id, p_num=current_page, direction=1)
+
+                page_data = await run.io_bound(load_next)
+                if page_data:
+                    search_state.current_page_idx = page_data.p_num
+                    # Update the selected result with new page info
+                    search_state.selected_result['full_text'] = page_data.text or ''
+                    search_state.selected_result['display']['img'] = str(page_data.p_num)
+                    load_in_viewer(search_state.selected_result)
 
     def show_add_to_list_dialog(result):
         display = result.get('display', {})

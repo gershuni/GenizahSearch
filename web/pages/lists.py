@@ -268,6 +268,9 @@ def create_lists_page():
             # Items Grid/List
             ui.label(f"{len(items_data)} {tr('items')}").classes('text-sm text-gray-500 mb-4')
 
+            # Track expanded items
+            expanded_items = {}
+
             with ui.column().classes('w-full gap-3'):
                 for item_id, item_data in items_data:
                     sys_id = item_data.get('sys_id', item_id)
@@ -275,6 +278,7 @@ def create_lists_page():
                     title = item_data.get('title', '')
                     note = item_data.get('note', '')
                     tags = item_data.get('tags', [])
+                    fl_id = item_data.get('fl_id')
 
                     # Enrich metadata if needed
                     if not shelfmark or shelfmark == 'Unknown':
@@ -292,7 +296,7 @@ def create_lists_page():
 
                                 # Title
                                 if title:
-                                    ui.label(title).classes('text-sm text-gray-600')
+                                    ui.label(title).classes('text-sm text-gray-600').style('direction: rtl;')
 
                                 # Note
                                 if note:
@@ -325,6 +329,78 @@ def create_lists_page():
                                         icon='delete',
                                         on_click=lambda iid=item_id, lid=list_id: remove_item_from_list(iid, lid)
                                     ).props('flat round dense').classes('text-red-400').tooltip(tr('Remove'))
+
+                        # Text snippet section (expandable)
+                        with ui.column().classes('w-full mt-3'):
+                            snippet_container = ui.column().classes('w-full')
+                            is_expanded = {'value': False}
+
+                            def create_snippet_ui(container, sid, fid, expanded_state):
+                                """Create the snippet UI with lazy loading."""
+                                container.clear()
+                                with container:
+                                    # Try to get text snippet
+                                    text_snippet = ''
+                                    try:
+                                        from web.services import get_service
+                                        service = get_service()
+                                        if service.is_ready:
+                                            page_data = service.get_browse_page(sid, p_num=1)
+                                            if page_data and page_data.text:
+                                                text_snippet = page_data.text
+                                    except Exception as e:
+                                        print(f"Error fetching snippet: {e}")
+
+                                    if text_snippet:
+                                        # Show snippet or full text
+                                        max_chars = 200
+                                        with ui.element('div').classes(
+                                            'bg-gray-50 p-3 rounded-lg border border-gray-200'
+                                        ).style('direction: rtl; text-align: right;'):
+                                            if expanded_state['value'] or len(text_snippet) <= max_chars:
+                                                ui.label(text_snippet).classes(
+                                                    'text-sm text-gray-700 whitespace-pre-wrap'
+                                                ).style('line-height: 1.8;')
+                                            else:
+                                                ui.label(text_snippet[:max_chars] + '...').classes(
+                                                    'text-sm text-gray-700'
+                                                ).style('line-height: 1.8;')
+
+                                            # Expand/collapse button
+                                            if len(text_snippet) > max_chars:
+                                                def toggle_expand():
+                                                    expanded_state['value'] = not expanded_state['value']
+                                                    create_snippet_ui(container, sid, fid, expanded_state)
+
+                                                with ui.row().classes('w-full justify-center mt-2'):
+                                                    btn_text = tr('Show less') if expanded_state['value'] else tr('Show more')
+                                                    btn_icon = 'expand_less' if expanded_state['value'] else 'expand_more'
+                                                    ui.button(
+                                                        btn_text,
+                                                        icon=btn_icon,
+                                                        on_click=toggle_expand
+                                                    ).props('flat dense size=sm').classes('text-green-700')
+                                    else:
+                                        ui.label(tr('No text preview available')).classes(
+                                            'text-xs text-gray-400 italic'
+                                        )
+
+                            # Load snippet button (lazy load to avoid slow page)
+                            load_btn_container = ui.row().classes('w-full')
+                            with load_btn_container:
+                                def make_load_handler(container, sid, fid, expanded, btn_container):
+                                    def handler():
+                                        btn_container.clear()
+                                        with container:
+                                            ui.spinner(size='sm').classes('mx-auto')
+                                        ui.timer(0.1, lambda: create_snippet_ui(container, sid, fid, expanded), once=True)
+                                    return handler
+
+                                ui.button(
+                                    tr('Show text preview'),
+                                    icon='text_snippet',
+                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
+                                ).props('flat dense size=sm').classes('text-gray-500')
 
     def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""

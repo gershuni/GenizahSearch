@@ -10,7 +10,7 @@ Features:
 - Metadata header with external links
 """
 
-from nicegui import ui
+from nicegui import ui, app
 from typing import Optional
 import re
 
@@ -377,6 +377,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.page_input_value = page.p_num
                 state.error = None
 
+                # Save position to storage for persistence
+                try:
+                    app.storage.user['browse_position'] = {
+                        'sys_id': state.sys_id,
+                        'p_num': page.p_num,
+                        'shelfmark': page.shelfmark
+                    }
+                except Exception:
+                    pass
+
                 # Track recently viewed item
                 if state.sys_id and service.is_ready:
                     try:
@@ -739,21 +749,72 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             'text-3xl font-bold mb-6 text-center text-green-800'
         )
 
-        # Shelfmark Search Box
+        # Shelfmark Search Box with Autocomplete
         with ui.card().classes('w-full p-4 mb-6 bg-green-50 border border-green-200'):
             with ui.row().classes('w-full gap-4 items-end'):
                 # Search icon
                 ui.icon('search', size='md').classes('text-green-600 mb-2')
 
-                # Shelfmark input
-                search_input = ui.input(
-                    placeholder=tr('e.g. T-S 8J6.1'),
-                    label=tr('Enter shelfmark'),
-                    value=state.shelfmark_query
-                ).classes('flex-1').props('outlined dense clearable color=green')
+                # Shelfmark input with autocomplete
+                with ui.column().classes('flex-1 relative'):
+                    search_input = ui.input(
+                        placeholder=tr('e.g. T-S 8J6.1'),
+                        label=tr('Enter shelfmark'),
+                        value=state.shelfmark_query
+                    ).classes('w-full').props('outlined dense clearable color=green')
 
-                search_input.bind_value(state, 'shelfmark_query')
-                search_input.on('keydown.enter', search_shelfmark)
+                    # Autocomplete suggestions container
+                    suggestions_container = ui.column().classes(
+                        'absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto hidden'
+                    )
+
+                    def on_input_change():
+                        query = search_input.value or ''
+                        state.shelfmark_query = query
+
+                        # Clear and hide suggestions if query too short
+                        if len(query) < 2:
+                            suggestions_container.clear()
+                            suggestions_container.classes(add='hidden')
+                            return
+
+                        # Search for matching shelfmarks
+                        try:
+                            results = service.search_by_shelfmark(query, limit=8)
+                            suggestions_container.clear()
+
+                            if results:
+                                suggestions_container.classes(remove='hidden')
+                                with suggestions_container:
+                                    for result in results:
+                                        def make_click_handler(r):
+                                            def handler():
+                                                search_input.value = r.shelfmark
+                                                state.shelfmark_query = r.shelfmark
+                                                suggestions_container.classes(add='hidden')
+                                                state.sys_id = r.sys_id
+                                                load_page()
+                                            return handler
+
+                                        with ui.row().classes(
+                                            'w-full px-3 py-2 hover:bg-green-50 cursor-pointer items-center gap-2'
+                                        ).on('click', make_click_handler(result)):
+                                            ui.icon('description', size='sm').classes('text-green-600')
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(result.shelfmark).classes('font-medium text-sm')
+                                                if result.title:
+                                                    ui.label(result.title[:50] + ('...' if len(result.title) > 50 else '')).classes(
+                                                        'text-xs text-gray-500 truncate'
+                                                    ).style('direction: rtl; max-width: 300px;')
+                            else:
+                                suggestions_container.classes(add='hidden')
+                        except Exception as e:
+                            print(f"Autocomplete error: {e}")
+                            suggestions_container.classes(add='hidden')
+
+                    search_input.on('input', on_input_change)
+                    search_input.on('keydown.enter', lambda: (suggestions_container.classes(add='hidden'), search_shelfmark()))
+                    search_input.on('blur', lambda: ui.timer(0.2, lambda: suggestions_container.classes(add='hidden'), once=True))
 
                 # Go button
                 ui.button(
@@ -794,7 +855,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         elif initial_sys_id:
             load_page()
         else:
-            update_content()
+            # Try to restore previous position
+            saved_position = app.storage.user.get('browse_position')
+            if saved_position and saved_position.get('sys_id'):
+                state.sys_id = saved_position['sys_id']
+                state.shelfmark_query = saved_position.get('shelfmark', '')
+                load_page(p_num=saved_position.get('p_num', 1))
+            else:
+                update_content()
 
         # Add keyboard event handlers
         ui.add_body_html('''
