@@ -45,6 +45,7 @@ def create_search_page(initial_query: str = None):
             self.selected_result = None
             self.total_count = 0
             self.current_page_idx = 0  # For browse within viewer
+            self.selected_indices = set()  # For bulk operations
 
     search_state = SearchUIState()
 
@@ -161,8 +162,24 @@ def create_search_page(initial_query: str = None):
                     'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
                 )
                 with results_header:
-                    results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
+                    with ui.row().classes('items-center gap-3'):
+                        # Select all checkbox
+                        select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
+                        results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
+                        # Selection counter (initially hidden)
+                        selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+
                     with ui.row().classes('gap-2'):
+                        # Bulk actions (initially hidden)
+                        bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
+                        with bulk_actions_row:
+                            ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
+                                'flat round dense size=sm'
+                            ).tooltip(tr('Add Selected to List'))
+                            ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
+                                'flat round dense size=sm'
+                            ).tooltip(tr('Copy Selected Text'))
+
                         # Filter toggle button
                         filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
                             'flat round dense size=sm'
@@ -275,6 +292,123 @@ def create_search_page(initial_query: str = None):
             render_results(search_state.results)
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             ui.notify(tr('Filters cleared'), type='info')
+
+    # === Bulk Operations ===
+
+    def toggle_select_all(is_checked):
+        """Toggle selection of all results."""
+        if is_checked:
+            # Select all current results
+            for i in range(len(search_state.results)):
+                search_state.selected_indices.add(i)
+        else:
+            # Deselect all
+            search_state.selected_indices.clear()
+
+        # Re-render to update checkboxes
+        current_results = list(search_state.results)  # Keep current filtered view
+        render_results(current_results)
+        update_selection_ui()
+
+    def update_selection_ui():
+        """Update selection counter and bulk actions visibility."""
+        selected_count = len(search_state.selected_indices)
+
+        if selected_count > 0:
+            selection_counter.text = f"{selected_count} {tr('selected')}"
+            selection_counter.style('color: var(--primary-600);')
+            bulk_actions_row.style('')  # Show bulk actions
+        else:
+            selection_counter.text = ''
+            selection_counter.style('display: none;')
+            bulk_actions_row.style('display: none;')  # Hide bulk actions
+
+        # Update select all checkbox state
+        if selected_count == len(search_state.results) and len(search_state.results) > 0:
+            select_all_checkbox.value = True
+        else:
+            select_all_checkbox.value = False
+
+    def bulk_add_to_list():
+        """Add all selected results to a list."""
+        if not search_state.selected_indices:
+            ui.notify(tr('No results selected'), type='warning')
+            return
+
+        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
+                          if i < len(search_state.results)]
+
+        if not selected_results:
+            ui.notify(tr('No valid selections'), type='warning')
+            return
+
+        # Show list selection dialog
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
+            ui.label(tr('Add Selected to List')).classes('text-xl font-bold mb-2')
+            ui.label(f"{len(selected_results)} {tr('items selected')}").style('color: var(--text-secondary);')
+
+            if state.lists_mgr:
+                lists = state.lists_mgr.data.get('lists', {})
+                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+
+                if not list_options:
+                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
+                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
+                else:
+                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+
+                    def add_all():
+                        added_count = 0
+                        for res in selected_results:
+                            display = res.get('display', {})
+                            sys_id = display.get('id')
+                            if sys_id and state.lists_mgr.add_item(sys_id, selected_list.value):
+                                added_count += 1
+
+                        ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
+                        dialog.close()
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                        ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+            else:
+                ui.label(tr('Lists manager not available')).style('color: var(--error);')
+
+        dialog.open()
+
+    def bulk_copy_text():
+        """Copy all selected results' text to clipboard."""
+        if not search_state.selected_indices:
+            ui.notify(tr('No results selected'), type='warning')
+            return
+
+        selected_results = [search_state.results[i] for i in sorted(search_state.selected_indices)
+                          if i < len(search_state.results)]
+
+        if not selected_results:
+            ui.notify(tr('No valid selections'), type='warning')
+            return
+
+        # Compile all text
+        compiled_text = []
+        for i, res in enumerate(selected_results, 1):
+            display = res.get('display', {})
+            shelfmark = display.get('shelfmark', 'Unknown')
+            full_text = res.get('full_text', '')
+            snippet = res.get('snippet', '').replace('*', '')
+            text = full_text or snippet
+
+            compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
+
+        final_text = '\n'.join(compiled_text)
+
+        # Copy to clipboard
+        ui.run_javascript(f'''
+            navigator.clipboard.writeText(`{final_text.replace("`", "\\`")}`).then(() => {{
+                console.log('Bulk text copied to clipboard');
+            }});
+        ''')
+        ui.notify(f"{len(selected_results)} {tr('results copied to clipboard')}", type='positive')
 
     def update_progress_ui():
         if search_state.is_running:
@@ -420,9 +554,24 @@ def create_search_page(initial_query: str = None):
 
         with ui.card().classes(
             'w-full p-4 cursor-pointer transition-all hover:shadow-md'
-        ).style('border-radius: 10px;').on('click', lambda r=result: load_in_viewer(r)):
+        ).style('border-radius: 10px;') as card:
             with ui.row().classes('w-full items-start justify-between'):
-                with ui.column().classes('flex-grow gap-1'):
+                # Checkbox for selection
+                with ui.column().classes('justify-center'):
+                    def toggle_card_selection(e, idx=index):
+                        if e.value:
+                            search_state.selected_indices.add(idx)
+                        else:
+                            search_state.selected_indices.discard(idx)
+                        update_selection_ui()
+
+                    result_checkbox = ui.checkbox(
+                        value=index in search_state.selected_indices,
+                        on_change=toggle_card_selection
+                    ).props('dense')
+
+                # Main content (clickable)
+                with ui.column().classes('flex-grow gap-1').on('click', lambda r=result: load_in_viewer(r)):
                     with ui.row().classes('items-center gap-2'):
                         ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
@@ -435,6 +584,11 @@ def create_search_page(initial_query: str = None):
 
                 # Actions
                 with ui.row().classes('gap-1'):
+                    ui.button(
+                        icon='open_in_full',
+                        on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
+                    ).props('flat round dense size=sm').tooltip(tr('Advanced View'))
+
                     def make_star_handler(r):
                         def handler():
                             show_add_to_list_dialog(r)
@@ -451,6 +605,156 @@ def create_search_page(initial_query: str = None):
                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
                 ):
                     ui.html(snippet_html, sanitize=False)
+
+    def open_advanced_dialog(index, result):
+        """Open a maximized dialog showing the full result with navigation."""
+
+        with ui.dialog().props('maximized') as dialog:
+            with ui.card().classes('w-full h-full flex flex-col'):
+                # Header with navigation
+                with ui.row().classes('w-full p-4 items-center justify-between').style(
+                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+                ):
+                    with ui.row().classes('items-center gap-3'):
+                        ui.button(icon='close', on_click=dialog.close).props('flat round')
+                        ui.label(tr('Advanced View')).classes('text-xl font-bold')
+
+                    # Navigation controls
+                    with ui.row().classes('items-center gap-2'):
+                        result_counter = ui.label(f"{index + 1} / {len(search_state.results)}")
+
+                        def navigate_result(direction):
+                            new_idx = index + direction
+                            if 0 <= new_idx < len(search_state.results):
+                                dialog.close()
+                                open_advanced_dialog(new_idx, search_state.results[new_idx])
+
+                        ui.button(
+                            icon='chevron_left',
+                            on_click=lambda: navigate_result(-1)
+                        ).props('flat round').tooltip(tr('Previous')).set_enabled(index > 0)
+
+                        ui.button(
+                            icon='chevron_right',
+                            on_click=lambda: navigate_result(1)
+                        ).props('flat round').tooltip(tr('Next')).set_enabled(index < len(search_state.results) - 1)
+
+                # Content area
+                with ui.scroll_area().classes('flex-grow p-6'):
+                    render_dialog_content(result, dialog)
+
+        dialog.open()
+
+    def render_dialog_content(result, dialog):
+        """Render the content inside the advanced dialog."""
+        display = result.get('display', {})
+        shelfmark = display.get('shelfmark', 'Unknown')
+        title = display.get('title', '')
+        sys_id = display.get('id', '')
+        snippet = result.get('snippet', '')
+        full_text = result.get('full_text', '')
+
+        with ui.column().classes('w-full max-w-4xl mx-auto gap-6'):
+            # Main Info Section
+            with ui.card().classes('w-full p-6'):
+                with ui.column().classes('gap-3'):
+                    ui.label(shelfmark).classes('text-3xl font-bold').style('color: var(--primary-700);')
+
+                    if title:
+                        ui.label(title).classes('text-lg').style('color: var(--text-secondary); direction: rtl;')
+
+                    # Badges
+                    with ui.row().classes('gap-2 flex-wrap mt-2'):
+                        if display.get('source'):
+                            ui.badge(display['source'], color='blue')
+                        if display.get('img'):
+                            ui.badge(f"{tr('Page')} {display['img']}", color='green')
+
+            # Metadata Section
+            with ui.card().classes('w-full p-6'):
+                ui.label(tr('Metadata')).classes('text-xl font-bold mb-4')
+                with ui.column().classes('gap-3'):
+                    metadata_items = [
+                        (tr('Shelfmark'), shelfmark),
+                        (tr('Title'), title or tr('Not available')),
+                        (tr('System ID'), sys_id or tr('Not available')),
+                        (tr('Source'), display.get('source', tr('Not available'))),
+                        (tr('Page'), display.get('img', tr('Not available'))),
+                    ]
+                    for label, value in metadata_items:
+                        with ui.row().classes('items-start gap-4'):
+                            ui.label(label + ':').classes('font-bold w-32').style('color: var(--text-secondary);')
+                            ui.label(value).style('color: var(--text-primary); direction: rtl;')
+
+            # Snippet Section
+            if snippet:
+                with ui.card().classes('w-full p-6'):
+                    ui.label(tr('Match Context')).classes('text-xl font-bold mb-4')
+                    snippet_html = format_snippet(snippet)
+                    with ui.element('div').classes('p-4 rounded-lg').style(
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
+                    ):
+                        ui.html(snippet_html, sanitize=False)
+
+            # Full Text Section
+            if full_text:
+                with ui.card().classes('w-full p-6'):
+                    ui.label(tr('Full Text')).classes('text-xl font-bold mb-4')
+                    with ui.element('div').classes('p-4 rounded-lg max-h-96 overflow-auto').style(
+                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2;'
+                    ):
+                        ui.label(full_text).classes('whitespace-pre-wrap')
+
+            # Actions Section
+            with ui.card().classes('w-full p-6'):
+                with ui.row().classes('gap-3 flex-wrap'):
+                    # Browse button
+                    if sys_id:
+                        fl_id = None
+                        if 'raw_header' in result and state.meta_mgr:
+                            try:
+                                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                                fl_id = parsed.get('fl_id')
+                            except Exception:
+                                pass
+
+                        browse_url = f'/browse?sys_id={sys_id}'
+                        if fl_id:
+                            browse_url += f'&fl_id={fl_id}'
+
+                        ui.button(
+                            tr('View in Browse'),
+                            icon='menu_book',
+                            on_click=lambda: (dialog.close(), ui.navigate.to(browse_url))
+                        ).classes('btn-primary')
+
+                    # Copy text button
+                    text_to_copy = full_text or snippet.replace('*', '')
+                    ui.button(
+                        tr('Copy Text'),
+                        icon='content_copy',
+                        on_click=lambda t=text_to_copy: copy_result_text(t)
+                    ).props('outline')
+
+                    # Find Parallels button
+                    text_for_parallels = full_text or snippet.replace('*', '')
+                    ui.button(
+                        tr('Find Parallels'),
+                        icon='compare_arrows',
+                        on_click=lambda: (dialog.close(), ui.navigate.to(f'/parallels?text={quote(text_for_parallels[:2000])}'))
+                    ).props('outline')
+
+    def copy_result_text(text):
+        """Copy text to clipboard."""
+        if text:
+            ui.run_javascript(f'''
+                navigator.clipboard.writeText(`{text.replace("`", "\\`")}`).then(() => {{
+                    console.log('Text copied to clipboard');
+                }});
+            ''')
+            ui.notify(tr('Text copied to clipboard'), type='positive')
+        else:
+            ui.notify(tr('No text to copy'), type='warning')
 
     def load_in_viewer(result):
         search_state.selected_result = result

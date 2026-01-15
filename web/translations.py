@@ -157,6 +157,21 @@ TRANSLATIONS = {
     "All results": "כל התוצאות",
     "Favorites only": "מועדפים בלבד",
     "Full text not available": "טקסט מלא לא זמין",
+    "Advanced View": "תצוגה מתקדמת",
+    "Match Context": "הקשר התאמה",
+    "View in Browse": "צפה בדפדוף",
+    "Copy Text": "העתק טקסט",
+    "Text copied to clipboard": "הטקסט הועתק ללוח",
+    "No text to copy": "אין טקסט להעתקה",
+    "selected": "נבחרו",
+    "Add Selected to List": "הוסף נבחרים לרשימה",
+    "Copy Selected Text": "העתק טקסט נבחר",
+    "No results selected": "לא נבחרו תוצאות",
+    "No valid selections": "אין בחירות תקפות",
+    "items selected": "פריטים נבחרו",
+    "Add All": "הוסף הכל",
+    "items added to list": "פריטים נוספו לרשימה",
+    "results copied to clipboard": "תוצאות הועתקו ללוח",
 
     # =========================================================================
     # Composition Search UI
