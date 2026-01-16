@@ -13,8 +13,13 @@ import os
 
 
 def get_api_base() -> str:
-    """Get the full API base URL."""
-    port = os.environ.get('GENIZAH_PORT', 8081)
+    """
+    Get the full API base URL for the backend API.
+
+    The backend API runs on port 8000 (separate from web interface on 8081).
+    Can be overridden with GENIZAH_BACKEND_PORT environment variable.
+    """
+    port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
     return f"http://localhost:{port}/api/v1"
 
 

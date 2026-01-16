@@ -39,8 +39,8 @@ def get_api_base():
     except:
         pass
 
-    # Fallback to localhost with configured port
-    port = os.environ.get('GENIZAH_PORT', 8081)
+    # Fallback to backend API port (separate from web interface)
+    port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
     return f"http://localhost:{port}/api/v1"
 
 
