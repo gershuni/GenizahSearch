@@ -557,7 +557,48 @@ TRANSLATIONS = {
     "Local draft": "טיוטה מקומית",
     "Discard local changes": "בטל שינויים מקומיים",
     "Apply local changes": "החל שינויים מקומיים",
+
+    # Admin Panel
+    "Access Denied": "הגישה נדחתה",
+    "You need admin privileges to access this page": "נדרשות הרשאות מנהל כדי לגשת לדף זה",
+    "Go Home": "חזור לדף הבית",
+    "User management and system administration": "ניהול משתמשים ומערכת",
+    "Users": "משתמשים",
+    "Pending Approval": "ממתינים לאישור",
+    "Statistics": "סטטיסטיקות",
+    "No pending users": "אין משתמשים ממתינים",
+    "All registration requests have been processed": "כל בקשות ההרשמה טופלו",
+    "users pending approval": "משתמשים ממתינים לאישור",
+    "User approved": "המשתמש אושר",
+    "User rejected": "המשתמש נדחה",
+    "No users found": "לא נמצאו משתמשים",
+    "Search users...": "חפש משתמשים...",
+    "All Roles": "כל התפקידים",
+    "User": "משתמש",
+    "Editor": "עורך",
+    "Filter by role": "סנן לפי תפקיד",
+    "Set as User": "הגדר כמשתמש",
+    "Set as Editor": "הגדר כעורך",
+    "Set as Admin": "הגדר כמנהל",
+    "Role updated": "התפקיד עודכן",
+    "Total Users": "סך המשתמשים",
+    "Editors & Admins": "עורכים ומנהלים",
+    "Total Corrections": "סך התיקונים",
+
+    # Version Selector
+    "Version History": "היסטוריית גרסאות",
+    "User Corrections": "תיקוני משתמשים",
+    "No other versions": "אין גרסאות אחרות",
+    "User correction": "תיקון משתמש",
+
+    # Notes Display
+    "Notes & Comments": "הערות ותגובות",
+    "No comments yet": "אין הערות עדיין",
+    "View Comments": "צפה בהערות",
+    "Write your comment here...": "כתוב את הערתך כאן...",
+    "Please enter a comment": "אנא הזן הערה",
 }
+
 
 
 def set_language(lang: str) -> None:

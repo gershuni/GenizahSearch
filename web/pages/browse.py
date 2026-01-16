@@ -1055,7 +1055,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Edit and Comment buttons
                             if page.text:
-                                from web.components import create_edit_button, create_comment_button
+                                from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button
                                 create_edit_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
@@ -1066,6 +1066,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id
+                                )
+                                create_notes_button(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    shelfmark=page.shelfmark or page.sys_id
+                                )
+                                # Version selector
+                                create_version_selector(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    original_text=page.text,
+                                    on_version_change=None  # TODO: implement text switching
                                 )
 
                     # Main text content

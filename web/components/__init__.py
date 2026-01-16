@@ -22,6 +22,18 @@ from .comment_dialog import (
     create_comment_dialog
 )
 
+from .version_selector import (
+    create_version_selector,
+    create_version_badge,
+    fetch_document_corrections
+)
+
+from .notes_display import (
+    create_notes_panel,
+    create_notes_button,
+    fetch_document_comments
+)
+
 __all__ = [
     'create_edit_button',
     'create_edit_text_dialog',
@@ -31,4 +43,10 @@ __all__ = [
     'delete_local_edit',
     'create_comment_button',
     'create_comment_dialog',
+    'create_version_selector',
+    'create_version_badge',
+    'fetch_document_corrections',
+    'create_notes_panel',
+    'create_notes_button',
+    'fetch_document_comments',
 ]

@@ -970,6 +970,17 @@ async def corrections_page_route():
         from web.pages.corrections import create_corrections_page
         await create_corrections_page()
 
+@ui.page('/admin')
+async def admin_page_route():
+    app.storage.user['current_page'] = '/admin'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.admin import create_admin_page
+        await create_admin_page()
+
 # ============================================================================
 # Startup Logic
 # ============================================================================
