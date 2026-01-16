@@ -747,6 +747,7 @@ def create_layout():
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
                     ('/lists', 'star', tr('My Lists'), None),
+                    ('/corrections', 'edit_note', tr('Corrections'), None),
                 ]
 
                 for path, icon, label, badge in nav_items:
@@ -954,6 +955,17 @@ def help_page_route():
     with content:
         from web.pages.help import create_help_page
         create_help_page()
+
+@ui.page('/corrections')
+async def corrections_page_route():
+    app.storage.user['current_page'] = '/corrections'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.corrections import create_corrections_page
+        create_corrections_page()
 
 # ============================================================================
 # Startup Logic

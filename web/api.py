@@ -8,6 +8,10 @@ import openpyxl
 from docx import Document
 from urllib.parse import urlparse
 
+# Import corrections API components
+from backend.models.database import init_db
+from backend.api.routes import auth, users, corrections, comments, documents
+
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
     'rosetta.nli.org.il',
@@ -18,6 +22,20 @@ ALLOWED_IMAGE_DOMAINS = [
 
 def init_api_routes():
     """Register API routes."""
+
+    # Initialize corrections database
+    try:
+        init_db()
+        print("Corrections database initialized")
+    except Exception as e:
+        print(f"Warning: Could not initialize corrections database: {e}")
+
+    # Include corrections API routers
+    app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(users.router, prefix="/api/v1", tags=["users"])
+    app.include_router(corrections.router, prefix="/api/v1", tags=["corrections"])
+    app.include_router(comments.router, prefix="/api/v1", tags=["comments"])
+    app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
 
     @app.get('/api/proxy_image')
     def proxy_image(url: str):
