@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}סקירת תיקונים - Genizah Corrections{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-check2-circle"></i> סקירת תיקונים</h2>
+        <p class="text-muted">בדקו ואשרו תיקונים שהוגשו על ידי הקהילה</p>
+    </div>
+
+    <!-- Stats -->
+    <div class="col-12 mb-4">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card bg-warning text-dark">
+                    <div class="card-body text-center">
+                        <h3 id="pending-count">-</h3>
+                        <small>ממתינים לסקירה</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <h3 id="review-count">-</h3>
+                        <small>בבדיקה</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h3 id="approved-today">-</h3>
+                        <small>אושרו היום</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Corrections -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">תיקונים ממתינים</h5>
+            </div>
+            <div class="card-body" id="pending-list">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="pagination" class="mt-4"></div>
+    </div>
+</div>
+
+<!-- Review Modal -->
+<div class="modal fade" id="reviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">סקירת תיקון</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="review-modal-body">
+                <!-- Content loaded dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
+                <button type="button" class="btn btn-warning" onclick="requestRevision()">
+                    <i class="bi bi-arrow-repeat"></i> בקש תיקון
+                </button>
+                <button type="button" class="btn btn-danger" onclick="rejectCorrection()">
+                    <i class="bi bi-x-lg"></i> דחה
+                </button>
+                <button type="button" class="btn btn-success" onclick="approveCorrection()">
+                    <i class="bi bi-check-lg"></i> אשר
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+let currentCorrectionId = null;
+let reviewModal = null;
+
+async function loadPendingCorrections(page = 1) {
+    currentPage = page;
+    const container = document.getElementById('pending-list');
+    container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div></div>';
+
+    try {
+        const result = await api.getPendingCorrections(page, 20);
+
+        document.getElementById('pending-count').textContent = result.total;
+
+        if (result.items.length > 0) {
+            container.innerHTML = result.items.map(c => `
+                <div class="card correction-card status-pending mb-3" data-correction-id="${c.id}">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <span class="badge badge-pending">ממתין</span>
+                                <span class="badge bg-secondary ms-1">${getCorrectionType(c.correction_type)}</span>
+                            </div>
+                            <small class="text-muted">${formatDate(c.created_at)}</small>
+                        </div>
+
+                        <div class="diff-container mb-3">
+                            <div class="mb-2">
+                                <strong>מקור:</strong>
+                                <span class="diff-original hebrew-text">${escapeHtml(c.original_text)}</span>
+                            </div>
+                            <div>
+                                <strong>תיקון:</strong>
+                                <span class="diff-corrected hebrew-text">${escapeHtml(c.corrected_text)}</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">
+                                <i class="bi bi-person"></i> ${c.author?.username || 'אנונימי'}
+                                | מסמך: ${c.document_id}
+                            </small>
+                            <button class="btn btn-primary btn-sm" onclick="openReviewModal(${c.id})">
+                                <i class="bi bi-eye"></i> סקור
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-check-circle display-4 text-success"></i>
+                    <p class="text-muted mt-3">אין תיקונים ממתינים לסקירה!</p>
+                </div>
+            `;
+        }
+
+        // Pagination
+        document.getElementById('pagination').innerHTML =
+            createPagination(result.page, result.total_pages, 'loadPendingCorrections');
+
+    } catch (error) {
+        console.error('Failed to load corrections:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> שגיאה בטעינת תיקונים
+            </div>
+        `;
+    }
+}
+
+async function openReviewModal(correctionId) {
+    currentCorrectionId = correctionId;
+    const modalBody = document.getElementById('review-modal-body');
+    modalBody.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+
+    reviewModal.show();
+
+    try {
+        const correction = await api.getCorrection(correctionId);
+
+        modalBody.innerHTML = `
+            <div class="mb-4">
+                <h6>פרטי המסמך</h6>
+                <p>
+                    <strong>מזהה:</strong> ${correction.document_id}<br>
+                    <strong>סימן מדף:</strong> ${correction.shelfmark || '-'}<br>
+                    <strong>שורה:</strong> ${correction.line_number || '-'}
+                </p>
+            </div>
+
+            <div class="mb-4">
+                <h6>התיקון</h6>
+                <div class="diff-container">
+                    <div class="mb-2">
+                        <strong>טקסט מקורי:</strong>
+                        <div class="diff-original hebrew-text p-2">${escapeHtml(correction.original_text)}</div>
+                    </div>
+                    <div>
+                        <strong>טקסט מתוקן:</strong>
+                        <div class="diff-corrected hebrew-text p-2">${escapeHtml(correction.corrected_text)}</div>
+                    </div>
+                </div>
+            </div>
+
+            ${correction.context_before ? `
+                <div class="mb-3">
+                    <h6>הקשר לפני</h6>
+                    <div class="hebrew-text bg-light p-2">${escapeHtml(correction.context_before)}</div>
+                </div>
+            ` : ''}
+
+            ${correction.context_after ? `
+                <div class="mb-3">
+                    <h6>הקשר אחרי</h6>
+                    <div class="hebrew-text bg-light p-2">${escapeHtml(correction.context_after)}</div>
+                </div>
+            ` : ''}
+
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <h6>מגיש התיקון</h6>
+                    <p>
+                        ${correction.author?.full_name || correction.author?.username || 'אנונימי'}<br>
+                        <small class="text-muted">מוניטין: ${correction.author?.reputation_score || 0}</small>
+                    </p>
+                </div>
+                <div class="col-md-6">
+                    <h6>רמת ביטחון</h6>
+                    <div class="progress" style="height: 25px;">
+                        <div class="progress-bar ${correction.confidence_score >= 0.7 ? 'bg-success' : 'bg-warning'}"
+                             style="width: ${correction.confidence_score * 100}%">
+                            ${Math.round(correction.confidence_score * 100)}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            ${correction.source_reference ? `
+                <div class="mb-3">
+                    <h6><i class="bi bi-book"></i> מקור</h6>
+                    <p>${escapeHtml(correction.source_reference)}</p>
+                </div>
+            ` : ''}
+
+            ${correction.notes ? `
+                <div class="mb-3">
+                    <h6><i class="bi bi-chat-text"></i> הערות המגיש</h6>
+                    <p>${escapeHtml(correction.notes)}</p>
+                </div>
+            ` : ''}
+
+            <hr>
+
+            <div class="mb-3">
+                <label class="form-label">הערות הסקירה</label>
+                <textarea class="form-control" id="review-notes" rows="3"
+                          placeholder="הוסף הערות (אופציונלי לאישור, חובה לדחייה/בקשת תיקון)"></textarea>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error('Failed to load correction:', error);
+        modalBody.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> שגיאה בטעינת התיקון
+            </div>
+        `;
+    }
+}
+
+async function approveCorrection() {
+    if (!currentCorrectionId) return;
+
+    const notes = document.getElementById('review-notes')?.value;
+
+    try {
+        await api.reviewCorrection(currentCorrectionId, 'approve', notes);
+        showAlert('success', 'התיקון אושר בהצלחה!');
+        reviewModal.hide();
+        loadPendingCorrections(currentPage);
+    } catch (error) {
+        showAlert('danger', error.message);
+    }
+}
+
+async function rejectCorrection() {
+    if (!currentCorrectionId) return;
+
+    const notes = document.getElementById('review-notes')?.value;
+    if (!notes) {
+        showAlert('warning', 'יש לציין סיבה לדחייה');
+        return;
+    }
+
+    try {
+        await api.reviewCorrection(currentCorrectionId, 'reject', notes, notes);
+        showAlert('info', 'התיקון נדחה');
+        reviewModal.hide();
+        loadPendingCorrections(currentPage);
+    } catch (error) {
+        showAlert('danger', error.message);
+    }
+}
+
+async function requestRevision() {
+    if (!currentCorrectionId) return;
+
+    const notes = document.getElementById('review-notes')?.value;
+    if (!notes) {
+        showAlert('warning', 'יש לציין מה דורש תיקון');
+        return;
+    }
+
+    try {
+        await api.reviewCorrection(currentCorrectionId, 'request_revision', notes);
+        showAlert('info', 'נשלחה בקשה לתיקון');
+        reviewModal.hide();
+        loadPendingCorrections(currentPage);
+    } catch (error) {
+        showAlert('danger', error.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Check permissions
+    if (!requireRole('reviewer')) {
+        return;
+    }
+
+    reviewModal = new bootstrap.Modal(document.getElementById('reviewModal'));
+    loadPendingCorrections();
+
+    // Load stats
+    api.getCorrectionStats().then(stats => {
+        document.getElementById('pending-count').textContent = stats.pending;
+        document.getElementById('review-count').textContent = stats.under_review;
+        document.getElementById('approved-today').textContent = stats.approved;
+    }).catch(console.error);
+});
+</script>
+{% endblock %}

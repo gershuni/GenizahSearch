@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}התחברות - Genizah Corrections{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4><i class="bi bi-box-arrow-in-right"></i> התחברות</h4>
+            </div>
+            <div class="card-body">
+                <form id="login-form">
+                    <div class="mb-3">
+                        <label for="email" class="form-label required">כתובת אימייל</label>
+                        <input type="email" class="form-control" id="email" required
+                               placeholder="your@email.com" dir="ltr">
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label required">סיסמה</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="password" required dir="ltr">
+                            <button class="btn btn-outline-secondary" type="button" onclick="togglePassword()">
+                                <i class="bi bi-eye" id="password-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-box-arrow-in-right"></i> התחבר
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                <p class="text-center text-muted mb-0">
+                    אין לך חשבון? <a href="/register">הירשם עכשיו</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function togglePassword() {
+    const input = document.getElementById('password');
+    const eye = document.getElementById('password-eye');
+    if (input.type === 'password') {
+        input.type = 'text';
+        eye.classList.replace('bi-eye', 'bi-eye-slash');
+    } else {
+        input.type = 'password';
+        eye.classList.replace('bi-eye-slash', 'bi-eye');
+    }
+}
+
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+
+    const btn = this.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> מתחבר...';
+
+    const success = await auth.login(email, password);
+
+    if (success) {
+        // Redirect to original page or home
+        const params = new URLSearchParams(window.location.search);
+        const redirect = params.get('redirect') || '/';
+        window.location.href = redirect;
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> התחבר';
+    }
+});
+
+// Redirect if already logged in
+if (auth.isAuthenticated()) {
+    window.location.href = '/';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}Genizah Corrections - ברוכים הבאים{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Hero Section -->
+    <div class="col-12 text-center mb-5">
+        <h1 class="display-4">
+            <i class="bi bi-journal-text text-primary"></i>
+            מערכת תיקוני גניזה
+        </h1>
+        <p class="lead text-muted">
+            שתפו את הידע שלכם ועזרו לשפר את התעתיקים של כתבי יד הגניזה הקהירית
+        </p>
+        <div class="mt-4" id="hero-buttons">
+            <a href="/corrections" class="btn btn-primary btn-lg me-2">
+                <i class="bi bi-search"></i> צפייה בתיקונים
+            </a>
+            <a href="/register" class="btn btn-outline-primary btn-lg" id="get-started-btn">
+                <i class="bi bi-person-plus"></i> הצטרפו אלינו
+            </a>
+        </div>
+    </div>
+
+    <!-- Stats Section -->
+    <div class="col-12 mb-5">
+        <div class="row" id="stats-row">
+            <div class="col-md-3 col-6 mb-3">
+                <div class="stat-card">
+                    <div class="stat-number" id="stat-total">-</div>
+                    <div class="stat-label">סה"כ תיקונים</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6 mb-3">
+                <div class="stat-card">
+                    <div class="stat-number" id="stat-approved">-</div>
+                    <div class="stat-label">תיקונים מאושרים</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6 mb-3">
+                <div class="stat-card">
+                    <div class="stat-number" id="stat-pending">-</div>
+                    <div class="stat-label">ממתינים לאישור</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6 mb-3">
+                <div class="stat-card">
+                    <div class="stat-number" id="stat-recent">-</div>
+                    <div class="stat-label">בשבוע האחרון</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Corrections -->
+    <div class="col-lg-8 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history"></i> תיקונים אחרונים
+                </h5>
+                <a href="/corrections" class="btn btn-sm btn-outline-primary">צפה בכל</a>
+            </div>
+            <div class="card-body" id="recent-corrections">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="col-lg-4 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-trophy"></i> מובילים
+                </h5>
+            </div>
+            <div class="card-body p-0" id="leaderboard">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- How it Works -->
+    <div class="col-12 mt-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-question-circle"></i> איך זה עובד?
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="display-4 text-primary mb-2">
+                            <i class="bi bi-person-plus"></i>
+                        </div>
+                        <h5>1. הירשמו</h5>
+                        <p class="text-muted small">צרו חשבון בחינם תוך שניות</p>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="display-4 text-primary mb-2">
+                            <i class="bi bi-search"></i>
+                        </div>
+                        <h5>2. מצאו מסמך</h5>
+                        <p class="text-muted small">חפשו מסמכים בארכיון הגניזה</p>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="display-4 text-primary mb-2">
+                            <i class="bi bi-pencil"></i>
+                        </div>
+                        <h5>3. שלחו תיקון</h5>
+                        <p class="text-muted small">הציעו תיקון לתעתיק</p>
+                    </div>
+                    <div class="col-md-3 text-center mb-3">
+                        <div class="display-4 text-primary mb-2">
+                            <i class="bi bi-star"></i>
+                        </div>
+                        <h5>4. צברו נקודות</h5>
+                        <p class="text-muted small">קבלו הכרה על התרומה שלכם</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    // Update hero button for logged-in users
+    if (auth.isAuthenticated()) {
+        const btn = document.getElementById('get-started-btn');
+        if (btn) {
+            btn.href = '/my-corrections';
+            btn.innerHTML = '<i class="bi bi-list-check"></i> התיקונים שלי';
+        }
+    }
+
+    // Load stats
+    try {
+        const stats = await api.getCorrectionStats();
+        document.getElementById('stat-total').textContent = stats.total;
+        document.getElementById('stat-approved').textContent = stats.approved;
+        document.getElementById('stat-pending').textContent = stats.pending;
+        document.getElementById('stat-recent').textContent = stats.recent_activity;
+    } catch (error) {
+        console.error('Failed to load stats:', error);
+    }
+
+    // Load recent corrections
+    try {
+        const result = await api.listCorrections({
+            status: 'approved',
+            page: 1,
+            page_size: 5
+        });
+
+        const container = document.getElementById('recent-corrections');
+        if (result.items.length > 0) {
+            container.innerHTML = result.items.map(c => createCorrectionCard(c, false)).join('');
+        } else {
+            container.innerHTML = '<p class="text-muted text-center">אין תיקונים עדיין</p>';
+        }
+    } catch (error) {
+        console.error('Failed to load corrections:', error);
+        document.getElementById('recent-corrections').innerHTML =
+            '<p class="text-danger text-center">שגיאה בטעינת תיקונים</p>';
+    }
+
+    // Load leaderboard
+    try {
+        const leaders = await api.getLeaderboard(5);
+        const container = document.getElementById('leaderboard');
+
+        if (leaders.length > 0) {
+            container.innerHTML = leaders.map((user, index) => {
+                const rankClass = index === 0 ? 'gold' : (index === 1 ? 'silver' : (index === 2 ? 'bronze' : ''));
+                return `
+                    <div class="leaderboard-item">
+                        <div class="leaderboard-rank ${rankClass}">#${index + 1}</div>
+                        <div class="flex-grow-1">
+                            <a href="/profile/${user.username}" class="text-decoration-none">
+                                <strong>${user.full_name || user.username}</strong>
+                            </a>
+                            <br>
+                            <small class="text-muted">${user.approved_corrections_count} תיקונים מאושרים</small>
+                        </div>
+                        <div class="reputation-badge">
+                            <i class="bi bi-star-fill"></i>
+                            ${user.reputation_score}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            container.innerHTML = '<p class="text-muted text-center p-3">אין נתונים עדיין</p>';
+        }
+    } catch (error) {
+        console.error('Failed to load leaderboard:', error);
+        document.getElementById('leaderboard').innerHTML =
+            '<p class="text-danger text-center p-3">שגיאה בטעינת מובילים</p>';
+    }
+});
+</script>
+{% endblock %}

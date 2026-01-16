@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}הרשמה - Genizah Corrections{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4><i class="bi bi-person-plus"></i> יצירת חשבון חדש</h4>
+            </div>
+            <div class="card-body">
+                <form id="register-form">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="email" class="form-label required">כתובת אימייל</label>
+                            <input type="email" class="form-control" id="email" required
+                                   placeholder="your@email.com" dir="ltr">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="username" class="form-label required">שם משתמש</label>
+                            <input type="text" class="form-control" id="username" required
+                                   pattern="[a-zA-Z0-9_-]+" minlength="3" maxlength="50"
+                                   placeholder="username" dir="ltr">
+                            <div class="form-text">אותיות, מספרים, מקף ומקף תחתי בלבד</div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="password" class="form-label required">סיסמה</label>
+                            <input type="password" class="form-control" id="password" required
+                                   minlength="8" dir="ltr">
+                            <div class="form-text">לפחות 8 תווים, אות גדולה ומספר</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="confirm_password" class="form-label required">אימות סיסמה</label>
+                            <input type="password" class="form-control" id="confirm_password" required
+                                   dir="ltr">
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6 class="text-muted">פרטים אישיים (אופציונלי)</h6>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="full_name" class="form-label">שם מלא</label>
+                            <input type="text" class="form-control" id="full_name"
+                                   placeholder="ישראל ישראלי">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="affiliation" class="form-label">שיוך מוסדי</label>
+                            <input type="text" class="form-control" id="affiliation"
+                                   placeholder="אוניברסיטה / מכון מחקר">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="bio" class="form-label">קצת על עצמך</label>
+                        <textarea class="form-control" id="bio" rows="3"
+                                  placeholder="ספרו לנו על הרקע והתחומים שלכם..."></textarea>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="terms" required>
+                        <label class="form-check-label" for="terms">
+                            קראתי ואני מסכים/ה ל<a href="/terms" target="_blank">תנאי השימוש</a>
+                        </label>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-person-plus"></i> הירשם
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                <p class="text-center text-muted mb-0">
+                    כבר יש לך חשבון? <a href="/login">התחבר</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('register-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirm_password').value;
+
+    if (password !== confirmPassword) {
+        showAlert('danger', 'הסיסמאות אינן תואמות');
+        return;
+    }
+
+    const userData = {
+        email: document.getElementById('email').value,
+        username: document.getElementById('username').value,
+        password: password,
+        confirm_password: confirmPassword,
+        full_name: document.getElementById('full_name').value || null,
+        affiliation: document.getElementById('affiliation').value || null,
+        bio: document.getElementById('bio').value || null
+    };
+
+    const btn = this.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> נרשם...';
+
+    const success = await auth.register(userData);
+
+    if (success) {
+        // Redirect to login after successful registration
+        setTimeout(() => {
+            window.location.href = '/login';
+        }, 2000);
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-person-plus"></i> הירשם';
+    }
+});
+
+// Password validation feedback
+document.getElementById('password').addEventListener('input', function() {
+    const password = this.value;
+    let isValid = true;
+    let message = '';
+
+    if (password.length < 8) {
+        isValid = false;
+        message = 'נדרשים לפחות 8 תווים';
+    } else if (!/[A-Z]/.test(password)) {
+        isValid = false;
+        message = 'נדרשת אות גדולה';
+    } else if (!/[0-9]/.test(password)) {
+        isValid = false;
+        message = 'נדרש מספר';
+    }
+
+    const feedback = this.nextElementSibling;
+    if (feedback) {
+        feedback.textContent = isValid ? 'סיסמה חזקה!' : message;
+        feedback.className = isValid ? 'form-text text-success' : 'form-text text-danger';
+    }
+});
+
+// Confirm password validation
+document.getElementById('confirm_password').addEventListener('input', function() {
+    const password = document.getElementById('password').value;
+    const isMatch = this.value === password;
+
+    this.classList.toggle('is-valid', isMatch && this.value.length > 0);
+    this.classList.toggle('is-invalid', !isMatch && this.value.length > 0);
+});
+
+// Redirect if already logged in
+if (auth.isAuthenticated()) {
+    window.location.href = '/';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}לוח מובילים - Genizah Corrections{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 text-center mb-4">
+        <h2><i class="bi bi-trophy text-warning"></i> לוח מובילים</h2>
+        <p class="text-muted">התורמים המובילים לפרויקט תיקוני הגניזה</p>
+    </div>
+
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-body p-0" id="leaderboard-list">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadLeaderboard() {
+    const container = document.getElementById('leaderboard-list');
+
+    try {
+        const leaders = await api.getLeaderboard(20);
+
+        if (leaders.length > 0) {
+            container.innerHTML = `
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 60px">דירוג</th>
+                            <th>משתמש</th>
+                            <th class="text-center">תיקונים מאושרים</th>
+                            <th class="text-center">מוניטין</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${leaders.map((user, index) => {
+                            const rankClass = index === 0 ? 'gold' : (index === 1 ? 'silver' : (index === 2 ? 'bronze' : ''));
+                            const rankIcon = index < 3 ? '<i class="bi bi-trophy-fill"></i>' : '';
+                            return `
+                                <tr class="${index < 3 ? 'table-warning' : ''}">
+                                    <td class="text-center">
+                                        <span class="leaderboard-rank ${rankClass}">${rankIcon} #${index + 1}</span>
+                                    </td>
+                                    <td>
+                                        <a href="/profile/${user.username}" class="text-decoration-none">
+                                            <strong>${user.full_name || user.username}</strong>
+                                        </a>
+                                        ${user.affiliation ? `<br><small class="text-muted">${user.affiliation}</small>` : ''}
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-success">${user.approved_corrections_count}</span>
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="reputation-badge">
+                                            <i class="bi bi-star-fill"></i>
+                                            ${user.reputation_score}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-people display-4 text-muted"></i>
+                    <p class="text-muted mt-3">אין משתמשים עדיין</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Failed to load leaderboard:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger m-3">
+                <i class="bi bi-exclamation-triangle"></i> שגיאה בטעינת לוח המובילים
+            </div>
+        `;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadLeaderboard);
+</script>
+{% endblock %}

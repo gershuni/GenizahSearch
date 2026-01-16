@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}פרופיל - Genizah Corrections{% endblock %}
+
+{% block content %}
+<div class="row" id="profile-content">
+    <div class="col-12 text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+</div>
+
+<script>
+const username = '{{ username }}';
+
+async function loadProfile() {
+    const container = document.getElementById('profile-content');
+
+    try {
+        const [user, stats] = await Promise.all([
+            api.getUserProfile(username),
+            api.getUserStats(username)
+        ]);
+
+        const isOwnProfile = auth.currentUser?.username === username;
+
+        container.innerHTML = `
+            <div class="col-md-4 mb-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="mb-3">
+                            ${user.avatar_url
+                                ? `<img src="${user.avatar_url}" class="user-avatar">`
+                                : `<div class="user-avatar bg-primary d-inline-flex align-items-center justify-content-center text-white" style="width:80px;height:80px;border-radius:50%;font-size:2rem">
+                                    ${user.username.charAt(0).toUpperCase()}
+                                   </div>`
+                            }
+                        </div>
+                        <h4>${user.full_name || user.username}</h4>
+                        <p class="text-muted">@${user.username}</p>
+                        <div class="reputation-badge mb-3">
+                            <i class="bi bi-star-fill"></i>
+                            ${user.reputation_score}
+                        </div>
+                        <p class="badge bg-secondary">${user.role}</p>
+                        ${user.affiliation ? `<p class="text-muted"><i class="bi bi-building"></i> ${user.affiliation}</p>` : ''}
+                        ${user.bio ? `<p class="small">${user.bio}</p>` : ''}
+                        <p class="small text-muted">
+                            <i class="bi bi-calendar"></i>
+                            הצטרף ${formatDate(user.created_at)}
+                        </p>
+                        ${isOwnProfile ? `
+                            <hr>
+                            <a href="/profile/edit" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-pencil"></i> ערוך פרופיל
+                            </a>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <!-- Stats -->
+                <div class="row mb-4">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.total_corrections}</div>
+                            <div class="stat-label">תיקונים</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.approved_corrections}</div>
+                            <div class="stat-label">מאושרים</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.pending_corrections}</div>
+                            <div class="stat-label">ממתינים</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.total_comments}</div>
+                            <div class="stat-label">תגובות</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Corrections -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> תיקונים אחרונים</h5>
+                    </div>
+                    <div class="card-body" id="user-corrections">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Load user's corrections
+        loadUserCorrections();
+
+    } catch (error) {
+        console.error('Failed to load profile:', error);
+        container.innerHTML = `
+            <div class="col-12">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    לא ניתן לטעון את הפרופיל: ${error.message}
+                </div>
+            </div>
+        `;
+    }
+}
+
+async function loadUserCorrections() {
+    const container = document.getElementById('user-corrections');
+
+    try {
+        // Get user first to get their ID
+        const user = await api.getUserProfile(username);
+        const result = await api.listCorrections({
+            author_id: user.id,
+            page: 1,
+            page_size: 5
+        });
+
+        if (result.items.length > 0) {
+            container.innerHTML = result.items.map(c => createCorrectionCard(c, false)).join('');
+        } else {
+            container.innerHTML = '<p class="text-muted text-center">אין תיקונים עדיין</p>';
+        }
+    } catch (error) {
+        console.error('Failed to load corrections:', error);
+        container.innerHTML = '<p class="text-danger">שגיאה בטעינת תיקונים</p>';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadProfile);
+</script>
+{% endblock %}

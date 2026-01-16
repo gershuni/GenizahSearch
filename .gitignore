@@ -13,6 +13,7 @@ Results/
 Genizah_Tantivy_Index/
 *.pkl
 config.pkl
+data/
 
 # Build artifacts
 dist/

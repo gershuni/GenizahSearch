@@ -1,0 +1,324 @@
+/* Genizah Corrections - Custom Styles */
+
+/* RTL Support */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    direction: rtl;
+}
+
+/* Hebrew Text */
+.hebrew-text {
+    font-family: 'David', 'Frank Ruehl', 'Times New Roman', serif;
+    font-size: 1.2rem;
+    line-height: 1.8;
+}
+
+/* Card Styles */
+.correction-card {
+    border-right: 4px solid #0d6efd;
+    transition: box-shadow 0.2s;
+}
+
+.correction-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.correction-card.status-pending {
+    border-right-color: #ffc107;
+}
+
+.correction-card.status-approved {
+    border-right-color: #198754;
+}
+
+.correction-card.status-rejected {
+    border-right-color: #dc3545;
+}
+
+.correction-card.status-needs_revision {
+    border-right-color: #fd7e14;
+}
+
+/* Status Badges */
+.badge-draft { background-color: #6c757d; }
+.badge-pending { background-color: #ffc107; color: #000; }
+.badge-under_review { background-color: #17a2b8; }
+.badge-approved { background-color: #198754; }
+.badge-rejected { background-color: #dc3545; }
+.badge-needs_revision { background-color: #fd7e14; }
+
+/* Diff Display */
+.diff-container {
+    font-family: monospace;
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.diff-original {
+    background-color: #ffebee;
+    text-decoration: line-through;
+    color: #c62828;
+}
+
+.diff-corrected {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+/* Vote Buttons */
+.vote-btn {
+    border: none;
+    background: transparent;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.vote-btn:hover {
+    transform: scale(1.2);
+}
+
+.vote-btn.voted-up {
+    color: #198754;
+}
+
+.vote-btn.voted-down {
+    color: #dc3545;
+}
+
+.vote-score {
+    font-weight: bold;
+    min-width: 30px;
+    text-align: center;
+}
+
+.vote-score.positive { color: #198754; }
+.vote-score.negative { color: #dc3545; }
+
+/* Comment Styles */
+.comment-card {
+    border-right: 3px solid #e9ecef;
+    margin-bottom: 0.5rem;
+}
+
+.comment-card.pinned {
+    border-right-color: #ffc107;
+    background-color: #fffbeb;
+}
+
+.comment-card.resolved {
+    opacity: 0.7;
+}
+
+.reply-indent {
+    margin-right: 2rem;
+}
+
+/* Reaction Buttons */
+.reaction-btn {
+    border: 1px solid #dee2e6;
+    background: #fff;
+    border-radius: 20px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.reaction-btn:hover {
+    background: #f8f9fa;
+}
+
+.reaction-btn.active {
+    border-color: #0d6efd;
+    background: #e7f1ff;
+}
+
+/* User Profile */
+.user-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.reputation-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: bold;
+}
+
+/* Leaderboard */
+.leaderboard-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.leaderboard-rank {
+    font-size: 1.5rem;
+    font-weight: bold;
+    width: 50px;
+    text-align: center;
+}
+
+.leaderboard-rank.gold { color: #ffd700; }
+.leaderboard-rank.silver { color: #c0c0c0; }
+.leaderboard-rank.bronze { color: #cd7f32; }
+
+/* Form Styles */
+.form-label.required::after {
+    content: ' *';
+    color: #dc3545;
+}
+
+/* Loading Spinner */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+/* Toast Notifications */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 9999;
+}
+
+/* Inline Comments */
+.inline-comment-marker {
+    position: absolute;
+    right: -30px;
+    cursor: pointer;
+    color: #6c757d;
+}
+
+.inline-comment-marker:hover {
+    color: #0d6efd;
+}
+
+/* Document View */
+.document-line {
+    padding: 0.25rem 0;
+    border-bottom: 1px solid transparent;
+}
+
+.document-line:hover {
+    background: #f8f9fa;
+    border-bottom-color: #e9ecef;
+}
+
+.document-line.has-correction {
+    background: #fff3cd;
+}
+
+.document-line.has-comment {
+    position: relative;
+}
+
+.document-line.has-comment::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #0d6efd;
+}
+
+/* Confidence Meter */
+.confidence-meter {
+    height: 6px;
+    border-radius: 3px;
+    background: #e9ecef;
+    overflow: hidden;
+}
+
+.confidence-meter .bar {
+    height: 100%;
+    transition: width 0.3s;
+}
+
+.confidence-meter .bar.high { background: #198754; }
+.confidence-meter .bar.medium { background: #ffc107; }
+.confidence-meter .bar.low { background: #dc3545; }
+
+/* Stats Cards */
+.stat-card {
+    text-align: center;
+    padding: 1.5rem;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.stat-card .stat-number {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #0d6efd;
+}
+
+.stat-card .stat-label {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .correction-card {
+        border-right-width: 3px;
+    }
+
+    .reply-indent {
+        margin-right: 1rem;
+    }
+
+    .hebrew-text {
+        font-size: 1rem;
+    }
+}
+
+/* Print Styles */
+@media print {
+    .navbar, .footer, .vote-btn, .reaction-btn {
+        display: none !important;
+    }
+
+    .correction-card {
+        break-inside: avoid;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
