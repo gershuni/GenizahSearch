@@ -225,8 +225,11 @@ def create_feed_item(item: dict):
 
                 # Footer
                 with ui.row().classes('w-full items-center justify-between mt-2'):
-                    # Author
-                    author_name = author.get('display_name', tr('Anonymous'))
+                    # Author - check if anonymous first
+                    if author.get('is_anonymous', False):
+                        author_name = tr('Anonymous')
+                    else:
+                        author_name = author.get('full_name') or author.get('username') or tr('Anonymous')
                     affiliation = author.get('affiliation', '')
                     author_text = f"{author_name}" + (f" ({affiliation})" if affiliation else "")
                     ui.label(author_text).classes('text-xs').style('color: var(--text-tertiary);')
@@ -354,7 +357,11 @@ def show_discovery_details(item: dict):
                         ui.icon('description', size='sm')
                         ui.label(item['shelfmark']).classes('font-mono')
                 author = item.get('author', {})
-                ui.label(f"{tr('by')} {author.get('display_name', tr('Anonymous'))}").style('color: var(--text-secondary);')
+                if author.get('is_anonymous', False):
+                    author_name = tr('Anonymous')
+                else:
+                    author_name = author.get('full_name') or author.get('username') or tr('Anonymous')
+                ui.label(f"{tr('by')} {author_name}").style('color: var(--text-secondary);')
                 ui.label(format_date(item.get('created_at', ''))).style('color: var(--text-tertiary);')
 
             # Content

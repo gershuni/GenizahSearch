@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Server
     HOST: str = "0.0.0.0"
-    PORT: int = int(os.environ.get('GENIZAH_PORT', 8081))
+    PORT: int = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
 
     # Database
     DATABASE_URL: str = "sqlite:///./data/genizah_users.db"
