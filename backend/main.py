@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .config import settings, setup_directories
 from .models.database import init_db
-from .api.routes import auth, users, corrections, comments, documents
+from .api.routes import auth, users, corrections, comments, documents, versions
 
 # Configure logging
 logging.basicConfig(
@@ -100,6 +100,7 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(corrections.router, prefix="/api/v1")
 app.include_router(comments.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
+app.include_router(versions.router, prefix="/api/v1")
 
 # Mount web frontend
 try:
