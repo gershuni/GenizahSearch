@@ -11,8 +11,16 @@ from web.translations import tr
 import httpx
 from typing import Optional, Dict, Any
 
-# API base URL (same server)
+# API base URL (same server) - will be set dynamically
 API_BASE = "/api/v1"
+
+
+def get_api_base():
+    """Get the full API base URL."""
+    # Use localhost with the app port
+    import os
+    port = os.environ.get('GENIZAH_PORT', 8081)
+    return f"http://localhost:{port}/api/v1"
 
 
 class CorrectionsState:
@@ -43,7 +51,8 @@ corrections_state = CorrectionsState()
 
 async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
     """Make API call to corrections backend."""
-    url = f"{API_BASE}{endpoint}"
+    base_url = get_api_base()
+    url = f"{base_url}{endpoint}"
     all_headers = corrections_state.get_headers()
     if headers:
         all_headers.update(headers)
