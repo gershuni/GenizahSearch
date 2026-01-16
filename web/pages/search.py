@@ -600,6 +600,26 @@ def create_search_page(initial_query: str = None):
                         on_click=make_star_handler(result)
                     ).props('flat round dense size=sm').style('color: var(--accent-amber);')
 
+                    # Edit and Comment buttons
+                    sys_id = display.get('id', '')
+                    full_text = result.get('full_text', '')
+                    page_num = int(display.get('img', '1'))
+                    if full_text and sys_id:
+                        from web.components import create_edit_button, create_comment_button
+                        create_edit_button(
+                            document_id=sys_id,
+                            page_number=page_num,
+                            original_text=full_text,
+                            shelfmark=shelfmark,
+                            size='sm'
+                        )
+                        create_comment_button(
+                            document_id=sys_id,
+                            page_number=page_num,
+                            shelfmark=shelfmark,
+                            size='sm'
+                        )
+
             # Snippet
             if snippet:
                 snippet_html = format_snippet(snippet)

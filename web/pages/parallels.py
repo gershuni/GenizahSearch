@@ -448,6 +448,24 @@ def create_parallels_page(initial_text: str = None):
                             on_click=show_add_dialog
                         ).props('flat dense size=sm').style('color: var(--accent-amber);')
 
+                        # Edit and Comment buttons
+                        ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
+                        if ms_text_clean:
+                            from web.components import create_edit_button, create_comment_button
+                            create_edit_button(
+                                document_id=sys_id,
+                                page_number=1,  # Page unknown in parallels
+                                original_text=ms_text_clean,
+                                shelfmark=shelfmark,
+                                size='sm'
+                            )
+                            create_comment_button(
+                                document_id=sys_id,
+                                page_number=1,
+                                shelfmark=shelfmark,
+                                size='sm'
+                            )
+
     def show_parallel_metadata(sys_id, shelfmark, item):
         """Show metadata dialog for a parallel result."""
         # Get full metadata
@@ -604,6 +622,24 @@ def create_parallels_page(initial_text: str = None):
                     icon='star_border',
                     on_click=lambda i=item, s=shelfmark, t=title, sid=sys_id: add_to_list(i, s, t, sid)
                 ).props('flat round dense').style('color: var(--accent-amber);').tooltip(tr('Add to Favorites'))
+
+                # Edit and Comment buttons
+                ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
+                if ms_text_clean and sys_id:
+                    from web.components import create_edit_button, create_comment_button
+                    create_edit_button(
+                        document_id=sys_id,
+                        page_number=1,  # Page unknown in parallels
+                        original_text=ms_text_clean,
+                        shelfmark=shelfmark,
+                        size='sm'
+                    )
+                    create_comment_button(
+                        document_id=sys_id,
+                        page_number=1,
+                        shelfmark=shelfmark,
+                        size='sm'
+                    )
 
     def add_to_list(item, shelfmark, title, sys_id):
         if not sys_id:
