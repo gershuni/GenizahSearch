@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./data/genizah_users.db"
 
     # Security
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # Load SECRET_KEY from env, or use persisted key, or generate new one
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")  # Will be set in __init__ if empty
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     ALGORITHM: str = "HS256"
@@ -38,7 +39,13 @@ class Settings(BaseSettings):
     PASSWORD_REQUIRE_NUMBERS: bool = True
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080", "http://localhost:8081", "http://127.0.0.1:8000", "http://127.0.0.1:8081"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:8081",  # Genizah web interface default port
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8081"
+    ]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
@@ -79,6 +86,39 @@ class Settings(BaseSettings):
     REPUTATION_UPVOTE_RECEIVED: int = 2
     REPUTATION_DOWNVOTE_RECEIVED: int = -1
     REPUTATION_HELPFUL_COMMENT: int = 5
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Ensure SECRET_KEY is set and persistent
+        if not self.SECRET_KEY:
+            self.SECRET_KEY = self._get_or_create_secret_key()
+
+    def _get_or_create_secret_key(self) -> str:
+        """Get or create a persistent SECRET_KEY."""
+        secret_file = self.DATA_DIR / ".secret_key"
+
+        # Create data dir if it doesn't exist
+        self.DATA_DIR.mkdir(exist_ok=True)
+
+        # Try to read existing secret key
+        if secret_file.exists():
+            try:
+                return secret_file.read_text().strip()
+            except Exception as e:
+                print(f"Warning: Could not read secret key file: {e}")
+
+        # Generate new secret key
+        new_key = secrets.token_urlsafe(32)
+
+        # Save it for future use
+        try:
+            secret_file.write_text(new_key)
+            secret_file.chmod(0o600)  # Make file readable only by owner
+            print(f"Generated new SECRET_KEY and saved to {secret_file}")
+        except Exception as e:
+            print(f"Warning: Could not save secret key to file: {e}")
+
+        return new_key
 
     class Config:
         env_file = ".env"

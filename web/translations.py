@@ -526,6 +526,9 @@ TRANSLATIONS = {
     "Error loading leaderboard": "שגיאה בטעינת טבלת המובילים",
     "corrections": "תיקונים",
     "pts": "נקודות",
+    "Loading corrections...": "טוען תיקונים...",
+    "Loading pending corrections...": "טוען תיקונים ממתינים...",
+    "Loading leaderboard...": "טוען טבלת מובילים...",
 
     # Auth additions
     "Cancel": "ביטול",

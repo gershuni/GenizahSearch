@@ -5,6 +5,7 @@ Corrections Page - Genizah Search Pro
 User corrections system: submit, review, and manage transcription corrections.
 """
 
+import os
 from nicegui import ui, app
 from web.state import state
 from web.translations import tr
@@ -16,9 +17,29 @@ API_BASE = "/api/v1"
 
 
 def get_api_base():
-    """Get the full API base URL."""
-    # Use localhost with the app port
-    import os
+    """
+    Get the full API base URL.
+
+    Returns the API base URL, preferring the current request's origin
+    to support both local and remote access.
+    """
+    # Try to get the current request's origin
+    try:
+        # Get the host from the request if available
+        from starlette.requests import Request
+        from nicegui import context
+
+        if hasattr(context, 'client') and context.client:
+            # Use the same protocol and host as the current page
+            request = context.client.request
+            if request:
+                scheme = request.url.scheme
+                host = request.url.netloc
+                return f"{scheme}://{host}/api/v1"
+    except:
+        pass
+
+    # Fallback to localhost with configured port
     port = os.environ.get('GENIZAH_PORT', 8081)
     return f"http://localhost:{port}/api/v1"
 
@@ -50,7 +71,7 @@ corrections_state = CorrectionsState()
 
 
 async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
-    """Make API call to corrections backend."""
+    """Make API call to corrections backend with error handling."""
     base_url = get_api_base()
     url = f"{base_url}{endpoint}"
     all_headers = corrections_state.get_headers()
@@ -72,10 +93,26 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
 
             if resp.status_code in (200, 201):
                 return resp.json()
+            elif resp.status_code == 401:
+                # Token expired or invalid - clear auth state
+                corrections_state.clear()
+                app.storage.user.pop('corrections_token', None)
+                app.storage.user.pop('corrections_user', None)
+                return {"error": "Session expired. Please log in again.", "status": 401, "expired": True}
             else:
-                return {"error": resp.text, "status": resp.status_code}
+                # Try to parse error detail from response
+                try:
+                    error_data = resp.json()
+                    error_msg = error_data.get("detail", resp.text)
+                except:
+                    error_msg = resp.text
+                return {"error": error_msg, "status": resp.status_code}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out. Please try again."}
+        except httpx.ConnectError:
+            return {"error": "Cannot connect to server. Please check your connection."}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Request failed: {str(e)}"}
 
 
 async def create_corrections_page():
@@ -229,10 +266,24 @@ async def create_corrections_page():
 
         async def create_my_corrections_view():
             """View user's own corrections."""
+            # Show loading indicator
+            with ui.row().classes('w-full items-center justify-center py-8'):
+                loading_spinner = ui.spinner(size='lg')
+                loading_label = ui.label(tr('Loading corrections...')).classes('ml-3')
+
             result = await api_call("GET", "/corrections/my")
 
+            # Remove loading indicator
+            loading_spinner.delete()
+            loading_label.delete()
+
             if "error" in result:
-                ui.label(tr('Error loading corrections')).style('color: var(--danger);')
+                # Check if session expired
+                if result.get("expired"):
+                    ui.notify(result["error"], type='warning')
+                    await refresh_page()
+                    return
+                ui.label(f"{tr('Error loading corrections')}: {result['error']}").style('color: var(--danger);')
                 return
 
             corrections = result.get('items', [])
@@ -310,7 +361,7 @@ async def create_corrections_page():
                             "notes": notes_input.value or None,
                             "correction_type": correction_type.value,
                             "page_number": int(page_input.value) if page_input.value else None,
-                            "line_start": int(line_input.value) if line_input.value else None
+                            "line_number": int(line_input.value) if line_input.value else None
                         }
 
                         result = await api_call("POST", "/corrections/", data)
@@ -332,10 +383,24 @@ async def create_corrections_page():
 
         async def create_review_view():
             """View for reviewers to review pending corrections."""
+            # Show loading indicator
+            with ui.row().classes('w-full items-center justify-center py-8'):
+                loading_spinner = ui.spinner(size='lg')
+                loading_label = ui.label(tr('Loading pending corrections...')).classes('ml-3')
+
             result = await api_call("GET", "/corrections/pending")
 
+            # Remove loading indicator
+            loading_spinner.delete()
+            loading_label.delete()
+
             if "error" in result:
-                ui.label(tr('Error loading pending corrections')).style('color: var(--danger);')
+                # Check if session expired
+                if result.get("expired"):
+                    ui.notify(result["error"], type='warning')
+                    await refresh_page()
+                    return
+                ui.label(f"{tr('Error loading pending corrections')}: {result['error']}").style('color: var(--danger);')
                 return
 
             pending = result.get('items', [])
@@ -396,10 +461,24 @@ async def create_corrections_page():
 
         async def create_leaderboard_view():
             """Show top contributors."""
+            # Show loading indicator
+            with ui.row().classes('w-full items-center justify-center py-8'):
+                loading_spinner = ui.spinner(size='lg')
+                loading_label = ui.label(tr('Loading leaderboard...')).classes('ml-3')
+
             result = await api_call("GET", "/users/leaderboard", {"limit": 20})
 
+            # Remove loading indicator
+            loading_spinner.delete()
+            loading_label.delete()
+
             if "error" in result:
-                ui.label(tr('Error loading leaderboard')).style('color: var(--danger);')
+                # Check if session expired
+                if result.get("expired"):
+                    ui.notify(result["error"], type='warning')
+                    await refresh_page()
+                    return
+                ui.label(f"{tr('Error loading leaderboard')}: {result['error']}").style('color: var(--danger);')
                 return
 
             users = result if isinstance(result, list) else result.get('items', [])
