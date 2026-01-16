@@ -141,12 +141,12 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
                 try:
                     error_detail = resp.json()
                     return {"error": error_detail.get("detail", resp.text), "status": resp.status_code}
-                except:
+                except (ValueError, KeyError, TypeError):
                     return {"error": resp.text, "status": resp.status_code}
         except httpx.TimeoutException:
             return {"error": "Request timeout"}
-        except Exception as e:
-            return {"error": str(e)}
+        except httpx.RequestError as e:
+            return {"error": f"Request failed: {type(e).__name__}"}
 
 
 async def do_login(email: str, password: str) -> Dict:

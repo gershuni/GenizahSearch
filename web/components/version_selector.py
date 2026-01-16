@@ -25,13 +25,26 @@ async def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
     Returns:
         Dict with current_default and all_versions
     """
+    default_response = {'all_versions': [], 'current_default': None, 'total': 0}
+
     result = await api_call(
         "GET",
         f"/versions/{sys_id}/{page_num}"
     )
 
+    # Validate response structure
+    if not isinstance(result, dict):
+        return default_response
+
     if "error" in result:
-        return {'all_versions': [], 'current_default': None}
+        return default_response
+
+    # Ensure expected keys exist with correct types
+    if 'all_versions' not in result or not isinstance(result.get('all_versions'), list):
+        result['all_versions'] = []
+
+    if 'current_default' not in result:
+        result['current_default'] = None
 
     return result
 
