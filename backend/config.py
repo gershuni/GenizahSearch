@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Server
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = int(os.environ.get('GENIZAH_PORT', 8081))
 
     # Database
     DATABASE_URL: str = "sqlite:///./data/genizah_users.db"
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     PASSWORD_REQUIRE_NUMBERS: bool = True
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080", "http://localhost:8081", "http://127.0.0.1:8000", "http://127.0.0.1:8081"]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
