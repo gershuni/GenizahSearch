@@ -103,7 +103,21 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
                 # Try to parse error detail from response
                 try:
                     error_data = resp.json()
-                    error_msg = error_data.get("detail", resp.text)
+                    detail = error_data.get("detail", resp.text)
+
+                    # Handle FastAPI validation errors (detail is a list)
+                    if isinstance(detail, list):
+                        if detail and isinstance(detail[0], dict):
+                            msg = detail[0].get("msg", "Validation error")
+                            loc = detail[0].get("loc", [])
+                            field = loc[-1] if loc else "field"
+                            error_msg = f"{field}: {msg}"
+                        else:
+                            error_msg = "Validation error"
+                    elif isinstance(detail, dict):
+                        error_msg = detail.get("message", str(detail))
+                    else:
+                        error_msg = str(detail)
                 except:
                     error_msg = resp.text
                 return {"error": error_msg, "status": resp.status_code}

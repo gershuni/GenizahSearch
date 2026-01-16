@@ -145,7 +145,26 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
             else:
                 try:
                     error_detail = resp.json()
-                    return {"error": error_detail.get("detail", resp.text), "status": resp.status_code}
+                    detail = error_detail.get("detail", resp.text)
+
+                    # Handle FastAPI validation errors (detail is a list)
+                    if isinstance(detail, list):
+                        # Extract first error message
+                        if detail and isinstance(detail[0], dict):
+                            msg = detail[0].get("msg", "Validation error")
+                            loc = detail[0].get("loc", [])
+                            field = loc[-1] if loc else "field"
+                            error_msg = f"{field}: {msg}"
+                        else:
+                            error_msg = "Validation error"
+                    elif isinstance(detail, dict):
+                        # Handle dict errors
+                        error_msg = detail.get("message", str(detail))
+                    else:
+                        # Already a string
+                        error_msg = str(detail)
+
+                    return {"error": error_msg, "status": resp.status_code}
                 except (ValueError, KeyError, TypeError):
                     return {"error": resp.text, "status": resp.status_code}
         except httpx.TimeoutException:

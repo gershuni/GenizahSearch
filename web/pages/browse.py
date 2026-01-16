@@ -1056,28 +1056,36 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Edit and Comment buttons
                             if page.text:
                                 from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button
+
+                                # Refresh callback to reload page after edits/comments
+                                def refresh_page():
+                                    load_page(direction=0)
+
                                 create_edit_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     original_text=page.text,
-                                    shelfmark=page.shelfmark or page.sys_id
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    on_save=refresh_page
                                 )
                                 create_comment_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    on_submit=refresh_page
                                 )
                                 create_notes_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    on_refresh=refresh_page
                                 )
                                 # Version selector
                                 create_version_selector(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     original_text=page.text,
-                                    on_version_change=None  # TODO: implement text switching
+                                    on_version_change=refresh_page  # Refresh when version changes
                                 )
 
                     # Main text content
