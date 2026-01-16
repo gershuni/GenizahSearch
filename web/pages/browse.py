@@ -1053,6 +1053,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     on_click=toggle_image
                                 ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
 
+                            # Edit and Comment buttons
+                            if page.text:
+                                from web.components import create_edit_button, create_comment_button
+                                create_edit_button(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    original_text=page.text,
+                                    shelfmark=page.shelfmark or page.sys_id
+                                )
+                                create_comment_button(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    shelfmark=page.shelfmark or page.sys_id
+                                )
+
                     # Main text content
                     with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
                         if page.text:

@@ -713,7 +713,7 @@ def create_layout():
                 quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
-            # Right: Status + Actions
+            # Right: Status + Actions + Auth
             with ui.row().classes('items-center gap-4'):
                 # Status Indicator
                 with ui.row().classes('items-center gap-2 bg-white/15 px-4 py-2 rounded-full'):
@@ -729,6 +729,10 @@ def create_layout():
                             status_text.text = tr('Loading...')
 
                     ui.timer(2.0, update_status)
+
+                # Auth Buttons (Login/Register or User Menu)
+                from web.auth_state import create_auth_buttons
+                create_auth_buttons()
 
                 # Help Button
                 ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help'))
@@ -747,7 +751,6 @@ def create_layout():
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
                     ('/lists', 'star', tr('My Lists'), None),
-                    ('/corrections', 'edit_note', tr('Corrections'), None),
                 ]
 
                 for path, icon, label, badge in nav_items:
