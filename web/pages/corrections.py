@@ -288,13 +288,15 @@ async def create_corrections_page():
                     notes_input = ui.textarea(tr('Notes (explain your correction)')).classes('w-full').props('outlined rows=2')
 
                     correction_type = ui.select({
-                        'transcription_error': tr('Transcription Error'),
-                        'ocr_error': tr('OCR Error'),
-                        'spelling': tr('Spelling'),
-                        'missing_text': tr('Missing Text'),
-                        'extra_text': tr('Extra Text'),
-                        'other': tr('Other')
-                    }, label=tr('Correction Type'), value='transcription_error').classes('w-full').props('outlined')
+                        'text_correction': tr('Text Correction'),
+                        'text_addition': tr('Text Addition'),
+                        'text_deletion': tr('Text Deletion'),
+                        'metadata': tr('Metadata Correction'),
+                        'translation': tr('Translation'),
+                        'reading_suggestion': tr('Reading Suggestion'),
+                        'paleographic': tr('Paleographic Note'),
+                        'uncertain': tr('Uncertain Reading')
+                    }, label=tr('Correction Type'), value='text_correction').classes('w-full').props('outlined')
 
                     async def submit_correction():
                         if not doc_id_input.value or not corrected_input.value:
