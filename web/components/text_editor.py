@@ -314,7 +314,13 @@ def create_edit_text_dialog(
                             # Clear local edit if exists
                             delete_local_edit(document_id, page_number)
                             has_unsaved_changes['value'] = False
-                            ui.notify(tr('Correction submitted for review'), type='positive')
+
+                            # Show different message based on role
+                            if GlobalAuthState.is_admin() or GlobalAuthState.is_editor():
+                                ui.notify(tr('Correction published successfully'), type='positive')
+                            else:
+                                ui.notify(tr('Correction submitted for review'), type='positive')
+
                             dialog.close()
                             if on_save:
                                 on_save()

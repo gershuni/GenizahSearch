@@ -291,7 +291,7 @@ def create_new_discovery_dialog(on_success=None):
                     ).classes('w-full').props('outlined dense')
 
                 # Anonymous option
-                anonymous_check = ui.checkbox(tr('Post anonymously')).classes('text-sm')
+                anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')
                 ui.label(tr('Your name will not be shown publicly')).classes('text-xs ml-8').style('color: var(--text-tertiary);')
 
                 # Submit button

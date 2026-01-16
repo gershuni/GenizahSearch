@@ -562,6 +562,7 @@ TRANSLATIONS = {
     "Apply local changes": "החל שינויים מקומיים",
     "Changes apply immediately": "השינויים יושמו מיד",
     "Your corrections will be reviewed before publishing": "התיקונים שלך יבדקו לפני פרסום",
+    "Correction published successfully": "התיקון פורסם בהצלחה",
 
     # Admin Panel
     "Access Denied": "הגישה נדחתה",

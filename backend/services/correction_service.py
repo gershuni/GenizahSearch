@@ -200,26 +200,59 @@ class CorrectionService:
         if correction.status not in [CorrectionStatus.DRAFT, CorrectionStatus.NEEDS_REVISION]:
             return None, f"Cannot submit correction in {correction.status.value} status"
 
-        # Submit for review
-        correction.status = CorrectionStatus.PENDING
-        correction.submitted_at = datetime.utcnow()
-        if notes:
-            correction.notes = notes
-        db.commit()
+        # Auto-approve for editors and admins
+        if user.role in [UserRole.EDITOR, UserRole.ADMIN]:
+            correction.status = CorrectionStatus.APPROVED
+            correction.submitted_at = datetime.utcnow()
+            correction.reviewed_at = datetime.utcnow()
+            correction.applied_at = datetime.utcnow()
+            correction.reviewer_id = user.id
+            correction.review_notes = "Auto-approved (Editor/Admin)"
+            if notes:
+                correction.notes = notes
+            db.commit()
 
-        # Update document metadata
-        CorrectionService._update_document_metadata(db, correction.document_id, pending_delta=1)
+            # Update document metadata
+            CorrectionService._update_document_metadata(db, correction.document_id, approved_delta=1)
 
-        # Log activity
-        ActivityLog.log(
-            db,
-            ActivityType.CORRECTION_SUBMIT,
-            user_id=user.id,
-            target_type='correction',
-            target_id=str(correction.id),
-            description=f"Submitted correction for review",
-            ip_address=ip_address
-        )
+            # Award reputation to self
+            UserService.add_reputation(
+                db, user,
+                settings.REPUTATION_CORRECTION_APPROVED,
+                reason="Correction auto-approved"
+            )
+
+            # Log activity
+            ActivityLog.log(
+                db,
+                ActivityType.CORRECTION_APPROVE,
+                user_id=user.id,
+                target_type='correction',
+                target_id=str(correction.id),
+                description=f"Correction auto-approved (Editor/Admin)",
+                ip_address=ip_address
+            )
+        else:
+            # Submit for review (regular contributors)
+            correction.status = CorrectionStatus.PENDING
+            correction.submitted_at = datetime.utcnow()
+            if notes:
+                correction.notes = notes
+            db.commit()
+
+            # Update document metadata
+            CorrectionService._update_document_metadata(db, correction.document_id, pending_delta=1)
+
+            # Log activity
+            ActivityLog.log(
+                db,
+                ActivityType.CORRECTION_SUBMIT,
+                user_id=user.id,
+                target_type='correction',
+                target_id=str(correction.id),
+                description=f"Submitted correction for review",
+                ip_address=ip_address
+            )
 
         return correction, None
 
