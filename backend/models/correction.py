@@ -141,6 +141,9 @@ class Correction(Base):
     # Flag for indexing
     is_indexed = Column(Boolean, default=False)
 
+    # Privacy
+    is_anonymous = Column(Boolean, default=False)  # Hide author identity in public views
+
     # Relationships
     author = relationship("User", back_populates="corrections", foreign_keys=[author_id])
     reviewer = relationship("User", back_populates="reviewed_corrections", foreign_keys=[reviewer_id])

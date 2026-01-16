@@ -1,0 +1,162 @@
+"""
+Discovery Model - Discoveries, Questions, and Notable Findings
+
+Allows researchers to share:
+- Discoveries (new findings, identifications)
+- Questions to the community
+- Notable corrections/identifications
+"""
+import enum
+from datetime import datetime
+from sqlalchemy import (
+    Column, Integer, String, DateTime, Boolean, Text,
+    ForeignKey, Index, Enum
+)
+from sqlalchemy.orm import relationship
+from .database import Base
+
+
+class DiscoveryType(str, enum.Enum):
+    """Type of discovery/post"""
+    DISCOVERY = "discovery"           # New finding, identification
+    QUESTION = "question"             # Question for the community
+    IDENTIFICATION = "identification" # Identified a text/author
+    NOTE = "note"                     # General scholarly note
+    CORRECTION_HIGHLIGHT = "correction_highlight"  # Notable correction
+
+
+class DiscoveryStatus(str, enum.Enum):
+    """Status of the discovery"""
+    PUBLISHED = "published"     # Visible to all
+    DRAFT = "draft"             # Not yet published
+    HIDDEN = "hidden"           # Hidden by admin
+    FEATURED = "featured"       # Featured/highlighted
+
+
+class Discovery(Base):
+    """
+    Discovery model for sharing findings and questions with the community.
+
+    Attributes:
+        id: Unique identifier
+        user_id: Author (can be displayed as anonymous)
+        discovery_type: Type of post (discovery, question, etc.)
+
+        title: Short title/headline
+        content: Full description (supports markdown)
+
+        document_id: Related document (optional)
+        page_number: Specific page (optional)
+        shelfmark: Library shelfmark for reference
+
+        is_anonymous: Hide author identity
+        is_featured: Highlighted by admin
+        status: Visibility status
+    """
+    __tablename__ = "discoveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Author
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Classification
+    discovery_type = Column(
+        Enum(DiscoveryType),
+        default=DiscoveryType.NOTE,
+        nullable=False
+    )
+    status = Column(
+        Enum(DiscoveryStatus),
+        default=DiscoveryStatus.PUBLISHED,
+        nullable=False,
+        index=True
+    )
+
+    # Content
+    title = Column(String(300), nullable=False)
+    content = Column(Text, nullable=False)
+
+    # Related document (optional)
+    document_id = Column(String(100), nullable=True, index=True)
+    page_number = Column(Integer, nullable=True)
+    shelfmark = Column(String(255), nullable=True)
+
+    # Related correction (if highlighting a correction)
+    correction_id = Column(Integer, ForeignKey("corrections.id"), nullable=True)
+
+    # Privacy and display
+    is_anonymous = Column(Boolean, default=False)
+    is_featured = Column(Boolean, default=False, index=True)
+
+    # Engagement counts
+    view_count = Column(Integer, default=0)
+    response_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="discoveries")
+    correction = relationship("Correction")
+    responses = relationship("DiscoveryResponse", back_populates="discovery", cascade="all, delete-orphan")
+
+    # Indexes
+    __table_args__ = (
+        Index('ix_discoveries_type_status', 'discovery_type', 'status'),
+        Index('ix_discoveries_featured', 'is_featured', 'created_at'),
+        Index('ix_discoveries_document', 'document_id'),
+    )
+
+    def __repr__(self):
+        return f"<Discovery(id={self.id}, type={self.discovery_type}, title='{self.title[:30]}...')>"
+
+    @property
+    def display_author(self) -> str:
+        """Get display name respecting anonymity"""
+        if self.is_anonymous:
+            return "חוקר אנונימי"  # Anonymous researcher
+        return self.user.full_name or self.user.username if self.user else "Unknown"
+
+
+class DiscoveryResponse(Base):
+    """
+    Responses/comments on discoveries.
+    """
+    __tablename__ = "discovery_responses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discovery_id = Column(Integer, ForeignKey("discoveries.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Content
+    content = Column(Text, nullable=False)
+
+    # Privacy
+    is_anonymous = Column(Boolean, default=False)
+
+    # Status
+    is_deleted = Column(Boolean, default=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    discovery = relationship("Discovery", back_populates="responses")
+    user = relationship("User", back_populates="discovery_responses")
+
+    __table_args__ = (
+        Index('ix_discovery_responses_discovery', 'discovery_id', 'is_deleted'),
+    )
+
+    def __repr__(self):
+        return f"<DiscoveryResponse(id={self.id}, discovery={self.discovery_id})>"
+
+    @property
+    def display_author(self) -> str:
+        """Get display name respecting anonymity"""
+        if self.is_anonymous:
+            return "חוקר אנונימי"
+        return self.user.full_name or self.user.username if self.user else "Unknown"

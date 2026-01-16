@@ -83,6 +83,8 @@ class User(Base):
     votes = relationship("CorrectionVote", back_populates="user")
     reactions = relationship("CommentReaction", back_populates="user")
     activities = relationship("ActivityLog", back_populates="user")
+    discoveries = relationship("Discovery", back_populates="user")
+    discovery_responses = relationship("DiscoveryResponse", back_populates="user")
 
     # Indexes for common queries
     __table_args__ = (

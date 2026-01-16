@@ -750,6 +750,7 @@ def create_layout():
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
+                    ('/discoveries', 'lightbulb', tr('Discoveries'), None),
                     ('/lists', 'star', tr('My Lists'), None),
                 ]
 
@@ -969,6 +970,17 @@ async def corrections_page_route():
     with content:
         from web.pages.corrections import create_corrections_page
         await create_corrections_page()
+
+@ui.page('/discoveries')
+async def discoveries_page_route():
+    app.storage.user['current_page'] = '/discoveries'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.discoveries import create_discoveries_page
+        await create_discoveries_page()
 
 @ui.page('/admin')
 async def admin_page_route():

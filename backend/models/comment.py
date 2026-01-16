@@ -76,6 +76,7 @@ class Comment(Base):
     is_resolved = Column(Boolean, default=False)
     is_edited = Column(Boolean, default=False)
     is_deleted = Column(Boolean, default=False)  # Soft delete
+    is_anonymous = Column(Boolean, default=False)  # Hide author identity in public views
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

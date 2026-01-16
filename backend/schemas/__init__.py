@@ -21,6 +21,11 @@ from .common import (
     PaginationParams, PaginatedResponse, StatusResponse,
     ErrorResponse, SuccessResponse
 )
+from .discovery import (
+    DiscoveryCreate, DiscoveryUpdate, DiscoveryResponse,
+    DiscoveryListResponse, ResponseCreate, ResponseItem, ResponseListResponse,
+    DiscoveryStats, FeedItem, FeedResponse, AuthorInfo
+)
 
 __all__ = [
     # User
@@ -39,5 +44,9 @@ __all__ = [
     'VersionSearchParams', 'VersionStats', 'VersionSourceEnum',
     # Common
     'PaginationParams', 'PaginatedResponse', 'StatusResponse',
-    'ErrorResponse', 'SuccessResponse'
+    'ErrorResponse', 'SuccessResponse',
+    # Discovery
+    'DiscoveryCreate', 'DiscoveryUpdate', 'DiscoveryResponse',
+    'DiscoveryListResponse', 'ResponseCreate', 'ResponseItem', 'ResponseListResponse',
+    'DiscoveryStats', 'FeedItem', 'FeedResponse', 'AuthorInfo',
 ]
