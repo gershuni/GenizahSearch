@@ -597,6 +597,7 @@ TRANSLATIONS = {
     "View Comments": "צפה בהערות",
     "Write your comment here...": "כתוב את הערתך כאן...",
     "Please enter a comment": "אנא הזן הערה",
+    "Default": "ברירת מחדל",
 }
 
 

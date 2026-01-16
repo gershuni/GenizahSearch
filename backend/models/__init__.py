@@ -5,6 +5,7 @@ from .correction import Correction, CorrectionStatus, CorrectionVote
 from .comment import Comment, CommentReaction
 from .document_metadata import DocumentMetadata
 from .activity_log import ActivityLog
+from .transcription_version import TranscriptionVersion, PageDefault, VersionSource
 
 __all__ = [
     'Base', 'engine', 'SessionLocal', 'get_db', 'init_db',
@@ -12,5 +13,6 @@ __all__ = [
     'Correction', 'CorrectionStatus', 'CorrectionVote',
     'Comment', 'CommentReaction',
     'DocumentMetadata',
-    'ActivityLog'
+    'ActivityLog',
+    'TranscriptionVersion', 'PageDefault', 'VersionSource',
 ]

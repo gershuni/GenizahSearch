@@ -12,6 +12,11 @@ from .comment import (
     CommentCreate, CommentUpdate, CommentResponse,
     CommentReactionCreate, CommentListResponse
 )
+from .version import (
+    VersionCreate, VersionResponse, VersionListItem,
+    PageVersionsResponse, SetDefaultRequest, ImportVersionRequest,
+    VersionSearchParams, VersionStats, VersionSourceEnum
+)
 from .common import (
     PaginationParams, PaginatedResponse, StatusResponse,
     ErrorResponse, SuccessResponse
@@ -28,6 +33,10 @@ __all__ = [
     # Comment
     'CommentCreate', 'CommentUpdate', 'CommentResponse',
     'CommentReactionCreate', 'CommentListResponse',
+    # Version
+    'VersionCreate', 'VersionResponse', 'VersionListItem',
+    'PageVersionsResponse', 'SetDefaultRequest', 'ImportVersionRequest',
+    'VersionSearchParams', 'VersionStats', 'VersionSourceEnum',
     # Common
     'PaginationParams', 'PaginatedResponse', 'StatusResponse',
     'ErrorResponse', 'SuccessResponse'

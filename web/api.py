@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 # Import corrections API components
 from backend.models.database import init_db
-from backend.api.routes import auth, users, corrections, comments, documents
+from backend.api.routes import auth, users, corrections, comments, documents, versions
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -36,6 +36,7 @@ def init_api_routes():
     app.include_router(corrections.router, prefix="/api/v1", tags=["corrections"])
     app.include_router(comments.router, prefix="/api/v1", tags=["comments"])
     app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
+    app.include_router(versions.router, prefix="/api/v1", tags=["versions"])
 
     @app.get('/api/proxy_image')
     def proxy_image(url: str):
