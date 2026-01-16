@@ -55,7 +55,10 @@ async def create_correction(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new correction (starts as draft).
+    Create and submit a new correction.
+
+    For Editors/Admins: Auto-approved immediately
+    For Contributors: Submitted for review (PENDING status)
 
     - **document_id**: ID of the document being corrected
     - **original_text**: The original text being corrected
@@ -68,6 +71,7 @@ async def create_correction(
     """
     client_info = get_client_info(request)
 
+    # Step 1: Create correction (DRAFT status)
     correction, error = CorrectionService.create_correction(
         db, current_user, data,
         ip_address=client_info.get('ip_address')
@@ -79,7 +83,24 @@ async def create_correction(
             detail=error
         )
 
-    return _enrich_correction_response(correction, db, current_user)
+    # Step 2: Auto-submit the correction
+    # This will auto-approve for editors/admins, or set to PENDING for contributors
+    submitted, submit_error = CorrectionService.submit_correction(
+        db, current_user, correction.id,
+        notes=data.notes,
+        ip_address=client_info.get('ip_address')
+    )
+
+    if submit_error:
+        # Submission failed - return the draft correction with error info
+        # This shouldn't normally happen
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=submit_error
+        )
+
+    # Return the submitted (and possibly auto-approved) correction
+    return _enrich_correction_response(submitted, db, current_user)
 
 
 @router.get("/", response_model=CorrectionListResponse)

@@ -215,6 +215,13 @@ class CorrectionService:
             # Update document metadata
             CorrectionService._update_document_metadata(db, correction.document_id, approved_delta=1)
 
+            # Create a TranscriptionVersion from this approved correction
+            # This allows the correction to show up in the version selector
+            from .version_service import VersionService
+            VersionService.create_version_from_correction(
+                db, correction, user, set_as_default=True
+            )
+
             # Award reputation to self
             UserService.add_reputation(
                 db, user,
@@ -310,6 +317,13 @@ class CorrectionService:
             CorrectionService._update_document_metadata(
                 db, correction.document_id,
                 pending_delta=-1, approved_delta=1
+            )
+
+            # Create a TranscriptionVersion from this approved correction
+            # This allows the correction to show up in the version selector
+            from .version_service import VersionService
+            VersionService.create_version_from_correction(
+                db, correction, reviewer, set_as_default=True
             )
 
             activity_type = ActivityType.CORRECTION_APPROVE
