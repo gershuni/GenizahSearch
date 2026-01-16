@@ -560,6 +560,8 @@ TRANSLATIONS = {
     "Local draft": "טיוטה מקומית",
     "Discard local changes": "בטל שינויים מקומיים",
     "Apply local changes": "החל שינויים מקומיים",
+    "Changes apply immediately": "השינויים יושמו מיד",
+    "Your corrections will be reviewed before publishing": "התיקונים שלך יבדקו לפני פרסום",
 
     # Admin Panel
     "Access Denied": "הגישה נדחתה",

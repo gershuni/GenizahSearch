@@ -1077,8 +1077,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 create_notes_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id,
-                                    on_refresh=refresh_page
+                                    shelfmark=page.shelfmark or page.sys_id
                                 )
                                 # Version selector
                                 create_version_selector(

@@ -242,12 +242,13 @@ def create_edit_text_dialog(
                     if not GlobalAuthState.is_logged_in():
                         ui.icon('info').classes('text-orange-500')
                         ui.label(tr('Login to submit corrections to the system')).classes('text-sm text-orange-500')
-                    elif not GlobalAuthState.can_edit():
-                        ui.icon('info').classes('text-blue-500')
-                        ui.label(tr('Your account is pending approval')).classes('text-sm text-blue-500')
-                    else:
+                    elif GlobalAuthState.is_admin() or GlobalAuthState.is_editor():
                         ui.icon('check_circle').classes('text-green-500')
-                        ui.label(tr('Ready to submit')).classes('text-sm text-green-500')
+                        role_name = 'Admin' if GlobalAuthState.is_admin() else 'Editor'
+                        ui.label(f'{role_name} - {tr("Changes apply immediately")}').classes('text-sm text-green-500')
+                    else:
+                        ui.icon('info').classes('text-blue-500')
+                        ui.label(tr('Your corrections will be reviewed before publishing')).classes('text-sm text-blue-500')
 
                 # Right: Action buttons
                 with ui.row().classes('gap-2'):

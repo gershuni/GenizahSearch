@@ -187,7 +187,14 @@ def create_user_row(user):
                 async def change_role(uid=user.get('id'), new_role=None):
                     if new_role is None:
                         return
-                    result = await api_call("PUT", f"/users/{uid}", {"role": new_role})
+                    # Map frontend role names to backend enum values
+                    role_map = {
+                        'user': 'contributor',
+                        'editor': 'editor',
+                        'admin': 'admin'
+                    }
+                    backend_role = role_map.get(new_role, new_role)
+                    result = await api_call("PUT", f"/users/{uid}/role?role={backend_role}", None)
                     if "error" in result:
                         ui.notify(result['error'], type='negative')
                     else:
