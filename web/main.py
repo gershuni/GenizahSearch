@@ -965,7 +965,7 @@ async def corrections_page_route():
     content = create_layout()
     with content:
         from web.pages.corrections import create_corrections_page
-        create_corrections_page()
+        await create_corrections_page()
 
 # ============================================================================
 # Startup Logic

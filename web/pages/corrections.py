@@ -69,7 +69,7 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
             return {"error": str(e)}
 
 
-def create_corrections_page():
+async def create_corrections_page():
     """Create the Corrections page."""
 
     # Load stored auth if available
