@@ -93,14 +93,15 @@ class VersionService:
         if correction.status != CorrectionStatus.APPROVED:
             return None, "Correction must be approved to create a version"
 
-        # Get the next version number for this page
-        max_version = db.query(func.max(TranscriptionVersion.version_number)).filter(
-            TranscriptionVersion.sys_id == correction.system_id or correction.document_id,
-            TranscriptionVersion.page_num == correction.page_number or 1
-        ).scalar() or 0
-
+        # Determine sys_id and page_num with fallbacks
         sys_id = correction.system_id or correction.document_id
         page_num = correction.page_number or 1
+
+        # Get the next version number for this page
+        max_version = db.query(func.max(TranscriptionVersion.version_number)).filter(
+            TranscriptionVersion.sys_id == sys_id,
+            TranscriptionVersion.page_num == page_num
+        ).scalar() or 0
 
         # Create the new version
         version = TranscriptionVersion(

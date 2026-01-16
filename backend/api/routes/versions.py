@@ -15,7 +15,7 @@ from ...schemas.version import (
 )
 from ...schemas.common import SuccessResponse
 from ...services.version_service import VersionService
-from ..deps import get_current_active_user, get_current_user_optional, require_admin
+from ..deps import get_current_active_user, get_current_user_optional, require_admin, require_editor
 
 router = APIRouter(prefix="/versions", tags=["Versions"])
 
@@ -154,13 +154,13 @@ async def set_default_version(
     sys_id: str,
     page_num: int,
     request: SetDefaultRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_editor),
     db: Session = Depends(get_db)
 ):
     """
     Set a specific version as the default for a page.
 
-    Requires authentication.
+    Requires editor role or higher.
     """
     # Verify the version belongs to this page
     version = VersionService.get_version_by_id(db, request.version_id)

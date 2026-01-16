@@ -13,6 +13,7 @@ from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
 from typing import Optional, Callable
+from datetime import datetime
 import json
 
 
@@ -34,7 +35,7 @@ def save_local_edit(document_id: str, page_number: int, text: str, original_text
         "page_number": page_number,
         "text": text,
         "original_text": original_text,
-        "timestamp": str(__import__('datetime').datetime.now())
+        "timestamp": str(datetime.now())
     }
     app.storage.user[LOCAL_EDITS_KEY] = edits
 
