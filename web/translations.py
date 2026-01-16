@@ -691,6 +691,7 @@ TRANSLATIONS = {
     "Discovery shared successfully!": "החידוש שותף בהצלחה!",
     "Share": "שתף",
     "View document": "צפה במסמך",
+    "Showing version by": "מציג גרסה מאת",
 }
 
 

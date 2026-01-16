@@ -1079,31 +1079,53 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id
                                 )
-                                # Version selector
-                                create_version_selector(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    original_text=page.text,
-                                    on_version_change=refresh_page  # Refresh when version changes
-                                )
 
-                    # Main text content
-                    with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
-                        if page.text:
-                            # Apply highlighting if we have search terms
-                            display_text = page.text
-                            if state.highlight_terms:
-                                display_text = highlight_text(page.text)
-                                ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
-                            else:
-                                ui.label(page.text).style(
-                                    'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
-                                )
-                        else:
-                            with ui.column().classes('items-center justify-center h-full'):
-                                ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                                ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+                    # Main text content - use container for version switching
+                    text_container = ui.column().classes('w-full')
+                    current_text = {'value': page.text}  # Mutable container for current text
+
+                    def render_text_content(text: str):
+                        """Render text content with optional highlighting."""
+                        text_container.clear()
+                        with text_container:
+                            with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
+                                if text:
+                                    if state.highlight_terms:
+                                        display_text = highlight_text(text)
+                                        ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                                    else:
+                                        ui.label(text).style(
+                                            'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                            'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                        )
+                                else:
+                                    with ui.column().classes('items-center justify-center h-full'):
+                                        ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                                        ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+
+                    def handle_version_change(new_text: str, version_info: dict):
+                        """Handle version selection - update displayed text."""
+                        current_text['value'] = new_text
+                        render_text_content(new_text)
+                        source = version_info.get('source', 'unknown')
+                        author = version_info.get('author', '')
+                        if source == 'user' and author:
+                            ui.notify(f"{tr('Showing version by')} {author}", type='info')
+                        elif source in ('V0.7', 'V0.8'):
+                            ui.notify(f"{tr('Showing')} {source}", type='info')
+
+                    # Version selector with callback
+                    if page.text:
+                        with ui.row().classes('items-center'):
+                            create_version_selector(
+                                document_id=page.sys_id,
+                                page_number=page.p_num,
+                                original_text=page.text,
+                                on_version_change=handle_version_change
+                            )
+
+                    # Initial render
+                    render_text_content(page.text if page.text else None)
 
                 # Image panel - BELOW text, collapsible, only if available
                 if has_image:
