@@ -566,7 +566,9 @@ class CorrectionsClient:
         correction_id: int = None,
         parent_id: int = None,
         comment_type: str = "general",
-        line_number: int = None
+        line_number: int = None,
+        is_public: bool = True,
+        is_anonymous: bool = False
     ) -> Tuple[Optional[Comment], str]:
         """Create a new comment"""
         try:
@@ -576,7 +578,9 @@ class CorrectionsClient:
                 'correction_id': correction_id,
                 'parent_id': parent_id,
                 'comment_type': comment_type,
-                'line_number': line_number
+                'line_number': line_number,
+                'is_public': is_public,
+                'is_anonymous': is_anonymous
             })
             return self._parse_comment(data), "Comment created"
         except Exception as e:
@@ -599,6 +603,16 @@ class CorrectionsClient:
         except Exception as e:
             logger.warning(f"Failed to get comments: {e}")
             return []
+
+    # Alias for consistency with UI naming
+    def get_comments_for_document(
+        self,
+        document_id: str,
+        page: int = 1,
+        page_size: int = 50
+    ) -> List[Comment]:
+        """Alias for get_document_comments"""
+        return self.get_document_comments(document_id, page, page_size)
 
     def react_to_comment(self, comment_id: int, reaction_type: str) -> Tuple[bool, str]:
         """Add/toggle reaction to a comment"""

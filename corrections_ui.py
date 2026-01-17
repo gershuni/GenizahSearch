@@ -1656,6 +1656,660 @@ class CreateDiscoveryDialog(QDialog):
             QMessageBox.warning(self, tr("Error"), error)
 
 
+class CommentDialog(QDialog):
+    """Dialog for adding a comment to a document or correction"""
+    comment_submitted = pyqtSignal(object)
+
+    def __init__(
+        self,
+        parent=None,
+        client: CorrectionsClient = None,
+        document_id: str = None,
+        correction_id: int = None,
+        shelfmark: str = None,
+        page_number: int = None
+    ):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.document_id = document_id
+        self.correction_id = correction_id
+        self.shelfmark = shelfmark
+        self.page_number = page_number
+        self.setWindowTitle(tr("Add Comment"))
+        self.resize(500, 400)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(tr("Add a Comment"))
+        header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(header)
+
+        # Context info
+        if self.shelfmark or self.document_id:
+            context_text = f"{tr('Document')}: {self.shelfmark or self.document_id}"
+            if self.page_number:
+                context_text += f" • {tr('Page')} {self.page_number}"
+            context_label = QLabel(context_text)
+            context_label.setStyleSheet("color: gray;")
+            layout.addWidget(context_label)
+
+        # Comment type
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel(tr("Type:")))
+        self.type_combo = QComboBox()
+        self.type_combo.addItems([
+            tr("General Comment"),
+            tr("Question"),
+            tr("Scholarly Note"),
+            tr("Suggestion"),
+            tr("Issue Report")
+        ])
+        self.type_values = ['general', 'question', 'scholarly_note', 'suggestion', 'issue']
+        type_layout.addWidget(self.type_combo)
+        type_layout.addStretch()
+        layout.addLayout(type_layout)
+
+        # Comment content
+        layout.addWidget(QLabel(tr("Your comment:")))
+        self.content_input = QTextEdit()
+        self.content_input.setPlaceholderText(tr("Write your comment here..."))
+        layout.addWidget(self.content_input)
+
+        # Options
+        options_layout = QHBoxLayout()
+        self.public_check = QCheckBox(tr("Public comment"))
+        self.public_check.setChecked(True)
+        self.public_check.setToolTip(tr("Uncheck to make this comment private (only visible to you)"))
+        options_layout.addWidget(self.public_check)
+
+        self.anonymous_check = QCheckBox(tr("Post anonymously"))
+        options_layout.addWidget(self.anonymous_check)
+
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_submit = QPushButton(tr("Submit Comment"))
+        self.btn_submit.setStyleSheet("background-color: #27ae60; color: white;")
+        self.btn_submit.clicked.connect(self.submit_comment)
+        btn_layout.addWidget(self.btn_submit)
+
+        layout.addLayout(btn_layout)
+
+    def submit_comment(self):
+        """Submit the comment"""
+        content = self.content_input.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, tr("Error"), tr("Please enter a comment"))
+            return
+
+        comment_type = self.type_values[self.type_combo.currentIndex()]
+
+        comment, error = self.client.create_comment(
+            content=content,
+            document_id=self.document_id,
+            correction_id=self.correction_id,
+            comment_type=comment_type,
+            is_public=self.public_check.isChecked(),
+            is_anonymous=self.anonymous_check.isChecked()
+        )
+
+        if comment:
+            QMessageBox.information(self, tr("Success"), tr("Comment submitted successfully"))
+            self.comment_submitted.emit(comment)
+            self.accept()
+        else:
+            QMessageBox.warning(self, tr("Error"), error or tr("Failed to submit comment"))
+
+
+class CommentsViewerDialog(QDialog):
+    """Dialog for viewing comments on a document"""
+
+    def __init__(
+        self,
+        parent=None,
+        client: CorrectionsClient = None,
+        document_id: str = None,
+        shelfmark: str = None
+    ):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.document_id = document_id
+        self.shelfmark = shelfmark
+        self.setWindowTitle(tr("Document Comments"))
+        self.resize(700, 500)
+        self.init_ui()
+        self.load_comments()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header_text = f"{tr('Comments for')} {self.shelfmark or self.document_id}"
+        header = QLabel(header_text)
+        header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(header)
+
+        # Add comment button
+        add_btn_layout = QHBoxLayout()
+        add_btn_layout.addStretch()
+        self.btn_add_comment = QPushButton(tr("Add Comment"))
+        self.btn_add_comment.setStyleSheet("background-color: #3498db; color: white;")
+        self.btn_add_comment.clicked.connect(self.open_add_comment)
+        add_btn_layout.addWidget(self.btn_add_comment)
+        layout.addLayout(add_btn_layout)
+
+        # Comments list
+        self.comments_scroll = QScrollArea()
+        self.comments_scroll.setWidgetResizable(True)
+        self.comments_widget = QWidget()
+        self.comments_layout = QVBoxLayout(self.comments_widget)
+        self.comments_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.comments_scroll.setWidget(self.comments_widget)
+        layout.addWidget(self.comments_scroll)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_refresh = QPushButton(tr("Refresh"))
+        self.btn_refresh.clicked.connect(self.load_comments)
+        btn_layout.addWidget(self.btn_refresh)
+        btn_layout.addStretch()
+        self.btn_close = QPushButton(tr("Close"))
+        self.btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+
+    def load_comments(self):
+        """Load comments for the document"""
+        # Clear existing
+        while self.comments_layout.count():
+            item = self.comments_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        comments = self.client.get_comments_for_document(self.document_id)
+
+        if not comments:
+            empty_label = QLabel(tr("No comments yet"))
+            empty_label.setStyleSheet("color: gray; font-size: 14px;")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.comments_layout.addWidget(empty_label)
+            return
+
+        for comment in comments:
+            comment_widget = self.create_comment_widget(comment)
+            self.comments_layout.addWidget(comment_widget)
+
+    def create_comment_widget(self, comment: Comment) -> QFrame:
+        """Create a widget for a comment"""
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 10px;
+                margin: 2px;
+            }
+        """)
+
+        layout = QVBoxLayout(frame)
+
+        # Header
+        header_layout = QHBoxLayout()
+
+        # Type badge
+        type_labels = {
+            'general': tr('Comment'),
+            'question': tr('Question'),
+            'scholarly_note': tr('Scholarly Note'),
+            'suggestion': tr('Suggestion'),
+            'issue': tr('Issue')
+        }
+        type_label = QLabel(type_labels.get(comment.comment_type, comment.comment_type))
+        type_label.setStyleSheet("background: #3498db; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px;")
+        header_layout.addWidget(type_label)
+
+        # Private indicator
+        if not comment.is_public:
+            private_label = QLabel("🔒 " + tr("Private"))
+            private_label.setStyleSheet("color: #e67e22; font-size: 10px;")
+            header_layout.addWidget(private_label)
+
+        # Pinned indicator
+        if comment.is_pinned:
+            pin_label = QLabel("📌")
+            header_layout.addWidget(pin_label)
+
+        # Resolved indicator
+        if comment.is_resolved:
+            resolved_label = QLabel("✓ " + tr("Resolved"))
+            resolved_label.setStyleSheet("color: #27ae60; font-size: 10px;")
+            header_layout.addWidget(resolved_label)
+
+        header_layout.addStretch()
+
+        # Date
+        if comment.created_at:
+            date_label = QLabel(comment.created_at[:10])
+            date_label.setStyleSheet("color: gray; font-size: 10px;")
+            header_layout.addWidget(date_label)
+
+        layout.addLayout(header_layout)
+
+        # Author
+        author_name = tr("Anonymous") if comment.is_anonymous else (comment.author_username or "-")
+        author_label = QLabel(f"👤 {author_name}")
+        author_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        layout.addWidget(author_label)
+
+        # Content
+        content_label = QLabel(comment.content)
+        content_label.setWordWrap(True)
+        content_label.setStyleSheet("font-size: 12px; margin-top: 5px;")
+        layout.addWidget(content_label)
+
+        # Reply count
+        if comment.reply_count > 0:
+            reply_label = QLabel(f"💬 {comment.reply_count} {tr('replies')}")
+            reply_label.setStyleSheet("color: gray; font-size: 10px; margin-top: 5px;")
+            layout.addWidget(reply_label)
+
+        return frame
+
+    def open_add_comment(self):
+        """Open dialog to add a comment"""
+        if not self.client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to add a comment"))
+            return
+
+        dialog = CommentDialog(
+            self,
+            self.client,
+            document_id=self.document_id,
+            shelfmark=self.shelfmark
+        )
+        dialog.comment_submitted.connect(lambda _: self.load_comments())
+        dialog.exec()
+
+
+class MyCommentsDialog(QDialog):
+    """Dialog showing user's own comments"""
+
+    def __init__(self, parent=None, client: CorrectionsClient = None):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.setWindowTitle(tr("My Comments"))
+        self.resize(800, 600)
+        self.init_ui()
+        self.load_comments()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(tr("My Comments"))
+        header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(header)
+
+        # Comments list
+        self.comments_scroll = QScrollArea()
+        self.comments_scroll.setWidgetResizable(True)
+        self.comments_widget = QWidget()
+        self.comments_layout = QVBoxLayout(self.comments_widget)
+        self.comments_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.comments_scroll.setWidget(self.comments_widget)
+        layout.addWidget(self.comments_scroll)
+
+        # Pagination
+        page_layout = QHBoxLayout()
+        self.btn_prev = QPushButton(tr("Previous"))
+        self.btn_prev.clicked.connect(self.prev_page)
+        page_layout.addWidget(self.btn_prev)
+
+        self.page_label = QLabel("1")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page_layout.addWidget(self.page_label)
+
+        self.btn_next = QPushButton(tr("Next"))
+        self.btn_next.clicked.connect(self.next_page)
+        page_layout.addWidget(self.btn_next)
+
+        page_layout.addStretch()
+        layout.addLayout(page_layout)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_refresh = QPushButton(tr("Refresh"))
+        self.btn_refresh.clicked.connect(self.load_comments)
+        btn_layout.addWidget(self.btn_refresh)
+        btn_layout.addStretch()
+        self.btn_close = QPushButton(tr("Close"))
+        self.btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+
+        self.current_page = 1
+        self.total_pages = 1
+
+    def load_comments(self):
+        """Load user's comments"""
+        # Clear existing
+        while self.comments_layout.count():
+            item = self.comments_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        comments, total = self.client.get_my_comments(page=self.current_page)
+
+        self.total_pages = max(1, (total + 19) // 20)
+        self.page_label.setText(f"{self.current_page} / {self.total_pages}")
+        self.btn_prev.setEnabled(self.current_page > 1)
+        self.btn_next.setEnabled(self.current_page < self.total_pages)
+
+        if not comments:
+            empty_label = QLabel(tr("No comments yet"))
+            empty_label.setStyleSheet("color: gray; font-size: 14px;")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.comments_layout.addWidget(empty_label)
+            return
+
+        for comment in comments:
+            comment_frame = QFrame()
+            comment_frame.setStyleSheet("""
+                QFrame {
+                    background: white;
+                    border: 1px solid #ddd;
+                    border-radius: 5px;
+                    padding: 10px;
+                    margin: 2px;
+                }
+            """)
+
+            frame_layout = QVBoxLayout(comment_frame)
+
+            # Header with document info
+            header_layout = QHBoxLayout()
+
+            if comment.document_id:
+                doc_label = QLabel(f"📄 {comment.document_id}")
+                doc_label.setStyleSheet("color: #3498db; font-family: monospace;")
+                header_layout.addWidget(doc_label)
+
+            # Type
+            type_labels = {
+                'general': tr('Comment'),
+                'question': tr('Question'),
+                'scholarly_note': tr('Scholarly Note'),
+                'suggestion': tr('Suggestion'),
+                'issue': tr('Issue')
+            }
+            type_label = QLabel(type_labels.get(comment.comment_type, comment.comment_type))
+            type_label.setStyleSheet("background: #95a5a6; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;")
+            header_layout.addWidget(type_label)
+
+            # Private indicator
+            if not comment.is_public:
+                private_label = QLabel("🔒")
+                header_layout.addWidget(private_label)
+
+            header_layout.addStretch()
+
+            # Date
+            if comment.created_at:
+                date_label = QLabel(comment.created_at[:10])
+                date_label.setStyleSheet("color: gray; font-size: 10px;")
+                header_layout.addWidget(date_label)
+
+            frame_layout.addLayout(header_layout)
+
+            # Content
+            content_label = QLabel(comment.content[:200] + "..." if len(comment.content) > 200 else comment.content)
+            content_label.setWordWrap(True)
+            content_label.setStyleSheet("font-size: 12px;")
+            frame_layout.addWidget(content_label)
+
+            self.comments_layout.addWidget(comment_frame)
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_comments()
+
+    def next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.load_comments()
+
+
+class TextEditorDialog(QDialog):
+    """Full-featured text editor for editing transcriptions"""
+    text_saved = pyqtSignal(str)  # Emits the edited text
+
+    def __init__(
+        self,
+        parent=None,
+        client: CorrectionsClient = None,
+        document_id: str = None,
+        page_number: int = None,
+        shelfmark: str = None,
+        original_text: str = "",
+        system_id: str = None
+    ):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.document_id = document_id
+        self.page_number = page_number
+        self.shelfmark = shelfmark
+        self.original_text = original_text
+        self.system_id = system_id
+
+        self.setWindowTitle(tr("Edit Transcription"))
+        self.resize(800, 600)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header_layout = QHBoxLayout()
+        header = QLabel(tr("Edit Transcription"))
+        header.setStyleSheet("font-weight: bold; font-size: 16px;")
+        header_layout.addWidget(header)
+
+        # Document info
+        if self.shelfmark or self.document_id:
+            doc_info = self.shelfmark or self.document_id
+            if self.page_number:
+                doc_info += f" • {tr('Page')} {self.page_number}"
+            doc_label = QLabel(doc_info)
+            doc_label.setStyleSheet("color: #3498db; font-family: monospace;")
+            header_layout.addWidget(doc_label)
+
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        # Splitter for original and edited text
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Original text (read-only)
+        original_group = QGroupBox(tr("Original Text"))
+        original_layout = QVBoxLayout(original_group)
+        self.original_edit = QTextEdit()
+        self.original_edit.setPlainText(self.original_text)
+        self.original_edit.setReadOnly(True)
+        self.original_edit.setStyleSheet("background-color: #f5f5f5;")
+        # RTL for Hebrew
+        self.original_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        original_layout.addWidget(self.original_edit)
+
+        # Copy from original button
+        copy_btn = QPushButton(tr("Copy to Editor"))
+        copy_btn.clicked.connect(self.copy_to_editor)
+        original_layout.addWidget(copy_btn)
+
+        splitter.addWidget(original_group)
+
+        # Edited text
+        edited_group = QGroupBox(tr("Your Correction"))
+        edited_layout = QVBoxLayout(edited_group)
+        self.edited_edit = QTextEdit()
+        self.edited_edit.setPlainText(self.original_text)
+        self.edited_edit.setStyleSheet("background-color: #e8f5e9;")
+        # RTL for Hebrew
+        self.edited_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.edited_edit.textChanged.connect(self.on_text_changed)
+        edited_layout.addWidget(self.edited_edit)
+
+        # Word count
+        self.word_count_label = QLabel()
+        self.word_count_label.setStyleSheet("color: gray; font-size: 10px;")
+        edited_layout.addWidget(self.word_count_label)
+
+        splitter.addWidget(edited_group)
+
+        # Equal sizes
+        splitter.setSizes([400, 400])
+        layout.addWidget(splitter)
+
+        # Status bar
+        status_layout = QHBoxLayout()
+        self.status_label = QLabel(tr("Ready to edit"))
+        self.status_label.setStyleSheet("color: gray;")
+        status_layout.addWidget(self.status_label)
+        status_layout.addStretch()
+        layout.addLayout(status_layout)
+
+        # Notes
+        notes_group = QGroupBox(tr("Notes (explain your correction)"))
+        notes_layout = QVBoxLayout(notes_group)
+        self.notes_input = QTextEdit()
+        self.notes_input.setMaximumHeight(80)
+        self.notes_input.setPlaceholderText(tr("Explain what you changed and why..."))
+        notes_layout.addWidget(notes_group)
+        layout.addWidget(notes_group)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        self.btn_reset = QPushButton(tr("Reset to Original"))
+        self.btn_reset.clicked.connect(self.reset_text)
+        btn_layout.addWidget(self.btn_reset)
+
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_save_draft = QPushButton(tr("Save Draft"))
+        self.btn_save_draft.clicked.connect(self.save_draft)
+        btn_layout.addWidget(self.btn_save_draft)
+
+        self.btn_submit = QPushButton(tr("Submit Correction"))
+        self.btn_submit.setStyleSheet("background-color: #27ae60; color: white;")
+        self.btn_submit.clicked.connect(self.submit_correction)
+        btn_layout.addWidget(self.btn_submit)
+
+        layout.addLayout(btn_layout)
+
+        # Update word count
+        self.on_text_changed()
+
+    def on_text_changed(self):
+        """Update word count and status"""
+        edited_text = self.edited_edit.toPlainText()
+        word_count = len(edited_text.split())
+        char_count = len(edited_text)
+
+        # Count changes
+        original_words = set(self.original_text.split())
+        edited_words = set(edited_text.split())
+        changed_words = len(original_words.symmetric_difference(edited_words))
+
+        self.word_count_label.setText(f"{word_count} {tr('words')} • {char_count} {tr('characters')} • {changed_words} {tr('words changed')}")
+
+        # Update status
+        if edited_text != self.original_text:
+            self.status_label.setText(tr("Unsaved changes"))
+            self.status_label.setStyleSheet("color: #e67e22;")
+        else:
+            self.status_label.setText(tr("No changes"))
+            self.status_label.setStyleSheet("color: gray;")
+
+    def copy_to_editor(self):
+        """Copy original text to editor"""
+        self.edited_edit.setPlainText(self.original_text)
+
+    def reset_text(self):
+        """Reset to original text"""
+        reply = QMessageBox.question(
+            self,
+            tr("Reset"),
+            tr("Are you sure you want to reset to the original text?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.edited_edit.setPlainText(self.original_text)
+
+    def save_draft(self):
+        """Save as local draft"""
+        edited_text = self.edited_edit.toPlainText()
+        self.text_saved.emit(edited_text)
+        QMessageBox.information(self, tr("Draft Saved"), tr("Your draft has been saved locally"))
+
+    def submit_correction(self):
+        """Submit the correction to the server"""
+        edited_text = self.edited_edit.toPlainText().strip()
+
+        if edited_text == self.original_text:
+            QMessageBox.warning(self, tr("No Changes"), tr("No changes to submit"))
+            return
+
+        if not self.client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to submit corrections"))
+            return
+
+        # Create correction
+        correction, error = self.client.create_correction(
+            document_id=self.document_id or self.system_id or "unknown",
+            original_text=self.original_text,
+            corrected_text=edited_text,
+            correction_type="text_correction",
+            page_number=self.page_number,
+            shelfmark=self.shelfmark,
+            system_id=self.system_id,
+            notes=self.notes_input.toPlainText().strip() or None
+        )
+
+        if error and not correction:
+            QMessageBox.warning(self, tr("Error"), error)
+            return
+
+        # Auto-submit
+        success, message = self.client.submit_correction(correction.id)
+        if success:
+            QMessageBox.information(
+                self,
+                tr("Submitted"),
+                tr("Your correction has been submitted for review")
+            )
+            self.text_saved.emit(edited_text)
+            self.accept()
+        else:
+            QMessageBox.warning(self, tr("Error"), message)
+
+
 class CommunityHubWidget(QWidget):
     """
     Main widget integrating all community features:
@@ -1719,6 +2373,16 @@ class CommunityHubWidget(QWidget):
         my_layout.addStretch()
         self.tabs.addTab(my_corrections_widget, tr("My Corrections"))
 
+        # My Comments tab
+        self.my_comments_btn = QPushButton(tr("View My Comments"))
+        self.my_comments_btn.clicked.connect(self.open_my_comments)
+        my_comments_widget = QWidget()
+        comments_layout = QVBoxLayout(my_comments_widget)
+        comments_layout.addWidget(QLabel(tr("View and manage your comments.")))
+        comments_layout.addWidget(self.my_comments_btn)
+        comments_layout.addStretch()
+        self.tabs.addTab(my_comments_widget, tr("My Comments"))
+
         layout.addWidget(self.tabs)
 
     def open_discoveries(self):
@@ -1737,4 +2401,12 @@ class CommunityHubWidget(QWidget):
             QMessageBox.warning(self, tr("Login Required"), tr("Please login to view your corrections"))
             return
         dialog = MyCorrectionsDialog(self, self.client)
+        dialog.exec()
+
+    def open_my_comments(self):
+        """Open my comments dialog"""
+        if not self.client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to view your comments"))
+            return
+        dialog = MyCommentsDialog(self, self.client)
         dialog.exec()
