@@ -21,7 +21,7 @@ async def fetch_document_comments(document_id: str, page_number: int = None) -> 
 
     Args:
         document_id: System ID of the document
-        page_number: Optional page number to filter
+        page_number: Optional page number to filter (uses line_number field)
 
     Returns:
         List of comment objects
@@ -37,9 +37,10 @@ async def fetch_document_comments(document_id: str, page_number: int = None) -> 
 
     comments = result.get('items', [])
 
-    # Filter by page number if specified
+    # Filter by line_number (which stores page number) if specified
+    # Include comments without line_number (document-level comments)
     if page_number is not None:
-        comments = [c for c in comments if c.get('page_number') == page_number or c.get('target_type') == 'document']
+        comments = [c for c in comments if c.get('line_number') == page_number or c.get('line_number') is None]
 
     return comments
 

@@ -59,14 +59,6 @@ def create_comment_dialog(
                 scope_select.props('disable')
                 scope_select.value = 'manuscript'
 
-            # Visibility
-            ui.label(tr('Comment visibility')).classes('font-medium text-sm')
-            visibility_options = {
-                'public': tr('Public'),
-                'private': tr('Private')
-            }
-            visibility_select = ui.radio(visibility_options, value='public').props('inline')
-
             # Comment text
             comment_text = ui.textarea(
                 label=tr('Comment'),
@@ -91,21 +83,21 @@ def create_comment_dialog(
                         error_label.classes('visible', remove='hidden')
                         return
 
-                    # Determine the scope
-                    target_type = 'document'
-                    target_page = None
-                    if scope_select.value == 'page' and page_number:
-                        target_type = 'page'
-                        target_page = page_number
-
-                    # Submit to backend
-                    result = await api_call("POST", "/comments/", {
+                    # Build comment data with valid fields
+                    # Note: Backend doesn't support is_public yet - all comments are public
+                    # line_number is used for page-specific comments
+                    comment_data = {
                         "document_id": document_id,
                         "content": comment_text.value.strip(),
-                        "is_public": visibility_select.value == 'public',
-                        "target_type": target_type,
-                        "page_number": target_page
-                    })
+                        "comment_type": "general"
+                    }
+
+                    # If page-specific comment, set line_number to page number for tracking
+                    if scope_select.value == 'page' and page_number:
+                        comment_data["line_number"] = page_number
+
+                    # Submit to backend
+                    result = await api_call("POST", "/comments/", comment_data)
 
                     if "error" in result:
                         error_label.text = result.get("error", "Error submitting comment")
