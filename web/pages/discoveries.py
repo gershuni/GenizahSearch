@@ -196,33 +196,45 @@ def create_feed_item(item: dict, on_refresh=None):
     }
     style = type_styles.get(item_type, type_styles['discovery'])
 
-    # Check if current user is the author
+    # Check if current user is the author or admin
     current_user = GlobalAuthState.get_user()
     is_author = current_user and author.get('id') == current_user.get('id')
+    is_admin = current_user and current_user.get('role') == 'admin'
 
     with ui.card().classes('w-full p-4 hover:shadow-md transition-shadow'):
         with ui.row().classes('w-full items-start gap-4'):
-            # Type icon
-            with ui.column().classes('items-center'):
+            # Type icon and badges
+            with ui.column().classes('items-center gap-1'):
                 ui.icon(style['icon']).classes(f'text-2xl text-{style["color"]}-500')
+                if item.get('is_pinned'):
+                    ui.icon('push_pin').classes('text-sm text-red-500').tooltip(tr('Pinned'))
                 if item.get('is_featured'):
                     ui.icon('star').classes('text-sm text-amber-400')
+                if item.get('is_answered') and item_type == 'question':
+                    ui.icon('check_circle').classes('text-sm text-green-500').tooltip(tr('Answered'))
 
             # Content
             with ui.column().classes('flex-1 gap-2'):
                 # Header row
                 with ui.row().classes('w-full items-center justify-between'):
-                    with ui.row().classes('items-center gap-2'):
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
                         ui.badge(style['label']).props(f'color={style["color"]}').classes('text-xs')
-                        # Shelfmark + page link
-                        if item.get('shelfmark') or item.get('document_id'):
-                            shelfmark = item.get('shelfmark') or item.get('document_id', '')
-                            page_num = item.get('page_number')
-                            link_text = shelfmark
+
+                        # Answered badge for questions
+                        if item.get('is_answered') and item_type == 'question':
+                            ui.badge(tr('Answered')).props('color=green').classes('text-xs')
+
+                        # Shelfmark + page link (always show if available)
+                        shelfmark = item.get('shelfmark')
+                        page_num = item.get('page_number')
+                        doc_id = item.get('document_id')
+
+                        if shelfmark or doc_id:
+                            link_text = shelfmark or doc_id
                             if page_num:
                                 link_text += f" • {tr('Image')} {page_num}"
 
-                            def go_to_doc(did=item.get('document_id'), pnum=page_num):
+                            def go_to_doc(did=doc_id, pnum=page_num):
                                 if did:
                                     url = f'/browse?id={did}'
                                     if pnum:
@@ -232,16 +244,14 @@ def create_feed_item(item: dict, on_refresh=None):
                             with ui.element('a').classes('cursor-pointer hover:underline text-sm font-mono').style('color: var(--primary-600);').on('click', go_to_doc):
                                 ui.label(link_text)
 
-                    # Date and author actions
+                    # Date and actions
                     with ui.row().classes('items-center gap-2'):
                         created_at = item.get('created_at', '')
                         if created_at:
-                            date_str = format_date(created_at)
-                            ui.label(date_str).classes('text-xs').style('color: var(--text-tertiary);')
+                            ui.label(format_date(created_at)).classes('text-xs').style('color: var(--text-tertiary);')
 
                         # Edit/Delete for author (only for discoveries, not corrections/comments)
                         if is_author and item_type in ('discovery', 'question', 'identification', 'note'):
-                            # Extract numeric ID from "discovery_123" format
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
 
                             async def edit_discovery(nid=numeric_id, i=item):
@@ -254,6 +264,22 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             ui.button(icon='delete', on_click=delete_discovery).props('flat round dense size=sm color=negative').tooltip(tr('Delete'))
 
+                        # Admin pin button
+                        if is_admin and item_type in ('discovery', 'question', 'identification', 'note'):
+                            numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
+                            is_pinned = item.get('is_pinned', False)
+
+                            async def toggle_pin(nid=numeric_id, pinned=is_pinned):
+                                result = await api_call("POST", f"/discoveries/{nid}/pin", {"pinned": not pinned})
+                                if "error" not in result:
+                                    ui.notify(tr('Pin toggled'), type='positive')
+                                    if on_refresh:
+                                        await on_refresh()
+
+                            pin_icon = 'push_pin' if is_pinned else 'push_pin'
+                            pin_color = 'color=red' if is_pinned else ''
+                            ui.button(icon=pin_icon, on_click=toggle_pin).props(f'flat round dense size=sm {pin_color}').tooltip(tr('Pin') if not is_pinned else tr('Unpin'))
+
                 # Title
                 ui.label(item.get('title', '')).classes('font-bold text-lg')
 
@@ -261,8 +287,27 @@ def create_feed_item(item: dict, on_refresh=None):
                 content = item.get('content_preview', '')
                 with ui.expansion(icon='expand_more').classes('w-full').props('dense'):
                     with ui.column().classes('w-full gap-4'):
-                        # Full content
-                        ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')
+                        # For corrections: show original and corrected text side by side
+                        if item_type == 'correction':
+                            original_text = item.get('original_text', '')
+                            corrected_text = item.get('corrected_text', '')
+                            if original_text or corrected_text:
+                                with ui.row().classes('w-full gap-4'):
+                                    if original_text:
+                                        with ui.column().classes('flex-1'):
+                                            ui.label(tr('Original')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
+                                            ui.label(original_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
+                                                'background: var(--surface-secondary); direction: rtl; text-align: right;'
+                                            )
+                                    if corrected_text:
+                                        with ui.column().classes('flex-1'):
+                                            ui.label(tr('Corrected')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
+                                            ui.label(corrected_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
+                                                'background: var(--surface-secondary); direction: rtl; text-align: right;'
+                                            )
+                        else:
+                            # Full content for non-corrections
+                            ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')
 
                         # Document link
                         if item.get('document_id'):
@@ -282,12 +327,65 @@ def create_feed_item(item: dict, on_refresh=None):
 
                                 ui.button(link_text, on_click=go_to_doc2).props('flat dense').classes('text-primary')
 
-                        # Responses section (only for discoveries)
+                        # Voting section for discoveries
                         if item_type in ('discovery', 'question', 'identification', 'note'):
+                            ui.separator().classes('my-2')
+                            numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
+
+                            with ui.row().classes('w-full items-center gap-4'):
+                                # Vote buttons
+                                upvotes = item.get('upvotes', 0) or 0
+                                downvotes = item.get('downvotes', 0) or 0
+
+                                with ui.row().classes('items-center gap-1'):
+                                    async def vote_up(nid=numeric_id):
+                                        if not GlobalAuthState.is_logged_in():
+                                            ui.notify(tr('Login to vote'), type='warning')
+                                            return
+                                        result = await api_call("POST", f"/discoveries/{nid}/vote?vote_type=up")
+                                        if "error" not in result:
+                                            ui.notify(tr('Vote recorded'), type='positive')
+                                            if on_refresh:
+                                                await on_refresh()
+
+                                    ui.button(icon='thumb_up', on_click=vote_up).props('flat dense size=sm').tooltip(tr('Upvote'))
+                                    ui.label(str(upvotes)).classes('text-sm font-medium')
+
+                                with ui.row().classes('items-center gap-1'):
+                                    async def vote_down(nid=numeric_id):
+                                        if not GlobalAuthState.is_logged_in():
+                                            ui.notify(tr('Login to vote'), type='warning')
+                                            return
+                                        result = await api_call("POST", f"/discoveries/{nid}/vote?vote_type=down")
+                                        if "error" not in result:
+                                            ui.notify(tr('Vote recorded'), type='positive')
+                                            if on_refresh:
+                                                await on_refresh()
+
+                                    ui.button(icon='thumb_down', on_click=vote_down).props('flat dense size=sm').tooltip(tr('Downvote'))
+                                    ui.label(str(downvotes)).classes('text-sm font-medium')
+
+                                # Mark as answered button (for questions, author or admin only)
+                                if item_type == 'question' and (is_author or is_admin):
+                                    is_answered = item.get('is_answered', False)
+
+                                    async def toggle_answered(nid=numeric_id, answered=is_answered):
+                                        result = await api_call("POST", f"/discoveries/{nid}/answer?answered={str(not answered).lower()}")
+                                        if "error" not in result:
+                                            ui.notify(tr('Status updated'), type='positive')
+                                            if on_refresh:
+                                                await on_refresh()
+
+                                    if is_answered:
+                                        ui.button(tr('Mark as unanswered'), icon='help_outline', on_click=toggle_answered).props('flat dense size=sm')
+                                    else:
+                                        ui.button(tr('Mark as answered'), icon='check_circle', on_click=toggle_answered).props('flat dense size=sm color=green')
+
+                            # Responses section
                             ui.separator().classes('my-2')
                             responses_container = ui.column().classes('w-full gap-2')
 
-                            async def load_responses(container=responses_container, nid=item_id.split('_')[-1] if '_' in item_id else item_id):
+                            async def load_responses(container=responses_container, nid=numeric_id):
                                 container.clear()
                                 with container:
                                     result = await api_call("GET", f"/discoveries/{nid}/responses")

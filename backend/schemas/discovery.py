@@ -68,8 +68,12 @@ class DiscoveryResponse(DiscoveryBase):
     author: AuthorInfo
     status: DiscoveryStatus
     is_featured: bool = False
+    is_pinned: bool = False
+    is_answered: bool = False
     view_count: int = 0
     response_count: int = 0
+    upvotes: int = 0
+    downvotes: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -148,13 +152,20 @@ class FeedItem(BaseModel):
     author: AuthorInfo
     document_id: Optional[str] = None
     shelfmark: Optional[str] = None
+    page_number: Optional[int] = None
     created_at: datetime
     response_count: int = 0
     is_featured: bool = False
+    is_pinned: bool = False
+    is_answered: bool = False
+    upvotes: int = 0
+    downvotes: int = 0
 
     # Type-specific fields
     discovery_type: Optional[DiscoveryType] = None
     correction_status: Optional[str] = None
+    original_text: Optional[str] = None  # For corrections
+    corrected_text: Optional[str] = None  # For corrections
 
 
 class FeedResponse(BaseModel):

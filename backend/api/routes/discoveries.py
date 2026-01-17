@@ -327,3 +327,72 @@ async def hide_discovery(
         )
 
     return SuccessResponse(success=True, message="Discovery hidden")
+
+
+@router.post("/{discovery_id}/pin", response_model=SuccessResponse)
+async def pin_discovery(
+    discovery_id: int,
+    pinned: bool = True,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Pin or unpin a discovery.
+
+    Admin only.
+    """
+    success, error = DiscoveryService.pin_discovery(db, discovery_id, pinned)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+
+    return SuccessResponse(success=True, message="Discovery pinned" if pinned else "Discovery unpinned")
+
+
+@router.post("/{discovery_id}/answer", response_model=SuccessResponse)
+async def mark_answered(
+    discovery_id: int,
+    answered: bool = True,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a question as answered.
+
+    Author or admin only.
+    """
+    success, error = DiscoveryService.mark_answered(db, discovery_id, current_user, answered)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+
+    return SuccessResponse(success=True, message="Question marked as answered" if answered else "Question marked as unanswered")
+
+
+@router.post("/{discovery_id}/vote", response_model=SuccessResponse)
+async def vote_discovery(
+    discovery_id: int,
+    vote_type: str,  # 'up', 'down', or 'none'
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Vote on a discovery (thumbs up/down).
+
+    Requires authentication.
+    """
+    success, error, votes = DiscoveryService.vote_discovery(db, discovery_id, current_user, vote_type)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+
+    return SuccessResponse(success=True, message="Vote recorded", data=votes)

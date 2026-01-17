@@ -88,10 +88,14 @@ class Discovery(Base):
     # Privacy and display
     is_anonymous = Column(Boolean, default=False)
     is_featured = Column(Boolean, default=False, index=True)
+    is_pinned = Column(Boolean, default=False, index=True)  # Admin pinned
+    is_answered = Column(Boolean, default=False)  # For questions
 
     # Engagement counts
     view_count = Column(Integer, default=0)
     response_count = Column(Integer, default=0)
+    upvotes = Column(Integer, default=0)
+    downvotes = Column(Integer, default=0)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -118,6 +122,33 @@ class Discovery(Base):
         if self.is_anonymous:
             return "חוקר אנונימי"  # Anonymous researcher
         return self.user.full_name or self.user.username if self.user else "Unknown"
+
+    @property
+    def vote_score(self) -> int:
+        """Net vote score (upvotes - downvotes)"""
+        return (self.upvotes or 0) - (self.downvotes or 0)
+
+
+class DiscoveryVote(Base):
+    """
+    Track individual user votes on discoveries.
+    Each user can vote once per discovery (up or down).
+    """
+    __tablename__ = "discovery_votes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discovery_id = Column(Integer, ForeignKey("discoveries.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    vote_type = Column(String(10), nullable=False)  # 'up' or 'down'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    discovery = relationship("Discovery")
+    user = relationship("User")
+
+    __table_args__ = (
+        Index('ix_discovery_votes_unique', 'discovery_id', 'user_id', unique=True),
+    )
 
 
 class DiscoveryResponse(Base):

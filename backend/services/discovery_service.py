@@ -312,13 +312,18 @@ class DiscoveryService:
                     id=f"discovery_{d.id}",
                     item_type="discovery" if d.discovery_type != DiscoveryType.QUESTION else "question",
                     title=d.title,
-                    content_preview=d.content[:200] + "..." if len(d.content) > 200 else d.content,
+                    content_preview=d.content,  # Full content, no truncation
                     author=AuthorInfo.from_user(d.user, d.is_anonymous),
                     document_id=d.document_id,
                     shelfmark=d.shelfmark,
+                    page_number=d.page_number,
                     created_at=d.created_at,
                     response_count=d.response_count,
                     is_featured=d.is_featured,
+                    is_pinned=getattr(d, 'is_pinned', False),
+                    is_answered=getattr(d, 'is_answered', False),
+                    upvotes=getattr(d, 'upvotes', 0) or 0,
+                    downvotes=getattr(d, 'downvotes', 0) or 0,
                     discovery_type=d.discovery_type
                 ))
 
@@ -339,14 +344,17 @@ class DiscoveryService:
                     id=f"correction_{c.id}",
                     item_type="correction",
                     title=title,
-                    content_preview=f'"{c.original_text}" → "{c.corrected_text}"'[:200],
+                    content_preview=c.corrected_text or '',  # Just the corrected text
                     author=AuthorInfo.from_user(c.author, getattr(c, 'is_anonymous', False)),
                     document_id=c.document_id,
                     shelfmark=c.shelfmark,
+                    page_number=c.page_number,
                     created_at=c.applied_at or c.created_at,
                     response_count=len(c.comments) if c.comments else 0,
                     is_featured=False,
-                    correction_status=c.status.value
+                    correction_status=c.status.value,
+                    original_text=c.original_text,
+                    corrected_text=c.corrected_text
                 ))
 
         # Get public comments (document-level, not on corrections)
@@ -436,3 +444,131 @@ class DiscoveryService:
         db.commit()
 
         return True, None
+
+    @staticmethod
+    def pin_discovery(
+        db: Session,
+        discovery_id: int,
+        pinned: bool = True
+    ) -> Tuple[bool, Optional[str]]:
+        """Pin or unpin a discovery (admin action)"""
+        discovery = db.query(Discovery).filter(
+            Discovery.id == discovery_id
+        ).first()
+
+        if not discovery:
+            return False, "Discovery not found"
+
+        discovery.is_pinned = pinned
+        db.commit()
+
+        return True, None
+
+    @staticmethod
+    def mark_answered(
+        db: Session,
+        discovery_id: int,
+        user: "User",
+        answered: bool = True
+    ) -> Tuple[bool, Optional[str]]:
+        """Mark a question as answered (author or admin)"""
+        from ..models.discovery import DiscoveryType
+
+        discovery = db.query(Discovery).filter(
+            Discovery.id == discovery_id
+        ).first()
+
+        if not discovery:
+            return False, "Discovery not found"
+
+        # Only author or admin can mark as answered
+        if discovery.user_id != user.id and not user.is_admin():
+            return False, "Not authorized"
+
+        # Only questions can be marked as answered
+        if discovery.discovery_type != DiscoveryType.QUESTION:
+            return False, "Only questions can be marked as answered"
+
+        discovery.is_answered = answered
+        db.commit()
+
+        return True, None
+
+    @staticmethod
+    def vote_discovery(
+        db: Session,
+        discovery_id: int,
+        user: "User",
+        vote_type: str  # 'up', 'down', or 'none' to remove vote
+    ) -> Tuple[bool, Optional[str], Optional[dict]]:
+        """Vote on a discovery (up/down or remove vote)"""
+        from ..models.discovery import DiscoveryVote
+
+        discovery = db.query(Discovery).filter(
+            Discovery.id == discovery_id
+        ).first()
+
+        if not discovery:
+            return False, "Discovery not found", None
+
+        # Check for existing vote
+        existing_vote = db.query(DiscoveryVote).filter(
+            DiscoveryVote.discovery_id == discovery_id,
+            DiscoveryVote.user_id == user.id
+        ).first()
+
+        if vote_type == 'none':
+            # Remove existing vote
+            if existing_vote:
+                if existing_vote.vote_type == 'up':
+                    discovery.upvotes = max(0, (discovery.upvotes or 0) - 1)
+                else:
+                    discovery.downvotes = max(0, (discovery.downvotes or 0) - 1)
+                db.delete(existing_vote)
+                db.commit()
+            return True, None, {"upvotes": discovery.upvotes or 0, "downvotes": discovery.downvotes or 0}
+
+        if vote_type not in ('up', 'down'):
+            return False, "Invalid vote type", None
+
+        if existing_vote:
+            # Change vote
+            if existing_vote.vote_type != vote_type:
+                if existing_vote.vote_type == 'up':
+                    discovery.upvotes = max(0, (discovery.upvotes or 0) - 1)
+                    discovery.downvotes = (discovery.downvotes or 0) + 1
+                else:
+                    discovery.downvotes = max(0, (discovery.downvotes or 0) - 1)
+                    discovery.upvotes = (discovery.upvotes or 0) + 1
+                existing_vote.vote_type = vote_type
+        else:
+            # New vote
+            new_vote = DiscoveryVote(
+                discovery_id=discovery_id,
+                user_id=user.id,
+                vote_type=vote_type
+            )
+            db.add(new_vote)
+            if vote_type == 'up':
+                discovery.upvotes = (discovery.upvotes or 0) + 1
+            else:
+                discovery.downvotes = (discovery.downvotes or 0) + 1
+
+        db.commit()
+        return True, None, {"upvotes": discovery.upvotes or 0, "downvotes": discovery.downvotes or 0}
+
+    @staticmethod
+    def get_user_vote(
+        db: Session,
+        discovery_id: int,
+        user_id: int
+    ) -> Optional[str]:
+        """Get user's vote on a discovery ('up', 'down', or None)"""
+        from ..models.discovery import DiscoveryVote
+
+        vote = db.query(DiscoveryVote).filter(
+            DiscoveryVote.discovery_id == discovery_id,
+            DiscoveryVote.user_id == user_id
+        ).first()
+
+        return vote.vote_type if vote else None
