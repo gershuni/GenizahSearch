@@ -98,11 +98,16 @@ async def get_my_comments(
         page_size=page_size
     )
 
+    total_pages = (total + page_size - 1) // page_size
+
     return CommentListResponse(
         items=[_enrich_comment_response(c, db, current_user) for c in comments],
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1
     )
 
 
