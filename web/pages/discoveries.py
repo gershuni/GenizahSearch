@@ -41,6 +41,7 @@ async def create_discoveries_page():
                         'discovery': tr('Discoveries'),
                         'question': tr('Questions'),
                         'correction': tr('Corrections'),
+                        'comment': tr('Comments'),
                     },
                     value='all',
                     label=tr('Type')
@@ -189,6 +190,7 @@ def create_feed_item(item: dict):
         'correction': {'icon': 'edit', 'color': 'blue', 'label': tr('Correction')},
         'identification': {'icon': 'search', 'color': 'green', 'label': tr('Identification')},
         'note': {'icon': 'note', 'color': 'gray', 'label': tr('Note')},
+        'comment': {'icon': 'comment', 'color': 'teal', 'label': tr('Comment')},
     }
     style = type_styles.get(item_type, type_styles['discovery'])
 

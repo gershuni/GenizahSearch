@@ -276,12 +276,12 @@ class DiscoveryService:
     @staticmethod
     def get_feed(
         db: Session,
-        item_type: Optional[str] = None,  # "all", "discovery", "question", "correction"
+        item_type: Optional[str] = None,  # "all", "discovery", "question", "correction", "comment"
         period: Optional[str] = None,  # "day", "week", "month", "all"
         limit: int = 20,
         offset: int = 0
     ) -> Tuple[List[FeedItem], int]:
-        """Get activity feed combining discoveries, corrections, etc."""
+        """Get activity feed combining discoveries, corrections, comments, etc."""
         feed_items = []
 
         # Calculate date filter
@@ -347,6 +347,43 @@ class DiscoveryService:
                     response_count=len(c.comments) if c.comments else 0,
                     is_featured=False,
                     correction_status=c.status.value
+                ))
+
+        # Get public comments (document-level, not on corrections)
+        if item_type in (None, "all", "comment"):
+            comment_query = db.query(Comment).filter(
+                Comment.is_deleted == False,
+                Comment.is_public == True,
+                Comment.document_id.isnot(None),  # Only document comments
+                Comment.parent_id.is_(None)  # Only top-level comments
+            )
+
+            if date_filter:
+                comment_query = comment_query.filter(Comment.created_at >= date_filter)
+
+            for c in comment_query.all():
+                # Create a title from the comment
+                comment_type_labels = {
+                    'general': 'הערה',
+                    'question': 'שאלה',
+                    'scholarly_note': 'הערה מדעית',
+                    'suggestion': 'הצעה',
+                    'issue': 'בעיה'
+                }
+                type_label = comment_type_labels.get(c.comment_type.value, 'הערה')
+                title = f"{type_label} על {c.document_id}"
+
+                feed_items.append(FeedItem(
+                    id=f"comment_{c.id}",
+                    item_type="comment",
+                    title=title,
+                    content_preview=c.content[:200] + "..." if len(c.content) > 200 else c.content,
+                    author=AuthorInfo.from_user(c.author, getattr(c, 'is_anonymous', False)),
+                    document_id=c.document_id,
+                    shelfmark=None,  # Comments don't have shelfmark directly
+                    created_at=c.created_at,
+                    response_count=c.reply_count or 0,
+                    is_featured=c.is_pinned
                 ))
 
         # Sort by date

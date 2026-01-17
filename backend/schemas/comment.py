@@ -30,6 +30,7 @@ class CommentCreate(CommentBase):
     document_id: Optional[str] = Field(None, max_length=100)
     correction_id: Optional[int] = None
     parent_id: Optional[int] = None  # For replies
+    is_public: bool = True  # False = private, only visible to author
 
 
 class CommentUpdate(BaseModel):
@@ -74,6 +75,7 @@ class CommentResponse(BaseModel):
     is_resolved: bool = False
     is_edited: bool = False
     is_deleted: bool = False
+    is_public: bool = True
 
     reply_count: int = 0
     reaction_count: int = 0

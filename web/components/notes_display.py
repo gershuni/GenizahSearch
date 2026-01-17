@@ -171,6 +171,7 @@ def create_notes_button(
 ):
     """
     Create a button that opens a dialog showing notes.
+    Shows yellow indicator when comments exist.
 
     Args:
         document_id: System ID of the document
@@ -179,30 +180,50 @@ def create_notes_button(
         size: Button size
 
     Returns:
-        The button element
+        The button container element
     """
-    async def show_notes_dialog():
-        dialog = ui.dialog()
+    container = ui.element('div').classes('relative inline-block')
 
-        with dialog, ui.card().classes('w-96 max-h-96'):
-            with ui.row().classes('w-full items-center justify-between p-4 border-b'):
-                ui.label(tr('Notes & Comments')).classes('font-bold')
-                ui.button(icon='close', on_click=dialog.close).props('flat round dense')
+    with container:
+        async def show_notes_dialog():
+            dialog = ui.dialog()
 
-            with ui.scroll_area().classes('w-full').style('height: 300px;'):
-                with ui.column().classes('w-full gap-2 p-4'):
-                    comments = await fetch_document_comments(document_id, page_number)
+            with dialog, ui.card().classes('w-96 max-h-96'):
+                with ui.row().classes('w-full items-center justify-between p-4 border-b'):
+                    ui.label(tr('Notes & Comments')).classes('font-bold')
+                    ui.button(icon='close', on_click=dialog.close).props('flat round dense')
 
-                    if not comments:
-                        with ui.row().classes('w-full justify-center'):
-                            ui.label(tr('No comments yet')).classes('text-sm').style('color: var(--text-muted);')
-                    else:
-                        for comment in comments:
-                            create_comment_card(comment)
+                with ui.scroll_area().classes('w-full').style('height: 300px;'):
+                    with ui.column().classes('w-full gap-2 p-4'):
+                        comments = await fetch_document_comments(document_id, page_number)
 
-        dialog.open()
+                        if not comments:
+                            with ui.row().classes('w-full justify-center'):
+                                ui.label(tr('No comments yet')).classes('text-sm').style('color: var(--text-muted);')
+                        else:
+                            for comment in comments:
+                                create_comment_card(comment)
 
-    return ui.button(
-        icon='forum',
-        on_click=show_notes_dialog
-    ).props(f'flat dense size={size}').tooltip(tr('View Comments'))
+            dialog.open()
+
+        btn = ui.button(
+            icon='forum',
+            on_click=show_notes_dialog
+        ).props(f'flat dense size={size}').tooltip(tr('View Comments'))
+
+        # Yellow indicator dot (hidden by default)
+        indicator = ui.element('div').classes('absolute').style(
+            'top: 2px; right: 2px; width: 8px; height: 8px; '
+            'background-color: #f59e0b; border-radius: 50%; display: none;'
+        )
+
+        # Check for comments and show indicator
+        async def check_comments():
+            comments = await fetch_document_comments(document_id, page_number)
+            if comments:
+                indicator.style(add='display: block;')
+                btn.style(add='color: #f59e0b;')
+
+        ui.timer(0.2, check_comments, once=True)
+
+    return container

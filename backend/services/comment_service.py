@@ -60,7 +60,8 @@ class CommentService:
             comment_type=comment_type,
             line_number=data.line_number,
             char_start=data.char_start,
-            char_end=data.char_end
+            char_end=data.char_end,
+            is_public=data.is_public
         )
 
         db.add(comment)
@@ -351,7 +352,8 @@ class CommentService:
         document_id: str,
         include_replies: bool = True,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
+        current_user_id: int = None
     ) -> Tuple[List[Comment], int]:
         """
         Get comments for a document.
@@ -362,6 +364,7 @@ class CommentService:
             include_replies: If True, includes nested replies
             page: Page number
             page_size: Items per page
+            current_user_id: Current user ID (to show their private comments)
 
         Returns:
             Tuple of (list of comments, total count)
@@ -370,6 +373,18 @@ class CommentService:
             Comment.document_id == document_id,
             Comment.is_deleted == False
         )
+
+        # Filter private comments - only show public OR user's own private comments
+        if current_user_id:
+            q = q.filter(
+                or_(
+                    Comment.is_public == True,
+                    Comment.author_id == current_user_id
+                )
+            )
+        else:
+            # No user - only show public comments
+            q = q.filter(Comment.is_public == True)
 
         if not include_replies:
             # Only top-level comments

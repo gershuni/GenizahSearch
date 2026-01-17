@@ -65,6 +65,9 @@ def create_comment_dialog(
                 placeholder=tr('Write your comment here...')
             ).classes('w-full').props('outlined rows=4').style('direction: rtl; text-align: right;')
 
+            # Private comment option
+            private_check = ui.checkbox(tr('Private comment (only visible to me)'), value=False).classes('text-sm')
+
             # Error message
             error_label = ui.label('').classes('text-red-500 text-sm hidden')
 
@@ -84,12 +87,12 @@ def create_comment_dialog(
                         return
 
                     # Build comment data with valid fields
-                    # Note: Backend doesn't support is_public yet - all comments are public
                     # line_number is used for page-specific comments
                     comment_data = {
                         "document_id": document_id,
                         "content": comment_text.value.strip(),
-                        "comment_type": "general"
+                        "comment_type": "general",
+                        "is_public": not private_check.value
                     }
 
                     # If page-specific comment, set line_number to page number for tracking

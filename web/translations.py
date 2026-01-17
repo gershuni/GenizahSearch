@@ -487,6 +487,8 @@ TRANSLATIONS = {
     "Delete Comment?": "למחוק את ההערה?",
     "Comment deleted": "ההערה נמחקה",
     "Comment updated": "ההערה עודכנה",
+    "Private comment (only visible to me)": "הערה פרטית (גלויה רק לי)",
+    "Private": "פרטי",
     "Please login to view your edits": "התחבר כדי לצפות בעריכות שלך",
     "Login": "התחברות",
     "Register": "הרשמה",

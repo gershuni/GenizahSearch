@@ -235,7 +235,7 @@ async def get_responses(
 
 @router.get("/feed/items", response_model=FeedResponse)
 async def get_feed(
-    item_type: Optional[str] = Query(None, pattern="^(all|discovery|question|correction)$"),
+    item_type: Optional[str] = Query(None, pattern="^(all|discovery|question|correction|comment)$"),
     period: Optional[str] = Query(None, pattern="^(day|week|month|all)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),

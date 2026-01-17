@@ -120,7 +120,8 @@ async def get_document_comments(
         db, document_id,
         include_replies=include_replies,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        current_user_id=current_user.id if current_user else None
     )
 
     total_pages = (total + page_size - 1) // page_size
