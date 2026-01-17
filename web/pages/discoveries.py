@@ -78,7 +78,8 @@ async def create_discoveries_page():
             with feed_container:
                 await load_feed(
                     type_filter.value if type_filter.value != 'all' else None,
-                    period_filter.value if period_filter.value != 'all' else None
+                    period_filter.value if period_filter.value != 'all' else None,
+                    on_refresh=refresh_feed
                 )
 
         # Bind filter changes
@@ -87,7 +88,7 @@ async def create_discoveries_page():
 
         # Initial load
         with feed_container:
-            await load_feed(None, None)
+            await load_feed(None, None, on_refresh=refresh_feed)
 
 
 async def load_stats(container):
@@ -143,9 +144,9 @@ async def load_stats(container):
                     ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
 
 
-async def load_feed(item_type: Optional[str], period: Optional[str]):
+async def load_feed(item_type: Optional[str], period: Optional[str], on_refresh=None):
     """Load and display the activity feed."""
-    params = {"limit": 20, "offset": 0}
+    params = {"limit": 50, "offset": 0}  # Increased limit
     if item_type:
         params["item_type"] = item_type
     if period:
@@ -169,19 +170,20 @@ async def load_feed(item_type: Optional[str], period: Optional[str]):
             ui.label(tr('Be the first to share a discovery or ask a question!')).style('color: var(--text-tertiary);')
         return
 
-    # Feed items
+    # Feed items - pass refresh callback for edit/delete
     for item in items:
-        create_feed_item(item)
+        create_feed_item(item, on_refresh=on_refresh)
 
     # Show total count
     if total > len(items):
         ui.label(f"{tr('Showing')} {len(items)} {tr('of')} {total}").classes('text-sm text-center w-full mt-4').style('color: var(--text-tertiary);')
 
 
-def create_feed_item(item: dict):
-    """Create a single feed item card."""
+def create_feed_item(item: dict, on_refresh=None):
+    """Create a single feed item card with expansion view."""
     item_type = item.get('item_type', 'discovery')
     author = item.get('author', {})
+    item_id = item.get('id', '')
 
     # Icon and color by type
     type_styles = {
@@ -193,6 +195,10 @@ def create_feed_item(item: dict):
         'comment': {'icon': 'comment', 'color': 'teal', 'label': tr('Comment')},
     }
     style = type_styles.get(item_type, type_styles['discovery'])
+
+    # Check if current user is the author
+    current_user = GlobalAuthState.get_user()
+    is_author = current_user and author.get('id') == current_user.get('id')
 
     with ui.card().classes('w-full p-4 hover:shadow-md transition-shadow'):
         with ui.row().classes('w-full items-start gap-4'):
@@ -208,26 +214,123 @@ def create_feed_item(item: dict):
                 with ui.row().classes('w-full items-center justify-between'):
                     with ui.row().classes('items-center gap-2'):
                         ui.badge(style['label']).props(f'color={style["color"]}').classes('text-xs')
-                        if item.get('shelfmark'):
-                            ui.label(item['shelfmark']).classes('text-sm font-mono').style('color: var(--primary-600);')
+                        # Shelfmark + page link
+                        if item.get('shelfmark') or item.get('document_id'):
+                            shelfmark = item.get('shelfmark') or item.get('document_id', '')
+                            page_num = item.get('page_number')
+                            link_text = shelfmark
+                            if page_num:
+                                link_text += f" • {tr('Image')} {page_num}"
 
-                    # Date
-                    created_at = item.get('created_at', '')
-                    if created_at:
-                        date_str = format_date(created_at)
-                        ui.label(date_str).classes('text-xs').style('color: var(--text-tertiary);')
+                            def go_to_doc(did=item.get('document_id'), pnum=page_num):
+                                if did:
+                                    url = f'/browse?id={did}'
+                                    if pnum:
+                                        url += f'&page={pnum}'
+                                    ui.navigate.to(url)
+
+                            with ui.element('a').classes('cursor-pointer hover:underline text-sm font-mono').style('color: var(--primary-600);').on('click', go_to_doc):
+                                ui.label(link_text)
+
+                    # Date and author actions
+                    with ui.row().classes('items-center gap-2'):
+                        created_at = item.get('created_at', '')
+                        if created_at:
+                            date_str = format_date(created_at)
+                            ui.label(date_str).classes('text-xs').style('color: var(--text-tertiary);')
+
+                        # Edit/Delete for author (only for discoveries, not corrections/comments)
+                        if is_author and item_type in ('discovery', 'question', 'identification', 'note'):
+                            # Extract numeric ID from "discovery_123" format
+                            numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
+
+                            async def edit_discovery(nid=numeric_id, i=item):
+                                await open_edit_discovery_dialog(nid, i, on_refresh)
+
+                            ui.button(icon='edit', on_click=edit_discovery).props('flat round dense size=sm').tooltip(tr('Edit'))
+
+                            async def delete_discovery(nid=numeric_id):
+                                await confirm_delete_discovery(nid, on_refresh)
+
+                            ui.button(icon='delete', on_click=delete_discovery).props('flat round dense size=sm color=negative').tooltip(tr('Delete'))
 
                 # Title
                 ui.label(item.get('title', '')).classes('font-bold text-lg')
 
-                # Content preview
+                # Full content in expansion (no truncation)
                 content = item.get('content_preview', '')
-                if content:
-                    ui.label(content).classes('text-sm').style('color: var(--text-secondary); direction: rtl;')
+                with ui.expansion(icon='expand_more').classes('w-full').props('dense'):
+                    with ui.column().classes('w-full gap-4'):
+                        # Full content
+                        ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')
 
-                # Footer
+                        # Document link
+                        if item.get('document_id'):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('link', size='sm')
+                                shelfmark = item.get('shelfmark') or item.get('document_id', '')
+                                page_num = item.get('page_number')
+                                link_text = f"{tr('View document')}: {shelfmark}"
+                                if page_num:
+                                    link_text += f" ({tr('Image')} {page_num})"
+
+                                def go_to_doc2(did=item.get('document_id'), pnum=page_num):
+                                    url = f'/browse?id={did}'
+                                    if pnum:
+                                        url += f'&page={pnum}'
+                                    ui.navigate.to(url)
+
+                                ui.button(link_text, on_click=go_to_doc2).props('flat dense').classes('text-primary')
+
+                        # Responses section (only for discoveries)
+                        if item_type in ('discovery', 'question', 'identification', 'note'):
+                            ui.separator().classes('my-2')
+                            responses_container = ui.column().classes('w-full gap-2')
+
+                            async def load_responses(container=responses_container, nid=item_id.split('_')[-1] if '_' in item_id else item_id):
+                                container.clear()
+                                with container:
+                                    result = await api_call("GET", f"/discoveries/{nid}/responses")
+                                    if "error" not in result:
+                                        responses = result.get('items', [])
+                                        if responses:
+                                            ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
+                                            for resp in responses:
+                                                create_response_item(resp)
+                                        else:
+                                            ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
+
+                                    # Reply form
+                                    if GlobalAuthState.is_logged_in():
+                                        ui.separator().classes('my-2')
+                                        reply_input = ui.textarea(placeholder=tr('Write a reply...')).classes('w-full').props('outlined dense rows=2').style('direction: rtl;')
+                                        anonymous_reply = ui.checkbox(tr('Reply anonymously'), value=False).classes('text-xs')
+
+                                        async def submit_reply(inp=reply_input, anon=anonymous_reply, nid=nid):
+                                            if not inp.value or not inp.value.strip():
+                                                ui.notify(tr('Please enter a reply'), type='warning')
+                                                return
+                                            result = await api_call("POST", f"/discoveries/{nid}/responses", {
+                                                "content": inp.value.strip(),
+                                                "is_anonymous": anon.value
+                                            })
+                                            if "error" in result:
+                                                ui.notify(result["error"], type='negative')
+                                            else:
+                                                ui.notify(tr('Reply posted'), type='positive')
+                                                inp.value = ''
+                                                await load_responses()
+
+                                        ui.button(tr('Reply'), icon='send', on_click=submit_reply).props('dense color=primary').classes('self-end')
+                                    else:
+                                        ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
+
+                            # Load responses when expansion opens
+                            ui.timer(0.1, load_responses, once=True)
+
+                # Footer - collapsed view info
                 with ui.row().classes('w-full items-center justify-between mt-2'):
-                    # Author - check if anonymous first
+                    # Author
                     if author.get('is_anonymous', False):
                         author_name = tr('Anonymous')
                     else:
@@ -236,18 +339,86 @@ def create_feed_item(item: dict):
                     author_text = f"{author_name}" + (f" ({affiliation})" if affiliation else "")
                     ui.label(author_text).classes('text-xs').style('color: var(--text-tertiary);')
 
-                    # Stats
-                    with ui.row().classes('items-center gap-3'):
-                        response_count = item.get('response_count', 0)
-                        if response_count > 0:
-                            with ui.row().classes('items-center gap-1'):
-                                ui.icon('chat_bubble_outline', size='xs').style('color: var(--text-tertiary);')
-                                ui.label(str(response_count)).classes('text-xs').style('color: var(--text-tertiary);')
+                    # Response count
+                    response_count = item.get('response_count', 0)
+                    if response_count > 0:
+                        with ui.row().classes('items-center gap-1'):
+                            ui.icon('chat_bubble_outline', size='xs').style('color: var(--text-tertiary);')
+                            ui.label(str(response_count)).classes('text-xs').style('color: var(--text-tertiary);')
 
-                        # View details button
-                        def open_details(i=item):
-                            show_discovery_details(i)
-                        ui.button(tr('View'), icon='open_in_new', on_click=open_details).props('flat dense size=sm').classes('text-xs')
+
+def create_response_item(resp: dict):
+    """Create a single response/reply item."""
+    author = resp.get('author', {})
+    if author.get('is_anonymous', False):
+        author_name = tr('Anonymous')
+    else:
+        author_name = author.get('full_name') or author.get('username') or tr('Anonymous')
+
+    with ui.card().classes('w-full p-3').style('background: var(--surface-secondary);'):
+        with ui.row().classes('w-full items-center justify-between mb-1'):
+            ui.label(author_name).classes('text-xs font-medium')
+            ui.label(format_date(resp.get('created_at', ''))).classes('text-xs').style('color: var(--text-tertiary);')
+        ui.label(resp.get('content', '')).classes('text-sm whitespace-pre-wrap').style('direction: rtl;')
+
+
+async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
+    """Open dialog to edit a discovery."""
+    dialog = ui.dialog()
+
+    with dialog, ui.card().classes('w-full max-w-lg p-6'):
+        ui.label(tr('Edit Discovery')).classes('text-xl font-bold mb-4')
+
+        title_input = ui.input(label=tr('Title'), value=item.get('title', '')).classes('w-full').props('outlined')
+        content_input = ui.textarea(label=tr('Description'), value=item.get('content_preview', '')).classes('w-full').props('outlined rows=5').style('direction: rtl;')
+        shelfmark_input = ui.input(label=tr('Shelfmark'), value=item.get('shelfmark', '')).classes('w-full').props('outlined')
+
+        with ui.row().classes('w-full justify-end gap-2 mt-4'):
+            ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+
+            async def save_changes():
+                result = await api_call("PUT", f"/discoveries/{discovery_id}", {
+                    "title": title_input.value,
+                    "content": content_input.value,
+                    "shelfmark": shelfmark_input.value or None
+                })
+                if "error" in result:
+                    ui.notify(result["error"], type='negative')
+                else:
+                    ui.notify(tr('Discovery updated'), type='positive')
+                    dialog.close()
+                    if on_refresh:
+                        await on_refresh()
+
+            ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
+
+    dialog.open()
+
+
+async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
+    """Confirm and delete a discovery."""
+    dialog = ui.dialog()
+
+    with dialog, ui.card().classes('p-4'):
+        ui.label(tr('Delete Discovery?')).classes('text-lg font-bold')
+        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+
+        with ui.row().classes('justify-end gap-2 mt-4'):
+            ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+
+            async def do_delete():
+                result = await api_call("DELETE", f"/discoveries/{discovery_id}")
+                dialog.close()
+                if "error" in result:
+                    ui.notify(result["error"], type='negative')
+                else:
+                    ui.notify(tr('Discovery deleted'), type='positive')
+                    if on_refresh:
+                        await on_refresh()
+
+            ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+
+    dialog.open()
 
 
 def create_new_discovery_dialog(on_success=None):
@@ -330,58 +501,6 @@ def create_new_discovery_dialog(on_success=None):
                     ui.button(tr('Share'), icon='send', on_click=submit_discovery).props('color=primary')
 
     return dialog
-
-
-def show_discovery_details(item: dict):
-    """Show full discovery details in a dialog."""
-    dialog = ui.dialog().props('maximized')
-
-    with dialog:
-        with ui.card().classes('w-full h-full p-6'):
-            # Header
-            with ui.row().classes('w-full items-center justify-between mb-4'):
-                with ui.row().classes('items-center gap-2'):
-                    item_type = item.get('item_type', 'discovery')
-                    type_icons = {
-                        'discovery': 'lightbulb',
-                        'question': 'help_outline',
-                        'correction': 'edit',
-                    }
-                    ui.icon(type_icons.get(item_type, 'article')).classes('text-2xl')
-                    ui.label(item.get('title', '')).classes('text-2xl font-bold')
-
-                ui.button(icon='close', on_click=dialog.close).props('flat round')
-
-            # Metadata
-            with ui.row().classes('w-full items-center gap-4 mb-4'):
-                if item.get('shelfmark'):
-                    with ui.row().classes('items-center gap-1'):
-                        ui.icon('description', size='sm')
-                        ui.label(item['shelfmark']).classes('font-mono')
-                author = item.get('author', {})
-                if author.get('is_anonymous', False):
-                    author_name = tr('Anonymous')
-                else:
-                    author_name = author.get('full_name') or author.get('username') or tr('Anonymous')
-                ui.label(f"{tr('by')} {author_name}").style('color: var(--text-secondary);')
-                ui.label(format_date(item.get('created_at', ''))).style('color: var(--text-tertiary);')
-
-            # Content
-            ui.separator()
-            with ui.scroll_area().classes('w-full flex-1 my-4'):
-                ui.label(item.get('content_preview', '')).classes('text-lg whitespace-pre-wrap').style('direction: rtl;')
-
-            # Link to document if available
-            if item.get('document_id'):
-                ui.separator()
-                with ui.row().classes('items-center gap-2 mt-4'):
-                    ui.icon('link')
-                    ui.link(
-                        f"{tr('View document')}: {item.get('shelfmark') or item['document_id']}",
-                        target=f"/browse?doc={item['document_id']}"
-                    ).classes('text-primary-600')
-
-    dialog.open()
 
 
 def format_date(date_str: str) -> str:
