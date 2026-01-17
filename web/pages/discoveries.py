@@ -556,13 +556,43 @@ def create_new_discovery_dialog(on_success=None):
 
                 # Document reference (optional)
                 with ui.expansion(tr('Link to document (optional)'), icon='link').classes('w-full'):
-                    with ui.row().classes('w-full gap-2'):
-                        doc_id_input = ui.input(label=tr('Document ID')).classes('flex-1').props('outlined dense')
-                        page_input = ui.number(label=tr('Page'), min=1).classes('w-24').props('outlined dense')
+                    # Shelfmark search with autocomplete
                     shelfmark_input = ui.input(
                         label=tr('Shelfmark'),
                         placeholder='e.g. T-S 8J6.1'
                     ).classes('w-full').props('outlined dense')
+
+                    # Title display (auto-filled when shelfmark is found)
+                    title_display = ui.label('').classes('text-sm').style('color: var(--text-secondary);')
+
+                    # Hidden document ID (auto-filled when shelfmark is found)
+                    doc_id_input = ui.input(label=tr('Document ID')).classes('w-full').props('outlined dense')
+
+                    with ui.row().classes('w-full gap-2'):
+                        page_input = ui.number(label=tr('Page'), min=1).classes('flex-1').props('outlined dense')
+
+                    # Search shelfmark and auto-fill
+                    def lookup_shelfmark():
+                        from web.state import state
+                        shelfmark_val = shelfmark_input.value.strip()
+                        if not shelfmark_val or not state.meta_mgr:
+                            title_display.text = ''
+                            return
+
+                        # Try to find matching document
+                        try:
+                            # Search for matching shelfmark
+                            matches = state.meta_mgr.search_by_shelfmark(shelfmark_val, limit=1)
+                            if matches:
+                                match = matches[0]
+                                doc_id_input.value = match.sys_id
+                                title_display.text = match.title or ''
+                            else:
+                                title_display.text = tr('No matching document found')
+                        except Exception:
+                            title_display.text = ''
+
+                    shelfmark_input.on('blur', lookup_shelfmark)
 
                 # Anonymous option
                 anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')

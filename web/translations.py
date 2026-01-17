@@ -718,6 +718,7 @@ TRANSLATIONS = {
     "Downvote": "הצבע נגד",
     "Vote recorded": "ההצבעה נרשמה",
     "Login to vote": "התחבר כדי להצביע",
+    "No matching document found": "לא נמצא מסמך מתאים",
     "Discovery - Found something interesting": "חידוש - מצאתי משהו מעניין",
     "Question - Need help reading/understanding": "שאלה - צריך עזרה בקריאה/הבנה",
     "Identification - Identified a text": "זיהוי - זיהיתי טקסט",
