@@ -93,6 +93,15 @@ class VersionService:
         if correction.status != CorrectionStatus.APPROVED:
             return None, "Correction must be approved to create a version"
 
+        # Force fresh load of correction to ensure corrected_text is loaded
+        db.refresh(correction)
+
+        # If still no corrected_text, try explicit query
+        if not correction.corrected_text:
+            fresh_correction = db.query(Correction).filter(Correction.id == correction.id).first()
+            if fresh_correction and fresh_correction.corrected_text:
+                correction = fresh_correction
+
         # Determine sys_id and page_num with fallbacks
         sys_id = correction.system_id or correction.document_id
         page_num = correction.page_number or 1

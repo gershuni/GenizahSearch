@@ -1102,6 +1102,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     with ui.column().classes('items-center justify-center h-full'):
                                         ui.icon('text_snippet', size='4rem').classes('text-gray-300')
                                         ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+                        # Force UI update
+                        text_container.update()
 
                     def handle_version_change(new_text: str, version_info: dict):
                         """Handle version selection - update displayed text."""

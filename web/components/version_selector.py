@@ -116,9 +116,9 @@ def create_version_selector(
                     # Always show original V0.8 option first
                     def select_original():
                         version_label.text = 'V0.8'
+                        menu.close()
                         if on_version_change:
                             on_version_change(original_text, {'source': 'V0.8', 'is_original': True})
-                        menu.close()
 
                     ui.menu_item(
                         f"V0.8 ({tr('Original')})",
@@ -172,16 +172,17 @@ def create_version_selector(
 
                             async def select_user(vid=ver_id, name=user_name, vdefault=is_default):
                                 version_label.text = f"{tr('by')} {name}"
+                                menu.close()
                                 if on_version_change:
                                     full_ver = await api_call("GET", f"/versions/id/{vid}")
-                                    if "error" not in full_ver:
-                                        on_version_change(full_ver.get('content', original_text), {
+                                    if "error" not in full_ver and 'content' in full_ver:
+                                        content = full_ver.get('content', '')
+                                        on_version_change(content if content else original_text, {
                                             'source': 'user',
                                             'version_id': vid,
                                             'author': name,
                                             'is_default': vdefault
                                         })
-                                menu.close()
 
                             with ui.menu_item(on_click=select_user).classes('text-sm'):
                                 with ui.column().classes('gap-0'):

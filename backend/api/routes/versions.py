@@ -60,6 +60,25 @@ def _to_list_item(version: TranscriptionVersion) -> VersionListItem:
     )
 
 
+# IMPORTANT: This route must come BEFORE /{sys_id}/{page_num} to avoid routing conflicts
+# Otherwise /id/5 would match as sys_id="id", page_num=5
+@router.get("/id/{version_id}", response_model=VersionResponse)
+async def get_version_by_id(
+    version_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get a specific version by its ID"""
+    version = VersionService.get_version_by_id(db, version_id)
+
+    if not version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Version not found"
+        )
+
+    return _to_response(version, db)
+
+
 @router.get("/{sys_id}/{page_num}", response_model=PageVersionsResponse)
 async def get_page_versions(
     sys_id: str,
@@ -97,23 +116,6 @@ async def get_default_version(
 
     if not version:
         return None
-
-    return _to_response(version, db)
-
-
-@router.get("/id/{version_id}", response_model=VersionResponse)
-async def get_version_by_id(
-    version_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get a specific version by its ID"""
-    version = VersionService.get_version_by_id(db, version_id)
-
-    if not version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Version not found"
-        )
 
     return _to_response(version, db)
 

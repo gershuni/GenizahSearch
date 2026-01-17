@@ -211,6 +211,7 @@ class CorrectionService:
             if notes:
                 correction.notes = notes
             db.commit()
+            db.refresh(correction)  # Ensure all fields are loaded for version creation
 
             # Update document metadata
             CorrectionService._update_document_metadata(db, correction.document_id, approved_delta=1)
@@ -303,6 +304,8 @@ class CorrectionService:
 
         if review.action == "approve":
             correction.approve(reviewer.id, review.review_notes)
+            db.flush()
+            db.refresh(correction)  # Ensure corrected_text is loaded for version creation
 
             # Award reputation
             if author:
