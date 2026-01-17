@@ -246,7 +246,9 @@ def create_feed_item(item: dict, on_refresh=None):
                         shelfmark = item.get('shelfmark')
                         page_num = item.get('page_number')
                         doc_id = item.get('document_id')
+                        additional_shelfmarks = item.get('additional_shelfmarks', []) or []
 
+                        # Primary shelfmark
                         if shelfmark or doc_id:
                             link_text = shelfmark or doc_id
                             if page_num:
@@ -261,6 +263,31 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             with ui.element('a').classes('cursor-pointer hover:underline text-sm font-mono').style('color: var(--primary-600);').on('click', go_to_doc):
                                 ui.label(link_text)
+
+                        # Additional shelfmarks (if any)
+                        if additional_shelfmarks:
+                            for add_sm in additional_shelfmarks[:3]:  # Show max 3 additional
+                                add_shelfmark = add_sm.get('shelfmark', '')
+                                add_doc_id = add_sm.get('document_id')
+                                add_page = add_sm.get('page_number')
+
+                                if add_shelfmark or add_doc_id:
+                                    add_link_text = add_shelfmark or add_doc_id
+                                    if add_page:
+                                        add_link_text += f" • {tr('Image')} {add_page}"
+
+                                    def go_to_add_doc(did=add_doc_id, pnum=add_page):
+                                        if did:
+                                            url = f'/browse?id={did}'
+                                            if pnum:
+                                                url += f'&page={pnum}'
+                                            ui.navigate.to(url)
+
+                                    with ui.element('a').classes('cursor-pointer hover:underline text-xs font-mono ml-2').style('color: var(--text-tertiary);').on('click', go_to_add_doc):
+                                        ui.label(f"+{add_link_text}")
+
+                            if len(additional_shelfmarks) > 3:
+                                ui.label(f"+{len(additional_shelfmarks) - 3} {tr('more')}").classes('text-xs ml-1').style('color: var(--text-tertiary);')
 
                     # Date and actions
                     with ui.row().classes('items-center gap-2'):
@@ -378,9 +405,11 @@ def create_feed_item(item: dict, on_refresh=None):
 
                 # Full content in expansion (no truncation)
                 content = item.get('content_preview', '')
+                related_manuscripts = item.get('related_manuscripts', []) or []
+
                 with ui.expansion(icon='expand_more').classes('w-full').props('dense'):
                     with ui.column().classes('w-full gap-4'):
-                        # For corrections: show original and corrected text side by side
+                        # For corrections: show original and corrected text side by side with highlighting
                         if item_type == 'correction':
                             original_text = item.get('original_text', '')
                             corrected_text = item.get('corrected_text', '')
@@ -390,17 +419,57 @@ def create_feed_item(item: dict, on_refresh=None):
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Original')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
                                             ui.label(original_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: var(--surface-secondary); direction: rtl; text-align: right;'
+                                                'background: #ffebee; direction: rtl; text-align: right; border-left: 3px solid #ef5350;'
                                             )
                                     if corrected_text:
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Corrected')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
                                             ui.label(corrected_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: var(--surface-secondary); direction: rtl; text-align: right;'
+                                                'background: #e8f5e9; direction: rtl; text-align: right; border-left: 3px solid #66bb6a;'
                                             )
+
+                                # Show visual diff if texts differ
+                                if original_text and corrected_text and original_text != corrected_text:
+                                    with ui.row().classes('w-full items-center gap-2 mt-2'):
+                                        ui.icon('compare_arrows', size='sm').style('color: var(--text-tertiary);')
+                                        ui.label(tr('Change highlighted')).classes('text-xs').style('color: var(--text-tertiary);')
                         else:
                             # Full content for non-corrections
                             ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')
+
+                        # Show related manuscripts if any
+                        if related_manuscripts and len(related_manuscripts) > 0:
+                            ui.separator().classes('my-2')
+                            with ui.row().classes('w-full items-center gap-2'):
+                                ui.icon('link', size='sm').style('color: var(--primary-600);')
+                                ui.label(tr('Related Manuscripts')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+
+                            with ui.row().classes('w-full flex-wrap gap-2'):
+                                relationship_labels = {
+                                    'parallel': tr('Parallel text'),
+                                    'continuation': tr('Continuation'),
+                                    'fragment': tr('Fragment of'),
+                                    'related': tr('Related'),
+                                    'citation': tr('Citation')
+                                }
+                                for rel in related_manuscripts[:5]:  # Show max 5
+                                    rel_shelfmark = rel.get('shelfmark', '')
+                                    rel_doc_id = rel.get('document_id', '')
+                                    rel_type = rel.get('relationship_type', 'related')
+                                    rel_notes = rel.get('notes', '')
+
+                                    with ui.card().classes('p-2').style('background: var(--surface-secondary);'):
+                                        def go_to_rel_doc(did=rel_doc_id):
+                                            if did:
+                                                ui.navigate.to(f'/browse?id={did}')
+
+                                        with ui.column().classes('gap-1'):
+                                            with ui.row().classes('items-center gap-1'):
+                                                ui.badge(relationship_labels.get(rel_type, rel_type)).props('color=grey').classes('text-xs')
+                                                with ui.element('a').classes('cursor-pointer hover:underline text-sm font-mono').style('color: var(--primary-600);').on('click', go_to_rel_doc):
+                                                    ui.label(rel_shelfmark or rel_doc_id)
+                                            if rel_notes:
+                                                ui.label(rel_notes).classes('text-xs').style('color: var(--text-tertiary);')
 
                         # Document link
                         if item.get('document_id'):
@@ -863,6 +932,10 @@ def create_new_discovery_dialog(on_success=None):
 
     # State for document selection
     selected_doc = {'sys_id': None, 'shelfmark': None, 'title': None, 'total_pages': 0}
+    # State for additional shelfmarks
+    additional_shelfmarks_list = []
+    # State for related manuscripts
+    related_manuscripts_list = []
 
     def truncate_title(title: str, max_words: int = 4) -> tuple:
         """Truncate title to max_words, return (short, full) for tooltip."""
@@ -1093,6 +1166,112 @@ def create_new_discovery_dialog(on_success=None):
                         ui.button(tr('Recent Activity'), icon='history', on_click=fetch_recent).props('outlined dense')
                         ui.button(tr('My Lists'), icon='bookmark', on_click=show_lists_view).props('outlined dense')
 
+                # Additional Shelfmarks section
+                with ui.expansion(tr('Additional shelfmarks (optional)'), icon='library_books').classes('w-full'):
+                    additional_shelfmarks_container = ui.column().classes('w-full gap-2')
+
+                    def add_additional_shelfmark():
+                        """Add an additional shelfmark entry."""
+                        new_entry = {'shelfmark': '', 'document_id': '', 'page_number': None}
+                        additional_shelfmarks_list.append(new_entry)
+                        idx = len(additional_shelfmarks_list) - 1
+
+                        with additional_shelfmarks_container:
+                            with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);') as card:
+                                with ui.row().classes('w-full items-center gap-2'):
+                                    shelfmark_input = ui.input(
+                                        label=tr('Shelfmark'),
+                                        placeholder='T-S 13J1.1'
+                                    ).classes('flex-1').props('outlined dense')
+
+                                    page_input = ui.number(
+                                        label=tr('Page'),
+                                        min=1
+                                    ).classes('w-20').props('outlined dense')
+
+                                    def remove_entry(i=idx, c=card):
+                                        if i < len(additional_shelfmarks_list):
+                                            additional_shelfmarks_list.pop(i)
+                                        c.delete()
+
+                                    ui.button(icon='close', on_click=remove_entry).props('flat round dense size=sm color=negative')
+
+                                def update_entry_shelfmark(e, i=idx):
+                                    if i < len(additional_shelfmarks_list):
+                                        additional_shelfmarks_list[i]['shelfmark'] = e.value
+
+                                def update_entry_page(e, i=idx):
+                                    if i < len(additional_shelfmarks_list):
+                                        additional_shelfmarks_list[i]['page_number'] = int(e.value) if e.value else None
+
+                                shelfmark_input.on('update:model-value', update_entry_shelfmark)
+                                page_input.on('update:model-value', update_entry_page)
+
+                    ui.button(tr('Add shelfmark'), icon='add', on_click=add_additional_shelfmark).props('outlined dense').classes('mt-2')
+
+                # Related Manuscripts section
+                with ui.expansion(tr('Related manuscripts (optional)'), icon='link').classes('w-full'):
+                    related_manuscripts_container = ui.column().classes('w-full gap-2')
+
+                    relationship_types = {
+                        'parallel': tr('Parallel text'),
+                        'continuation': tr('Continuation'),
+                        'fragment': tr('Fragment of'),
+                        'related': tr('Related'),
+                        'citation': tr('Citation')
+                    }
+
+                    def add_related_manuscript():
+                        """Add a related manuscript entry."""
+                        new_entry = {'shelfmark': '', 'document_id': '', 'relationship_type': 'related', 'notes': ''}
+                        related_manuscripts_list.append(new_entry)
+                        idx = len(related_manuscripts_list) - 1
+
+                        with related_manuscripts_container:
+                            with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);') as card:
+                                with ui.column().classes('w-full gap-2'):
+                                    with ui.row().classes('w-full items-center gap-2'):
+                                        shelfmark_input = ui.input(
+                                            label=tr('Shelfmark'),
+                                            placeholder='T-S 8.1'
+                                        ).classes('flex-1').props('outlined dense')
+
+                                        rel_type_select = ui.select(
+                                            options=relationship_types,
+                                            value='related',
+                                            label=tr('Relationship')
+                                        ).classes('w-32').props('outlined dense')
+
+                                        def remove_entry(i=idx, c=card):
+                                            if i < len(related_manuscripts_list):
+                                                related_manuscripts_list.pop(i)
+                                            c.delete()
+
+                                        ui.button(icon='close', on_click=remove_entry).props('flat round dense size=sm color=negative')
+
+                                    notes_input = ui.input(
+                                        label=tr('Notes'),
+                                        placeholder=tr('Optional notes about the relationship')
+                                    ).classes('w-full').props('outlined dense')
+
+                                def update_rel_shelfmark(e, i=idx):
+                                    if i < len(related_manuscripts_list):
+                                        related_manuscripts_list[i]['shelfmark'] = e.value
+
+                                def update_rel_type(e, i=idx):
+                                    if i < len(related_manuscripts_list):
+                                        related_manuscripts_list[i]['relationship_type'] = e.value
+
+                                def update_rel_notes(e, i=idx):
+                                    if i < len(related_manuscripts_list):
+                                        related_manuscripts_list[i]['notes'] = e.value
+
+                                shelfmark_input.on('update:model-value', update_rel_shelfmark)
+                                rel_type_select.on('update:model-value', update_rel_type)
+                                notes_input.on('update:model-value', update_rel_notes)
+
+                    ui.button(tr('Add related manuscript'), icon='add', on_click=add_related_manuscript).props('outlined dense').classes('mt-2')
+
                 # Anonymous option
                 anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')
                 ui.label(tr('Your name will not be shown publicly')).classes('text-xs ml-8').style('color: var(--text-tertiary);')
@@ -1110,6 +1289,16 @@ def create_new_discovery_dialog(on_success=None):
                         except:
                             pass
 
+                    # Filter out empty entries
+                    valid_additional_shelfmarks = [
+                        sm for sm in additional_shelfmarks_list
+                        if sm.get('shelfmark')
+                    ]
+                    valid_related_manuscripts = [
+                        rm for rm in related_manuscripts_list
+                        if rm.get('shelfmark') or rm.get('document_id')
+                    ]
+
                     data = {
                         "discovery_type": disc_type.value,
                         "title": title_input.value,
@@ -1117,7 +1306,9 @@ def create_new_discovery_dialog(on_success=None):
                         "document_id": doc_id_input.value or None,
                         "page_number": page_num,
                         "shelfmark": shelfmark_hidden.value or None,
-                        "is_anonymous": anonymous_check.value
+                        "is_anonymous": anonymous_check.value,
+                        "additional_shelfmarks": valid_additional_shelfmarks if valid_additional_shelfmarks else None,
+                        "related_manuscripts": valid_related_manuscripts if valid_related_manuscripts else None
                     }
 
                     result = await api_call("POST", "/discoveries/", data)

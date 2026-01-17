@@ -5,12 +5,17 @@ Allows researchers to share:
 - Discoveries (new findings, identifications)
 - Questions to the community
 - Notable corrections/identifications
+
+Supports:
+- Multiple shelfmarks per discovery
+- Related manuscripts linking
 """
 import enum
+import json
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, DateTime, Boolean, Text,
-    ForeignKey, Index, Enum
+    ForeignKey, Index, Enum, JSON
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -82,6 +87,15 @@ class Discovery(Base):
     page_number = Column(Integer, nullable=True)
     shelfmark = Column(String(255), nullable=True)
 
+    # Multiple shelfmarks support - JSON array of {shelfmark, document_id, page_number}
+    # Example: [{"shelfmark": "T-S 13J1.1", "document_id": "xyz", "page_number": 2}]
+    additional_shelfmarks = Column(JSON, nullable=True, default=list)
+
+    # Related manuscripts - JSON array of {document_id, shelfmark, relationship_type, notes}
+    # relationship_type: "parallel", "continuation", "fragment", "related", "citation"
+    # Example: [{"document_id": "abc", "shelfmark": "T-S 8.1", "relationship_type": "parallel", "notes": "Same text"}]
+    related_manuscripts = Column(JSON, nullable=True, default=list)
+
     # Related correction (if highlighting a correction)
     correction_id = Column(Integer, ForeignKey("corrections.id"), nullable=True)
 
@@ -127,6 +141,55 @@ class Discovery(Base):
     def vote_score(self) -> int:
         """Net vote score (upvotes - downvotes)"""
         return (self.upvotes or 0) - (self.downvotes or 0)
+
+    @property
+    def all_shelfmarks(self) -> list:
+        """Get all shelfmarks (primary + additional)"""
+        shelfmarks = []
+        if self.shelfmark:
+            shelfmarks.append({
+                'shelfmark': self.shelfmark,
+                'document_id': self.document_id,
+                'page_number': self.page_number,
+                'is_primary': True
+            })
+        if self.additional_shelfmarks:
+            for sm in self.additional_shelfmarks:
+                sm['is_primary'] = False
+                shelfmarks.append(sm)
+        return shelfmarks
+
+    @property
+    def related_docs(self) -> list:
+        """Get related manuscripts list"""
+        return self.related_manuscripts or []
+
+    def add_shelfmark(self, shelfmark: str, document_id: str = None, page_number: int = None):
+        """Add an additional shelfmark"""
+        if not self.additional_shelfmarks:
+            self.additional_shelfmarks = []
+        self.additional_shelfmarks.append({
+            'shelfmark': shelfmark,
+            'document_id': document_id,
+            'page_number': page_number
+        })
+
+    def add_related_manuscript(
+        self,
+        document_id: str,
+        shelfmark: str = None,
+        relationship_type: str = "related",
+        notes: str = None
+    ):
+        """Add a related manuscript link"""
+        if not self.related_manuscripts:
+            self.related_manuscripts = []
+        self.related_manuscripts.append({
+            'document_id': document_id,
+            'shelfmark': shelfmark,
+            'relationship_type': relationship_type,
+            'notes': notes
+        })
 
 
 class DiscoveryVote(Base):

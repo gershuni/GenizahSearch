@@ -2,10 +2,30 @@
 Discovery Schemas - Pydantic models for discovery API
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
 
 from ..models.discovery import DiscoveryType, DiscoveryStatus
+
+
+# ============================================
+# Shelfmark and Related Manuscript schemas
+# ============================================
+
+class ShelfmarkReference(BaseModel):
+    """Reference to a shelfmark/document"""
+    shelfmark: str
+    document_id: Optional[str] = None
+    page_number: Optional[int] = None
+    is_primary: bool = False
+
+
+class RelatedManuscript(BaseModel):
+    """Reference to a related manuscript"""
+    document_id: str
+    shelfmark: Optional[str] = None
+    relationship_type: Literal["parallel", "continuation", "fragment", "related", "citation"] = "related"
+    notes: Optional[str] = None
 
 
 # ============================================
@@ -44,6 +64,10 @@ class DiscoveryBase(BaseModel):
     page_number: Optional[int] = None
     shelfmark: Optional[str] = None
     is_anonymous: bool = False
+    # Multiple shelfmarks support
+    additional_shelfmarks: Optional[List[ShelfmarkReference]] = None
+    # Related manuscripts
+    related_manuscripts: Optional[List[RelatedManuscript]] = None
 
 
 class DiscoveryCreate(DiscoveryBase):
@@ -60,6 +84,10 @@ class DiscoveryUpdate(BaseModel):
     page_number: Optional[int] = None
     shelfmark: Optional[str] = None
     is_anonymous: Optional[bool] = None
+    # Multiple shelfmarks support
+    additional_shelfmarks: Optional[List[ShelfmarkReference]] = None
+    # Related manuscripts
+    related_manuscripts: Optional[List[RelatedManuscript]] = None
 
 
 class DiscoveryResponse(DiscoveryBase):
@@ -76,6 +104,10 @@ class DiscoveryResponse(DiscoveryBase):
     downvotes: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # All shelfmarks combined (from model property)
+    all_shelfmarks: Optional[List[ShelfmarkReference]] = None
+    # Related manuscripts (from model)
+    related_docs: Optional[List[RelatedManuscript]] = None
 
     class Config:
         from_attributes = True
@@ -161,6 +193,10 @@ class FeedItem(BaseModel):
     is_hidden: bool = False  # For admin view of hidden items
     upvotes: int = 0
     downvotes: int = 0
+
+    # Multiple shelfmarks and related manuscripts
+    additional_shelfmarks: Optional[List[ShelfmarkReference]] = None
+    related_manuscripts: Optional[List[RelatedManuscript]] = None
 
     # Type-specific fields
     discovery_type: Optional[DiscoveryType] = None

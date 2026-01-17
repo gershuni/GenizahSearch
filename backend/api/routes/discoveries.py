@@ -38,10 +38,19 @@ def _to_response(discovery, db: Session = None) -> DiscoveryResponseSchema:
         author=AuthorInfo.from_user(discovery.user, discovery.is_anonymous),
         status=discovery.status,
         is_featured=discovery.is_featured,
+        is_pinned=getattr(discovery, 'is_pinned', False),
+        is_answered=getattr(discovery, 'is_answered', False),
         view_count=discovery.view_count,
         response_count=discovery.response_count,
+        upvotes=getattr(discovery, 'upvotes', 0) or 0,
+        downvotes=getattr(discovery, 'downvotes', 0) or 0,
         created_at=discovery.created_at,
-        updated_at=discovery.updated_at
+        updated_at=discovery.updated_at,
+        # Include new fields
+        additional_shelfmarks=getattr(discovery, 'additional_shelfmarks', None),
+        related_manuscripts=getattr(discovery, 'related_manuscripts', None),
+        all_shelfmarks=discovery.all_shelfmarks if hasattr(discovery, 'all_shelfmarks') else None,
+        related_docs=discovery.related_docs if hasattr(discovery, 'related_docs') else None
     )
 
 

@@ -31,6 +31,15 @@ class DiscoveryService:
         user: User
     ) -> Tuple[Optional[Discovery], Optional[str]]:
         """Create a new discovery"""
+        # Convert Pydantic models to dicts for JSON fields
+        additional_shelfmarks = None
+        if data.additional_shelfmarks:
+            additional_shelfmarks = [sm.model_dump() for sm in data.additional_shelfmarks]
+
+        related_manuscripts = None
+        if data.related_manuscripts:
+            related_manuscripts = [rm.model_dump() for rm in data.related_manuscripts]
+
         discovery = Discovery(
             user_id=user.id,
             title=data.title,
@@ -39,6 +48,8 @@ class DiscoveryService:
             document_id=data.document_id,
             page_number=data.page_number,
             shelfmark=data.shelfmark,
+            additional_shelfmarks=additional_shelfmarks,
+            related_manuscripts=related_manuscripts,
             correction_id=data.correction_id,
             is_anonymous=data.is_anonymous,
             status=DiscoveryStatus.PUBLISHED
@@ -102,6 +113,11 @@ class DiscoveryService:
             discovery.shelfmark = data.shelfmark
         if data.is_anonymous is not None:
             discovery.is_anonymous = data.is_anonymous
+        # Update new fields
+        if data.additional_shelfmarks is not None:
+            discovery.additional_shelfmarks = [sm.model_dump() for sm in data.additional_shelfmarks]
+        if data.related_manuscripts is not None:
+            discovery.related_manuscripts = [rm.model_dump() for rm in data.related_manuscripts]
 
         db.commit()
         db.refresh(discovery)
@@ -332,7 +348,10 @@ class DiscoveryService:
                     is_hidden=is_hidden,
                     upvotes=getattr(d, 'upvotes', 0) or 0,
                     downvotes=getattr(d, 'downvotes', 0) or 0,
-                    discovery_type=d.discovery_type
+                    discovery_type=d.discovery_type,
+                    # Include new fields
+                    additional_shelfmarks=getattr(d, 'additional_shelfmarks', None),
+                    related_manuscripts=getattr(d, 'related_manuscripts', None)
                 ))
 
         # Get approved corrections

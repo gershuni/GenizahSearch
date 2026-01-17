@@ -67,6 +67,74 @@ class Comment:
     created_at: Optional[str] = None
     is_pinned: bool = False
     is_resolved: bool = False
+    is_public: bool = True
+    is_anonymous: bool = False
+    reply_count: int = 0
+
+
+@dataclass
+class Discovery:
+    """Discovery/Question data class"""
+    id: int
+    title: str
+    content: str
+    discovery_type: str = "discovery"  # discovery, question, identification, note
+    status: str = "published"
+    author_id: Optional[int] = None
+    author_username: Optional[str] = None
+    author_full_name: Optional[str] = None
+    is_anonymous: bool = False
+    document_id: Optional[str] = None
+    shelfmark: Optional[str] = None
+    page_number: Optional[int] = None
+    additional_shelfmarks: Optional[List[Dict]] = None
+    related_manuscripts: Optional[List[Dict]] = None
+    is_featured: bool = False
+    is_pinned: bool = False
+    is_answered: bool = False
+    view_count: int = 0
+    response_count: int = 0
+    upvotes: int = 0
+    downvotes: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@dataclass
+class DiscoveryResponse:
+    """Response to a discovery"""
+    id: int
+    discovery_id: int
+    content: str
+    author_id: Optional[int] = None
+    author_username: Optional[str] = None
+    is_anonymous: bool = False
+    created_at: Optional[str] = None
+
+
+@dataclass
+class FeedItem:
+    """Activity feed item"""
+    id: str
+    item_type: str  # discovery, question, correction, comment
+    title: str
+    content_preview: str
+    author_username: Optional[str] = None
+    author_full_name: Optional[str] = None
+    is_anonymous: bool = False
+    document_id: Optional[str] = None
+    shelfmark: Optional[str] = None
+    page_number: Optional[int] = None
+    created_at: Optional[str] = None
+    response_count: int = 0
+    is_featured: bool = False
+    is_pinned: bool = False
+    is_answered: bool = False
+    upvotes: int = 0
+    downvotes: int = 0
+    # For corrections
+    original_text: Optional[str] = None
+    corrected_text: Optional[str] = None
 
 
 class CorrectionsClient:
@@ -555,8 +623,340 @@ class CorrectionsClient:
             comment_type=data.get('comment_type', 'general'),
             created_at=data.get('created_at'),
             is_pinned=data.get('is_pinned', False),
-            is_resolved=data.get('is_resolved', False)
+            is_resolved=data.get('is_resolved', False),
+            is_public=data.get('is_public', True),
+            is_anonymous=data.get('is_anonymous', False),
+            reply_count=data.get('reply_count', 0)
         )
+
+    def get_my_comments(
+        self,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[Comment], int]:
+        """Get current user's comments"""
+        try:
+            params = {'page': page, 'page_size': page_size}
+            data = self._request('GET', '/comments/my', params=params)
+            comments = [self._parse_comment(c) for c in data.get('items', [])]
+            return comments, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get my comments: {e}")
+            return [], 0
+
+    # ==================== Discoveries ====================
+
+    def create_discovery(
+        self,
+        title: str,
+        content: str,
+        discovery_type: str = "discovery",
+        document_id: str = None,
+        page_number: int = None,
+        shelfmark: str = None,
+        is_anonymous: bool = False,
+        additional_shelfmarks: List[Dict] = None,
+        related_manuscripts: List[Dict] = None
+    ) -> Tuple[Optional[Discovery], str]:
+        """Create a new discovery/question"""
+        try:
+            data = self._request('POST', '/discoveries/', {
+                'title': title,
+                'content': content,
+                'discovery_type': discovery_type,
+                'document_id': document_id,
+                'page_number': page_number,
+                'shelfmark': shelfmark,
+                'is_anonymous': is_anonymous,
+                'additional_shelfmarks': additional_shelfmarks,
+                'related_manuscripts': related_manuscripts
+            })
+            return self._parse_discovery(data), "Discovery created"
+        except Exception as e:
+            return None, str(e)
+
+    def get_discovery(self, discovery_id: int) -> Optional[Discovery]:
+        """Get a single discovery"""
+        try:
+            data = self._request('GET', f'/discoveries/{discovery_id}')
+            return self._parse_discovery(data)
+        except Exception as e:
+            logger.warning(f"Failed to get discovery: {e}")
+            return None
+
+    def update_discovery(
+        self,
+        discovery_id: int,
+        title: str = None,
+        content: str = None,
+        document_id: str = None,
+        page_number: int = None,
+        shelfmark: str = None,
+        is_anonymous: bool = None
+    ) -> Tuple[bool, str]:
+        """Update a discovery"""
+        try:
+            update_data = {}
+            if title is not None:
+                update_data['title'] = title
+            if content is not None:
+                update_data['content'] = content
+            if document_id is not None:
+                update_data['document_id'] = document_id
+            if page_number is not None:
+                update_data['page_number'] = page_number
+            if shelfmark is not None:
+                update_data['shelfmark'] = shelfmark
+            if is_anonymous is not None:
+                update_data['is_anonymous'] = is_anonymous
+
+            self._request('PUT', f'/discoveries/{discovery_id}', update_data)
+            return True, "Discovery updated"
+        except Exception as e:
+            return False, str(e)
+
+    def delete_discovery(self, discovery_id: int) -> Tuple[bool, str]:
+        """Delete (hide) a discovery"""
+        try:
+            self._request('DELETE', f'/discoveries/{discovery_id}')
+            return True, "Discovery deleted"
+        except Exception as e:
+            return False, str(e)
+
+    def get_discoveries(
+        self,
+        discovery_type: str = None,
+        featured_only: bool = False,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[Discovery], int]:
+        """Get list of discoveries"""
+        try:
+            params = {
+                'limit': page_size,
+                'offset': (page - 1) * page_size
+            }
+            if discovery_type:
+                params['discovery_type'] = discovery_type
+            if featured_only:
+                params['featured_only'] = True
+
+            data = self._request('GET', '/discoveries/', params=params)
+            discoveries = [self._parse_discovery(d) for d in data.get('items', [])]
+            return discoveries, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get discoveries: {e}")
+            return [], 0
+
+    def get_feed(
+        self,
+        item_type: str = None,
+        period: str = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[FeedItem], int]:
+        """Get activity feed"""
+        try:
+            params = {
+                'limit': page_size,
+                'offset': (page - 1) * page_size
+            }
+            if item_type and item_type != 'all':
+                params['item_type'] = item_type
+            if period and period != 'all':
+                params['period'] = period
+
+            data = self._request('GET', '/discoveries/feed/items', params=params)
+            items = [self._parse_feed_item(i) for i in data.get('items', [])]
+            return items, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get feed: {e}")
+            return [], 0
+
+    def get_discovery_stats(self) -> Dict:
+        """Get discovery statistics"""
+        try:
+            return self._request('GET', '/discoveries/stats/summary')
+        except Exception as e:
+            logger.warning(f"Failed to get discovery stats: {e}")
+            return {}
+
+    def add_discovery_response(
+        self,
+        discovery_id: int,
+        content: str,
+        is_anonymous: bool = False
+    ) -> Tuple[Optional[DiscoveryResponse], str]:
+        """Add a response to a discovery"""
+        try:
+            data = self._request('POST', f'/discoveries/{discovery_id}/responses', {
+                'content': content,
+                'is_anonymous': is_anonymous
+            })
+            return self._parse_discovery_response(data), "Response added"
+        except Exception as e:
+            return None, str(e)
+
+    def get_discovery_responses(
+        self,
+        discovery_id: int
+    ) -> List[DiscoveryResponse]:
+        """Get responses for a discovery"""
+        try:
+            data = self._request('GET', f'/discoveries/{discovery_id}/responses')
+            return [self._parse_discovery_response(r) for r in data.get('items', [])]
+        except Exception as e:
+            logger.warning(f"Failed to get discovery responses: {e}")
+            return []
+
+    def vote_discovery(
+        self,
+        discovery_id: int,
+        vote_type: str  # 'up', 'down', or 'none'
+    ) -> Tuple[bool, str]:
+        """Vote on a discovery"""
+        try:
+            self._request('POST', f'/discoveries/{discovery_id}/vote', params={'vote_type': vote_type})
+            return True, "Vote recorded"
+        except Exception as e:
+            return False, str(e)
+
+    def mark_discovery_answered(
+        self,
+        discovery_id: int,
+        answered: bool = True
+    ) -> Tuple[bool, str]:
+        """Mark a question as answered"""
+        try:
+            self._request('POST', f'/discoveries/{discovery_id}/answer', params={'answered': str(answered).lower()})
+            return True, "Marked as answered" if answered else "Marked as unanswered"
+        except Exception as e:
+            return False, str(e)
+
+    def _parse_discovery(self, data: Dict) -> Discovery:
+        """Parse discovery data into Discovery object"""
+        author = data.get('author', {})
+        return Discovery(
+            id=data['id'],
+            title=data['title'],
+            content=data['content'],
+            discovery_type=data.get('discovery_type', 'discovery'),
+            status=data.get('status', 'published'),
+            author_id=author.get('id') if author else None,
+            author_username=author.get('username') if author else None,
+            author_full_name=author.get('full_name') if author else None,
+            is_anonymous=author.get('is_anonymous', False) if author else False,
+            document_id=data.get('document_id'),
+            shelfmark=data.get('shelfmark'),
+            page_number=data.get('page_number'),
+            additional_shelfmarks=data.get('additional_shelfmarks'),
+            related_manuscripts=data.get('related_manuscripts'),
+            is_featured=data.get('is_featured', False),
+            is_pinned=data.get('is_pinned', False),
+            is_answered=data.get('is_answered', False),
+            view_count=data.get('view_count', 0),
+            response_count=data.get('response_count', 0),
+            upvotes=data.get('upvotes', 0),
+            downvotes=data.get('downvotes', 0),
+            created_at=data.get('created_at'),
+            updated_at=data.get('updated_at')
+        )
+
+    def _parse_discovery_response(self, data: Dict) -> DiscoveryResponse:
+        """Parse discovery response data"""
+        author = data.get('author', {})
+        return DiscoveryResponse(
+            id=data['id'],
+            discovery_id=data.get('discovery_id', 0),
+            content=data['content'],
+            author_id=author.get('id') if author else None,
+            author_username=author.get('username') if author else None,
+            is_anonymous=author.get('is_anonymous', False) if author else False,
+            created_at=data.get('created_at')
+        )
+
+    def _parse_feed_item(self, data: Dict) -> FeedItem:
+        """Parse feed item data"""
+        author = data.get('author', {})
+        return FeedItem(
+            id=data['id'],
+            item_type=data['item_type'],
+            title=data['title'],
+            content_preview=data.get('content_preview', ''),
+            author_username=author.get('username') if author else None,
+            author_full_name=author.get('full_name') if author else None,
+            is_anonymous=author.get('is_anonymous', False) if author else False,
+            document_id=data.get('document_id'),
+            shelfmark=data.get('shelfmark'),
+            page_number=data.get('page_number'),
+            created_at=data.get('created_at'),
+            response_count=data.get('response_count', 0),
+            is_featured=data.get('is_featured', False),
+            is_pinned=data.get('is_pinned', False),
+            is_answered=data.get('is_answered', False),
+            upvotes=data.get('upvotes', 0),
+            downvotes=data.get('downvotes', 0),
+            original_text=data.get('original_text'),
+            corrected_text=data.get('corrected_text')
+        )
+
+    # ==================== All Users Corrections ====================
+
+    def get_all_corrections(
+        self,
+        status: str = None,
+        document_id: str = None,
+        search_text: str = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[Correction], int]:
+        """Get all corrections (from all users)"""
+        try:
+            params = {'page': page, 'page_size': page_size}
+            if status:
+                params['status'] = status
+            if document_id:
+                params['document_id'] = document_id
+            if search_text:
+                params['search_text'] = search_text
+
+            data = self._request('GET', '/corrections/', params=params)
+            corrections = [self._parse_correction(c) for c in data.get('items', [])]
+            return corrections, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get all corrections: {e}")
+            return [], 0
+
+    def get_pending_corrections(
+        self,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[Correction], int]:
+        """Get pending corrections for review"""
+        try:
+            params = {'page': page, 'page_size': page_size}
+            data = self._request('GET', '/corrections/pending', params=params)
+            corrections = [self._parse_correction(c) for c in data.get('items', [])]
+            return corrections, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get pending corrections: {e}")
+            return [], 0
+
+    def review_correction(
+        self,
+        correction_id: int,
+        action: str,  # 'approve', 'reject', 'request_revision'
+        review_notes: str = None
+    ) -> Tuple[bool, str]:
+        """Review a correction"""
+        try:
+            data = {'action': action}
+            if review_notes:
+                data['review_notes'] = review_notes
+            self._request('POST', f'/corrections/{correction_id}/review', data)
+            return True, f"Correction {action}d"
+        except Exception as e:
+            return False, str(e)
 
     # ==================== Documents ====================
 
