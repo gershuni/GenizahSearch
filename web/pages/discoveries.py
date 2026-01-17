@@ -9,7 +9,8 @@ Shows:
 - NO leaderboard (researchers prefer anonymity over competition)
 """
 
-from nicegui import ui, app
+import asyncio
+from nicegui import ui, app, run
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
 from typing import Optional
@@ -64,7 +65,11 @@ async def create_discoveries_page():
                 if not GlobalAuthState.is_logged_in():
                     ui.notify(tr('Please login to create a discovery'), type='warning')
                     return
-                dialog = create_new_discovery_dialog(on_success=lambda: refresh_feed())
+
+                async def on_discovery_created():
+                    await refresh_feed()
+
+                dialog = create_new_discovery_dialog(on_success=on_discovery_created)
                 dialog.open()
 
             ui.button(tr('Share Discovery'), icon='add', on_click=open_create_dialog).props('color=primary')
@@ -200,8 +205,21 @@ def create_feed_item(item: dict, on_refresh=None):
     current_user = GlobalAuthState.get_user()
     is_author = current_user and author.get('id') == current_user.get('id')
     is_admin = current_user and current_user.get('role') == 'admin'
+    is_hidden = item.get('is_hidden', False)
 
-    with ui.card().classes('w-full p-4 hover:shadow-md transition-shadow'):
+    # Card styling - hidden items have muted appearance
+    card_classes = 'w-full p-4 hover:shadow-md transition-shadow'
+    card_style = ''
+    if is_hidden:
+        card_classes += ' opacity-60'
+        card_style = 'border-left: 4px solid #ef4444; background: #fef2f2;'
+
+    with ui.card().classes(card_classes).style(card_style):
+        # Hidden badge for admin
+        if is_hidden:
+            with ui.row().classes('w-full mb-2'):
+                ui.badge(tr('Hidden')).props('color=red').classes('text-xs')
+
         with ui.row().classes('w-full items-start gap-4'):
             # Type icon and badges
             with ui.column().classes('items-center gap-1'):
@@ -264,7 +282,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             ui.button(icon='delete', on_click=delete_discovery).props('flat round dense size=sm color=negative').tooltip(tr('Delete'))
 
-                        # Admin pin button
+                        # Admin pin button for discoveries
                         if is_admin and item_type in ('discovery', 'question', 'identification', 'note'):
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
                             is_pinned = item.get('is_pinned', False)
@@ -279,6 +297,81 @@ def create_feed_item(item: dict, on_refresh=None):
                             pin_icon = 'push_pin' if is_pinned else 'push_pin'
                             pin_color = 'color=red' if is_pinned else ''
                             ui.button(icon=pin_icon, on_click=toggle_pin).props(f'flat round dense size=sm {pin_color}').tooltip(tr('Pin') if not is_pinned else tr('Unpin'))
+
+                            # Admin hide/unhide button for discoveries
+                            is_item_hidden = item.get('is_hidden', False)
+
+                            async def toggle_hide_discovery(nid=numeric_id, hidden=is_item_hidden):
+                                endpoint = f"/discoveries/{nid}/unhide" if hidden else f"/discoveries/{nid}/hide"
+                                result = await api_call("POST", endpoint)
+                                if "error" not in result:
+                                    msg = tr('Item unhidden') if hidden else tr('Item hidden')
+                                    ui.notify(msg, type='positive')
+                                    if on_refresh:
+                                        await on_refresh()
+                                else:
+                                    ui.notify(result.get("error", tr('Error')), type='negative')
+
+                            if is_item_hidden:
+                                ui.button(icon='visibility', on_click=toggle_hide_discovery).props('flat round dense size=sm color=green').tooltip(tr('Unhide'))
+                            else:
+                                ui.button(icon='visibility_off', on_click=toggle_hide_discovery).props('flat round dense size=sm').tooltip(tr('Hide'))
+
+                        # Admin delete for comments
+                        if is_admin and item_type == 'comment':
+                            numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
+
+                            async def delete_comment_admin(nid=numeric_id):
+                                # Confirm dialog
+                                confirm_dialog = ui.dialog()
+                                with confirm_dialog, ui.card().classes('p-4'):
+                                    ui.label(tr('Delete this comment?')).classes('font-bold')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    with ui.row().classes('justify-end gap-2 mt-4'):
+                                        ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+
+                                        async def do_delete():
+                                            result = await api_call("DELETE", f"/comments/{nid}")
+                                            confirm_dialog.close()
+                                            if "error" not in result:
+                                                ui.notify(tr('Comment deleted'), type='positive')
+                                                if on_refresh:
+                                                    await on_refresh()
+                                            else:
+                                                ui.notify(result.get("error", tr('Error')), type='negative')
+
+                                        ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                confirm_dialog.open()
+
+                            ui.button(icon='delete', on_click=delete_comment_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete comment'))
+
+                        # Admin delete for corrections
+                        if is_admin and item_type == 'correction':
+                            numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
+
+                            async def delete_correction_admin(nid=numeric_id):
+                                # Confirm dialog
+                                confirm_dialog = ui.dialog()
+                                with confirm_dialog, ui.card().classes('p-4'):
+                                    ui.label(tr('Delete this correction?')).classes('font-bold')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    with ui.row().classes('justify-end gap-2 mt-4'):
+                                        ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+
+                                        async def do_delete():
+                                            result = await api_call("DELETE", f"/corrections/{nid}")
+                                            confirm_dialog.close()
+                                            if "error" not in result:
+                                                ui.notify(tr('Correction deleted'), type='positive')
+                                                if on_refresh:
+                                                    await on_refresh()
+                                            else:
+                                                ui.notify(result.get("error", tr('Error')), type='negative')
+
+                                        ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                confirm_dialog.open()
+
+                            ui.button(icon='delete', on_click=delete_correction_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete correction'))
 
                 # Title
                 ui.label(item.get('title', '')).classes('font-bold text-lg')
@@ -462,31 +555,274 @@ def create_response_item(resp: dict):
 
 async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
     """Open dialog to edit a discovery."""
+    from web.state import state
+
     dialog = ui.dialog()
+
+    # State for document selection
+    selected_doc = {
+        'sys_id': item.get('document_id'),
+        'shelfmark': item.get('shelfmark'),
+        'page_number': item.get('page_number'),
+        'total_pages': 0
+    }
+
+    def truncate_title(title: str, max_words: int = 4) -> tuple:
+        """Truncate title to max_words, return (short, full) for tooltip."""
+        if not title:
+            return '', ''
+        words = title.split()
+        if len(words) <= max_words:
+            return title, ''
+        return ' '.join(words[:max_words]) + '...', title
 
     with dialog, ui.card().classes('w-full max-w-lg p-6'):
         ui.label(tr('Edit Discovery')).classes('text-xl font-bold mb-4')
 
         title_input = ui.input(label=tr('Title'), value=item.get('title', '')).classes('w-full').props('outlined')
         content_input = ui.textarea(label=tr('Description'), value=item.get('content_preview', '')).classes('w-full').props('outlined rows=5').style('direction: rtl;')
-        shelfmark_input = ui.input(label=tr('Shelfmark'), value=item.get('shelfmark', '')).classes('w-full').props('outlined')
+
+        # Document link section
+        with ui.expansion(tr('Document link'), icon='link').classes('w-full') as doc_expansion:
+            # Document info container
+            doc_info_container = ui.column().classes('w-full gap-1')
+
+            # Page selection container
+            page_select_container = ui.column().classes('w-full')
+
+            def clear_document_selection():
+                """Clear the document selection."""
+                selected_doc['sys_id'] = None
+                selected_doc['shelfmark'] = None
+                selected_doc['page_number'] = None
+                selected_doc['total_pages'] = 0
+                doc_info_container.clear()
+                page_select_container.clear()
+                update_doc_info()
+
+            def update_doc_info():
+                """Update the document info display."""
+                doc_info_container.clear()
+                if selected_doc['sys_id']:
+                    with doc_info_container:
+                        with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);'):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('check_circle', size='sm').classes('text-green-500')
+                                ui.label(selected_doc['shelfmark'] or selected_doc['sys_id']).classes('font-medium')
+                                ui.button(icon='close', on_click=clear_document_selection).props('flat round dense size=xs')
+                else:
+                    with doc_info_container:
+                        ui.label(tr('No document linked')).classes('text-sm').style('color: var(--text-tertiary);')
+
+            def select_document(sys_id: str, shelfmark: str, title: str = '', page: int = 1):
+                """Select a document and update UI."""
+                selected_doc['sys_id'] = sys_id
+                selected_doc['shelfmark'] = shelfmark
+
+                # Clear and rebuild page selector
+                page_select_container.clear()
+
+                # Get total pages for this document
+                if state.meta_mgr:
+                    try:
+                        browse_page = state.meta_mgr.get_browse_page(sys_id, p_num=1)
+                        if browse_page and browse_page.total_pages > 0:
+                            total = browse_page.total_pages
+                            selected_doc['total_pages'] = total
+                            page_options = {str(i): f"{tr('Image')} {i}" for i in range(1, total + 1)}
+                            initial_page = str(min(page, total))
+                            with page_select_container:
+                                page_sel = ui.select(
+                                    options=page_options,
+                                    value=initial_page,
+                                    label=tr('Image number')
+                                ).classes('w-full').props('outlined dense')
+
+                                def on_page_change(e):
+                                    try:
+                                        selected_doc['page_number'] = int(e.value)
+                                    except:
+                                        selected_doc['page_number'] = None
+
+                                page_sel.on('update:model-value', on_page_change)
+                            selected_doc['page_number'] = int(initial_page)
+                    except Exception:
+                        pass
+
+                update_doc_info()
+
+            # Single dialog for document selection
+            doc_picker_dialog = ui.dialog()
+            doc_picker_content = ui.column()
+
+            def show_document_items(items, title_text, back_callback=None):
+                """Show document items in the picker dialog."""
+                doc_picker_content.clear()
+                with doc_picker_content:
+                    with ui.card().classes('w-96 p-4'):
+                        with ui.row().classes('w-full items-center justify-between mb-3'):
+                            if back_callback:
+                                ui.button(icon='arrow_back', on_click=back_callback).props('flat round dense')
+                            ui.label(title_text).classes('font-bold flex-grow')
+                            ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
+
+                        if not items:
+                            ui.label(tr('No items found')).classes('text-gray-500 p-4')
+                        else:
+                            with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                                for itm in items:
+                                    doc_id = itm.get('sys_id') or itm.get('document_id') or itm.get('system_id', '')
+                                    shelfmark = itm.get('shelfmark', '')
+                                    title = itm.get('title', '')
+                                    page = itm.get('page_number') or itm.get('page', 1) or 1
+
+                                    if doc_id and state.meta_mgr and not shelfmark:
+                                        try:
+                                            sh, ti = state.meta_mgr.get_meta_for_id(doc_id)
+                                            shelfmark = sh or doc_id
+                                            title = title or ti or ''
+                                        except:
+                                            shelfmark = doc_id
+
+                                    def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
+                                        def pick():
+                                            select_document(did, sm, ti, pg)
+                                            doc_picker_dialog.close()
+                                        return pick
+
+                                    with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_pick()):
+                                        display_text = shelfmark or doc_id
+                                        if page and page > 1:
+                                            display_text += f" • {tr('Image')} {page}"
+                                        ui.label(display_text).classes('font-medium text-sm')
+                                        if title:
+                                            short_title, full_title = truncate_title(title)
+                                            t_label = ui.label(short_title).classes('text-xs').style('color: var(--text-secondary);')
+                                            if full_title:
+                                                t_label.tooltip(full_title)
+
+            def show_lists_view():
+                """Show list of user's lists."""
+                if not state.lists_mgr:
+                    ui.notify(tr('Lists not available'), type='warning')
+                    return
+
+                lists = state.lists_mgr.data.get('lists', {})
+                if not lists:
+                    ui.notify(tr('No lists found'), type='info')
+                    return
+
+                doc_picker_content.clear()
+                with doc_picker_content:
+                    with ui.card().classes('w-96 p-4'):
+                        with ui.row().classes('w-full items-center justify-between mb-3'):
+                            ui.label(tr('Select a list')).classes('font-bold flex-grow')
+                            ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
+
+                        with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                            for list_id, list_data in lists.items():
+                                list_name = list_data.get('name', list_id)
+                                color = list_data.get('color', '#999')
+                                try:
+                                    count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
+                                except:
+                                    count = 0
+
+                                def make_list_click(lid=list_id, lname=list_name):
+                                    def click():
+                                        items = state.lists_mgr.get_items_in_list(lid)
+                                        show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
+                                    return click
+
+                                with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_list_click()):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.icon('circle').style(f'color: {color}; font-size: 1rem;')
+                                        ui.label(list_name).classes('font-medium flex-grow')
+                                        ui.badge(str(count)).classes('bg-gray-200')
+
+                doc_picker_dialog.open()
+
+            def fetch_recent():
+                """Fetch from recent browsing history."""
+                if not state.lists_mgr:
+                    ui.notify(tr('Lists not available'), type='warning')
+                    return
+
+                recent_items = state.lists_mgr.data.get('recent_items', [])
+                if not recent_items:
+                    ui.notify(tr('No recent activity'), type='info')
+                    return
+
+                show_document_items(recent_items, tr('Recent Activity'))
+                doc_picker_dialog.open()
+
+            # Attach dialog content container
+            with doc_picker_dialog:
+                doc_picker_content
+
+            # Quick select buttons
+            with ui.row().classes('w-full gap-2 mb-3'):
+                ui.button(tr('Recent Activity'), icon='history', on_click=fetch_recent).props('outlined dense')
+                ui.button(tr('My Lists'), icon='bookmark', on_click=show_lists_view).props('outlined dense')
+
+            # Initialize: show current document info and page selector if applicable
+            if selected_doc['sys_id']:
+                # Load page options for existing document
+                if state.meta_mgr:
+                    try:
+                        browse_page = state.meta_mgr.get_browse_page(selected_doc['sys_id'], p_num=1)
+                        if browse_page and browse_page.total_pages > 0:
+                            total = browse_page.total_pages
+                            selected_doc['total_pages'] = total
+                            page_options = {str(i): f"{tr('Image')} {i}" for i in range(1, total + 1)}
+                            initial_page = str(selected_doc['page_number']) if selected_doc['page_number'] else '1'
+                            if int(initial_page) > total:
+                                initial_page = '1'
+                            with page_select_container:
+                                page_sel = ui.select(
+                                    options=page_options,
+                                    value=initial_page,
+                                    label=tr('Image number')
+                                ).classes('w-full').props('outlined dense')
+
+                                def on_page_change(e):
+                                    try:
+                                        selected_doc['page_number'] = int(e.value)
+                                    except:
+                                        selected_doc['page_number'] = None
+
+                                page_sel.on('update:model-value', on_page_change)
+                    except Exception:
+                        pass
+
+            update_doc_info()
+
+            # Expand if document is linked
+            if selected_doc['sys_id']:
+                doc_expansion.value = True
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
             async def save_changes():
-                result = await api_call("PUT", f"/discoveries/{discovery_id}", {
+                data = {
                     "title": title_input.value,
                     "content": content_input.value,
-                    "shelfmark": shelfmark_input.value or None
-                })
+                    "document_id": selected_doc['sys_id'],
+                    "shelfmark": selected_doc['shelfmark'],
+                    "page_number": selected_doc['page_number']
+                }
+                result = await api_call("PUT", f"/discoveries/{discovery_id}", data)
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
                     ui.notify(tr('Discovery updated'), type='positive')
                     dialog.close()
                     if on_refresh:
-                        await on_refresh()
+                        if asyncio.iscoroutinefunction(on_refresh):
+                            await on_refresh()
+                        else:
+                            on_refresh()
 
             ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
 
@@ -521,7 +857,21 @@ async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
 
 def create_new_discovery_dialog(on_success=None):
     """Create dialog for posting a new discovery/question."""
+    from web.state import state
+
     dialog = ui.dialog().props('persistent')
+
+    # State for document selection
+    selected_doc = {'sys_id': None, 'shelfmark': None, 'title': None, 'total_pages': 0}
+
+    def truncate_title(title: str, max_words: int = 4) -> tuple:
+        """Truncate title to max_words, return (short, full) for tooltip."""
+        if not title:
+            return '', ''
+        words = title.split()
+        if len(words) <= max_words:
+            return title, ''
+        return ' '.join(words[:max_words]) + '...', title
 
     with dialog:
         with ui.card().classes('w-full max-w-lg p-6'):
@@ -555,44 +905,193 @@ def create_new_discovery_dialog(on_success=None):
                 ).classes('w-full').props('outlined rows=5').style('direction: rtl;')
 
                 # Document reference (optional)
-                with ui.expansion(tr('Link to document (optional)'), icon='link').classes('w-full'):
-                    # Shelfmark search with autocomplete
-                    shelfmark_input = ui.input(
-                        label=tr('Shelfmark'),
-                        placeholder='e.g. T-S 8J6.1'
-                    ).classes('w-full').props('outlined dense')
+                with ui.expansion(tr('Link to document (optional)'), icon='link').classes('w-full') as doc_expansion:
+                    # Selected document info
+                    doc_info_container = ui.column().classes('w-full gap-1')
 
-                    # Title display (auto-filled when shelfmark is found)
-                    title_display = ui.label('').classes('text-sm').style('color: var(--text-secondary);')
+                    # Hidden inputs for form data
+                    doc_id_input = ui.input().classes('hidden')
+                    shelfmark_hidden = ui.input().classes('hidden')
 
-                    # Hidden document ID (auto-filled when shelfmark is found)
-                    doc_id_input = ui.input(label=tr('Document ID')).classes('w-full').props('outlined dense')
+                    # Page selection container (shown when document selected)
+                    page_select_container = ui.column().classes('w-full')
 
-                    with ui.row().classes('w-full gap-2'):
-                        page_input = ui.number(label=tr('Page'), min=1).classes('flex-1').props('outlined dense')
+                    def clear_document_selection():
+                        """Clear the document selection."""
+                        selected_doc['sys_id'] = None
+                        selected_doc['shelfmark'] = None
+                        selected_doc['title'] = None
+                        selected_doc['total_pages'] = 0
+                        doc_id_input.value = ''
+                        shelfmark_hidden.value = ''
+                        doc_info_container.clear()
+                        page_select_container.clear()
 
-                    # Search shelfmark and auto-fill
-                    def lookup_shelfmark():
-                        from web.state import state
-                        shelfmark_val = shelfmark_input.value.strip()
-                        if not shelfmark_val or not state.meta_mgr:
-                            title_display.text = ''
+                    def update_doc_info():
+                        """Update the document info display."""
+                        doc_info_container.clear()
+                        if selected_doc['sys_id']:
+                            with doc_info_container:
+                                with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);'):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.icon('check_circle', size='sm').classes('text-green-500')
+                                        ui.label(selected_doc['shelfmark'] or '').classes('font-medium')
+                                        ui.button(icon='close', on_click=clear_document_selection).props('flat round dense size=xs')
+                                    if selected_doc['title']:
+                                        short_title, full_title = truncate_title(selected_doc['title'])
+                                        title_label = ui.label(short_title).classes('text-sm').style('color: var(--text-secondary);')
+                                        if full_title:
+                                            title_label.tooltip(full_title)
+                                    ui.label(f"ID: {selected_doc['sys_id']}").classes('text-xs').style('color: var(--text-tertiary);')
+
+                    def select_document(sys_id: str, shelfmark: str, title: str = '', page: int = 1):
+                        """Select a document and update UI."""
+                        selected_doc['sys_id'] = sys_id
+                        selected_doc['shelfmark'] = shelfmark
+                        selected_doc['title'] = title
+
+                        doc_id_input.value = sys_id
+                        shelfmark_hidden.value = shelfmark
+
+                        # Clear and rebuild page selector
+                        page_select_container.clear()
+
+                        # Get total pages for this document
+                        if state.meta_mgr:
+                            try:
+                                browse_page = state.meta_mgr.get_browse_page(sys_id, p_num=1)
+                                if browse_page and browse_page.total_pages > 0:
+                                    total = browse_page.total_pages
+                                    selected_doc['total_pages'] = total
+                                    page_options = {str(i): f"{tr('Image')} {i}" for i in range(1, total + 1)}
+                                    initial_page = str(min(page, total))
+                                    with page_select_container:
+                                        ui.select(
+                                            options=page_options,
+                                            value=initial_page,
+                                            label=tr('Image number')
+                                        ).classes('w-full').props('outlined dense').bind_value(
+                                            selected_doc, 'selected_page'
+                                        )
+                                    selected_doc['selected_page'] = initial_page
+                            except Exception:
+                                pass
+
+                        update_doc_info()
+
+                    # Single dialog for document selection - reused for all cases
+                    doc_picker_dialog = ui.dialog()
+                    doc_picker_content = ui.column()
+
+                    def show_document_items(items, title_text, back_callback=None):
+                        """Show document items in the picker dialog."""
+                        doc_picker_content.clear()
+                        with doc_picker_content:
+                            with ui.card().classes('w-96 p-4'):
+                                with ui.row().classes('w-full items-center justify-between mb-3'):
+                                    if back_callback:
+                                        ui.button(icon='arrow_back', on_click=back_callback).props('flat round dense')
+                                    ui.label(title_text).classes('font-bold flex-grow')
+                                    ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
+
+                                if not items:
+                                    ui.label(tr('No items found')).classes('text-gray-500 p-4')
+                                else:
+                                    with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                                        for item in items:
+                                            doc_id = item.get('sys_id') or item.get('document_id') or item.get('system_id', '')
+                                            shelfmark = item.get('shelfmark', '')
+                                            title = item.get('title', '')
+                                            page = item.get('page_number') or item.get('page', 1) or 1
+
+                                            if doc_id and state.meta_mgr and not shelfmark:
+                                                try:
+                                                    sh, ti = state.meta_mgr.get_meta_for_id(doc_id)
+                                                    shelfmark = sh or doc_id
+                                                    title = title or ti or ''
+                                                except:
+                                                    shelfmark = doc_id
+
+                                            def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
+                                                def pick():
+                                                    select_document(did, sm, ti, pg)
+                                                    doc_picker_dialog.close()
+                                                return pick
+
+                                            with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_pick()):
+                                                display_text = shelfmark or doc_id
+                                                if page and page > 1:
+                                                    display_text += f" • {tr('Image')} {page}"
+                                                ui.label(display_text).classes('font-medium text-sm')
+                                                if title:
+                                                    short_title, full_title = truncate_title(title)
+                                                    t_label = ui.label(short_title).classes('text-xs').style('color: var(--text-secondary);')
+                                                    if full_title:
+                                                        t_label.tooltip(full_title)
+
+                    def show_lists_view():
+                        """Show list of user's lists."""
+                        if not state.lists_mgr:
+                            ui.notify(tr('Lists not available'), type='warning')
                             return
 
-                        # Try to find matching document
-                        try:
-                            # Search for matching shelfmark
-                            matches = state.meta_mgr.search_by_shelfmark(shelfmark_val, limit=1)
-                            if matches:
-                                match = matches[0]
-                                doc_id_input.value = match.sys_id
-                                title_display.text = match.title or ''
-                            else:
-                                title_display.text = tr('No matching document found')
-                        except Exception:
-                            title_display.text = ''
+                        lists = state.lists_mgr.data.get('lists', {})
+                        if not lists:
+                            ui.notify(tr('No lists found'), type='info')
+                            return
 
-                    shelfmark_input.on('blur', lookup_shelfmark)
+                        doc_picker_content.clear()
+                        with doc_picker_content:
+                            with ui.card().classes('w-96 p-4'):
+                                with ui.row().classes('w-full items-center justify-between mb-3'):
+                                    ui.label(tr('Select a list')).classes('font-bold flex-grow')
+                                    ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
+
+                                with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                                    for list_id, list_data in lists.items():
+                                        list_name = list_data.get('name', list_id)
+                                        color = list_data.get('color', '#999')
+                                        try:
+                                            count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
+                                        except:
+                                            count = 0
+
+                                        def make_list_click(lid=list_id, lname=list_name):
+                                            def click():
+                                                items = state.lists_mgr.get_items_in_list(lid)
+                                                show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
+                                            return click
+
+                                        with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_list_click()):
+                                            with ui.row().classes('items-center gap-2'):
+                                                ui.icon('circle').style(f'color: {color}; font-size: 1rem;')
+                                                ui.label(list_name).classes('font-medium flex-grow')
+                                                ui.badge(str(count)).classes('bg-gray-200')
+
+                        doc_picker_dialog.open()
+
+                    def fetch_recent():
+                        """Fetch from recent browsing history."""
+                        if not state.lists_mgr:
+                            ui.notify(tr('Lists not available'), type='warning')
+                            return
+
+                        recent_items = state.lists_mgr.data.get('recent_items', [])
+                        if not recent_items:
+                            ui.notify(tr('No recent activity'), type='info')
+                            return
+
+                        show_document_items(recent_items, tr('Recent Activity'))
+                        doc_picker_dialog.open()
+
+                    # Attach dialog content container
+                    with doc_picker_dialog:
+                        doc_picker_content
+
+                    # Quick select buttons
+                    with ui.row().classes('w-full gap-2 mb-3'):
+                        ui.button(tr('Recent Activity'), icon='history', on_click=fetch_recent).props('outlined dense')
+                        ui.button(tr('My Lists'), icon='bookmark', on_click=show_lists_view).props('outlined dense')
 
                 # Anonymous option
                 anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')
@@ -604,13 +1103,20 @@ def create_new_discovery_dialog(on_success=None):
                         ui.notify(tr('Please fill in title and description'), type='warning')
                         return
 
+                    page_num = None
+                    if selected_doc.get('selected_page'):
+                        try:
+                            page_num = int(selected_doc['selected_page'])
+                        except:
+                            pass
+
                     data = {
                         "discovery_type": disc_type.value,
                         "title": title_input.value,
                         "content": content_input.value,
                         "document_id": doc_id_input.value or None,
-                        "page_number": int(page_input.value) if page_input.value else None,
-                        "shelfmark": shelfmark_input.value or None,
+                        "page_number": page_num,
+                        "shelfmark": shelfmark_hidden.value or None,
                         "is_anonymous": anonymous_check.value
                     }
 
@@ -622,7 +1128,11 @@ def create_new_discovery_dialog(on_success=None):
                         ui.notify(tr('Discovery shared successfully!'), type='positive')
                         dialog.close()
                         if on_success:
-                            on_success()
+                            # Handle both sync and async callbacks
+                            if asyncio.iscoroutinefunction(on_success):
+                                await on_success()
+                            else:
+                                on_success()
 
                 with ui.row().classes('w-full justify-end gap-2 mt-4'):
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')

@@ -7,11 +7,13 @@ Provides functionality to add comments to:
 - An entire manuscript
 
 Comments can be public or private.
+Supports shelfmark mentions in format: [[shelfmark:T-S 8J6.1|id:123456]]
 """
 
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
+from web.state import state
 from typing import Optional, Callable
 
 
@@ -35,7 +37,7 @@ def create_comment_dialog(
     """
     dialog = ui.dialog()
 
-    with dialog, ui.card().classes('w-96 p-6'):
+    with dialog, ui.card().classes('w-[450px] p-6'):
         # Header
         ui.label(tr('Send Comment')).classes('text-xl font-bold mb-4')
 
@@ -64,6 +66,114 @@ def create_comment_dialog(
                 label=tr('Comment'),
                 placeholder=tr('Write your comment here...')
             ).classes('w-full').props('outlined rows=4').style('direction: rtl; text-align: right;')
+
+            # Shelfmark mention button
+            def show_shelfmark_picker():
+                """Show dialog to select shelfmarks to mention."""
+                picker_dialog = ui.dialog()
+
+                with picker_dialog, ui.card().classes('w-96 p-4'):
+                    ui.label(tr('Add shelfmark reference')).classes('font-bold mb-3')
+
+                    # Tabs for Recent Activity and Lists
+                    with ui.tabs().classes('w-full') as tabs:
+                        recent_tab = ui.tab('recent', label=tr('Recent Activity'))
+                        lists_tab = ui.tab('lists', label=tr('My Lists'))
+
+                    with ui.tab_panels(tabs, value='recent').classes('w-full'):
+                        with ui.tab_panel('recent'):
+                            recent_container = ui.column().classes('w-full gap-1')
+
+                            def load_recent():
+                                recent_container.clear()
+                                if state.lists_mgr:
+                                    recent_items = state.lists_mgr.data.get('recent_items', [])
+                                    if recent_items:
+                                        with recent_container:
+                                            for item in recent_items[:20]:
+                                                doc_id = item.get('sys_id', '')
+                                                item_shelfmark = item.get('shelfmark', doc_id)
+
+                                                def make_add(sm=item_shelfmark, did=doc_id):
+                                                    def add():
+                                                        # Insert mention at cursor
+                                                        mention = f"[[shelfmark:{sm}|id:{did}]]"
+                                                        current = comment_text.value or ''
+                                                        comment_text.value = current + ' ' + mention + ' '
+                                                        picker_dialog.close()
+                                                    return add
+
+                                                with ui.card().classes('w-full p-2 cursor-pointer hover:bg-gray-100').on('click', make_add()):
+                                                    ui.label(item_shelfmark).classes('font-medium text-sm')
+                                    else:
+                                        with recent_container:
+                                            ui.label(tr('No recent activity')).classes('text-gray-500 text-sm')
+                                else:
+                                    with recent_container:
+                                        ui.label(tr('Lists not available')).classes('text-gray-500 text-sm')
+
+                            load_recent()
+
+                        with ui.tab_panel('lists'):
+                            lists_container = ui.column().classes('w-full gap-1')
+
+                            def load_lists():
+                                lists_container.clear()
+                                if state.lists_mgr:
+                                    lists = state.lists_mgr.data.get('lists', {})
+                                    if lists:
+                                        with lists_container:
+                                            for list_id, list_data in lists.items():
+                                                list_name = list_data.get('name', list_id)
+                                                color = list_data.get('color', '#999')
+
+                                                def make_show_list(lid=list_id, lname=list_name):
+                                                    def show_list():
+                                                        lists_container.clear()
+                                                        items = state.lists_mgr.get_items_in_list(lid)
+                                                        with lists_container:
+                                                            # Back button
+                                                            ui.button(tr('Back'), icon='arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
+                                                            ui.label(lname).classes('font-bold mb-2')
+
+                                                            if items:
+                                                                for item in items:
+                                                                    doc_id = item.get('sys_id', '')
+                                                                    item_shelfmark = item.get('shelfmark', doc_id)
+
+                                                                    def make_add(sm=item_shelfmark, did=doc_id):
+                                                                        def add():
+                                                                            mention = f"[[shelfmark:{sm}|id:{did}]]"
+                                                                            current = comment_text.value or ''
+                                                                            comment_text.value = current + ' ' + mention + ' '
+                                                                            picker_dialog.close()
+                                                                        return add
+
+                                                                    with ui.card().classes('w-full p-2 cursor-pointer hover:bg-gray-100').on('click', make_add()):
+                                                                        ui.label(item_shelfmark).classes('font-medium text-sm')
+                                                            else:
+                                                                ui.label(tr('No items in this list')).classes('text-gray-500 text-sm')
+                                                    return show_list
+
+                                                with ui.card().classes('w-full p-2 cursor-pointer hover:bg-gray-100').on('click', make_show_list()):
+                                                    with ui.row().classes('items-center gap-2'):
+                                                        ui.icon('circle').style(f'color: {color}; font-size: 0.8rem;')
+                                                        ui.label(list_name).classes('font-medium text-sm')
+                                    else:
+                                        with lists_container:
+                                            ui.label(tr('No lists found')).classes('text-gray-500 text-sm')
+                                else:
+                                    with lists_container:
+                                        ui.label(tr('Lists not available')).classes('text-gray-500 text-sm')
+
+                            load_lists()
+
+                    ui.button(tr('Cancel'), on_click=picker_dialog.close).props('flat').classes('mt-3')
+
+                picker_dialog.open()
+
+            with ui.row().classes('w-full'):
+                ui.button(tr('Add shelfmark reference'), icon='link', on_click=show_shelfmark_picker).props('flat dense size=sm')
 
             # Private comment option
             private_check = ui.checkbox(tr('Private comment (only visible to me)'), value=False).classes('text-sm')

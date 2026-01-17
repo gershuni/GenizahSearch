@@ -37,8 +37,8 @@ class AuthorInfo(BaseModel):
 
 class DiscoveryBase(BaseModel):
     """Base discovery fields"""
-    title: str = Field(..., min_length=5, max_length=300)
-    content: str = Field(..., min_length=10)
+    title: str = Field(..., max_length=300)
+    content: str = Field(...)
     discovery_type: DiscoveryType = DiscoveryType.NOTE
     document_id: Optional[str] = None
     page_number: Optional[int] = None
@@ -53,8 +53,8 @@ class DiscoveryCreate(DiscoveryBase):
 
 class DiscoveryUpdate(BaseModel):
     """Update an existing discovery"""
-    title: Optional[str] = Field(None, min_length=5, max_length=300)
-    content: Optional[str] = Field(None, min_length=10)
+    title: Optional[str] = Field(None, max_length=300)
+    content: Optional[str] = None
     discovery_type: Optional[DiscoveryType] = None
     document_id: Optional[str] = None
     page_number: Optional[int] = None
@@ -158,6 +158,7 @@ class FeedItem(BaseModel):
     is_featured: bool = False
     is_pinned: bool = False
     is_answered: bool = False
+    is_hidden: bool = False  # For admin view of hidden items
     upvotes: int = 0
     downvotes: int = 0
 

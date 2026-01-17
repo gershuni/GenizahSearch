@@ -10,6 +10,7 @@ from ..models.discovery import Discovery, DiscoveryResponse, DiscoveryType, Disc
 from ..models.correction import Correction, CorrectionStatus
 from ..models.comment import Comment
 from ..models.user import User
+from ..models.document_metadata import DocumentMetadata
 from ..schemas.discovery import (
     DiscoveryCreate, DiscoveryUpdate, ResponseCreate,
     AuthorInfo, DiscoveryStats, FeedItem
@@ -279,7 +280,8 @@ class DiscoveryService:
         item_type: Optional[str] = None,  # "all", "discovery", "question", "correction", "comment"
         period: Optional[str] = None,  # "day", "week", "month", "all"
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
+        is_admin: bool = False  # Include hidden items for admin
     ) -> Tuple[List[FeedItem], int]:
         """Get activity feed combining discoveries, corrections, comments, etc."""
         feed_items = []
@@ -295,9 +297,13 @@ class DiscoveryService:
 
         # Get discoveries
         if item_type in (None, "all", "discovery", "question"):
-            disc_query = db.query(Discovery).filter(
-                Discovery.status == DiscoveryStatus.PUBLISHED
-            )
+            if is_admin:
+                # Admin sees all discoveries including hidden
+                disc_query = db.query(Discovery)
+            else:
+                disc_query = db.query(Discovery).filter(
+                    Discovery.status == DiscoveryStatus.PUBLISHED
+                )
 
             if item_type == "question":
                 disc_query = disc_query.filter(
@@ -308,6 +314,7 @@ class DiscoveryService:
                 disc_query = disc_query.filter(Discovery.created_at >= date_filter)
 
             for d in disc_query.all():
+                is_hidden = d.status != DiscoveryStatus.PUBLISHED
                 feed_items.append(FeedItem(
                     id=f"discovery_{d.id}",
                     item_type="discovery" if d.discovery_type != DiscoveryType.QUESTION else "question",
@@ -322,6 +329,7 @@ class DiscoveryService:
                     is_featured=d.is_featured,
                     is_pinned=getattr(d, 'is_pinned', False),
                     is_answered=getattr(d, 'is_answered', False),
+                    is_hidden=is_hidden,
                     upvotes=getattr(d, 'upvotes', 0) or 0,
                     downvotes=getattr(d, 'downvotes', 0) or 0,
                     discovery_type=d.discovery_type
@@ -369,8 +377,21 @@ class DiscoveryService:
             if date_filter:
                 comment_query = comment_query.filter(Comment.created_at >= date_filter)
 
-            for c in comment_query.all():
-                # Create a title from the comment
+            # Build a cache of document_id -> shelfmark for comments
+            comments_list = comment_query.all()
+            doc_ids = list(set(c.document_id for c in comments_list if c.document_id))
+            shelfmark_cache = {}
+            if doc_ids:
+                doc_metas = db.query(DocumentMetadata).filter(
+                    DocumentMetadata.document_id.in_(doc_ids)
+                ).all()
+                shelfmark_cache = {dm.document_id: dm.shelfmark for dm in doc_metas}
+
+            for c in comments_list:
+                # Look up shelfmark from cache
+                shelfmark = shelfmark_cache.get(c.document_id)
+
+                # Create a title from the comment using shelfmark if available
                 comment_type_labels = {
                     'general': 'הערה',
                     'question': 'שאלה',
@@ -379,7 +400,8 @@ class DiscoveryService:
                     'issue': 'בעיה'
                 }
                 type_label = comment_type_labels.get(c.comment_type.value, 'הערה')
-                title = f"{type_label} על {c.document_id}"
+                doc_display = shelfmark or c.document_id
+                title = f"{type_label} על {doc_display}"
 
                 feed_items.append(FeedItem(
                     id=f"comment_{c.id}",
@@ -388,14 +410,16 @@ class DiscoveryService:
                     content_preview=c.content[:200] + "..." if len(c.content) > 200 else c.content,
                     author=AuthorInfo.from_user(c.author, getattr(c, 'is_anonymous', False)),
                     document_id=c.document_id,
-                    shelfmark=None,  # Comments don't have shelfmark directly
+                    shelfmark=shelfmark,  # Now includes shelfmark from metadata lookup
                     created_at=c.created_at,
                     response_count=c.reply_count or 0,
                     is_featured=c.is_pinned
                 ))
 
-        # Sort by date
-        feed_items.sort(key=lambda x: x.created_at, reverse=True)
+        # Sort: pinned first, then by date
+        feed_items.sort(key=lambda x: (not x.is_pinned, x.created_at), reverse=True)
+        # Re-sort to ensure pinned items are at top (reverse=True affects both, so pinned=True becomes first)
+        feed_items.sort(key=lambda x: (not x.is_pinned, -x.created_at.timestamp()))
 
         total = len(feed_items)
 
@@ -441,6 +465,24 @@ class DiscoveryService:
             return False, "Discovery not found"
 
         discovery.status = DiscoveryStatus.HIDDEN
+        db.commit()
+
+        return True, None
+
+    @staticmethod
+    def unhide_discovery(
+        db: Session,
+        discovery_id: int
+    ) -> Tuple[bool, Optional[str]]:
+        """Unhide a discovery (admin action)"""
+        discovery = db.query(Discovery).filter(
+            Discovery.id == discovery_id
+        ).first()
+
+        if not discovery:
+            return False, "Discovery not found"
+
+        discovery.status = DiscoveryStatus.PUBLISHED
         db.commit()
 
         return True, None

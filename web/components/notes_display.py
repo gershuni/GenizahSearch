@@ -7,12 +7,66 @@ Supports:
 - Public and private notes
 - Nested replies
 - Reactions
+- Shelfmark mentions in format [[shelfmark:T-S 8J6.1|id:123456]]
 """
 
+import re
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
 from typing import Optional, List
+
+
+# Pattern to match shelfmark mentions: [[shelfmark:xxx|id:yyy]]
+SHELFMARK_MENTION_PATTERN = re.compile(r'\[\[shelfmark:([^\]|]+)\|id:([^\]]+)\]\]')
+
+
+def render_content_with_mentions(content: str, container_classes: str = '', container_style: str = ''):
+    """
+    Render comment content with shelfmark mentions as clickable links.
+
+    Mentions are in format: [[shelfmark:T-S 8J6.1|id:123456]]
+    They will be rendered as clickable links that navigate to the document.
+
+    Args:
+        content: The comment text content
+        container_classes: CSS classes for the container
+        container_style: Inline styles for the container
+    """
+    if not content:
+        return
+
+    # Split content by mentions
+    parts = SHELFMARK_MENTION_PATTERN.split(content)
+
+    # parts will be: [text, shelfmark1, id1, text, shelfmark2, id2, ...]
+    # Every 3 elements: text, shelfmark, id
+
+    with ui.element('div').classes(f'text-sm whitespace-pre-wrap {container_classes}').style(container_style):
+        i = 0
+        while i < len(parts):
+            if i % 3 == 0:
+                # Regular text
+                text = parts[i]
+                if text:
+                    ui.html(f'<span>{text}</span>')
+            elif i % 3 == 1:
+                # Shelfmark (next element is id)
+                shelfmark = parts[i]
+                doc_id = parts[i + 1] if i + 1 < len(parts) else ''
+
+                def make_click(did=doc_id):
+                    def click():
+                        ui.navigate.to(f'/browse?sys_id={did}')
+                    return click
+
+                with ui.element('span').classes('inline'):
+                    ui.link(
+                        shelfmark,
+                        target=f'/browse?sys_id={doc_id}'
+                    ).classes('text-primary font-medium hover:underline').style('cursor: pointer;')
+                i += 1  # Skip the id part
+            i += 1
 
 
 async def fetch_document_comments(document_id: str, page_number: int = None) -> List[dict]:
@@ -118,9 +172,10 @@ def create_comment_card(comment: dict):
 
             ui.label(created_at).classes('text-xs').style('color: var(--text-muted);')
 
-        # Content
-        ui.label(content).classes('text-sm whitespace-pre-wrap').style(
-            'direction: rtl; text-align: right; color: var(--text-secondary);'
+        # Content with shelfmark mentions rendered as links
+        render_content_with_mentions(
+            content,
+            container_style='direction: rtl; text-align: right; color: var(--text-secondary);'
         )
 
         # Reactions summary
@@ -158,8 +213,11 @@ def create_reply_item(reply: dict):
                 ui.label(author_name).classes('font-medium text-xs')
                 ui.label(created_at).classes('text-xs').style('color: var(--text-muted);')
 
-            ui.label(content).classes('text-xs').style(
-                'direction: rtl; text-align: right; color: var(--text-tertiary);'
+            # Content with shelfmark mentions rendered as links
+            render_content_with_mentions(
+                content,
+                container_classes='text-xs',
+                container_style='direction: rtl; text-align: right; color: var(--text-tertiary);'
             )
 
 

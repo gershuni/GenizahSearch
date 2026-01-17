@@ -246,14 +246,18 @@ async def get_feed(
     """
     Get activity feed combining discoveries, questions, corrections.
 
-    Public endpoint.
+    Public endpoint. Admins see hidden items.
     """
+    # Check if current user is admin
+    is_admin = current_user and current_user.role == 'admin'
+
     items, total = DiscoveryService.get_feed(
         db,
         item_type=item_type,
         period=period,
         limit=limit,
-        offset=offset
+        offset=offset,
+        is_admin=is_admin
     )
 
     stats = DiscoveryService.get_stats(db) if include_stats else None
@@ -327,6 +331,28 @@ async def hide_discovery(
         )
 
     return SuccessResponse(success=True, message="Discovery hidden")
+
+
+@router.post("/{discovery_id}/unhide", response_model=SuccessResponse)
+async def unhide_discovery(
+    discovery_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Unhide a discovery (admin moderation).
+
+    Admin only.
+    """
+    success, error = DiscoveryService.unhide_discovery(db, discovery_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+
+    return SuccessResponse(success=True, message="Discovery unhidden")
 
 
 @router.post("/{discovery_id}/pin", response_model=SuccessResponse)
