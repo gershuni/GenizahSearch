@@ -5,139 +5,14 @@ Corrections Page - Genizah Search Pro
 User corrections system: submit, review, and manage transcription corrections.
 """
 
-import os
 from nicegui import ui, app
-from web.state import state
 from web.translations import tr
-import httpx
+from web.auth_state import GlobalAuthState, api_call, create_login_dialog, do_logout
 from typing import Optional, Dict, Any
-
-# API base URL (same server) - will be set dynamically
-API_BASE = "/api/v1"
-
-
-def get_api_base():
-    """
-    Get the full API base URL.
-
-    Returns the API base URL, preferring the current request's origin
-    to support both local and remote access.
-    """
-    # Try to get the current request's origin
-    try:
-        # Get the host from the request if available
-        from starlette.requests import Request
-        from nicegui import context
-
-        if hasattr(context, 'client') and context.client:
-            # Use the same protocol and host as the current page
-            request = context.client.request
-            if request:
-                scheme = request.url.scheme
-                host = request.url.netloc
-                return f"{scheme}://{host}/api/v1"
-    except:
-        pass
-
-    # Fallback to backend API port (separate from web interface)
-    port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
-    return f"http://localhost:{port}/api/v1"
-
-
-class CorrectionsState:
-    """State management for corrections page."""
-
-    def __init__(self):
-        self.current_user: Optional[Dict] = None
-        self.token: Optional[str] = None
-        self.corrections: list = []
-        self.pending_count: int = 0
-
-    def is_logged_in(self) -> bool:
-        return self.token is not None
-
-    def get_headers(self) -> Dict[str, str]:
-        if self.token:
-            return {"Authorization": f"Bearer {self.token}"}
-        return {}
-
-    def clear(self):
-        self.current_user = None
-        self.token = None
-        self.corrections = []
-
-
-corrections_state = CorrectionsState()
-
-
-async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
-    """Make API call to corrections backend with error handling."""
-    base_url = get_api_base()
-    url = f"{base_url}{endpoint}"
-    all_headers = corrections_state.get_headers()
-    if headers:
-        all_headers.update(headers)
-
-    async with httpx.AsyncClient() as client:
-        try:
-            if method == "GET":
-                resp = await client.get(url, headers=all_headers, params=data, timeout=10)
-            elif method == "POST":
-                resp = await client.post(url, headers=all_headers, json=data, timeout=10)
-            elif method == "PUT":
-                resp = await client.put(url, headers=all_headers, json=data, timeout=10)
-            elif method == "DELETE":
-                resp = await client.delete(url, headers=all_headers, timeout=10)
-            else:
-                return {"error": f"Unknown method: {method}"}
-
-            if resp.status_code in (200, 201):
-                return resp.json()
-            elif resp.status_code == 401:
-                # Token expired or invalid - clear auth state
-                corrections_state.clear()
-                app.storage.user.pop('corrections_token', None)
-                app.storage.user.pop('corrections_user', None)
-                return {"error": "Session expired. Please log in again.", "status": 401, "expired": True}
-            else:
-                # Try to parse error detail from response
-                try:
-                    error_data = resp.json()
-                    detail = error_data.get("detail", resp.text)
-
-                    # Handle FastAPI validation errors (detail is a list)
-                    if isinstance(detail, list):
-                        if detail and isinstance(detail[0], dict):
-                            msg = detail[0].get("msg", "Validation error")
-                            loc = detail[0].get("loc", [])
-                            field = loc[-1] if loc else "field"
-                            error_msg = f"{field}: {msg}"
-                        else:
-                            error_msg = "Validation error"
-                    elif isinstance(detail, dict):
-                        error_msg = detail.get("message", str(detail))
-                    else:
-                        error_msg = str(detail)
-                except:
-                    error_msg = resp.text
-                return {"error": error_msg, "status": resp.status_code}
-        except httpx.TimeoutException:
-            return {"error": "Request timed out. Please try again."}
-        except httpx.ConnectError:
-            return {"error": "Cannot connect to server. Please check your connection."}
-        except Exception as e:
-            return {"error": f"Request failed: {str(e)}"}
 
 
 async def create_corrections_page():
     """Create the Corrections page."""
-
-    # Load stored auth if available
-    stored_token = app.storage.user.get('corrections_token')
-    stored_user = app.storage.user.get('corrections_user')
-    if stored_token and stored_user:
-        corrections_state.token = stored_token
-        corrections_state.current_user = stored_user
 
     with ui.column().classes('w-full max-w-5xl mx-auto gap-8 fade-in'):
 
@@ -154,85 +29,28 @@ async def create_corrections_page():
             """Refresh the page content."""
             main_container.clear()
             with main_container:
-                if corrections_state.is_logged_in():
+                if GlobalAuthState.is_logged_in():
                     await create_logged_in_view()
                 else:
                     create_login_view()
 
         def create_login_view():
-            """Create login/register view."""
+            """Create login/register view - use global login dialog."""
             with ui.card().classes('w-full p-6'):
-                with ui.tabs().classes('w-full') as tabs:
-                    login_tab = ui.tab(tr('Login'))
-                    register_tab = ui.tab(tr('Register'))
+                with ui.column().classes('w-full items-center gap-4 py-8'):
+                    ui.icon('login').classes('text-6xl').style('color: var(--text-tertiary);')
+                    ui.label(tr('Please login to view your corrections')).classes('text-xl').style('color: var(--text-secondary);')
 
-                with ui.tab_panels(tabs, value=login_tab).classes('w-full'):
-                    # Login panel
-                    with ui.tab_panel(login_tab):
-                        with ui.column().classes('w-full gap-4'):
-                            email_input = ui.input(tr('Email')).classes('w-full').props('outlined')
-                            password_input = ui.input(tr('Password'), password=True).classes('w-full').props('outlined')
+                    login_dialog = create_login_dialog()
 
-                            async def do_login():
-                                result = await api_call("POST", "/auth/login", {
-                                    "email": email_input.value,
-                                    "password": password_input.value
-                                })
-                                if "error" in result:
-                                    ui.notify(result.get("detail", result["error"]), type='negative')
-                                else:
-                                    corrections_state.token = result["access_token"]
-                                    # Get user profile
-                                    profile = await api_call("GET", "/users/me")
-                                    if "error" not in profile:
-                                        corrections_state.current_user = profile
-                                        app.storage.user['corrections_token'] = corrections_state.token
-                                        app.storage.user['corrections_user'] = profile
-                                    ui.notify(tr('Login successful'), type='positive')
-                                    await refresh_page()
+                    def open_login():
+                        login_dialog.open()
 
-                            ui.button(tr('Login'), on_click=do_login).classes('w-full').props('color=primary')
-
-                    # Register panel
-                    with ui.tab_panel(register_tab):
-                        with ui.column().classes('w-full gap-4'):
-                            reg_email = ui.input(tr('Email')).classes('w-full').props('outlined')
-                            reg_username = ui.input(tr('Username')).classes('w-full').props('outlined')
-                            reg_fullname = ui.input(tr('Full Name')).classes('w-full').props('outlined')
-                            reg_affiliation = ui.input(tr('Affiliation (optional)')).classes('w-full').props('outlined')
-                            reg_password = ui.input(tr('Password'), password=True).classes('w-full').props('outlined')
-                            reg_confirm = ui.input(tr('Confirm Password'), password=True).classes('w-full').props('outlined')
-
-                            async def do_register():
-                                if reg_password.value != reg_confirm.value:
-                                    ui.notify(tr('Passwords do not match'), type='negative')
-                                    return
-
-                                result = await api_call("POST", "/auth/register", {
-                                    "email": reg_email.value,
-                                    "username": reg_username.value,
-                                    "full_name": reg_fullname.value,
-                                    "affiliation": reg_affiliation.value or None,
-                                    "password": reg_password.value,
-                                    "confirm_password": reg_confirm.value
-                                })
-                                if "error" in result:
-                                    ui.notify(result.get("detail", result["error"]), type='negative')
-                                else:
-                                    corrections_state.token = result["access_token"]
-                                    profile = await api_call("GET", "/users/me")
-                                    if "error" not in profile:
-                                        corrections_state.current_user = profile
-                                        app.storage.user['corrections_token'] = corrections_state.token
-                                        app.storage.user['corrections_user'] = profile
-                                    ui.notify(tr('Registration successful'), type='positive')
-                                    await refresh_page()
-
-                            ui.button(tr('Register'), on_click=do_register).classes('w-full').props('color=primary')
+                    ui.button(tr('Login / Register'), icon='login', on_click=open_login).props('color=primary size=lg')
 
         async def create_logged_in_view():
             """Create view for logged in users."""
-            user = corrections_state.current_user
+            user = GlobalAuthState.get_user()
 
             # User info bar
             with ui.card().classes('w-full p-4'):
@@ -243,14 +61,12 @@ async def create_corrections_page():
                             ui.label(user.get('full_name', user.get('username', ''))).classes('font-bold')
                             ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation_score', 0)}").classes('text-sm').style('color: var(--text-secondary);')
 
-                    async def do_logout():
-                        corrections_state.clear()
-                        app.storage.user.pop('corrections_token', None)
-                        app.storage.user.pop('corrections_user', None)
+                    async def handle_logout():
+                        do_logout()
                         ui.notify(tr('Logged out'), type='info')
                         await refresh_page()
 
-                    ui.button(tr('Logout'), on_click=do_logout).props('flat color=negative')
+                    ui.button(tr('Logout'), on_click=handle_logout).props('flat color=negative')
 
             # Tabs for different views
             with ui.tabs().classes('w-full') as tabs:
@@ -308,6 +124,15 @@ async def create_corrections_page():
                     ui.label(tr('No corrections yet')).classes('text-xl').style('color: var(--text-secondary);')
                     ui.label(tr('Submit your first correction to help improve transcriptions')).style('color: var(--text-tertiary);')
             else:
+                async def delete_correction(corr_id: int):
+                    """Delete a correction after confirmation."""
+                    result = await api_call("DELETE", f"/corrections/{corr_id}")
+                    if "error" in result:
+                        ui.notify(result["error"], type='negative')
+                    else:
+                        ui.notify(tr('Correction deleted'), type='positive')
+                        await refresh_page()
+
                 for corr in corrections:
                     with ui.card().classes('w-full p-4 mb-3'):
                         with ui.row().classes('w-full items-start justify-between'):
@@ -327,16 +152,39 @@ async def create_corrections_page():
 
                                 if corr.get('original_text'):
                                     with ui.expansion(tr('Original')).classes('w-full'):
-                                        ui.label(corr['original_text']).classes('font-mono text-sm whitespace-pre-wrap')
+                                        ui.label(corr['original_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
 
                                 if corr.get('corrected_text'):
                                     with ui.expansion(tr('Corrected')).classes('w-full'):
-                                        ui.label(corr['corrected_text']).classes('font-mono text-sm whitespace-pre-wrap')
+                                        ui.label(corr['corrected_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
 
                                 if corr.get('notes'):
                                     ui.label(f"{tr('Notes')}: {corr['notes']}").classes('text-sm').style('color: var(--text-secondary);')
 
-                            ui.label(corr.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
+                            with ui.column().classes('items-end gap-2'):
+                                ui.label(corr.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
+
+                                # Delete button - always available for drafts, admins can delete any
+                                corr_status = corr.get('status', 'draft')
+                                user_role = GlobalAuthState.get_role()
+                                can_delete = corr_status == 'draft' or user_role == 'admin'
+
+                                if can_delete:
+                                    corr_id = corr.get('id')
+
+                                    async def confirm_delete(cid=corr_id):
+                                        with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
+                                            ui.label(tr('Delete Correction?')).classes('text-lg font-bold')
+                                            ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                            with ui.row().classes('justify-end gap-2 mt-4'):
+                                                ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+                                                async def do_delete():
+                                                    confirm_dialog.close()
+                                                    await delete_correction(cid)
+                                                ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                        confirm_dialog.open()
+
+                                    ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
 
         def create_submit_correction_view():
             """Form to submit a new correction."""

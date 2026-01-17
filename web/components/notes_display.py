@@ -83,8 +83,12 @@ def create_notes_panel(
                     for comment in comments:
                         create_comment_card(comment)
 
-        # Load on expansion
-        panel.on('update:model-value', lambda e: load_notes() if e.args else None)
+        # Load on expansion - use background task for async
+        async def on_expand(e):
+            if e.args:
+                await load_notes()
+
+        panel.on('update:model-value', on_expand)
 
     return panel
 

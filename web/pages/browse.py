@@ -1129,6 +1129,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Initial render
                     render_text_content(page.text if page.text else None)
 
+                # Comments section - below text
+                from web.components import create_notes_panel
+                create_notes_panel(
+                    document_id=page.sys_id,
+                    page_number=page.p_num,
+                    shelfmark=page.shelfmark or page.sys_id
+                )
+
                 # Image panel - BELOW text, collapsible, only if available
                 if has_image:
                     image_container = ui.card().classes('w-full mt-4 hidden')
