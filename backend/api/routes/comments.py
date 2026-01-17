@@ -84,6 +84,28 @@ async def create_comment(
     return _enrich_comment_response(comment, db, current_user)
 
 
+@router.get("/my", response_model=CommentListResponse)
+async def get_my_comments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get comments by the current user"""
+    comments, total = CommentService.get_comments_by_user(
+        db, current_user.id,
+        page=page,
+        page_size=page_size
+    )
+
+    return CommentListResponse(
+        items=[_enrich_comment_response(c, db, current_user) for c in comments],
+        total=total,
+        page=page,
+        page_size=page_size
+    )
+
+
 @router.get("/document/{document_id}", response_model=CommentListResponse)
 async def get_document_comments(
     document_id: str,

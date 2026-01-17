@@ -99,10 +99,68 @@ def create_version_selector(
     container = ui.row().classes('items-center gap-2')
 
     with container:
-        # Version indicator
-        version_label = ui.label(tr('V0.8')).classes('text-xs font-medium').style(
+        # Version indicator - will be updated after loading
+        version_label = ui.label('...').classes('text-xs font-medium').style(
             'color: var(--text-secondary);'
         )
+
+        # Load and apply latest version on initialization
+        async def load_and_apply_latest():
+            """Load versions and apply the latest/default one."""
+            versions_data = await fetch_page_versions(document_id, page_number)
+            current_default = versions_data.get('current_default')
+            all_versions = versions_data.get('all_versions', [])
+
+            # Find the latest version (most recent user version or default)
+            if current_default:
+                # Use current default
+                source = current_default.get('source', 'V0.8')
+                if source == 'user':
+                    user_info = current_default.get('user', {})
+                    user_name = user_info.get('full_name') or user_info.get('username', 'User')
+                    version_label.text = f"{tr('by')} {user_name}"
+                    if on_version_change:
+                        content = current_default.get('content', original_text)
+                        on_version_change(content, {
+                            'source': 'user',
+                            'version_id': current_default.get('id'),
+                            'author': user_name,
+                            'is_default': True
+                        })
+                else:
+                    version_label.text = source
+                    if source != 'V0.8' and on_version_change:
+                        content = current_default.get('content', original_text)
+                        on_version_change(content, {
+                            'source': source,
+                            'version_id': current_default.get('id'),
+                            'is_default': True
+                        })
+                    elif source == 'V0.8':
+                        version_label.text = 'V0.8'
+            else:
+                # No default set - check for user versions
+                user_versions = [v for v in all_versions if v.get('source') == 'user']
+                if user_versions:
+                    # Use most recent user version
+                    latest = user_versions[0]  # Already sorted by date desc
+                    user_name = latest.get('user_name', 'User')
+                    version_label.text = f"{tr('by')} {user_name}"
+                    # Fetch full content
+                    full_ver = await api_call("GET", f"/versions/id/{latest.get('id')}")
+                    if "error" not in full_ver and on_version_change:
+                        on_version_change(full_ver.get('content', original_text), {
+                            'source': 'user',
+                            'version_id': latest.get('id'),
+                            'author': user_name,
+                            'is_default': False
+                        })
+                else:
+                    # Fall back to V0.8
+                    version_label.text = 'V0.8'
+
+        # Schedule the async load
+        ui.timer(0.1, load_and_apply_latest, once=True)
 
         # Version dropdown button
         with ui.button(icon='history').props(f'flat dense size={size}').tooltip(tr('Version History')) as btn:
@@ -113,7 +171,7 @@ def create_version_selector(
                 menu.clear()
 
                 with menu:
-                    # Always show original V0.8 option first
+                    # Always show original V0.8 option
                     def select_original():
                         version_label.text = 'V0.8'
                         menu.close()

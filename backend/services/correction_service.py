@@ -43,7 +43,35 @@ class CorrectionService:
         if not user.can_submit_corrections():
             return None, "You don't have permission to submit corrections"
 
-        # Create correction
+        # Check for existing correction by this user for this document/page
+        # Enforce one version per user per image rule
+        doc_id = data.document_id or data.system_id
+        page_num = data.page_number or 1
+
+        existing = db.query(Correction).filter(
+            Correction.author_id == user.id,
+            or_(
+                Correction.document_id == doc_id,
+                Correction.system_id == doc_id
+            ),
+            Correction.page_number == page_num,
+            Correction.status.in_([CorrectionStatus.DRAFT, CorrectionStatus.PENDING, CorrectionStatus.APPROVED])
+        ).first()
+
+        if existing:
+            # Update existing correction instead of creating new one
+            existing.original_text = data.original_text
+            existing.corrected_text = data.corrected_text
+            existing.notes = data.notes
+            existing.correction_type = CorrectionType(data.correction_type.value)
+            # Reset to draft if it was rejected
+            if existing.status == CorrectionStatus.REJECTED:
+                existing.status = CorrectionStatus.DRAFT
+            db.commit()
+            db.refresh(existing)
+            return existing, None
+
+        # Create new correction
         correction = Correction(
             document_id=data.document_id,
             shelfmark=data.shelfmark,

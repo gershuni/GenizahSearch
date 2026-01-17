@@ -386,6 +386,38 @@ class CommentService:
         return comments, total
 
     @staticmethod
+    def get_comments_by_user(
+        db: Session,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 50
+    ) -> Tuple[List[Comment], int]:
+        """
+        Get comments by a specific user.
+
+        Args:
+            db: Database session
+            user_id: User ID
+            page: Page number
+            page_size: Items per page
+
+        Returns:
+            Tuple of (list of comments, total count)
+        """
+        q = db.query(Comment).filter(
+            Comment.author_id == user_id,
+            Comment.is_deleted == False
+        )
+
+        total = q.count()
+
+        comments = q.order_by(
+            Comment.created_at.desc()
+        ).offset((page - 1) * page_size).limit(page_size).all()
+
+        return comments, total
+
+    @staticmethod
     def get_comments_for_correction(
         db: Session,
         correction_id: int,

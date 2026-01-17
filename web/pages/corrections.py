@@ -1,26 +1,38 @@
 # -*- coding: utf-8 -*-
 """
-Corrections Page - Genizah Search Pro
+My Edits & Comments Page - Genizah Search Pro
 
-User corrections system: submit, review, and manage transcription corrections.
+User corrections and comments system: view, edit, and manage your contributions.
 """
 
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call, create_login_dialog, do_logout
-from typing import Optional, Dict, Any
+from web.state import state
+from typing import Optional, Dict, Any, List
+
+
+def get_shelfmark_for_id(sys_id: str) -> tuple:
+    """Get shelfmark and title for a system ID."""
+    try:
+        if state.meta_mgr:
+            shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
+            return shelfmark or sys_id, title or ''
+    except:
+        pass
+    return sys_id, ''
 
 
 async def create_corrections_page():
-    """Create the Corrections page."""
+    """Create the My Edits & Comments page."""
 
     with ui.column().classes('w-full max-w-5xl mx-auto gap-8 fade-in'):
 
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Corrections')).classes('text-3xl font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Submit and review transcription corrections')).style('color: var(--text-secondary);')
+                ui.label(tr('My Edits & Comments')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                ui.label(tr('Manage your edits and comments')).style('color: var(--text-secondary);')
 
         # Main content container
         main_container = ui.column().classes('w-full gap-6')
@@ -39,7 +51,7 @@ async def create_corrections_page():
             with ui.card().classes('w-full p-6'):
                 with ui.column().classes('w-full items-center gap-4 py-8'):
                     ui.icon('login').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('Please login to view your corrections')).classes('text-xl').style('color: var(--text-secondary);')
+                    ui.label(tr('Please login to view your edits')).classes('text-xl').style('color: var(--text-secondary);')
 
                     login_dialog = create_login_dialog()
 
@@ -70,20 +82,20 @@ async def create_corrections_page():
 
             # Tabs for different views
             with ui.tabs().classes('w-full') as tabs:
-                my_corrections_tab = ui.tab(tr('My Corrections'))
-                submit_tab = ui.tab(tr('Submit Correction'))
+                my_edits_tab = ui.tab(tr('My Edits'))
+                my_comments_tab = ui.tab(tr('My Comments'))
                 if user.get('role') in ('reviewer', 'editor', 'admin'):
                     review_tab = ui.tab(tr('Review'))
                 leaderboard_tab = ui.tab(tr('Leaderboard'))
 
-            with ui.tab_panels(tabs, value=my_corrections_tab).classes('w-full'):
-                # My Corrections panel
-                with ui.tab_panel(my_corrections_tab):
-                    await create_my_corrections_view()
+            with ui.tab_panels(tabs, value=my_edits_tab).classes('w-full'):
+                # My Edits panel
+                with ui.tab_panel(my_edits_tab):
+                    await create_my_edits_view()
 
-                # Submit Correction panel
-                with ui.tab_panel(submit_tab):
-                    create_submit_correction_view()
+                # My Comments panel
+                with ui.tab_panel(my_comments_tab):
+                    await create_my_comments_view()
 
                 # Review panel (for reviewers+)
                 if user.get('role') in ('reviewer', 'editor', 'admin'):
@@ -94,12 +106,12 @@ async def create_corrections_page():
                 with ui.tab_panel(leaderboard_tab):
                     await create_leaderboard_view()
 
-        async def create_my_corrections_view():
-            """View user's own corrections."""
+        async def create_my_edits_view():
+            """View user's own corrections/edits."""
             # Show loading indicator
             with ui.row().classes('w-full items-center justify-center py-8'):
                 loading_spinner = ui.spinner(size='lg')
-                loading_label = ui.label(tr('Loading corrections...')).classes('ml-3')
+                loading_label = ui.label(tr('Loading...')).classes('ml-3')
 
             result = await api_call("GET", "/corrections/my")
 
@@ -108,12 +120,11 @@ async def create_corrections_page():
             loading_label.delete()
 
             if "error" in result:
-                # Check if session expired
                 if result.get("expired"):
                     ui.notify(result["error"], type='warning')
                     await refresh_page()
                     return
-                ui.label(f"{tr('Error loading corrections')}: {result['error']}").style('color: var(--danger);')
+                ui.label(f"{tr('Error')}: {result['error']}").style('color: var(--danger);')
                 return
 
             corrections = result.get('items', [])
@@ -121,8 +132,8 @@ async def create_corrections_page():
             if not corrections:
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('edit_note').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('No corrections yet')).classes('text-xl').style('color: var(--text-secondary);')
-                    ui.label(tr('Submit your first correction to help improve transcriptions')).style('color: var(--text-tertiary);')
+                    ui.label(tr('No edits yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    ui.label(tr('Edit transcriptions to help improve the corpus')).style('color: var(--text-tertiary);')
             else:
                 async def delete_correction(corr_id: int):
                     """Delete a correction after confirmation."""
@@ -134,130 +145,307 @@ async def create_corrections_page():
                         await refresh_page()
 
                 for corr in corrections:
-                    with ui.card().classes('w-full p-4 mb-3'):
-                        with ui.row().classes('w-full items-start justify-between'):
-                            with ui.column().classes('gap-1 flex-1'):
-                                status_colors = {
-                                    'draft': 'orange',
-                                    'pending': 'blue',
-                                    'under_review': 'purple',
-                                    'approved': 'green',
-                                    'rejected': 'red',
-                                    'merged': 'teal'
-                                }
-                                status = corr.get('status', 'draft')
-                                ui.badge(status.replace('_', ' ').title()).props(f'color={status_colors.get(status, "grey")}')
+                    await create_edit_card(corr, delete_correction)
 
-                                ui.label(f"Document: {corr.get('document_id', 'Unknown')}").classes('font-medium')
+        async def create_edit_card(corr: dict, delete_callback):
+            """Create a card for a single edit/correction."""
+            doc_id = corr.get('document_id') or corr.get('system_id', 'Unknown')
+            page_num = corr.get('page_number', 1)
 
-                                if corr.get('original_text'):
-                                    with ui.expansion(tr('Original')).classes('w-full'):
-                                        ui.label(corr['original_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
+            # Get shelfmark
+            shelfmark, title = get_shelfmark_for_id(doc_id)
 
-                                if corr.get('corrected_text'):
-                                    with ui.expansion(tr('Corrected')).classes('w-full'):
-                                        ui.label(corr['corrected_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
-
-                                if corr.get('notes'):
-                                    ui.label(f"{tr('Notes')}: {corr['notes']}").classes('text-sm').style('color: var(--text-secondary);')
-
-                            with ui.column().classes('items-end gap-2'):
-                                ui.label(corr.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
-
-                                # Delete button - always available for drafts, admins can delete any
-                                corr_status = corr.get('status', 'draft')
-                                user_role = GlobalAuthState.get_role()
-                                can_delete = corr_status == 'draft' or user_role == 'admin'
-
-                                if can_delete:
-                                    corr_id = corr.get('id')
-
-                                    async def confirm_delete(cid=corr_id):
-                                        with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
-                                            ui.label(tr('Delete Correction?')).classes('text-lg font-bold')
-                                            ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
-                                            with ui.row().classes('justify-end gap-2 mt-4'):
-                                                ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
-                                                async def do_delete():
-                                                    confirm_dialog.close()
-                                                    await delete_correction(cid)
-                                                ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
-                                        confirm_dialog.open()
-
-                                    ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
-
-        def create_submit_correction_view():
-            """Form to submit a new correction."""
-            with ui.card().classes('w-full p-6'):
-                with ui.column().classes('w-full gap-4'):
-                    ui.label(tr('Submit New Correction')).classes('text-xl font-bold')
-
-                    doc_id_input = ui.input(tr('Document ID (System ID)')).classes('w-full').props('outlined')
-                    page_input = ui.number(tr('Page Number (optional)'), min=1).classes('w-full').props('outlined')
-                    line_input = ui.number(tr('Line Number (optional)'), min=1).classes('w-full').props('outlined')
-
-                    original_input = ui.textarea(tr('Original Text')).classes('w-full').props('outlined rows=4')
-                    corrected_input = ui.textarea(tr('Corrected Text')).classes('w-full').props('outlined rows=4')
-                    notes_input = ui.textarea(tr('Notes (explain your correction)')).classes('w-full').props('outlined rows=2')
-
-                    correction_type = ui.select({
-                        'text_correction': tr('Text Correction'),
-                        'text_addition': tr('Text Addition'),
-                        'text_deletion': tr('Text Deletion'),
-                        'metadata': tr('Metadata Correction'),
-                        'translation': tr('Translation'),
-                        'reading_suggestion': tr('Reading Suggestion'),
-                        'paleographic': tr('Paleographic Note'),
-                        'uncertain': tr('Uncertain Reading')
-                    }, label=tr('Correction Type'), value='text_correction').classes('w-full').props('outlined')
-
-                    async def submit_correction():
-                        if not doc_id_input.value or not corrected_input.value:
-                            ui.notify(tr('Please fill in Document ID and Corrected Text'), type='warning')
-                            return
-
-                        data = {
-                            "document_id": doc_id_input.value,
-                            "original_text": original_input.value or None,
-                            "corrected_text": corrected_input.value,
-                            "notes": notes_input.value or None,
-                            "correction_type": correction_type.value,
-                            "page_number": int(page_input.value) if page_input.value else None,
-                            "line_number": int(line_input.value) if line_input.value else None
+            with ui.card().classes('w-full p-4 mb-3'):
+                with ui.row().classes('w-full items-start justify-between'):
+                    with ui.column().classes('gap-2 flex-1'):
+                        # Status badge
+                        status_colors = {
+                            'draft': 'orange',
+                            'pending': 'blue',
+                            'under_review': 'purple',
+                            'approved': 'green',
+                            'rejected': 'red',
+                            'merged': 'teal'
                         }
+                        status = corr.get('status', 'draft')
 
-                        result = await api_call("POST", "/corrections/", data)
+                        with ui.row().classes('items-center gap-2'):
+                            ui.badge(status.replace('_', ' ').title()).props(f'color={status_colors.get(status, "grey")}')
 
+                        # Shelfmark + Image with link
+                        with ui.row().classes('items-center gap-2'):
+                            ui.icon('description').classes('text-lg').style('color: var(--primary-600);')
+
+                            # Link to browse page
+                            def go_to_browse(sid=doc_id, pnum=page_num):
+                                ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+
+                            with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
+                                ui.label(f"{shelfmark}").classes('font-medium text-primary')
+                                if page_num:
+                                    ui.label(f" • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
+
+                        if title:
+                            ui.label(title).classes('text-sm').style('color: var(--text-tertiary);')
+
+                        # Expandable text sections
+                        if corr.get('original_text'):
+                            with ui.expansion(tr('Original'), icon='article').classes('w-full').props('dense'):
+                                ui.label(corr['original_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
+
+                        if corr.get('corrected_text'):
+                            with ui.expansion(tr('Corrected'), icon='edit').classes('w-full').props('dense'):
+                                ui.label(corr['corrected_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
+
+                        if corr.get('notes'):
+                            ui.label(f"{tr('Notes')}: {corr['notes']}").classes('text-sm').style('color: var(--text-secondary);')
+
+                    # Right side - date and actions
+                    with ui.column().classes('items-end gap-2'):
+                        ui.label(corr.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
+
+                        with ui.row().classes('gap-1'):
+                            # View in browse
+                            def view_in_browse(sid=doc_id, pnum=page_num):
+                                ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+
+                            ui.button(icon='visibility', on_click=view_in_browse).props('flat round dense').tooltip(tr('View in Browse'))
+
+                            # Edit button - for drafts
+                            corr_status = corr.get('status', 'draft')
+                            if corr_status == 'draft':
+                                async def edit_correction(c=corr):
+                                    await open_edit_dialog(c)
+
+                                ui.button(icon='edit', on_click=edit_correction).props('flat round dense').tooltip(tr('Edit'))
+
+                            # Delete button
+                            user_role = GlobalAuthState.get_role()
+                            can_delete = corr_status == 'draft' or user_role == 'admin'
+
+                            if can_delete:
+                                corr_id = corr.get('id')
+
+                                async def confirm_delete(cid=corr_id):
+                                    with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
+                                        ui.label(tr('Delete Correction?')).classes('text-lg font-bold')
+                                        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                        with ui.row().classes('justify-end gap-2 mt-4'):
+                                            ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+                                            async def do_delete():
+                                                confirm_dialog.close()
+                                                await delete_callback(cid)
+                                            ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                    confirm_dialog.open()
+
+                                ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
+
+        async def open_edit_dialog(corr: dict):
+            """Open dialog to edit a correction."""
+            dialog = ui.dialog().props('maximized persistent')
+
+            with dialog, ui.card().classes('w-full h-full').style('display: flex; flex-direction: column;'):
+                doc_id = corr.get('document_id') or corr.get('system_id', '')
+                page_num = corr.get('page_number', 1)
+                shelfmark, title = get_shelfmark_for_id(doc_id)
+
+                # Header
+                with ui.row().classes('w-full items-center justify-between p-4 border-b'):
+                    with ui.column().classes('gap-1'):
+                        ui.label(tr('Edit your version')).classes('text-xl font-bold')
+                        ui.label(f"{shelfmark} • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
+
+                    ui.button(icon='close', on_click=dialog.close).props('flat round')
+
+                # Content
+                with ui.column().classes('flex-1 p-4 gap-4 overflow-auto'):
+                    if corr.get('original_text'):
+                        ui.label(tr('Original Text')).classes('font-medium')
+                        ui.label(corr['original_text']).classes('font-mono text-sm p-3 rounded').style(
+                            'background: var(--surface-secondary); direction: rtl; text-align: right;'
+                        )
+
+                    ui.label(tr('Corrected Text')).classes('font-medium')
+                    text_area = ui.textarea(value=corr.get('corrected_text', '')).classes('w-full').props('outlined rows=10').style(
+                        'direction: rtl; text-align: right;'
+                    )
+
+                    ui.label(tr('Notes')).classes('font-medium')
+                    notes_area = ui.textarea(value=corr.get('notes', '')).classes('w-full').props('outlined rows=3').style(
+                        'direction: rtl; text-align: right;'
+                    )
+
+                # Footer
+                with ui.row().classes('w-full justify-end gap-2 p-4 border-t'):
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+
+                    async def save_changes():
+                        result = await api_call("PUT", f"/corrections/{corr['id']}", {
+                            "corrected_text": text_area.value,
+                            "notes": notes_area.value or None
+                        })
                         if "error" in result:
-                            ui.notify(result.get("detail", result["error"]), type='negative')
+                            ui.notify(result["error"], type='negative')
                         else:
-                            ui.notify(tr('Correction submitted successfully'), type='positive')
-                            # Clear form
-                            doc_id_input.value = ""
-                            page_input.value = None
-                            line_input.value = None
-                            original_input.value = ""
-                            corrected_input.value = ""
-                            notes_input.value = ""
+                            ui.notify(tr('Correction updated'), type='positive')
+                            dialog.close()
+                            await refresh_page()
 
-                    with ui.row().classes('w-full gap-4'):
-                        ui.button(tr('Submit'), on_click=submit_correction).props('color=primary')
+                    ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
+
+            dialog.open()
+
+        async def create_my_comments_view():
+            """View user's own comments."""
+            with ui.row().classes('w-full items-center justify-center py-8'):
+                loading_spinner = ui.spinner(size='lg')
+                loading_label = ui.label(tr('Loading...')).classes('ml-3')
+
+            result = await api_call("GET", "/comments/my")
+
+            loading_spinner.delete()
+            loading_label.delete()
+
+            if "error" in result:
+                if result.get("expired"):
+                    ui.notify(result["error"], type='warning')
+                    await refresh_page()
+                    return
+                # Might not have this endpoint yet - show empty state
+                with ui.column().classes('w-full items-center py-8'):
+                    ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
+                    ui.label(tr('No comments yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
+                return
+
+            comments = result.get('items', []) if isinstance(result, dict) else result
+
+            if not comments:
+                with ui.column().classes('w-full items-center py-8'):
+                    ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
+                    ui.label(tr('No comments yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
+            else:
+                for comment in comments:
+                    await create_comment_card(comment)
+
+        async def create_comment_card(comment: dict):
+            """Create a card for a single comment."""
+            doc_id = comment.get('document_id', 'Unknown')
+            line_num = comment.get('line_number')  # Used as page number
+
+            shelfmark, title = get_shelfmark_for_id(doc_id)
+
+            with ui.card().classes('w-full p-4 mb-3'):
+                with ui.row().classes('w-full items-start justify-between'):
+                    with ui.column().classes('gap-2 flex-1'):
+                        # Document link
+                        with ui.row().classes('items-center gap-2'):
+                            ui.icon('description').classes('text-lg').style('color: var(--primary-600);')
+
+                            def go_to_browse(sid=doc_id, pnum=line_num):
+                                url = f'/browse?id={sid}'
+                                if pnum:
+                                    url += f'&page={pnum}'
+                                ui.navigate.to(url)
+
+                            with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
+                                ui.label(f"{shelfmark}").classes('font-medium text-primary')
+                                if line_num:
+                                    ui.label(f" • {tr('Image')} {line_num}").classes('text-sm').style('color: var(--text-secondary);')
+
+                        # Comment content
+                        ui.label(comment.get('content', '')).classes('text-sm whitespace-pre-wrap').style(
+                            'direction: rtl; text-align: right; color: var(--text-primary);'
+                        )
+
+                        # Comment type badge
+                        comment_type = comment.get('comment_type', 'general')
+                        if comment_type != 'general':
+                            ui.badge(comment_type.title()).props('color=grey').classes('text-xs')
+
+                    with ui.column().classes('items-end gap-2'):
+                        ui.label(comment.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
+
+                        with ui.row().classes('gap-1'):
+                            # View in browse
+                            def view_in_browse(sid=doc_id, pnum=line_num):
+                                url = f'/browse?id={sid}'
+                                if pnum:
+                                    url += f'&page={pnum}'
+                                ui.navigate.to(url)
+
+                            ui.button(icon='visibility', on_click=view_in_browse).props('flat round dense').tooltip(tr('View in Browse'))
+
+                            # Edit button
+                            async def edit_comment(c=comment):
+                                await open_comment_edit_dialog(c)
+
+                            ui.button(icon='edit', on_click=edit_comment).props('flat round dense').tooltip(tr('Edit'))
+
+                            # Delete button
+                            comment_id = comment.get('id')
+
+                            async def confirm_delete(cid=comment_id):
+                                with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
+                                    ui.label(tr('Delete Comment?')).classes('text-lg font-bold')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    with ui.row().classes('justify-end gap-2 mt-4'):
+                                        ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+                                        async def do_delete():
+                                            result = await api_call("DELETE", f"/comments/{cid}")
+                                            confirm_dialog.close()
+                                            if "error" in result:
+                                                ui.notify(result["error"], type='negative')
+                                            else:
+                                                ui.notify(tr('Comment deleted'), type='positive')
+                                                await refresh_page()
+                                        ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                confirm_dialog.open()
+
+                            ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
+
+        async def open_comment_edit_dialog(comment: dict):
+            """Open dialog to edit a comment."""
+            dialog = ui.dialog()
+
+            with dialog, ui.card().classes('w-96 p-6'):
+                ui.label(tr('Edit Comment')).classes('text-xl font-bold mb-4')
+
+                text_area = ui.textarea(value=comment.get('content', '')).classes('w-full').props('outlined rows=5').style(
+                    'direction: rtl; text-align: right;'
+                )
+
+                with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+
+                    async def save_comment():
+                        result = await api_call("PUT", f"/comments/{comment['id']}", {
+                            "content": text_area.value
+                        })
+                        if "error" in result:
+                            ui.notify(result["error"], type='negative')
+                        else:
+                            ui.notify(tr('Comment updated'), type='positive')
+                            dialog.close()
+                            await refresh_page()
+
+                    ui.button(tr('Save'), icon='save', on_click=save_comment).props('color=primary')
+
+            dialog.open()
 
         async def create_review_view():
             """View for reviewers to review pending corrections."""
-            # Show loading indicator
             with ui.row().classes('w-full items-center justify-center py-8'):
                 loading_spinner = ui.spinner(size='lg')
                 loading_label = ui.label(tr('Loading pending corrections...')).classes('ml-3')
 
             result = await api_call("GET", "/corrections/pending")
 
-            # Remove loading indicator
             loading_spinner.delete()
             loading_label.delete()
 
             if "error" in result:
-                # Check if session expired
                 if result.get("expired"):
                     ui.notify(result["error"], type='warning')
                     await refresh_page()
@@ -275,20 +463,32 @@ async def create_corrections_page():
                 ui.label(f"{len(pending)} {tr('corrections pending review')}").classes('text-lg font-medium mb-4')
 
                 for corr in pending:
+                    doc_id = corr.get('document_id') or corr.get('system_id', 'Unknown')
+                    page_num = corr.get('page_number', 1)
+                    shelfmark, title = get_shelfmark_for_id(doc_id)
+
                     with ui.card().classes('w-full p-4 mb-4'):
                         with ui.column().classes('w-full gap-3'):
                             with ui.row().classes('w-full items-center justify-between'):
-                                ui.label(f"Document: {corr.get('document_id', 'Unknown')}").classes('font-bold')
+                                with ui.row().classes('items-center gap-2'):
+                                    def go_to_browse(sid=doc_id, pnum=page_num):
+                                        ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+
+                                    with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
+                                        ui.label(f"{shelfmark}").classes('font-bold text-primary')
+                                        if page_num:
+                                            ui.label(f" • {tr('Image')} {page_num}").classes('text-sm')
+
                                 ui.label(f"by {corr.get('author', {}).get('username', 'Unknown')}").style('color: var(--text-secondary);')
 
                             with ui.row().classes('w-full gap-4'):
                                 with ui.column().classes('flex-1'):
                                     ui.label(tr('Original')).classes('font-medium text-sm')
-                                    ui.label(corr.get('original_text', '-')).classes('font-mono text-sm p-2 rounded').style('background: var(--surface-secondary);')
+                                    ui.label(corr.get('original_text', '-')).classes('font-mono text-sm p-2 rounded whitespace-pre-wrap').style('background: var(--surface-secondary); direction: rtl; text-align: right;')
 
                                 with ui.column().classes('flex-1'):
                                     ui.label(tr('Corrected')).classes('font-medium text-sm')
-                                    ui.label(corr.get('corrected_text', '-')).classes('font-mono text-sm p-2 rounded').style('background: var(--surface-secondary);')
+                                    ui.label(corr.get('corrected_text', '-')).classes('font-mono text-sm p-2 rounded whitespace-pre-wrap').style('background: var(--surface-secondary); direction: rtl; text-align: right;')
 
                             if corr.get('notes'):
                                 ui.label(f"{tr('Notes')}: {corr['notes']}").style('color: var(--text-secondary);')
@@ -323,19 +523,16 @@ async def create_corrections_page():
 
         async def create_leaderboard_view():
             """Show top contributors."""
-            # Show loading indicator
             with ui.row().classes('w-full items-center justify-center py-8'):
                 loading_spinner = ui.spinner(size='lg')
                 loading_label = ui.label(tr('Loading leaderboard...')).classes('ml-3')
 
             result = await api_call("GET", "/users/leaderboard", {"limit": 20})
 
-            # Remove loading indicator
             loading_spinner.delete()
             loading_label.delete()
 
             if "error" in result:
-                # Check if session expired
                 if result.get("expired"):
                     ui.notify(result["error"], type='warning')
                     await refresh_page()
@@ -355,7 +552,6 @@ async def create_corrections_page():
                         with ui.card().classes('w-full p-3 mb-2'):
                             with ui.row().classes('w-full items-center justify-between'):
                                 with ui.row().classes('items-center gap-3'):
-                                    # Medal for top 3
                                     if i == 1:
                                         ui.icon('emoji_events').style('color: gold;')
                                     elif i == 2:
