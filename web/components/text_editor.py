@@ -19,7 +19,6 @@ from web.auth_state import GlobalAuthState, api_call
 from typing import Optional, Callable
 from datetime import datetime
 import json
-import asyncio
 
 
 # localStorage key prefix for local edits
@@ -359,19 +358,18 @@ def create_edit_text_dialog(
             # Bind text change handler
             edited_textarea.on('input', lambda: update_counts())
 
-            # Auto-save timer
-            async def auto_save():
-                while True:
-                    await asyncio.sleep(AUTO_SAVE_INTERVAL)
-                    if has_unsaved_changes['value']:
-                        text = edited_textarea.value
-                        notes = notes_textarea.value
-                        if text != original_text:
-                            save_local_edit(document_id, page_number, text, original_text, notes)
-                            ui.notify(tr('Auto-saved'), type='info', position='bottom-right', timeout=1500)
+            # Auto-save timer - saves draft locally every AUTO_SAVE_INTERVAL seconds
+            def do_auto_save():
+                """Periodic auto-save callback for NiceGUI timer."""
+                if has_unsaved_changes['value']:
+                    text = edited_textarea.value
+                    notes = notes_textarea.value
+                    if text != original_text:
+                        save_local_edit(document_id, page_number, text, original_text, notes)
+                        ui.notify(tr('Auto-saved'), type='info', position='bottom-right', timeout=1500)
 
-            # Start auto-save in background
-            ui.timer(AUTO_SAVE_INTERVAL, lambda: None)  # Placeholder - NiceGUI handles async differently
+            # Start auto-save timer - runs every AUTO_SAVE_INTERVAL seconds
+            ui.timer(AUTO_SAVE_INTERVAL, do_auto_save)
 
         # ============================================
         # Keyboard shortcuts dialog

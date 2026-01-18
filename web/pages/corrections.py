@@ -498,7 +498,7 @@ async def create_corrections_page():
                             async def approve(c=corr, notes=review_notes):
                                 result = await api_call("POST", f"/corrections/{c['id']}/review", {
                                     "action": "approve",
-                                    "notes": notes.value or None
+                                    "review_notes": notes.value or None
                                 })
                                 if "error" in result:
                                     ui.notify(result.get("detail", result["error"]), type='negative')
@@ -507,9 +507,10 @@ async def create_corrections_page():
                                     await refresh_page()
 
                             async def reject(c=corr, notes=review_notes):
+                                rejection_text = notes.value or tr('Rejected by reviewer')
                                 result = await api_call("POST", f"/corrections/{c['id']}/review", {
                                     "action": "reject",
-                                    "notes": notes.value or None
+                                    "rejection_reason": rejection_text
                                 })
                                 if "error" in result:
                                     ui.notify(result.get("detail", result["error"]), type='negative')
