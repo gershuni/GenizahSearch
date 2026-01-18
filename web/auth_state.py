@@ -10,6 +10,14 @@ from typing import Optional, Dict, Any
 from nicegui import app, ui
 import httpx
 import os
+import asyncio
+
+
+# API Configuration
+DEFAULT_API_TIMEOUT = 30  # seconds - matches desktop timeout
+AUTH_API_TIMEOUT = 10     # shorter timeout for auth operations
+MAX_RETRIES = 3           # retry count for transient failures
+RETRY_BACKOFF = 0.5       # exponential backoff factor
 
 
 def get_api_base() -> str:
@@ -17,8 +25,14 @@ def get_api_base() -> str:
     Get the full API base URL for the backend API.
 
     The backend API runs on port 8000 (separate from web interface on 8081).
-    Can be overridden with GENIZAH_BACKEND_PORT environment variable.
+    Supports both CORRECTIONS_API_URL (full URL) and GENIZAH_BACKEND_PORT (port only).
     """
+    # Support full URL (for compatibility with desktop client)
+    full_url = os.environ.get('CORRECTIONS_API_URL')
+    if full_url:
+        return full_url
+
+    # Support port-only configuration
     port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
     return f"http://localhost:{port}/api/v1"
 
@@ -104,15 +118,22 @@ class GlobalAuthState:
         return ''
 
 
-async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
+async def api_call(
+    method: str,
+    endpoint: str,
+    data: Dict = None,
+    headers: Dict = None,
+    timeout: int = None
+) -> Dict:
     """
-    Make API call to corrections backend.
+    Make API call to corrections backend with automatic retry on transient failures.
 
     Args:
         method: HTTP method (GET, POST, PUT, DELETE)
         endpoint: API endpoint (e.g., "/auth/login")
         data: Request data (query params for GET, JSON body for POST/PUT)
         headers: Additional headers
+        timeout: Request timeout in seconds (default: 30s, 10s for auth endpoints)
 
     Returns:
         Response JSON or error dict
@@ -123,54 +144,81 @@ async def api_call(method: str, endpoint: str, data: Dict = None, headers: Dict 
     if headers:
         all_headers.update(headers)
 
-    async with httpx.AsyncClient() as client:
-        try:
-            if method == "GET":
-                resp = await client.get(url, headers=all_headers, params=data, timeout=10)
-            elif method == "POST":
-                resp = await client.post(url, headers=all_headers, json=data, timeout=10)
-            elif method == "PUT":
-                resp = await client.put(url, headers=all_headers, json=data, timeout=10)
-            elif method == "DELETE":
-                resp = await client.delete(url, headers=all_headers, timeout=10)
-            else:
-                return {"error": f"Unknown method: {method}"}
+    # Use shorter timeout for auth endpoints
+    if timeout is None:
+        timeout = AUTH_API_TIMEOUT if '/auth/' in endpoint else DEFAULT_API_TIMEOUT
 
-            if resp.status_code in (200, 201):
-                return resp.json()
-            elif resp.status_code == 401:
-                # Token expired or invalid - clear auth
-                GlobalAuthState.clear_auth()
-                return {"error": "Session expired. Please login again.", "status": 401}
-            else:
-                try:
-                    error_detail = resp.json()
-                    detail = error_detail.get("detail", resp.text)
+    last_error = None
 
-                    # Handle FastAPI validation errors (detail is a list)
-                    if isinstance(detail, list):
-                        # Extract first error message
-                        if detail and isinstance(detail[0], dict):
-                            msg = detail[0].get("msg", "Validation error")
-                            loc = detail[0].get("loc", [])
-                            field = loc[-1] if loc else "field"
-                            error_msg = f"{field}: {msg}"
+    # Retry logic with exponential backoff for transient failures
+    for attempt in range(MAX_RETRIES):
+        async with httpx.AsyncClient() as client:
+            try:
+                if method == "GET":
+                    resp = await client.get(url, headers=all_headers, params=data, timeout=timeout)
+                elif method == "POST":
+                    resp = await client.post(url, headers=all_headers, json=data, timeout=timeout)
+                elif method == "PUT":
+                    resp = await client.put(url, headers=all_headers, json=data, timeout=timeout)
+                elif method == "DELETE":
+                    resp = await client.delete(url, headers=all_headers, timeout=timeout)
+                else:
+                    return {"error": f"Unknown method: {method}"}
+
+                # Success - return immediately
+                if resp.status_code in (200, 201):
+                    return resp.json()
+
+                # Auth error - don't retry
+                if resp.status_code == 401:
+                    GlobalAuthState.clear_auth()
+                    return {"error": "Session expired. Please login again.", "status": 401}
+
+                # Client errors (4xx except 401) - don't retry
+                if 400 <= resp.status_code < 500:
+                    try:
+                        error_detail = resp.json()
+                        detail = error_detail.get("detail", resp.text)
+
+                        # Handle FastAPI validation errors (detail is a list)
+                        if isinstance(detail, list):
+                            if detail and isinstance(detail[0], dict):
+                                msg = detail[0].get("msg", "Validation error")
+                                loc = detail[0].get("loc", [])
+                                field = loc[-1] if loc else "field"
+                                error_msg = f"{field}: {msg}"
+                            else:
+                                error_msg = "Validation error"
+                        elif isinstance(detail, dict):
+                            error_msg = detail.get("message", str(detail))
                         else:
-                            error_msg = "Validation error"
-                    elif isinstance(detail, dict):
-                        # Handle dict errors
-                        error_msg = detail.get("message", str(detail))
-                    else:
-                        # Already a string
-                        error_msg = str(detail)
+                            error_msg = str(detail)
 
-                    return {"error": error_msg, "status": resp.status_code}
-                except (ValueError, KeyError, TypeError):
-                    return {"error": resp.text, "status": resp.status_code}
-        except httpx.TimeoutException:
-            return {"error": "Request timeout"}
-        except httpx.RequestError as e:
-            return {"error": f"Request failed: {type(e).__name__}"}
+                        return {"error": error_msg, "status": resp.status_code}
+                    except (ValueError, KeyError, TypeError):
+                        return {"error": resp.text, "status": resp.status_code}
+
+                # Server errors (5xx) - retry with backoff
+                if resp.status_code >= 500:
+                    last_error = f"Server error: {resp.status_code}"
+                    if attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
+                        continue
+                    return {"error": last_error, "status": resp.status_code}
+
+            except httpx.TimeoutException:
+                last_error = "Request timeout"
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
+                    continue
+            except httpx.RequestError as e:
+                last_error = f"Request failed: {type(e).__name__}"
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
+                    continue
+
+    # All retries exhausted
+    return {"error": last_error or "Request failed after retries"}
 
 
 async def do_login(email: str, password: str) -> Dict:
