@@ -45,12 +45,18 @@ class GlobalAuthState:
 
     # Storage keys
     TOKEN_KEY = 'auth_token'
+    REFRESH_TOKEN_KEY = 'refresh_token'
     USER_KEY = 'auth_user'
 
     @classmethod
     def get_token(cls) -> Optional[str]:
         """Get the current auth token."""
         return app.storage.user.get(cls.TOKEN_KEY)
+
+    @classmethod
+    def get_refresh_token(cls) -> Optional[str]:
+        """Get the current refresh token."""
+        return app.storage.user.get(cls.REFRESH_TOKEN_KEY)
 
     @classmethod
     def get_user(cls) -> Optional[Dict]:
@@ -98,15 +104,25 @@ class GlobalAuthState:
         return {}
 
     @classmethod
-    def set_auth(cls, token: str, user: Dict):
+    def set_auth(cls, token: str, user: Dict, refresh_token: str = None):
         """Set authentication after successful login."""
         app.storage.user[cls.TOKEN_KEY] = token
         app.storage.user[cls.USER_KEY] = user
+        if refresh_token:
+            app.storage.user[cls.REFRESH_TOKEN_KEY] = refresh_token
+
+    @classmethod
+    def update_tokens(cls, token: str, refresh_token: str = None):
+        """Update tokens after refresh (without changing user info)."""
+        app.storage.user[cls.TOKEN_KEY] = token
+        if refresh_token:
+            app.storage.user[cls.REFRESH_TOKEN_KEY] = refresh_token
 
     @classmethod
     def clear_auth(cls):
         """Clear authentication (logout)."""
         app.storage.user.pop(cls.TOKEN_KEY, None)
+        app.storage.user.pop(cls.REFRESH_TOKEN_KEY, None)
         app.storage.user.pop(cls.USER_KEY, None)
 
     @classmethod
@@ -118,12 +134,49 @@ class GlobalAuthState:
         return ''
 
 
+async def _refresh_access_token() -> bool:
+    """
+    Refresh the access token using the refresh token.
+
+    Returns:
+        True if refresh was successful, False otherwise
+    """
+    refresh_token = GlobalAuthState.get_refresh_token()
+    if not refresh_token:
+        return False
+
+    base_url = get_api_base()
+    url = f"{base_url}/auth/refresh"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                json={'refresh_token': refresh_token},
+                timeout=AUTH_API_TIMEOUT
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                new_access_token = data.get('access_token')
+                new_refresh_token = data.get('refresh_token', refresh_token)
+
+                if new_access_token:
+                    GlobalAuthState.update_tokens(new_access_token, new_refresh_token)
+                    return True
+
+            return False
+    except (httpx.TimeoutException, httpx.RequestError):
+        return False
+
+
 async def api_call(
     method: str,
     endpoint: str,
     data: Dict = None,
     headers: Dict = None,
-    timeout: int = None
+    timeout: int = None,
+    _retry_after_refresh: bool = True
 ) -> Dict:
     """
     Make API call to corrections backend with automatic retry on transient failures.
@@ -134,6 +187,7 @@ async def api_call(
         data: Request data (query params for GET, JSON body for POST/PUT)
         headers: Additional headers
         timeout: Request timeout in seconds (default: 30s, 10s for auth endpoints)
+        _retry_after_refresh: Internal flag to prevent infinite refresh loops
 
     Returns:
         Response JSON or error dict
@@ -169,10 +223,25 @@ async def api_call(
                 if resp.status_code in (200, 201):
                     return resp.json()
 
-                # Auth error - don't retry
+                # Auth error - attempt token refresh
                 if resp.status_code == 401:
+                    # Don't try refresh for auth endpoints (login/register/refresh)
+                    if '/auth/' in endpoint:
+                        GlobalAuthState.clear_auth()
+                        return {"error": "Authentication failed", "status": 401, "expired": True}
+
+                    # Attempt token refresh if we have a refresh token
+                    if _retry_after_refresh and GlobalAuthState.get_refresh_token():
+                        if await _refresh_access_token():
+                            # Retry the original request with new token
+                            return await api_call(
+                                method, endpoint, data, headers, timeout,
+                                _retry_after_refresh=False
+                            )
+
+                    # Token refresh failed or not available - clear auth
                     GlobalAuthState.clear_auth()
-                    return {"error": "Session expired. Please login again.", "status": 401}
+                    return {"error": "Session expired. Please login again.", "status": 401, "expired": True}
 
                 # Client errors (4xx except 401) - don't retry
                 if 400 <= resp.status_code < 500:
@@ -236,21 +305,22 @@ async def do_login(email: str, password: str) -> Dict:
     if "error" in result:
         return result
 
-    # Store token
+    # Store tokens
     token = result.get("access_token")
+    refresh_token = result.get("refresh_token")
     if not token:
         return {"error": "No token received"}
 
-    # Get user profile
-    GlobalAuthState.set_auth(token, {})  # Temporary set to get headers
+    # Get user profile (set temporary auth to get headers)
+    GlobalAuthState.set_auth(token, {}, refresh_token)
     profile = await api_call("GET", "/users/me")
 
     if "error" in profile:
         GlobalAuthState.clear_auth()
         return profile
 
-    # Update with full user info
-    GlobalAuthState.set_auth(token, profile)
+    # Update with full user info (keep refresh token)
+    GlobalAuthState.set_auth(token, profile, refresh_token)
     return {"success": True, "user": profile}
 
 
@@ -274,20 +344,22 @@ async def do_register(email: str, username: str, password: str,
     if "error" in result:
         return result
 
-    # Store token
+    # Store tokens
     token = result.get("access_token")
+    refresh_token = result.get("refresh_token")
     if not token:
         return {"error": "No token received"}
 
-    # Get user profile
-    GlobalAuthState.set_auth(token, {})
+    # Get user profile (set temporary auth to get headers)
+    GlobalAuthState.set_auth(token, {}, refresh_token)
     profile = await api_call("GET", "/users/me")
 
     if "error" in profile:
         GlobalAuthState.clear_auth()
         return profile
 
-    GlobalAuthState.set_auth(token, profile)
+    # Update with full user info (keep refresh token)
+    GlobalAuthState.set_auth(token, profile, refresh_token)
     return {"success": True, "user": profile}
 
 
