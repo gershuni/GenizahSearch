@@ -332,7 +332,7 @@ async def create_corrections_page():
         async def create_comment_card(comment: dict):
             """Create a card for a single comment."""
             doc_id = comment.get('document_id', 'Unknown')
-            line_num = comment.get('line_number')  # Used as page number
+            page_num = comment.get('page_number')  # Page/image number in manuscript
 
             shelfmark, title = get_shelfmark_for_id(doc_id)
 
@@ -343,7 +343,7 @@ async def create_corrections_page():
                         with ui.row().classes('items-center gap-2'):
                             ui.icon('description').classes('text-lg').style('color: var(--primary-600);')
 
-                            def go_to_browse(sid=doc_id, pnum=line_num):
+                            def go_to_browse(sid=doc_id, pnum=page_num):
                                 url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'
@@ -351,8 +351,8 @@ async def create_corrections_page():
 
                             with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
                                 ui.label(f"{shelfmark}").classes('font-medium text-primary')
-                                if line_num:
-                                    ui.label(f" • {tr('Image')} {line_num}").classes('text-sm').style('color: var(--text-secondary);')
+                                if page_num:
+                                    ui.label(f" • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
 
                         # Comment content
                         ui.label(comment.get('content', '')).classes('text-sm whitespace-pre-wrap').style(
@@ -369,7 +369,7 @@ async def create_corrections_page():
 
                         with ui.row().classes('gap-1'):
                             # View in browse
-                            def view_in_browse(sid=doc_id, pnum=line_num):
+                            def view_in_browse(sid=doc_id, pnum=page_num):
                                 url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'

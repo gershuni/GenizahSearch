@@ -67,9 +67,10 @@ class Comment(Base):
     )
 
     # Location in document (optional, for inline comments)
-    line_number = Column(Integer, nullable=True)
+    line_number = Column(Integer, nullable=True)  # Line within text (for inline comments)
     char_start = Column(Integer, nullable=True)
     char_end = Column(Integer, nullable=True)
+    page_number = Column(Integer, nullable=True)  # Page/image number in manuscript
 
     # Status flags
     is_pinned = Column(Boolean, default=False)

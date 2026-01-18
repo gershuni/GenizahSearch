@@ -197,7 +197,6 @@ def create_comment_dialog(
                         return
 
                     # Build comment data with valid fields
-                    # line_number is used for page-specific comments
                     comment_data = {
                         "document_id": document_id,
                         "content": comment_text.value.strip(),
@@ -205,9 +204,9 @@ def create_comment_dialog(
                         "is_public": not private_check.value
                     }
 
-                    # If page-specific comment, set line_number to page number for tracking
+                    # If page-specific comment, set page_number for tracking
                     if scope_select.value == 'page' and page_number:
-                        comment_data["line_number"] = page_number
+                        comment_data["page_number"] = page_number
 
                     # Submit to backend
                     result = await api_call("POST", "/comments/", comment_data)

@@ -300,7 +300,7 @@ def create_edit_text_dialog(
                             "document_id": document_id,
                             "system_id": document_id,
                             "shelfmark": shelfmark if shelfmark else None,
-                            "line_number": page_number,
+                            "page_number": page_number,
                             "original_text": original_text,
                             "corrected_text": text,
                             "correction_type": "text_correction",
