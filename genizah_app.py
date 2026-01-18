@@ -2466,11 +2466,11 @@ class ResultDialog(QDialog):
         # Only add corrections for users who don't already have a version entry
         try:
             corrections = client.get_corrections_for_document(doc_id, include_drafts=True)
-            # Filter corrections by page number (stored in line_number)
-            page_corrections = [c for c in corrections if c.line_number == page_num or c.line_number is None]
+            # Filter corrections by page number
+            page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
             print(f"[DEBUG] _rd_refresh_versions: corrections={len(corrections)}, page_corrections={len(page_corrections)}", flush=True)
             for c in corrections:
-                print(f"[DEBUG]   corr id={c.id}, status={c.status}, author={c.author_username}, page={c.line_number}", flush=True)
+                print(f"[DEBUG]   corr id={c.id}, status={c.status}, author={c.author_username}, page={c.page_number}", flush=True)
 
             # Group by user, keep latest per user
             corrections_by_user = {}
@@ -2747,7 +2747,7 @@ class ResultDialog(QDialog):
                         original_text=original if original else new_text,
                         corrected_text=new_text,
                         correction_type="text_correction",
-                        line_number=self.current_p_num,
+                        page_number=self.current_p_num,
                         notes=notes,
                         shelfmark=self.lbl_shelf.text(),
                         system_id=self.current_sys_id,
@@ -2769,7 +2769,7 @@ class ResultDialog(QDialog):
                     original_text=original if original else new_text,
                     corrected_text=new_text,
                     correction_type="text_correction",
-                    line_number=self.current_p_num,
+                    page_number=self.current_p_num,
                     notes=notes,
                     shelfmark=self.lbl_shelf.text(),
                     system_id=self.current_sys_id,
@@ -4062,7 +4062,7 @@ class GenizahGUI(QMainWindow):
                         original_text=original if original else new_text,
                         corrected_text=new_text,
                         correction_type="text_correction",
-                        line_number=self.current_browse_p,
+                        page_number=self.current_browse_p,
                         notes=notes,
                         shelfmark=shelfmark,
                         system_id=doc_id,
@@ -4086,7 +4086,7 @@ class GenizahGUI(QMainWindow):
                     original_text=original if original else new_text,
                     corrected_text=new_text,
                     correction_type="text_correction",
-                    line_number=self.current_browse_p,
+                    page_number=self.current_browse_p,
                     notes=notes,
                     shelfmark=shelfmark,
                     system_id=doc_id,
@@ -4272,8 +4272,8 @@ class GenizahGUI(QMainWindow):
             # Also fetch corrections (including drafts) for current user
             try:
                 corrections = self.corrections_client.get_corrections_for_document(doc_id, include_drafts=True)
-                # Filter corrections by page number (stored in line_number)
-                page_corrections = [c for c in corrections if c.line_number == page_num or c.line_number is None]
+                # Filter corrections by page number
+                page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
 
                 # Group by user, keep latest per user
                 corrections_by_user = {}
@@ -7957,7 +7957,7 @@ class GenizahGUI(QMainWindow):
 
             try:
                 corrections, total = self.corrections_client.get_my_corrections(page_size=20)
-                cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'status': c.status, 'corrected_text': c.corrected_text, 'line_number': c.line_number} for c in corrections]
+                cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'status': c.status, 'corrected_text': c.corrected_text, 'page_number': c.page_number} for c in corrections]
                 self.corrections_client.set_cached_data('my_corrections', cache_data)
                 self.my_corrections_list.clear()
                 self._populate_my_corrections_list(cache_data)
@@ -7973,7 +7973,7 @@ class GenizahGUI(QMainWindow):
 
         try:
             corrections, total = self.corrections_client.search_corrections(page_size=20)
-            cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'line_number': c.line_number} for c in corrections]
+            cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'page_number': c.page_number} for c in corrections]
             self.corrections_client.set_cached_data('all_corrections', cache_data)
             self.all_corrections_list.clear()
             self._populate_all_corrections_list(cache_data)
@@ -7999,11 +7999,11 @@ class GenizahGUI(QMainWindow):
 
         for corr in latest_by_doc.values():
             shelfmark = corr.get('shelfmark') or tr('Unknown')
-            line_number = corr.get('line_number')
+            page_number = corr.get('page_number')
             # Display shelfmark with page number if available
             display_shelfmark = shelfmark
-            if line_number:
-                display_shelfmark = f"{shelfmark}:{line_number}"
+            if page_number:
+                display_shelfmark = f"{shelfmark}:{page_number}"
             status = corr.get('status') or 'pending'
             status_icon = {'pending': '🔵', 'approved': '✅', 'rejected': '❌', 'draft': '📝'}.get(status, '⚪')
             corrected_text = corr.get('corrected_text') or ''
@@ -8013,7 +8013,7 @@ class GenizahGUI(QMainWindow):
                 'id': corr.get('id'),
                 'shelfmark': shelfmark,
                 'system_id': corr.get('system_id'),
-                'line_number': line_number
+                'page_number': page_number
             })
             self.my_corrections_list.addItem(item)
 
@@ -8036,11 +8036,11 @@ class GenizahGUI(QMainWindow):
 
         for corr in latest_by_user_doc.values():
             shelfmark = corr.get('shelfmark') or tr('Unknown')
-            line_number = corr.get('line_number')
+            page_number = corr.get('page_number')
             # Display shelfmark with page number if available
             display_shelfmark = shelfmark
-            if line_number:
-                display_shelfmark = f"{shelfmark}:{line_number}"
+            if page_number:
+                display_shelfmark = f"{shelfmark}:{page_number}"
             author = corr.get('author_username') or tr('Anonymous')
             status = corr.get('status') or 'pending'
             status_icon = {'pending': '🔵', 'approved': '✅', 'rejected': '❌', 'draft': '📝'}.get(status, '⚪')
@@ -8049,7 +8049,7 @@ class GenizahGUI(QMainWindow):
                 'id': corr.get('id'),
                 'shelfmark': shelfmark,
                 'system_id': corr.get('system_id'),
-                'line_number': line_number
+                'page_number': page_number
             })
             self.all_corrections_list.addItem(item)
 
@@ -8069,7 +8069,7 @@ class GenizahGUI(QMainWindow):
             try:
                 comments, total = self.corrections_client.get_my_comments(page_size=20)
                 print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
-                cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.line_number} for c in comments]
+                cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
                 self.corrections_client.set_cached_data('my_comments', cache_data)
                 self.my_comments_list.clear()
                 self._populate_comments_list(cache_data, self.my_comments_list)
@@ -8090,7 +8090,7 @@ class GenizahGUI(QMainWindow):
         try:
             comments, total = self.corrections_client.get_all_comments(page_size=20)
             print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
-            cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.line_number} for c in comments]
+            cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
             self.corrections_client.set_cached_data('all_comments', cache_data)
             self.all_comments_list.clear()
             self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
@@ -8268,7 +8268,7 @@ class GenizahGUI(QMainWindow):
             original_v08_text = None
             try:
                 doc_id = correction.document_id or correction.system_id
-                page_num = correction.line_number or 1
+                page_num = correction.page_number or 1
                 if doc_id and hasattr(self, 'searcher') and self.searcher:
                     page_data = self.searcher.get_browse_page(doc_id, p_num=page_num)
                     if page_data:
@@ -8316,7 +8316,7 @@ class GenizahGUI(QMainWindow):
             if corr_data:
                 sys_id = corr_data.get('system_id')
                 shelfmark = corr_data.get('shelfmark')
-                page_num = corr_data.get('line_number') or 1
+                page_num = corr_data.get('page_number') or 1
                 print(f"[DEBUG] sys_id={sys_id}, shelfmark={shelfmark}, page_num={page_num}", flush=True)
                 self._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id, page_num=page_num)
         except Exception as e:

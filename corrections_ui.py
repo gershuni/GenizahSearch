@@ -235,7 +235,7 @@ class CorrectionSubmitDialog(QDialog):
         original_text: str = None,
         shelfmark: str = None,
         system_id: str = None,
-        line_number: int = None,
+        page_number: int = None,
         context_before: str = None,
         context_after: str = None
     ):
@@ -245,7 +245,7 @@ class CorrectionSubmitDialog(QDialog):
         self.original_text = original_text or ""
         self.shelfmark = shelfmark
         self.system_id = system_id
-        self.line_number = line_number
+        self.page_number = page_number
         self.context_before = context_before
         self.context_after = context_after
 
@@ -313,8 +313,8 @@ class CorrectionSubmitDialog(QDialog):
         self.confidence_spin.setSuffix("")
         options.addWidget(self.confidence_spin)
 
-        if self.line_number:
-            options.addWidget(QLabel(f"{tr('Line')}: {self.line_number}"))
+        if self.page_number:
+            options.addWidget(QLabel(f"{tr('Image')}: {self.page_number}"))
 
         options.addStretch()
         layout.addLayout(options)
@@ -399,7 +399,7 @@ class CorrectionSubmitDialog(QDialog):
             original_text=original,
             corrected_text=corrected,
             correction_type=self.type_values[self.type_combo.currentIndex()],
-            line_number=self.line_number,
+            page_number=self.page_number,
             confidence_score=self.confidence_spin.value(),
             source_reference=self.source_edit.text().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
@@ -2383,7 +2383,7 @@ class CommentDialog(QDialog):
             document_id=self.document_id,
             correction_id=self.correction_id,
             comment_type=comment_type,
-            line_number=self.page_number,
+            page_number=self.page_number,
             is_public=self.public_check.isChecked(),
             is_anonymous=self.anonymous_check.isChecked()
         )
