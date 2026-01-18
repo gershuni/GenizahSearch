@@ -65,13 +65,19 @@ class DiscoveryService:
     def get_discovery(
         db: Session,
         discovery_id: int,
-        increment_views: bool = True
+        increment_views: bool = True,
+        include_hidden: bool = False
     ) -> Optional[Discovery]:
         """Get a single discovery by ID"""
-        discovery = db.query(Discovery).filter(
-            Discovery.id == discovery_id,
-            Discovery.status != DiscoveryStatus.HIDDEN
-        ).first()
+        if include_hidden:
+            discovery = db.query(Discovery).filter(
+                Discovery.id == discovery_id
+            ).first()
+        else:
+            discovery = db.query(Discovery).filter(
+                Discovery.id == discovery_id,
+                Discovery.status != DiscoveryStatus.HIDDEN
+            ).first()
 
         if discovery and increment_views:
             discovery.view_count += 1
@@ -153,13 +159,20 @@ class DiscoveryService:
         discovery_type: Optional[DiscoveryType] = None,
         status: DiscoveryStatus = DiscoveryStatus.PUBLISHED,
         featured_only: bool = False,
+        include_hidden: bool = False,
         limit: int = 20,
         offset: int = 0
     ) -> Tuple[List[Discovery], int]:
         """List discoveries with filters"""
-        query = db.query(Discovery).filter(
-            Discovery.status == status
-        )
+        if include_hidden:
+            # Include both published and hidden (for admin view)
+            query = db.query(Discovery).filter(
+                Discovery.status.in_([DiscoveryStatus.PUBLISHED, DiscoveryStatus.HIDDEN])
+            )
+        else:
+            query = db.query(Discovery).filter(
+                Discovery.status == status
+            )
 
         if discovery_type:
             query = query.filter(Discovery.discovery_type == discovery_type)

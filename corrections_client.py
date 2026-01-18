@@ -70,6 +70,7 @@ class Comment:
     is_public: bool = True
     is_anonymous: bool = False
     reply_count: int = 0
+    line_number: Optional[int] = None
 
 
 @dataclass
@@ -91,6 +92,7 @@ class Discovery:
     related_manuscripts: Optional[List[Dict]] = None
     is_featured: bool = False
     is_pinned: bool = False
+    is_hidden: bool = False
     is_answered: bool = False
     view_count: int = 0
     response_count: int = 0
@@ -129,6 +131,7 @@ class FeedItem:
     response_count: int = 0
     is_featured: bool = False
     is_pinned: bool = False
+    is_hidden: bool = False
     is_answered: bool = False
     upvotes: int = 0
     downvotes: int = 0
@@ -159,9 +162,14 @@ class CorrectionsClient:
         self.config_path.mkdir(exist_ok=True)
 
         self.credentials_file = self.config_path / 'credentials.json'
+        self.cache_file = self.config_path / 'community_cache.json'
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.current_user: Optional[User] = None
+
+        # Community data cache (refreshed on startup)
+        self._cache: Dict[str, Any] = {}
+        self._cache_loaded = False
 
         # Setup session with retries
         self.session = requests.Session()
@@ -177,13 +185,16 @@ class CorrectionsClient:
         self._load_credentials()
 
     def _load_credentials(self):
-        """Load saved credentials from disk"""
+        """Load saved credentials from disk and validate"""
         if self.credentials_file.exists():
             try:
                 with open(self.credentials_file, 'r') as f:
                     data = json.load(f)
                     self.access_token = data.get('access_token')
                     self.refresh_token = data.get('refresh_token')
+                # Validate token and load user info
+                if self.access_token:
+                    self.get_current_user()
             except Exception as e:
                 logger.warning(f"Failed to load credentials: {e}")
 
@@ -197,6 +208,47 @@ class CorrectionsClient:
                 }, f)
         except Exception as e:
             logger.warning(f"Failed to save credentials: {e}")
+
+    def _load_cache(self):
+        """Load cached community data from disk"""
+        if self._cache_loaded:
+            return
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self._cache = json.load(f)
+                    self._cache_loaded = True
+                    logger.info("Loaded community cache from disk")
+            except Exception as e:
+                logger.warning(f"Failed to load cache: {e}")
+                self._cache = {}
+
+    def _save_cache(self):
+        """Save community data cache to disk"""
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self._cache, f, ensure_ascii=False, default=str)
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+
+    def get_cached_data(self, key: str) -> Optional[Any]:
+        """Get cached data if available"""
+        self._load_cache()
+        return self._cache.get(key)
+
+    def set_cached_data(self, key: str, data: Any):
+        """Set cache data and save to disk"""
+        self._cache[key] = data
+        self._save_cache()
+
+    def clear_cache(self):
+        """Clear the community data cache"""
+        self._cache = {}
+        if self.cache_file.exists():
+            try:
+                self.cache_file.unlink()
+            except:
+                pass
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with authentication"""
@@ -399,13 +451,15 @@ class CorrectionsClient:
         line_number: int = None,
         char_start: int = None,
         char_end: int = None,
-        confidence_score: float = 0.8,
+        confidence_score: float = None,
         source_reference: str = None,
         notes: str = None,
         shelfmark: str = None,
         system_id: str = None,
         context_before: str = None,
-        context_after: str = None
+        context_after: str = None,
+        status: str = None,
+        save_as_draft: bool = False
     ) -> Tuple[Optional[Correction], str]:
         """
         Create a new correction.
@@ -414,22 +468,39 @@ class CorrectionsClient:
             Tuple of (Correction or None, message)
         """
         try:
-            data = self._request('POST', '/corrections/', {
+            payload = {
                 'document_id': document_id,
                 'original_text': original_text,
                 'corrected_text': corrected_text,
                 'correction_type': correction_type,
-                'line_number': line_number,
-                'char_start': char_start,
-                'char_end': char_end,
-                'confidence_score': confidence_score,
-                'source_reference': source_reference,
-                'notes': notes,
-                'shelfmark': shelfmark,
-                'system_id': system_id,
-                'context_before': context_before,
-                'context_after': context_after
-            })
+            }
+            # Only add optional fields if provided
+            if line_number is not None:
+                payload['line_number'] = line_number
+            if char_start is not None:
+                payload['char_start'] = char_start
+            if char_end is not None:
+                payload['char_end'] = char_end
+            if confidence_score is not None:
+                payload['confidence_score'] = confidence_score
+            if source_reference:
+                payload['source_reference'] = source_reference
+            if notes:
+                payload['notes'] = notes
+            if shelfmark:
+                payload['shelfmark'] = shelfmark
+            if system_id:
+                payload['system_id'] = system_id
+            if context_before:
+                payload['context_before'] = context_before
+            if context_after:
+                payload['context_after'] = context_after
+            if status:
+                payload['status'] = status
+
+            # Pass save_as_draft as query parameter
+            params = {'save_as_draft': str(save_as_draft).lower()} if save_as_draft else None
+            data = self._request('POST', '/corrections/', payload, params=params)
             return self._parse_correction(data), "Correction created"
         except Exception as e:
             return None, str(e)
@@ -469,7 +540,7 @@ class CorrectionsClient:
             data = self._request(
                 'GET',
                 f'/corrections/document/{document_id}',
-                params={'include_drafts': include_drafts}
+                params={'include_drafts': str(include_drafts).lower()}
             )
             return [self._parse_correction(c) for c in data]
         except Exception as e:
@@ -640,7 +711,8 @@ class CorrectionsClient:
             is_resolved=data.get('is_resolved', False),
             is_public=data.get('is_public', True),
             is_anonymous=data.get('is_anonymous', False),
-            reply_count=data.get('reply_count', 0)
+            reply_count=data.get('reply_count', 0),
+            line_number=data.get('line_number')
         )
 
     def get_my_comments(
@@ -656,6 +728,22 @@ class CorrectionsClient:
             return comments, data.get('total', 0)
         except Exception as e:
             logger.warning(f"Failed to get my comments: {e}")
+            return [], 0
+
+    def get_all_comments(
+        self,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Tuple[List[Comment], int]:
+        """Get all public comments via search (no login required)"""
+        try:
+            # Use search endpoint with broad query to get recent comments
+            params = {'query': '%', 'page': page, 'page_size': page_size}
+            data = self._request('GET', '/comments/search/', params=params)
+            comments = [self._parse_comment(c) for c in data.get('items', [])]
+            return comments, data.get('total', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get all comments: {e}")
             return [], 0
 
     # ==================== Discoveries ====================
@@ -737,10 +825,35 @@ class CorrectionsClient:
         except Exception as e:
             return False, str(e)
 
+    def pin_discovery(self, discovery_id: int, pinned: bool = True) -> Tuple[bool, str]:
+        """Pin or unpin a discovery (admin only)"""
+        try:
+            self._request('POST', f'/discoveries/{discovery_id}/pin', params={'pinned': str(pinned).lower()})
+            return True, "Discovery pinned" if pinned else "Discovery unpinned"
+        except Exception as e:
+            return False, str(e)
+
+    def hide_discovery(self, discovery_id: int) -> Tuple[bool, str]:
+        """Hide a discovery (admin only)"""
+        try:
+            self._request('POST', f'/discoveries/{discovery_id}/hide')
+            return True, "Discovery hidden"
+        except Exception as e:
+            return False, str(e)
+
+    def unhide_discovery(self, discovery_id: int) -> Tuple[bool, str]:
+        """Unhide a discovery (admin only)"""
+        try:
+            self._request('POST', f'/discoveries/{discovery_id}/unhide')
+            return True, "Discovery unhidden"
+        except Exception as e:
+            return False, str(e)
+
     def get_discoveries(
         self,
         discovery_type: str = None,
         featured_only: bool = False,
+        include_hidden: bool = False,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[Discovery], int]:
@@ -754,6 +867,8 @@ class CorrectionsClient:
                 params['discovery_type'] = discovery_type
             if featured_only:
                 params['featured_only'] = True
+            if include_hidden:
+                params['include_hidden'] = True
 
             data = self._request('GET', '/discoveries/', params=params)
             discoveries = [self._parse_discovery(d) for d in data.get('items', [])]
@@ -867,6 +982,7 @@ class CorrectionsClient:
             related_manuscripts=data.get('related_manuscripts'),
             is_featured=data.get('is_featured', False),
             is_pinned=data.get('is_pinned', False),
+            is_hidden=data.get('is_hidden', False),
             is_answered=data.get('is_answered', False),
             view_count=data.get('view_count', 0),
             response_count=data.get('response_count', 0),
@@ -994,13 +1110,59 @@ class CorrectionsClient:
             Text with corrections applied
         """
         try:
-            data = self._request('POST', f'/documents/{document_id}/corrected-text', {
+            # API expects original_text as query parameter with POST method
+            data = self._request('POST', f'/documents/{document_id}/corrected-text', params={
                 'original_text': original_text
             })
             return data.get('corrected_text', original_text)
         except Exception as e:
             logger.warning(f"Failed to get corrected text: {e}")
             return original_text
+
+    # ==================== Versions API ====================
+
+    def get_page_versions(self, document_id: str, page_num: int = 1) -> Dict:
+        """
+        Fetch all versions for a document page.
+
+        Args:
+            document_id: System ID of the document
+            page_num: Page number
+
+        Returns:
+            Dict with 'all_versions', 'current_default', 'total'
+        """
+        default_response = {'all_versions': [], 'current_default': None, 'total': 0}
+        try:
+            data = self._request('GET', f'/versions/{document_id}/{page_num}')
+            if not isinstance(data, dict):
+                return default_response
+            # Ensure expected keys exist
+            if 'all_versions' not in data or not isinstance(data.get('all_versions'), list):
+                data['all_versions'] = []
+            if 'current_default' not in data:
+                data['current_default'] = None
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to get page versions: {e}")
+            return default_response
+
+    def get_version_content(self, version_id: int) -> Dict:
+        """
+        Fetch content for a specific version.
+
+        Args:
+            version_id: Version ID
+
+        Returns:
+            Dict with version details including 'content'
+        """
+        try:
+            data = self._request('GET', f'/versions/id/{version_id}')
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.warning(f"Failed to get version content: {e}")
+            return {}
 
     def record_document_view(self, document_id: str):
         """Record a document view for statistics"""

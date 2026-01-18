@@ -388,6 +388,7 @@ async def search_comments(
         document_id=document_id,
         author_id=author_id,
         comment_type=ctype,
+        current_user_id=current_user.id if current_user else None,
         page=page,
         page_size=page_size
     )

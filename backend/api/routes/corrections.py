@@ -51,14 +51,17 @@ def _enrich_correction_response(
 async def create_correction(
     data: CorrectionCreate,
     request: Request,
+    save_as_draft: bool = Query(False, description="Save as draft without submitting"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    Create and submit a new correction.
+    Create a new correction.
 
-    For Editors/Admins: Auto-approved immediately
-    For Contributors: Submitted for review (PENDING status)
+    If save_as_draft=True: Saves as draft (DRAFT status)
+    If save_as_draft=False (default): Auto-submits
+      - For Editors/Admins: Auto-approved immediately
+      - For Contributors: Submitted for review (PENDING status)
 
     - **document_id**: ID of the document being corrected
     - **original_text**: The original text being corrected
@@ -68,6 +71,7 @@ async def create_correction(
     - **confidence_score**: Your confidence in the correction (0-1)
     - **source_reference**: Academic source if applicable
     - **notes**: Additional notes
+    - **save_as_draft**: If true, save as draft without submitting
     """
     client_info = get_client_info(request)
 
@@ -82,6 +86,10 @@ async def create_correction(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error
         )
+
+    # If saving as draft, return without submitting
+    if save_as_draft:
+        return _enrich_correction_response(correction, db, current_user)
 
     # Step 2: Auto-submit the correction
     # This will auto-approve for editors/admins, or set to PENDING for contributors

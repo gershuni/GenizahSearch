@@ -59,6 +59,17 @@ from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
 
+# Community features - corrections, comments, discoveries
+from corrections_client import get_corrections_client
+from corrections_ui import (
+    LoginDialog, RegisterDialog,
+    CorrectionSubmitDialog, CorrectionsViewerDialog, CorrectionDetailDialog,
+    MyCorrectionsDialog, AllCorrectionsDialog,
+    CommentDialog, CommentsViewerDialog, MyCommentsDialog,
+    DiscoveriesDialog, CreateDiscoveryDialog, DiscoveryDetailDialog,
+    TextEditorDialog
+)
+
 logger = get_logger(__name__)
 
 def apply_find_highlight(text_browser, query):
@@ -2057,7 +2068,74 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_toggle_image)
+
         action_row.addStretch()
+
+        # --- Second row: Community features (Edit, Version, Comment) ---
+        community_row = QHBoxLayout()
+
+        # Version selector
+        community_row.addWidget(QLabel(tr("Version:")))
+        self.rd_version_combo = QComboBox()
+        self.rd_version_combo.addItem("V0.8", {"source": "original"})
+        self.rd_version_combo.setFixedWidth(180)
+        self.rd_version_combo.setEnabled(False)
+        self.rd_version_combo.currentIndexChanged.connect(self._rd_change_version)
+        community_row.addWidget(self.rd_version_combo)
+        self._rd_versions_cache = {}
+
+        community_row.addWidget(QLabel(" | "))
+
+        # Edit button
+        self.btn_rd_edit = QPushButton(tr("✏️ Edit"))
+        self.btn_rd_edit.setToolTip(tr("Enable edit mode to make corrections"))
+        self.btn_rd_edit.clicked.connect(self._rd_toggle_edit_mode)
+        community_row.addWidget(self.btn_rd_edit)
+
+        # Edit action buttons (hidden by default, shown in edit mode)
+        self.btn_rd_save_draft = QPushButton(f"💾 {tr('Save')}")
+        self.btn_rd_save_draft.clicked.connect(lambda: self._rd_save_correction(submit=False))
+        self.btn_rd_save_draft.setEnabled(False)
+        self.btn_rd_save_draft.setVisible(False)
+        community_row.addWidget(self.btn_rd_save_draft)
+
+        self.btn_rd_submit = QPushButton(f"📤 {tr('Submit')}")
+        self.btn_rd_submit.clicked.connect(lambda: self._rd_save_correction(submit=True))
+        self.btn_rd_submit.setEnabled(False)
+        self.btn_rd_submit.setVisible(False)
+        community_row.addWidget(self.btn_rd_submit)
+
+        self.btn_rd_cancel_edit = QPushButton(tr("Cancel"))
+        self.btn_rd_cancel_edit.clicked.connect(self._rd_cancel_edit)
+        self.btn_rd_cancel_edit.setVisible(False)
+        community_row.addWidget(self.btn_rd_cancel_edit)
+
+        # Edit status label (hidden by default)
+        self.rd_edit_status = QLabel("")
+        self.rd_edit_status.setVisible(False)
+        community_row.addWidget(self.rd_edit_status)
+
+        community_row.addWidget(QLabel(" | "))
+
+        # Comment button
+        self.btn_comment = QPushButton(tr("💬 Comment"))
+        self.btn_comment.clicked.connect(self.add_comment)
+        community_row.addWidget(self.btn_comment)
+
+        # View Corrections button
+        self.btn_view_corrections = QPushButton(tr("View Corrections"))
+        self.btn_view_corrections.clicked.connect(self.view_corrections)
+        community_row.addWidget(self.btn_view_corrections)
+
+        # View Comments button (icon, visible when comments exist)
+        self.btn_view_comments = QPushButton("💬")
+        self.btn_view_comments.setToolTip(tr("View Comments"))
+        self.btn_view_comments.setFixedSize(32, 32)
+        self.btn_view_comments.setVisible(False)
+        self.btn_view_comments.clicked.connect(self.view_comments)
+        community_row.addWidget(self.btn_view_comments)
+
+        community_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
         self.txt_extended_info.setVisible(False)
@@ -2065,11 +2143,11 @@ class ResultDialog(QDialog):
         # Use standard palette (transparent background allowed) to support dark mode
         self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addWidget(self.txt_extended_info)
-        
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
+
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
-        
+
         header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
         main_layout.addWidget(header_widget)
         
@@ -2215,6 +2293,517 @@ class ResultDialog(QDialog):
             fl_id=parent._normalize_fl_id(self.current_fl_id),
         )
         self.btn_add_to_list.setText(_format_add_to_list_label(in_list))
+
+    def add_comment(self):
+        """Open comment dialog for current document."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+        if not parent.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to add a comment."))
+            return
+        dialog = CommentDialog(
+            self, parent.corrections_client,
+            document_id=self.current_sys_id,
+            shelfmark=self.lbl_shelf.text(),
+            page_number=self.current_p_num
+        )
+        dialog.exec()
+
+    def view_corrections(self):
+        """View corrections for current document."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+        dialog = CorrectionsViewerDialog(
+            self, parent.corrections_client,
+            document_id=self.current_sys_id,
+            shelfmark=self.lbl_shelf.text(),
+            on_view_result=lambda s: parent._open_document_result_dialog(shelfmark=s) if hasattr(parent, '_open_document_result_dialog') else None,
+            on_browse=lambda s: parent._browse_document_by_shelfmark(s) if hasattr(parent, '_browse_document_by_shelfmark') else None
+        )
+        dialog.exec()
+
+    def view_comments(self):
+        """View comments for current document."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+        dialog = CommentsViewerDialog(
+            self, parent.corrections_client,
+            document_id=self.current_sys_id,
+            shelfmark=self.lbl_shelf.text()
+        )
+        dialog.exec()
+
+    def _rd_load_versions(self):
+        """Load versions for current document page."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        doc_id = self.current_sys_id
+        page_num = self.current_p_num or 1
+        client = parent.corrections_client
+
+        # Store original text
+        original_text = self.text_ms.toPlainText()
+        self._rd_original_text = original_text
+        self._rd_versions_cache = {'original': original_text}
+
+        # Check for comments
+        try:
+            comments = client.get_comments_for_document(doc_id, page_size=1)
+            if comments and len(comments) > 0:
+                self.btn_view_comments.setVisible(True)
+            else:
+                self.btn_view_comments.setVisible(False)
+        except:
+            self.btn_view_comments.setVisible(False)
+
+        # Fetch versions and corrections using shared method
+        self._rd_refresh_versions(select_latest=True)
+
+    def _rd_change_version(self, index):
+        """Handle version change in ResultDialog."""
+        version_data = self.rd_version_combo.currentData()
+        if version_data:
+            self._rd_load_version_content(version_data)
+
+    def _rd_refresh_versions(self, select_latest=False):
+        """Refresh version list. If select_latest=True, select and load the latest version."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        doc_id = self.current_sys_id
+        page_num = self.current_p_num or 1
+        client = parent.corrections_client
+
+        # Remember current selection
+        current_data = self.rd_version_combo.currentData()
+
+        # Reset version combo
+        self.rd_version_combo.blockSignals(True)
+        self.rd_version_combo.clear()
+        self.rd_version_combo.addItem("V0.8", {"source": "original"})
+
+        new_user_idx = -1  # Track user's own correction/version
+        users_with_versions = set()  # Track users who have versions (to avoid duplicate corrections)
+
+        try:
+            versions_data = client.get_page_versions(doc_id, page_num)
+            all_versions = versions_data.get('all_versions', [])
+            print(f"[DEBUG] _rd_refresh_versions: doc_id={doc_id}, page={page_num}, versions={len(all_versions)}", flush=True)
+            for v in all_versions:
+                print(f"[DEBUG]   version: source={v.get('source')}, user={v.get('user_name')}, id={v.get('id')}", flush=True)
+
+            # Filter to only latest version per user (use user_name as key for consistent deduplication)
+            user_versions = [v for v in all_versions if v.get('source') == 'user']
+            latest_by_user = {}
+            for ver in user_versions:
+                # Use user_name as key for deduplication (more reliable than user_id which may vary)
+                user_key = ver.get('user_name', 'unknown')
+                if user_key not in latest_by_user:
+                    latest_by_user[user_key] = ver
+                else:
+                    existing = latest_by_user[user_key]
+                    # Keep the one with the later created_at date
+                    if ver.get('created_at', '') > existing.get('created_at', ''):
+                        latest_by_user[user_key] = ver
+
+            print(f"[DEBUG] After dedup: {len(latest_by_user)} unique users from {len(user_versions)} versions", flush=True)
+
+            # Add V0.7 if available
+            for ver in all_versions:
+                if ver.get('source') == 'V0.7':
+                    ver_id = ver.get('id')
+                    is_default = ver.get('is_current_default', False)
+                    label = 'V0.7'
+                    if is_default:
+                        label += f" ({tr('Default')})"
+                    self.rd_version_combo.addItem(label, {
+                        "source": "V0.7", "version_id": ver_id, "is_default": is_default
+                    })
+
+            # Add unique user versions (latest per user)
+            for ver in latest_by_user.values():
+                ver_id = ver.get('id')
+                user_name = ver.get('user_name') or 'User'
+                created_at = ver.get('created_at', '')[:10] if ver.get('created_at') else ''
+                is_default = ver.get('is_current_default', False)
+
+                label = f"{tr('by')} {user_name}"
+                if created_at:
+                    label += f" ({created_at})"
+                if is_default:
+                    label += " ✓"
+
+                self.rd_version_combo.addItem(label, {
+                    "source": "user", "version_id": ver_id, "user_name": user_name, "is_default": is_default
+                })
+
+                # Check if this is the current user's version (by username or full name)
+                is_current_user = False
+                if client.current_user:
+                    if user_name == client.current_user.username:
+                        is_current_user = True
+                    elif client.current_user.full_name and user_name == client.current_user.full_name:
+                        is_current_user = True
+
+                if is_current_user:
+                    new_user_idx = self.rd_version_combo.count() - 1
+                    # Also add the username to tracked set (for matching with corrections)
+                    users_with_versions.add(client.current_user.username)
+
+                # Track users who already have versions (to avoid duplicates with corrections)
+                users_with_versions.add(user_name)
+
+        except Exception as e:
+            print(f"[DEBUG] Error refreshing versions: {e}", flush=True)
+
+        # Also fetch corrections from corrections API (separate from versions)
+        # Only add corrections for users who don't already have a version entry
+        try:
+            corrections = client.get_corrections_for_document(doc_id, include_drafts=True)
+            # Filter corrections by page number (stored in line_number)
+            page_corrections = [c for c in corrections if c.line_number == page_num or c.line_number is None]
+            print(f"[DEBUG] _rd_refresh_versions: corrections={len(corrections)}, page_corrections={len(page_corrections)}", flush=True)
+            for c in corrections:
+                print(f"[DEBUG]   corr id={c.id}, status={c.status}, author={c.author_username}, page={c.line_number}", flush=True)
+
+            # Group by user, keep latest per user
+            corrections_by_user = {}
+            for corr in page_corrections:
+                user_key = corr.author_username or f"user_{corr.author_id}"
+                if user_key not in corrections_by_user:
+                    corrections_by_user[user_key] = corr
+                else:
+                    existing = corrections_by_user[user_key]
+                    if (corr.created_at or '') > (existing.created_at or ''):
+                        corrections_by_user[user_key] = corr
+
+            # Determine user permissions for viewing corrections
+            current_username = client.current_user.username if client.current_user else None
+            is_reviewer_or_admin = client.current_user and client.current_user.role in ('reviewer', 'editor', 'admin')
+
+            for corr in corrections_by_user.values():
+                user_name = corr.author_username or 'User'
+                status = corr.status
+
+                # Skip if user already has a version entry (avoid duplicates)
+                if user_name in users_with_versions:
+                    print(f"[DEBUG]   correction: user={user_name} SKIPPED (has version)", flush=True)
+                    continue
+
+                # Filter based on status and user permissions:
+                # - Authors can see their own corrections (any status)
+                # - Reviewers/admins can see all corrections
+                # - Regular users can only see approved corrections from others
+                is_own_correction = current_username and user_name == current_username
+
+                if status == 'rejected':
+                    # Rejected corrections: only visible to author or admin
+                    if not is_own_correction and not is_reviewer_or_admin:
+                        print(f"[DEBUG]   correction: user={user_name} SKIPPED (rejected, not authorized)", flush=True)
+                        continue
+                elif status in ('draft', 'pending'):
+                    # Draft/Pending: only visible to author or reviewer/admin
+                    if not is_own_correction and not is_reviewer_or_admin:
+                        print(f"[DEBUG]   correction: user={user_name} SKIPPED ({status}, not authorized)", flush=True)
+                        continue
+
+                created_at = corr.created_at[:10] if corr.created_at else ''
+
+                # Status indicators and label
+                if status == 'draft':
+                    # For drafts, just show "📝 Draft" without username
+                    label = f"📝 {tr('Draft')}"
+                elif status == 'pending':
+                    label = f"⏳ {tr('Pending')} - {user_name}"
+                elif status == 'approved':
+                    label = f"✅ {tr('by')} {user_name}"
+                    if created_at:
+                        label += f" ({created_at})"
+                elif status == 'rejected':
+                    label = f"❌ {tr('Rejected')} - {user_name}"
+                else:
+                    label = f"{tr('by')} {user_name}"
+                    if created_at:
+                        label += f" ({created_at})"
+
+                print(f"[DEBUG]   correction: user={user_name}, status={status}, id={corr.id}", flush=True)
+
+                self.rd_version_combo.addItem(label, {
+                    "source": "correction",
+                    "correction_id": corr.id,
+                    "user_name": user_name,
+                    "status": status,
+                    "corrected_text": corr.corrected_text
+                })
+
+                # Check if this is the current user's correction
+                if client.current_user and user_name == client.current_user.username:
+                    new_user_idx = self.rd_version_combo.count() - 1
+
+        except Exception as e:
+            print(f"[DEBUG] Error fetching corrections: {e}", flush=True)
+
+        # Enable combo if we have versions/corrections
+        if self.rd_version_combo.count() > 1:
+            self.rd_version_combo.setEnabled(True)
+
+            if select_latest:
+                # Select and load the latest (last) version as default
+                latest_idx = self.rd_version_combo.count() - 1
+                self.rd_version_combo.setCurrentIndex(latest_idx)
+                self.rd_version_combo.blockSignals(False)
+                data = self.rd_version_combo.itemData(latest_idx)
+                if data and data.get('source') != 'original':
+                    self._rd_load_version_content(data)
+                return
+            elif new_user_idx >= 0:
+                # Select user's own version/correction if just saved
+                self.rd_version_combo.setCurrentIndex(new_user_idx)
+        else:
+            self.rd_version_combo.setEnabled(False)
+
+        self.rd_version_combo.blockSignals(False)
+
+    def _rd_load_version_content(self, version_data):
+        """Load and display version content."""
+        source = version_data.get('source')
+        version_id = version_data.get('version_id')
+        correction_id = version_data.get('correction_id')
+
+        cache_key = f"{source}_{version_id or correction_id}" if (version_id or correction_id) else source
+        if cache_key in self._rd_versions_cache:
+            self._rd_display_text(self._rd_versions_cache[cache_key])
+            return
+
+        if source == "original":
+            if hasattr(self, '_rd_original_text'):
+                self._rd_display_text(self._rd_original_text)
+        elif source == "correction":
+            # Correction text is included directly in version_data
+            content = version_data.get('corrected_text', '')
+            if content:
+                self._rd_versions_cache[cache_key] = content
+                self._rd_display_text(content)
+        elif version_id:
+            parent = self.parent()
+            if parent and hasattr(parent, 'corrections_client'):
+                try:
+                    ver_data = parent.corrections_client.get_version_content(version_id)
+                    content = ver_data.get('content', '')
+                    if content:
+                        self._rd_versions_cache[cache_key] = content
+                        self._rd_display_text(content)
+                except Exception as e:
+                    print(f"[DEBUG] Error loading version: {e}", flush=True)
+
+    def _rd_display_text(self, text):
+        """Display text in the manuscript viewer."""
+        if text:
+            self.text_ms.setHtml(self._htmlify(text))
+
+    def _rd_toggle_edit_mode(self):
+        """Toggle edit mode in ResultDialog."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+        if not parent.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to edit."))
+            return
+
+        if not hasattr(self, '_rd_edit_mode'):
+            self._rd_edit_mode = False
+
+        self._rd_edit_mode = not self._rd_edit_mode
+
+        if self._rd_edit_mode:
+            # Enter edit mode - reset draft tracking
+            self._rd_draft_correction_id = None
+            self._rd_original_edit_text = self.text_ms.toPlainText()
+            self.text_ms.setReadOnly(False)
+            # Use palette-aware colors for dark mode support
+            palette = self.palette()
+            is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+            if is_dark:
+                edit_bg = "#3d3522"  # Dark yellowish for dark mode
+            else:
+                edit_bg = "#fffacd"  # Light lemon for light mode
+            self.text_ms.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+            # Show edit action buttons
+            self.btn_rd_save_draft.setVisible(True)
+            self.btn_rd_submit.setVisible(True)
+            self.btn_rd_cancel_edit.setVisible(True)
+            self.rd_edit_status.setVisible(True)
+            self.btn_rd_edit.setText(tr("✏️ Editing..."))
+            self.btn_rd_edit.setStyleSheet("background-color: #f39c12; color: white;")
+            self.text_ms.textChanged.connect(self._rd_on_text_changed)
+        else:
+            self._rd_exit_edit_mode()
+
+    def _rd_exit_edit_mode(self):
+        """Exit edit mode."""
+        self._rd_edit_mode = False
+        self._rd_draft_correction_id = None
+        try:
+            self.text_ms.textChanged.disconnect(self._rd_on_text_changed)
+        except:
+            pass
+        self.text_ms.setReadOnly(True)
+        self.text_ms.setStyleSheet("")
+        # Hide edit action buttons
+        self.btn_rd_save_draft.setVisible(False)
+        self.btn_rd_submit.setVisible(False)
+        self.btn_rd_cancel_edit.setVisible(False)
+        self.rd_edit_status.setVisible(False)
+        self.rd_edit_status.setText("")
+        self.btn_rd_edit.setText(tr("✏️ Edit"))
+        self.btn_rd_edit.setStyleSheet("")
+
+    def _rd_on_text_changed(self):
+        """Handle text changes in edit mode."""
+        current = self.text_ms.toPlainText()
+        has_changes = current != getattr(self, '_rd_original_edit_text', '')
+        draft_id = getattr(self, '_rd_draft_correction_id', None)
+        self.btn_rd_save_draft.setEnabled(has_changes)
+        # Enable submit if has changes OR has saved draft
+        self.btn_rd_submit.setEnabled(has_changes or draft_id is not None)
+
+        # Get palette-aware background color
+        palette = self.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        edit_bg = "#3d3522" if is_dark else "#fffacd"
+
+        if has_changes:
+            self.rd_edit_status.setText(tr("Modified"))
+            self.rd_edit_status.setStyleSheet("color: #e67e22;")
+            # Orange border for unsaved changes
+            self.text_ms.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+        elif draft_id:
+            self.rd_edit_status.setText(f"✓ {tr('Saved')}")
+            self.rd_edit_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+            # Green border for saved draft
+            self.text_ms.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #27ae60;")
+        else:
+            self.rd_edit_status.setText("")
+            # Orange border (default edit mode)
+            self.text_ms.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+
+    def _rd_cancel_edit(self):
+        """Cancel edit mode and restore original text."""
+        if hasattr(self, '_rd_original_edit_text'):
+            self._rd_display_text(self._rd_original_edit_text)
+        self._rd_exit_edit_mode()
+
+    def _rd_save_correction(self, submit=False):
+        """Save correction from ResultDialog."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        new_text = self.text_ms.toPlainText()
+        original = getattr(self, '_rd_original_edit_text', new_text)
+
+        # Check if there are changes OR if we have a saved draft to submit
+        draft_correction_id = getattr(self, '_rd_draft_correction_id', None)
+        has_changes = new_text != original
+
+        if not has_changes and not draft_correction_id:
+            if submit:
+                QMessageBox.information(self, tr("No Changes"), tr("No changes were made to the text."))
+            return
+
+        notes = None
+        if submit:
+            notes, ok = QInputDialog.getMultiLineText(
+                self, tr("Correction Notes"),
+                tr("Please provide a brief explanation for your correction (optional):"), ""
+            )
+            if not ok:
+                return
+            notes = notes if notes else None
+
+        try:
+            # If submitting an existing draft, try submit_correction API first
+            if submit and draft_correction_id:
+                success, message = parent.corrections_client.submit_correction(draft_correction_id, notes)
+                if success or 'approved' in message.lower():
+                    # Success, or already approved (which means it succeeded earlier)
+                    QMessageBox.information(self, tr("Correction Submitted"),
+                        tr("Your correction has been submitted for review. Thank you for your contribution!"))
+                    self._rd_exit_edit_mode()
+                    self._rd_original_edit_text = new_text
+                    self._rd_draft_correction_id = None
+                    # Refresh versions to show the submitted correction
+                    self._rd_refresh_versions()
+                else:
+                    # Submit failed, try creating a new pending correction instead
+                    correction, create_msg = parent.corrections_client.create_correction(
+                        document_id=self.current_sys_id,
+                        original_text=original if original else new_text,
+                        corrected_text=new_text,
+                        correction_type="text_correction",
+                        line_number=self.current_p_num,
+                        notes=notes,
+                        shelfmark=self.lbl_shelf.text(),
+                        system_id=self.current_sys_id,
+                        status='pending'
+                    )
+                    if correction:
+                        QMessageBox.information(self, tr("Correction Submitted"),
+                            tr("Your correction has been submitted for review. Thank you for your contribution!"))
+                        self._rd_exit_edit_mode()
+                        self._rd_original_edit_text = new_text
+                        self._rd_draft_correction_id = None
+                        self._rd_refresh_versions()
+                    else:
+                        QMessageBox.warning(self, tr("Error"), f"{tr('Failed to submit correction')}: {create_msg}")
+            else:
+                # Create new correction (draft or direct submit)
+                correction, message = parent.corrections_client.create_correction(
+                    document_id=self.current_sys_id,
+                    original_text=original if original else new_text,
+                    corrected_text=new_text,
+                    correction_type="text_correction",
+                    line_number=self.current_p_num,
+                    notes=notes,
+                    shelfmark=self.lbl_shelf.text(),
+                    system_id=self.current_sys_id,
+                    status='pending' if submit else 'draft',
+                    save_as_draft=not submit  # Don't auto-submit when saving as draft
+                )
+                if correction:
+                    if submit:
+                        QMessageBox.information(self, tr("Correction Submitted"),
+                            tr("Your correction has been submitted for review. Thank you for your contribution!"))
+                        self._rd_exit_edit_mode()
+                        self._rd_original_edit_text = new_text
+                        self._rd_draft_correction_id = None
+                        # Refresh versions to show the submitted correction
+                        self._rd_refresh_versions()
+                    else:
+                        self.rd_edit_status.setText(f"✓ {tr('Saved')}")
+                        self.rd_edit_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+                        self._rd_draft_correction_id = correction.id  # Store draft ID for later submit
+                        self._rd_original_edit_text = new_text  # Update original to mark as saved
+                        # Update border to green (saved)
+                        palette = self.palette()
+                        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+                        edit_bg = "#3d3522" if is_dark else "#fffacd"
+                        self.text_ms.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #27ae60;")
+                        # Keep submit button enabled after saving draft
+                        self.btn_rd_submit.setEnabled(True)
+                        self.btn_rd_save_draft.setEnabled(False)  # Disable save since no changes
+                        # Refresh versions to show the draft
+                        self._rd_refresh_versions()
+                else:
+                    QMessageBox.warning(self, tr("Error"), f"{tr('Failed to save correction')}: {message}")
+        except Exception as e:
+            QMessageBox.warning(self, tr("Error"), f"{tr('Failed to save correction')}: {str(e)}")
 
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
@@ -2420,6 +3009,9 @@ class ResultDialog(QDialog):
         
         self.text_ms.setHtml(self._htmlify(raw_text))
         self._refresh_find_highlights()
+
+        # Load versions for this page
+        self._rd_load_versions()
 
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
@@ -2889,7 +3481,8 @@ class GenizahGUI(QMainWindow):
         self.comp_col_context = 4
         self.comp_col_ms_context = 5
         self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
-        self.resize(1300, 850)
+        # Initial size - will be overridden by showMaximized() at startup
+        self.setMinimumSize(1200, 700)
         log_tls_relaxation_notice()
 
         self.meta_mgr = None
@@ -2899,6 +3492,9 @@ class GenizahGUI(QMainWindow):
         self.ai_mgr = None
         self.lab_engine = None
         self.lists_mgr = None
+
+        # Community features - corrections client
+        self.corrections_client = get_corrections_client()
 
         self.last_results = []
         self.last_search_query = ""
@@ -2957,6 +3553,8 @@ class GenizahGUI(QMainWindow):
         self.results_loaded = 0
         self.snippet_queue = []
 
+        # Shelfmark to sys_id mapping for community features
+        self._shelf_to_sys = None
 
         self.init_ui()
 
@@ -3120,19 +3718,60 @@ class GenizahGUI(QMainWindow):
         self.composition_tab = self.create_composition_tab()
         self.browse_tab = self.create_browse_tab()
         self.lists_tab = self.create_lists_tab()
+        self.community_tab = self.create_community_tab()
         self.settings_tab = self.create_settings_tab()
         self.tabs.addTab(self.search_tab, tr("Search"))
         self.tabs.addTab(self.composition_tab, tr("Composition Search"))
         self.tabs.addTab(self.browse_tab, tr("Browse Manuscript"))
         self.tabs.addTab(self.lists_tab, tr("Personal Lists"))
+        self.tabs.addTab(self.community_tab, tr("Community"))
         self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
-        # Language Toggle
-        lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
-        lang_btn.setFlat(True)
-        lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        lang_btn.clicked.connect(self.toggle_language)
-        self.tabs.setCornerWidget(lang_btn, Qt.Corner.TopRightCorner if CURRENT_LANG == 'en' else Qt.Corner.TopLeftCorner)
+        # Corner widget with Version, Login button and Language toggle
+        corner_widget = QWidget()
+        corner_layout = QHBoxLayout(corner_widget)
+        corner_layout.setContentsMargins(5, 0, 5, 0)
+        corner_layout.setSpacing(10)
+
+        # Version button
+        self.corner_version_btn = QPushButton(f"v{APP_VERSION}")
+        self.corner_version_btn.setFlat(True)
+        self.corner_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_version_btn.setToolTip(tr("Check for updates"))
+        self.corner_version_btn.clicked.connect(self.check_updates_manual)
+        self.corner_version_btn.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        corner_layout.addWidget(self.corner_version_btn)
+
+        # Separator
+        sep1 = QLabel("|")
+        sep1.setStyleSheet("color: gray;")
+        corner_layout.addWidget(sep1)
+
+        # Login/Logout button
+        self.corner_login_btn = QPushButton(tr("Login"))
+        self.corner_login_btn.setFlat(True)
+        self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_login_btn.clicked.connect(self._corner_login_clicked)
+        corner_layout.addWidget(self.corner_login_btn)
+
+        # Separator
+        sep2 = QLabel("|")
+        sep2.setStyleSheet("color: gray;")
+        corner_layout.addWidget(sep2)
+
+        # Language toggle
+        self.lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
+        self.lang_btn.setFlat(True)
+        self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lang_btn.clicked.connect(self.toggle_language)
+        corner_layout.addWidget(self.lang_btn)
+
+        self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner if CURRENT_LANG == 'en' else Qt.Corner.TopLeftCorner)
+        self._update_corner_login_state()
+
+        # Connect tab change to refresh community data when needed
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._community_data_loaded = False
 
         # Main Layout wrapper for Notification Bar
         central_widget = QWidget()
@@ -3147,6 +3786,770 @@ class GenizahGUI(QMainWindow):
 
         main_layout.addWidget(self.tabs)
         self.setCentralWidget(central_widget)
+
+    def _update_corner_login_state(self):
+        """Update the corner login button based on login state."""
+        if self.corrections_client.is_logged_in():
+            user = self.corrections_client.current_user
+            if user:
+                self.corner_login_btn.setText(f"{user.username} ({tr('Logout')})")
+            else:
+                self.corner_login_btn.setText(tr("Logout"))
+        else:
+            self.corner_login_btn.setText(tr("Login"))
+
+    def _on_tab_changed(self, index):
+        """Handle tab change events."""
+        import sys
+        print(f"[DEBUG] _on_tab_changed called with index={index}", flush=True)
+        try:
+            current_widget = self.tabs.widget(index)
+            print(f"[DEBUG] current_widget={current_widget}", flush=True)
+            if hasattr(self, 'community_tab') and current_widget == self.community_tab:
+                print(f"[DEBUG] Matched community_tab, _community_data_loaded={getattr(self, '_community_data_loaded', False)}", flush=True)
+                # Load community data when tab is first shown or refresh if needed
+                if not getattr(self, '_community_data_loaded', False):
+                    print("[DEBUG] About to call _refresh_community_panels", flush=True)
+                    self._refresh_community_panels()
+                    print("[DEBUG] _refresh_community_panels completed", flush=True)
+                    self._community_data_loaded = True
+        except Exception as e:
+            import traceback
+            print(f"Error in _on_tab_changed: {e}", flush=True)
+            traceback.print_exc()
+            sys.stdout.flush()
+
+    def _corner_login_clicked(self):
+        """Handle corner login button click."""
+        if self.corrections_client.is_logged_in():
+            self._do_logout()
+        else:
+            self._show_login_dialog()
+
+    def _show_login_dialog(self):
+        dialog = LoginDialog(self, self.corrections_client)
+        if dialog.exec():
+            self._update_corner_login_state()
+            self._refresh_community_panels()
+
+    def _show_register_dialog(self):
+        dialog = RegisterDialog(self, self.corrections_client)
+        if dialog.exec():
+            self._update_corner_login_state()
+            self._refresh_community_panels()
+
+    def _do_logout(self):
+        self.corrections_client.logout()
+        self._update_corner_login_state()
+        self._refresh_community_panels()
+        QMessageBox.information(self, tr("Logged Out"), tr("You have been logged out."))
+
+    def _show_discoveries_dialog(self):
+        dialog = DiscoveriesDialog(
+            self, self.corrections_client,
+            on_view_result=lambda s: self._open_document_result_dialog(shelfmark=s),
+            on_browse=lambda s: self._browse_document_by_shelfmark(s)
+        )
+        dialog.exec()
+
+    def _show_create_discovery_dialog(self):
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to share a discovery."))
+            return
+        # Get current document context if in browse tab
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        page_number = None
+        if doc_id and self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+                page_number = self.current_browse_p
+            except:
+                pass
+        dialog = CreateDiscoveryDialog(
+            self, self.corrections_client,
+            document_id=doc_id, shelfmark=shelfmark, page_number=page_number,
+            lists_mgr=self.lists_mgr,
+            shelf_completer=getattr(self, 'shelf_completer', None),
+            meta_mgr=self.meta_mgr
+        )
+        if dialog.exec():
+            # Refresh discoveries panel after successful creation
+            self._refresh_discoveries_panel(use_cache_first=False)
+
+    def _show_all_corrections_dialog(self):
+        dialog = AllCorrectionsDialog(self, self.corrections_client)
+        dialog.exec()
+
+    def _show_my_corrections_dialog(self):
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to view your corrections."))
+            return
+        dialog = MyCorrectionsDialog(self, self.corrections_client)
+        dialog.exec()
+
+    def _show_my_comments_dialog(self):
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to view your comments."))
+            return
+        dialog = MyCommentsDialog(
+            self, self.corrections_client,
+            on_view_result=lambda s: self._open_document_result_dialog(shelfmark=s),
+            on_browse=lambda s: self._browse_document_by_shelfmark(s)
+        )
+        dialog.exec()
+
+    # === Browse Tab Community Button Handlers ===
+
+    def _browse_toggle_edit_mode(self):
+        """Toggle edit mode for inline corrections."""
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to make corrections."))
+            return
+        if not self.current_browse_sid:
+            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
+            return
+
+        if self.browse_edit_mode:
+            # Exit edit mode
+            self._browse_cancel_edit()
+        else:
+            # Enter edit mode - reset draft tracking
+            self.browse_edit_mode = True
+            self._browse_draft_correction_id = None
+            self.browse_original_edit_text = self.browse_text.toPlainText()
+            self.browse_text.setReadOnly(False)
+            # Set initial orange border (no changes yet)
+            palette = self.palette()
+            is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+            edit_bg = "#3d3522" if is_dark else "#fffacd"
+            self.browse_text.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+            self.browse_text.textChanged.connect(self._browse_on_text_changed)
+            self.browse_edit_bar.show()
+            self.browse_edit_status.setText("")
+            self.btn_b_save_draft.setEnabled(False)
+            self.btn_b_save_correction.setEnabled(False)
+            self.btn_b_edit.setText(tr("❌ Exit Edit"))
+            self.btn_b_edit.setStyleSheet("background-color: #e74c3c; color: white;")
+
+    def _browse_on_text_changed(self):
+        """Handle text changes in edit mode."""
+        if not self.browse_edit_mode:
+            return
+        current_text = self.browse_text.toPlainText()
+        original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
+        has_changes = current_text != original
+        self.btn_b_save_draft.setEnabled(has_changes)
+        # Enable submit if has changes OR has saved draft
+        draft_id = getattr(self, '_browse_draft_correction_id', None)
+        self.btn_b_save_correction.setEnabled(has_changes or draft_id is not None)
+
+        # Get palette-aware background color
+        palette = self.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        edit_bg = "#3d3522" if is_dark else "#fffacd"
+
+        if has_changes:
+            self.browse_edit_status.setText(f"● {tr('Unsaved changes')}")
+            self.browse_edit_status.setStyleSheet("color: #e67e22;")
+            # Orange border for unsaved changes
+            self.browse_text.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+        elif draft_id:
+            self.browse_edit_status.setText(f"✓ {tr('Saved')}")
+            self.browse_edit_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+            # Green border for saved draft
+            self.browse_text.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #27ae60;")
+        else:
+            self.browse_edit_status.setText("")
+            # Orange border (default edit mode)
+            self.browse_text.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #f39c12;")
+
+    def _browse_cancel_edit(self):
+        """Cancel edit mode and restore original text."""
+        self.browse_edit_mode = False
+        self._browse_draft_correction_id = None
+        try:
+            self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
+        except:
+            pass
+        # Restore to original text before editing
+        original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
+        self.browse_text.setPlainText(original)
+        self.browse_text.setReadOnly(True)
+        self.browse_text.setStyleSheet("")
+        self.browse_edit_bar.hide()
+        self.browse_edit_status.setText("")
+        self.btn_b_edit.setText(tr("✏️ Edit"))
+        self.btn_b_edit.setStyleSheet("")
+
+    def _browse_exit_edit_mode(self):
+        """Exit edit mode without restoring text (after successful submit)."""
+        self.browse_edit_mode = False
+        self._browse_draft_correction_id = None
+        try:
+            self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
+        except:
+            pass
+        self.browse_text.setReadOnly(True)
+        self.browse_text.setStyleSheet("")
+        self.browse_edit_bar.hide()
+        self.browse_edit_status.setText("")
+        self.btn_b_edit.setText(tr("✏️ Edit"))
+        self.btn_b_edit.setStyleSheet("")
+
+    def _browse_save_correction(self, submit=False):
+        """Save the inline correction.
+
+        Args:
+            submit: If True, submit for review. If False, save as draft (silent).
+        """
+        if not self.browse_edit_mode:
+            return
+
+        new_text = self.browse_text.toPlainText()
+        original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
+        draft_correction_id = getattr(self, '_browse_draft_correction_id', None)
+        has_changes = new_text != original
+
+        if not has_changes and not draft_correction_id:
+            if submit:
+                QMessageBox.information(self, tr("No Changes"), tr("No changes were made to the text."))
+            return
+
+        # Get document context
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+            except:
+                pass
+
+        # Ask for notes/reason (only for submit)
+        notes = None
+        if submit:
+            notes, ok = QInputDialog.getMultiLineText(
+                self,
+                tr("Correction Notes"),
+                tr("Please provide a brief explanation for your correction (optional):"),
+                ""
+            )
+            if not ok:
+                return
+            notes = notes if notes else None
+
+        # Submit or save the correction
+        try:
+            # If submitting an existing draft, try submit_correction API first
+            if submit and draft_correction_id:
+                success, message = self.corrections_client.submit_correction(draft_correction_id, notes)
+                if success or 'approved' in message.lower():
+                    # Success, or already approved (which means it succeeded earlier)
+                    QMessageBox.information(
+                        self,
+                        tr("Correction Submitted"),
+                        tr("Your correction has been submitted for review. Thank you for your contribution!")
+                    )
+                    # Exit edit mode after submit
+                    self._browse_exit_edit_mode()
+                    self._browse_draft_correction_id = None
+                    # Refresh versions
+                    self._check_document_community_status()
+                else:
+                    # Submit failed, try creating a new pending correction instead
+                    correction, create_msg = self.corrections_client.create_correction(
+                        document_id=doc_id,
+                        original_text=original if original else new_text,
+                        corrected_text=new_text,
+                        correction_type="text_correction",
+                        line_number=self.current_browse_p,
+                        notes=notes,
+                        shelfmark=shelfmark,
+                        system_id=doc_id,
+                        status='pending'
+                    )
+                    if correction:
+                        QMessageBox.information(
+                            self,
+                            tr("Correction Submitted"),
+                            tr("Your correction has been submitted for review. Thank you for your contribution!")
+                        )
+                        self._browse_exit_edit_mode()
+                        self._browse_draft_correction_id = None
+                        self._check_document_community_status()
+                    else:
+                        QMessageBox.warning(self, tr("Error"), f"{tr('Failed to submit correction')}: {create_msg}")
+            else:
+                # Create new correction (draft or direct submit)
+                correction, message = self.corrections_client.create_correction(
+                    document_id=doc_id,
+                    original_text=original if original else new_text,
+                    corrected_text=new_text,
+                    correction_type="text_correction",
+                    line_number=self.current_browse_p,
+                    notes=notes,
+                    shelfmark=shelfmark,
+                    system_id=doc_id,
+                    status='pending' if submit else 'draft',
+                    save_as_draft=not submit  # Don't auto-submit when saving as draft
+                )
+                if correction:
+                    if submit:
+                        QMessageBox.information(
+                            self,
+                            tr("Correction Submitted"),
+                            tr("Your correction has been submitted for review. Thank you for your contribution!")
+                        )
+                        # Exit edit mode after submit
+                        self._browse_exit_edit_mode()
+                        self._browse_draft_correction_id = None
+                        # Refresh versions
+                        self._check_document_community_status()
+                    else:
+                        # Silent save - just show checkmark in status, keep editing
+                        self.browse_edit_status.setText(f"✓ {tr('Saved')}")
+                        self.browse_edit_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+                        self._browse_draft_correction_id = correction.id
+                        self.browse_original_edit_text = new_text  # Update original to mark as saved
+                        # Update border to green (saved)
+                        palette = self.palette()
+                        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+                        edit_bg = "#3d3522" if is_dark else "#fffacd"
+                        self.browse_text.setStyleSheet(f"background-color: {edit_bg}; border: 2px solid #27ae60;")
+                        # Disable save draft button since no changes
+                        self.btn_b_save_draft.setEnabled(False)
+                        # Enable submit button
+                        self.btn_b_save_correction.setEnabled(True)
+                        # Refresh versions
+                        self._check_document_community_status()
+                else:
+                    QMessageBox.warning(self, tr("Error"), f"{tr('Failed to save correction')}: {message}")
+        except Exception as e:
+            QMessageBox.warning(self, tr("Error"), f"{tr('Failed to save correction')}: {str(e)}")
+
+    def _browse_change_version(self, index):
+        """Change between text versions."""
+        if not hasattr(self, 'current_browse_sid') or not self.current_browse_sid:
+            return
+        if not hasattr(self, 'browse_version_combo'):
+            return
+
+        version_data = self.browse_version_combo.currentData()
+        if not version_data:
+            return
+
+        self._browse_load_version(version_data)
+
+    def _browse_load_version(self, version_data):
+        """Load and display a specific version."""
+        if not version_data:
+            return
+
+        source = version_data.get('source')
+        version_id = version_data.get('version_id')
+
+        # Check cache first
+        cache_key = f"{source}_{version_id}" if version_id else source
+        if cache_key in self._browse_versions_cache:
+            content = self._browse_versions_cache[cache_key]
+            self._browse_display_version_text(content)
+            return
+
+        if source == "original":
+            # Show original V0.8 text
+            if hasattr(self, 'browse_original_page_text') and self.browse_original_page_text:
+                self._browse_display_version_text(self.browse_original_page_text)
+        elif source == "correction":
+            # Correction content is stored directly in version_data
+            content = version_data.get('corrected_text', '')
+            if content:
+                correction_id = version_data.get('correction_id')
+                cache_key = f"correction_{correction_id}"
+                self._browse_versions_cache[cache_key] = content
+                self._browse_display_version_text(content)
+            else:
+                if hasattr(self, 'browse_original_page_text'):
+                    self._browse_display_version_text(self.browse_original_page_text)
+        elif version_id:
+            # Fetch version content from API
+            try:
+                ver_data = self.corrections_client.get_version_content(version_id)
+                content = ver_data.get('content', '')
+                if content:
+                    self._browse_versions_cache[cache_key] = content
+                    self._browse_display_version_text(content)
+                else:
+                    # Fall back to original if no content
+                    if hasattr(self, 'browse_original_page_text'):
+                        self._browse_display_version_text(self.browse_original_page_text)
+            except Exception as e:
+                print(f"[DEBUG] Error loading version content: {e}", flush=True)
+                if hasattr(self, 'browse_original_page_text'):
+                    self._browse_display_version_text(self.browse_original_page_text)
+
+    def _browse_display_version_text(self, text):
+        """Display version text in the browse text area."""
+        if not text:
+            return
+        # Apply RTL formatting like browse_render_page does
+        browse_html_text = text.replace('\n', '<br>')
+        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
+        apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
+
+    def _check_document_community_status(self):
+        """Check if document has comments and load available versions."""
+        if not self.current_browse_sid or not self.corrections_client:
+            return
+
+        doc_id = self.current_browse_sid
+        page_num = self.current_browse_p or 1
+
+        # Store original text for this document
+        original_text = self.browse_text.toPlainText()
+        self.browse_original_page_text = original_text
+
+        # Reset version cache and combo for new document
+        self._browse_versions_cache = {'original': original_text}
+        self.browse_version_combo.blockSignals(True)
+        self.browse_version_combo.clear()
+        self.browse_version_combo.addItem("V0.8", {"source": "original"})
+        self.browse_version_combo.blockSignals(False)
+
+        # Check for comments
+        try:
+            comments = self.corrections_client.get_comments_for_document(doc_id, page_size=1)
+            if comments and len(comments) > 0:
+                self.btn_b_view_comments.setVisible(True)
+                self.btn_b_view_comments.setEnabled(True)
+            else:
+                self.btn_b_view_comments.setVisible(False)
+        except:
+            self.btn_b_view_comments.setVisible(False)
+
+        # Fetch versions from API
+        try:
+            versions_data = self.corrections_client.get_page_versions(doc_id, page_num)
+            all_versions = versions_data.get('all_versions', [])
+            current_default = versions_data.get('current_default')
+
+            # Add V0.7 if available
+            v07_versions = [v for v in all_versions if v.get('source') == 'V0.7']
+            for ver in v07_versions:
+                ver_id = ver.get('id')
+                is_default = ver.get('is_current_default', False)
+                label = 'V0.7'
+                if is_default:
+                    label += f" ({tr('Default')})"
+                self.browse_version_combo.addItem(label, {
+                    "source": "V0.7",
+                    "version_id": ver_id,
+                    "is_default": is_default
+                })
+
+            # Add user versions
+            users_with_versions = set()  # Track users who have versions (to avoid duplicate corrections)
+            user_versions = [v for v in all_versions if v.get('source') == 'user']
+            for ver in user_versions:
+                ver_id = ver.get('id')
+                user_name = ver.get('user_name') or 'User'
+                created_at = ver.get('created_at', '')[:10] if ver.get('created_at') else ''
+                is_default = ver.get('is_current_default', False)
+
+                label = f"{tr('by')} {user_name}"
+                if created_at:
+                    label += f" ({created_at})"
+                if is_default:
+                    label += " ✓"
+
+                self.browse_version_combo.addItem(label, {
+                    "source": "user",
+                    "version_id": ver_id,
+                    "user_name": user_name,
+                    "is_default": is_default
+                })
+                users_with_versions.add(user_name)
+
+            # Also fetch corrections (including drafts) for current user
+            try:
+                corrections = self.corrections_client.get_corrections_for_document(doc_id, include_drafts=True)
+                # Filter corrections by page number (stored in line_number)
+                page_corrections = [c for c in corrections if c.line_number == page_num or c.line_number is None]
+
+                # Group by user, keep latest per user
+                corrections_by_user = {}
+                for corr in page_corrections:
+                    user_key = corr.author_username or f"user_{corr.author_id}"
+                    if user_key not in corrections_by_user:
+                        corrections_by_user[user_key] = corr
+                    else:
+                        existing = corrections_by_user[user_key]
+                        if (corr.created_at or '') > (existing.created_at or ''):
+                            corrections_by_user[user_key] = corr
+
+                # Determine user permissions for viewing corrections
+                current_username = self.corrections_client.current_user.username if self.corrections_client.current_user else None
+                is_reviewer_or_admin = self.corrections_client.current_user and self.corrections_client.current_user.role in ('reviewer', 'editor', 'admin')
+
+                for corr in corrections_by_user.values():
+                    user_name = corr.author_username or 'User'
+                    status = corr.status
+
+                    # Skip if user already has a version entry (avoid duplicates)
+                    if user_name in users_with_versions:
+                        continue
+
+                    # Filter based on status and user permissions:
+                    # - Authors can see their own corrections (any status)
+                    # - Reviewers/admins can see all corrections
+                    # - Regular users can only see approved corrections from others
+                    is_own_correction = current_username and user_name == current_username
+
+                    if status == 'rejected':
+                        if not is_own_correction and not is_reviewer_or_admin:
+                            continue
+                    elif status in ('draft', 'pending'):
+                        if not is_own_correction and not is_reviewer_or_admin:
+                            continue
+
+                    created_at = corr.created_at[:10] if corr.created_at else ''
+
+                    # Status indicators and label
+                    if status == 'draft':
+                        label = f"📝 {tr('Draft')}"
+                    elif status == 'pending':
+                        label = f"⏳ {tr('Pending')} - {user_name}"
+                    elif status == 'approved':
+                        label = f"✅ {tr('by')} {user_name}"
+                        if created_at:
+                            label += f" ({created_at})"
+                    elif status == 'rejected':
+                        label = f"❌ {tr('Rejected')} - {user_name}"
+                    else:
+                        label = f"{tr('by')} {user_name}"
+                        if created_at:
+                            label += f" ({created_at})"
+
+                    self.browse_version_combo.addItem(label, {
+                        "source": "correction",
+                        "correction_id": corr.id,
+                        "user_name": user_name,
+                        "status": status,
+                        "corrected_text": corr.corrected_text
+                    })
+            except Exception as e:
+                print(f"[DEBUG] Error fetching corrections for browse: {e}", flush=True)
+
+            # Enable combo if we have more than just V0.8
+            if self.browse_version_combo.count() > 1:
+                self.browse_version_combo.setEnabled(True)
+
+                # If there's a current default that's not V0.8, select it
+                if current_default and current_default.get('source') != 'V0.8':
+                    default_id = current_default.get('id')
+                    for i in range(self.browse_version_combo.count()):
+                        data = self.browse_version_combo.itemData(i)
+                        if data and data.get('version_id') == default_id:
+                            self.browse_version_combo.blockSignals(True)
+                            self.browse_version_combo.setCurrentIndex(i)
+                            self.browse_version_combo.blockSignals(False)
+                            # Load and display this version
+                            self._browse_load_version(data)
+                            break
+            else:
+                self.browse_version_combo.setEnabled(False)
+
+        except Exception as e:
+            print(f"[DEBUG] Error fetching versions: {e}", flush=True)
+            self.browse_version_combo.setEnabled(False)
+
+    def _browse_add_comment(self):
+        """Open comment dialog for current document."""
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to add a comment."))
+            return
+        if not self.current_browse_sid:
+            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
+            return
+
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+            except:
+                pass
+
+        dialog = CommentDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark,
+            page_number=self.current_browse_p
+        )
+        dialog.exec()
+
+    def _browse_view_corrections(self):
+        """View corrections for current document."""
+        if not self.current_browse_sid:
+            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
+            return
+
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+            except:
+                pass
+
+        dialog = CorrectionsViewerDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark,
+            on_view_result=lambda s: self._open_document_result_dialog(shelfmark=s),
+            on_browse=lambda s: self._browse_document_by_shelfmark(s)
+        )
+        dialog.exec()
+
+    def _browse_view_comments(self):
+        """View comments for current document."""
+        if not self.current_browse_sid:
+            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
+            return
+
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+            except:
+                pass
+
+        dialog = CommentsViewerDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark
+        )
+        dialog.exec()
+
+    # === Search Results Context Menu ===
+
+    def _show_results_context_menu(self, pos):
+        """Show context menu for search results with community options."""
+        row = self.results_table.rowAt(pos.y())
+        if row < 0:
+            return
+
+        # Get the result data
+        item = self.results_table.item(row, self.COL_SYS_ID)
+        if not item:
+            return
+        res = item.data(Qt.ItemDataRole.UserRole)
+        if not res:
+            return
+
+        sys_id = res.get('sys_id') or res.get('system_id', '')
+        shelfmark = res.get('shelfmark', '')
+        if not shelfmark and self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            except:
+                pass
+
+        menu = QMenu(self)
+
+        # View action
+        action_view = menu.addAction(tr("View Document"))
+        action_view.triggered.connect(lambda: self._context_view_document(sys_id))
+
+        menu.addSeparator()
+
+        # Community actions
+        action_correction = menu.addAction(tr("Submit Correction..."))
+        action_correction.triggered.connect(lambda: self._context_submit_correction(sys_id, shelfmark))
+
+        action_comment = menu.addAction(tr("Add Comment..."))
+        action_comment.triggered.connect(lambda: self._context_add_comment(sys_id, shelfmark))
+
+        menu.addSeparator()
+
+        action_view_corrections = menu.addAction(tr("View Corrections..."))
+        action_view_corrections.triggered.connect(lambda: self._context_view_corrections(sys_id, shelfmark))
+
+        action_view_comments = menu.addAction(tr("View Comments..."))
+        action_view_comments.triggered.connect(lambda: self._context_view_comments(sys_id, shelfmark))
+
+        menu.addSeparator()
+
+        action_discovery = menu.addAction(tr("Share Discovery..."))
+        action_discovery.triggered.connect(lambda: self._context_share_discovery(sys_id, shelfmark))
+
+        menu.exec(self.results_table.mapToGlobal(pos))
+
+    def _context_view_document(self, sys_id):
+        """Navigate to browse tab for this document."""
+        self.browse_sys_input.setText(sys_id)
+        self._set_last_browse_field("sys")
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self.browse_load()
+
+    def _context_submit_correction(self, doc_id, shelfmark):
+        """Open correction dialog from context menu."""
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to submit a correction."))
+            return
+        dialog = CorrectionSubmitDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark
+        )
+        dialog.exec()
+
+    def _context_add_comment(self, doc_id, shelfmark):
+        """Open comment dialog from context menu."""
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to add a comment."))
+            return
+        dialog = CommentDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark
+        )
+        dialog.exec()
+
+    def _context_view_corrections(self, doc_id, shelfmark):
+        """View corrections from context menu."""
+        dialog = CorrectionsViewerDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark,
+            on_view_result=lambda s: self._open_document_result_dialog(shelfmark=s),
+            on_browse=lambda s: self._browse_document_by_shelfmark(s)
+        )
+        dialog.exec()
+
+    def _context_view_comments(self, doc_id, shelfmark):
+        """View comments from context menu."""
+        dialog = CommentsViewerDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark
+        )
+        dialog.exec()
+
+    def _context_share_discovery(self, doc_id, shelfmark):
+        """Share discovery from context menu."""
+        if not self.corrections_client.is_logged_in():
+            QMessageBox.warning(self, tr("Login Required"), tr("Please login to share a discovery."))
+            return
+        dialog = CreateDiscoveryDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark,
+            lists_mgr=self.lists_mgr,
+            shelf_completer=getattr(self, 'shelf_completer', None),
+            meta_mgr=self.meta_mgr
+        )
+        dialog.exec()
 
     def toggle_language(self):
         new_lang = 'en' if CURRENT_LANG == 'he' else 'he'
@@ -3288,7 +4691,11 @@ class GenizahGUI(QMainWindow):
         self.results_table.doubleClicked.connect(self.show_full_text)
         self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
-        
+
+        # Context menu for community features
+        self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_table.customContextMenuRequested.connect(self._show_results_context_menu)
+
         self.results_placeholder = QLabel(tr("Please wait while components load..."))
         self.results_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_placeholder.setWordWrap(True)
@@ -3714,8 +5121,102 @@ class GenizahGUI(QMainWindow):
         nav_bar.addWidget(self.btn_b_all)
         nav_bar.addWidget(self.btn_b_save)
         nav_bar.addWidget(self.btn_b_toggle_img)
+
         nav_bar.addStretch()
         text_layout.addLayout(nav_bar)
+
+        # Second row: Community buttons and version selector
+        community_bar = QHBoxLayout()
+        community_bar.setContentsMargins(0, 2, 0, 2)
+
+        # Version selector
+        community_bar.addWidget(QLabel(tr("Version:")))
+        self.browse_version_combo = QComboBox()
+        self.browse_version_combo.blockSignals(True)
+        self.browse_version_combo.addItem("V0.8", {"source": "original"})
+        self.browse_version_combo.setFixedWidth(180)  # Wider for "by Username (date)"
+        self.browse_version_combo.setEnabled(False)
+        self.browse_version_combo.blockSignals(False)
+        self.browse_version_combo.currentIndexChanged.connect(self._browse_change_version)
+        community_bar.addWidget(self.browse_version_combo)
+        # Version data cache for current document
+        self._browse_versions_cache = {}
+
+        community_bar.addWidget(QLabel(" | "))
+
+        # Edit Mode button (for inline corrections)
+        self.btn_b_edit = QPushButton(tr("✏️ Edit"))
+        self.btn_b_edit.setToolTip(tr("Enable edit mode to make corrections"))
+        self.btn_b_edit.clicked.connect(self._browse_toggle_edit_mode)
+        self.btn_b_edit.setEnabled(False)
+        community_bar.addWidget(self.btn_b_edit)
+
+        # Add Comment button
+        self.btn_b_comment = QPushButton(tr("💬 Comment"))
+        self.btn_b_comment.setToolTip(tr("Add a comment on this document"))
+        self.btn_b_comment.clicked.connect(self._browse_add_comment)
+        self.btn_b_comment.setEnabled(False)
+        community_bar.addWidget(self.btn_b_comment)
+
+        # View Corrections button
+        self.btn_b_view_corrections = QPushButton(tr("View Corrections"))
+        self.btn_b_view_corrections.setToolTip(tr("View community corrections for this document"))
+        self.btn_b_view_corrections.clicked.connect(self._browse_view_corrections)
+        self.btn_b_view_corrections.setEnabled(False)
+        community_bar.addWidget(self.btn_b_view_corrections)
+
+        # View Comments indicator (icon that appears when comments exist)
+        self.btn_b_view_comments = QPushButton("💬")
+        self.btn_b_view_comments.setToolTip(tr("View comments on this document"))
+        self.btn_b_view_comments.clicked.connect(self._browse_view_comments)
+        self.btn_b_view_comments.setEnabled(False)
+        self.btn_b_view_comments.setVisible(False)  # Hidden by default, show when comments exist
+        self.btn_b_view_comments.setFixedSize(32, 32)
+        self.btn_b_view_comments.setStyleSheet("background-color: #f39c12; color: white; border-radius: 4px;")
+        community_bar.addWidget(self.btn_b_view_comments)
+
+        community_bar.addStretch()
+        text_layout.addLayout(community_bar)
+
+        # Edit mode action bar (hidden by default)
+        self.browse_edit_bar = QWidget()
+        self.browse_edit_bar.setStyleSheet("background-color: #2c3e50; border-radius: 5px;")
+        edit_bar_layout = QHBoxLayout(self.browse_edit_bar)
+        edit_bar_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Edit mode label
+        edit_mode_label = QLabel(f"<b style='color: white;'>{tr('Edit Mode')}</b>")
+        edit_bar_layout.addWidget(edit_mode_label)
+
+        # Save status indicator
+        self.browse_edit_status = QLabel()
+        self.browse_edit_status.setStyleSheet("color: #f39c12; font-weight: bold;")
+        edit_bar_layout.addWidget(self.browse_edit_status)
+
+        edit_bar_layout.addStretch()
+
+        # Save button (draft)
+        self.btn_b_save_draft = QPushButton(f"💾 {tr('Save')}")
+        self.btn_b_save_draft.setStyleSheet("background-color: #3498db; color: white; padding: 5px 15px; border-radius: 3px;")
+        self.btn_b_save_draft.setToolTip(tr("Save as draft for later editing"))
+        self.btn_b_save_draft.clicked.connect(lambda: self._browse_save_correction(submit=False))
+        self.btn_b_save_draft.setEnabled(False)
+        edit_bar_layout.addWidget(self.btn_b_save_draft)
+
+        # Save and Submit button
+        self.btn_b_save_correction = QPushButton(f"📤 {tr('Submit')}")
+        self.btn_b_save_correction.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px; border-radius: 3px;")
+        self.btn_b_save_correction.setToolTip(tr("Submit correction for review"))
+        self.btn_b_save_correction.clicked.connect(lambda: self._browse_save_correction(submit=True))
+        self.btn_b_save_correction.setEnabled(False)
+        edit_bar_layout.addWidget(self.btn_b_save_correction)
+
+        self.btn_b_cancel_edit = QPushButton(tr("Cancel"))
+        self.btn_b_cancel_edit.setStyleSheet("background-color: #95a5a6; color: white; padding: 5px 15px; border-radius: 3px;")
+        self.btn_b_cancel_edit.clicked.connect(self._browse_cancel_edit)
+        edit_bar_layout.addWidget(self.btn_b_cancel_edit)
+        self.browse_edit_bar.hide()
+        text_layout.addWidget(self.browse_edit_bar)
 
         browse_find_row = QHBoxLayout()
         browse_find_row.addWidget(QLabel(tr("Find:")))
@@ -3725,11 +5226,13 @@ class GenizahGUI(QMainWindow):
         browse_find_row.addWidget(self.browse_find_input)
         text_layout.addLayout(browse_find_row)
 
-        self.browse_text = QTextBrowser()
+        # Text display/edit widget
+        self.browse_text = QTextEdit()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.browse_text.setFont(QFont("SBL Hebrew", 16))
-        self.browse_text.setOpenExternalLinks(False)
-        self.browse_text.anchorClicked.connect(self._on_browse_link_clicked)
+        self.browse_text.setReadOnly(True)  # Start in read-only mode
+        self.browse_edit_mode = False
+        self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
         
         # Right: Image Viewer
@@ -3956,6 +5459,14 @@ class GenizahGUI(QMainWindow):
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
+        # Enable community buttons
+        self.btn_b_edit.setEnabled(True)
+        self.btn_b_comment.setEnabled(True)
+        self.btn_b_view_corrections.setEnabled(True)
+        self.browse_version_combo.setEnabled(True)
+
+        # Check for comments and corrections to update UI
+        self._check_document_community_status()
 
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
@@ -5455,6 +6966,69 @@ class GenizahGUI(QMainWindow):
         self._set_last_browse_field("sys")
         self.browse_load()
 
+    def _open_document_result_dialog(self, shelfmark=None, sys_id=None, page_num=1):
+        """Open ResultDialog for a document by shelfmark or sys_id."""
+        print(f"[DEBUG] _open_document_result_dialog called: shelfmark={shelfmark}, sys_id={sys_id}", flush=True)
+        try:
+            if not self.searcher or not self.meta_mgr:
+                print("[DEBUG] searcher or meta_mgr not available", flush=True)
+                return
+
+            # Get sys_id from shelfmark if needed
+            if not sys_id and shelfmark:
+                print("[DEBUG] Looking up sys_id from shelfmark", flush=True)
+                self._ensure_shelf_map()
+                norm = self._normalize_shelfmark(shelfmark)
+                sys_id = self._shelf_to_sys.get(norm) if norm else None
+                print(f"[DEBUG] Normalized: {norm}, sys_id: {sys_id}", flush=True)
+
+            if not sys_id:
+                print("[DEBUG] No sys_id found", flush=True)
+                QMessageBox.warning(self, tr("Error"), tr("Document not found"))
+                return
+
+            # Get page data
+            print(f"[DEBUG] Getting page data for sys_id={sys_id}", flush=True)
+            page_data = self.searcher.get_browse_page(sys_id, p_num=page_num)
+            if not page_data:
+                print("[DEBUG] No page data found", flush=True)
+                QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
+                return
+
+            shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
+            print(f"[DEBUG] shelfmark_display={shelfmark_display}, title={title}", flush=True)
+
+            # Create result dict for ResultDialog
+            result = {
+                'uid': page_data.get('uid', ''),
+                'raw_header': page_data.get('full_header', ''),
+                'full_header': page_data.get('full_header', ''),
+                'text': page_data.get('text', ''),
+                'full_text': page_data.get('text', ''),
+                'display': {
+                    'id': sys_id,
+                    'shelfmark': shelfmark_display,
+                    'title': title,
+                    'img': str(page_num),
+                    'source': ''
+                }
+            }
+
+            print("[DEBUG] Opening ResultDialog", flush=True)
+            ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
+            print("[DEBUG] ResultDialog closed", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] Error in _open_document_result_dialog: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+
+    def _browse_document_by_shelfmark(self, shelfmark, page_num=1):
+        """Browse a document by shelfmark in the Browse tab."""
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self.browse_shelf_input.setText(shelfmark)
+        self._set_last_browse_field("shelf")
+        self.browse_load()
+
     def lists_copy_item_info(self):
         """Copy current item info to clipboard."""
         if self.lists_current_item_id:
@@ -6026,6 +7600,739 @@ class GenizahGUI(QMainWindow):
                         # Items already in list
                         QMessageBox.information(self, tr("Already in list"),
                                                 tr("Items are already in this list."))
+
+    # ==========================================================================
+    #  COMMUNITY TAB
+    # ==========================================================================
+
+    def create_community_tab(self):
+        """Create the Community tab with panels for discoveries, corrections, and comments."""
+        panel = QWidget()
+        main_layout = QVBoxLayout(panel)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
+        # Header with user info (wrap in widget to control height)
+        header_widget = QWidget()
+        header_widget.setFixedHeight(30)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        self.community_user_label = QLabel()
+        self.community_user_label.setStyleSheet("font-size: 14px;")
+        header_layout.addWidget(self.community_user_label)
+        header_layout.addStretch()
+
+        # Register button (shown when not logged in)
+        self.community_register_btn = QPushButton(tr("Register"))
+        self.community_register_btn.clicked.connect(self._show_register_dialog)
+        header_layout.addWidget(self.community_register_btn)
+
+        main_layout.addWidget(header_widget)
+
+        # Create horizontal splitter for the three panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # --- Discoveries Panel ---
+        discoveries_panel = QWidget()
+        discoveries_layout = QVBoxLayout(discoveries_panel)
+        discoveries_layout.setContentsMargins(5, 5, 5, 5)
+
+        discoveries_header = QHBoxLayout()
+        discoveries_header.addWidget(QLabel(f"<b>{tr('Discoveries')}</b>"))
+        discoveries_header.addStretch()
+
+        # Store discoveries data for filtering (must be before filter creation)
+        self._discoveries_cache_data = []
+
+        # Category filter dropdown
+        self.discoveries_filter = QComboBox()
+        self.discoveries_filter.blockSignals(True)  # Block during setup
+        self.discoveries_filter.addItem(tr("All Types"), "all")
+        self.discoveries_filter.addItem(f"📜 {tr('Discovery')}", "discovery")
+        self.discoveries_filter.addItem(f"❓ {tr('Question')}", "question")
+        self.discoveries_filter.addItem(f"🔍 {tr('Identification')}", "identification")
+        self.discoveries_filter.addItem(f"📝 {tr('Note')}", "note")
+        self.discoveries_filter.setFixedWidth(140)
+        self.discoveries_filter.blockSignals(False)  # Unblock after setup
+        self.discoveries_filter.currentIndexChanged.connect(self._filter_discoveries)
+        discoveries_header.addWidget(self.discoveries_filter)
+
+        btn_new_discovery = QPushButton("+")
+        btn_new_discovery.setFixedSize(24, 24)
+        btn_new_discovery.setToolTip(tr("Share a new discovery"))
+        btn_new_discovery.clicked.connect(self._show_create_discovery_dialog)
+        discoveries_header.addWidget(btn_new_discovery)
+        btn_refresh_discoveries = QPushButton("↻")
+        btn_refresh_discoveries.setFixedSize(24, 24)
+        btn_refresh_discoveries.setToolTip(tr("Refresh discoveries"))
+        btn_refresh_discoveries.clicked.connect(self._refresh_discoveries_panel)
+        discoveries_header.addWidget(btn_refresh_discoveries)
+        discoveries_layout.addLayout(discoveries_header)
+
+        self.discoveries_list = QListWidget()
+        self.discoveries_list.setAlternatingRowColors(True)
+        self.discoveries_list.itemDoubleClicked.connect(self._on_discovery_clicked)
+        self.discoveries_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.discoveries_list.customContextMenuRequested.connect(self._discoveries_context_menu)
+        discoveries_layout.addWidget(self.discoveries_list)
+
+        btn_view_all_discoveries = QPushButton(tr("View All Discoveries..."))
+        btn_view_all_discoveries.clicked.connect(self._show_discoveries_dialog)
+        discoveries_layout.addWidget(btn_view_all_discoveries)
+
+        splitter.addWidget(discoveries_panel)
+
+        # --- Corrections Panel ---
+        corrections_panel = QWidget()
+        corrections_layout = QVBoxLayout(corrections_panel)
+        corrections_layout.setContentsMargins(5, 5, 5, 5)
+
+        corrections_header = QHBoxLayout()
+        corrections_header.addWidget(QLabel(f"<b>{tr('Corrections')}</b>"))
+        corrections_header.addStretch()
+        btn_refresh_corrections = QPushButton("↻")
+        btn_refresh_corrections.setFixedSize(24, 24)
+        btn_refresh_corrections.setToolTip(tr("Refresh corrections"))
+        btn_refresh_corrections.clicked.connect(self._refresh_corrections_panel)
+        corrections_header.addWidget(btn_refresh_corrections)
+        corrections_layout.addLayout(corrections_header)
+
+        # Sub-tabs for My Corrections vs All Corrections
+        corrections_tabs = QTabWidget()
+        corrections_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # My Corrections list
+        self.my_corrections_list = QListWidget()
+        self.my_corrections_list.setAlternatingRowColors(True)
+        self.my_corrections_list.itemDoubleClicked.connect(self._on_correction_clicked)
+        self.my_corrections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.my_corrections_list.customContextMenuRequested.connect(lambda pos: self._corrections_context_menu(pos, self.my_corrections_list))
+        corrections_tabs.addTab(self.my_corrections_list, tr("My Corrections"))
+
+        # All Corrections list
+        self.all_corrections_list = QListWidget()
+        self.all_corrections_list.setAlternatingRowColors(True)
+        self.all_corrections_list.itemDoubleClicked.connect(self._on_correction_clicked)
+        self.all_corrections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_corrections_list.customContextMenuRequested.connect(lambda pos: self._corrections_context_menu(pos, self.all_corrections_list))
+        corrections_tabs.addTab(self.all_corrections_list, tr("All Corrections"))
+
+        corrections_layout.addWidget(corrections_tabs)
+
+        btn_browse_corrections = QPushButton(tr("Browse Corrections..."))
+        btn_browse_corrections.clicked.connect(self._show_all_corrections_dialog)
+        corrections_layout.addWidget(btn_browse_corrections)
+
+        splitter.addWidget(corrections_panel)
+
+        # --- Comments Panel ---
+        comments_panel = QWidget()
+        comments_layout = QVBoxLayout(comments_panel)
+        comments_layout.setContentsMargins(5, 5, 5, 5)
+
+        comments_header = QHBoxLayout()
+        comments_header.addWidget(QLabel(f"<b>{tr('Comments')}</b>"))
+        comments_header.addStretch()
+        btn_refresh_comments = QPushButton("↻")
+        btn_refresh_comments.setFixedSize(24, 24)
+        btn_refresh_comments.setToolTip(tr("Refresh comments"))
+        btn_refresh_comments.clicked.connect(self._refresh_comments_panel)
+        comments_header.addWidget(btn_refresh_comments)
+        comments_layout.addLayout(comments_header)
+
+        # Sub-tabs for My Comments vs All Comments (like Corrections)
+        comments_tabs = QTabWidget()
+        comments_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # My Comments list
+        self.my_comments_list = QListWidget()
+        self.my_comments_list.setAlternatingRowColors(True)
+        self.my_comments_list.itemDoubleClicked.connect(self._on_comment_clicked)
+        self.my_comments_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.my_comments_list.customContextMenuRequested.connect(lambda pos: self._comments_context_menu(pos, self.my_comments_list))
+        comments_tabs.addTab(self.my_comments_list, tr("My Comments"))
+
+        # All Comments list
+        self.all_comments_list = QListWidget()
+        self.all_comments_list.setAlternatingRowColors(True)
+        self.all_comments_list.itemDoubleClicked.connect(self._on_comment_clicked)
+        self.all_comments_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_comments_list.customContextMenuRequested.connect(lambda pos: self._comments_context_menu(pos, self.all_comments_list))
+        comments_tabs.addTab(self.all_comments_list, tr("All Comments"))
+
+        comments_layout.addWidget(comments_tabs)
+
+        btn_view_my_comments = QPushButton(tr("View All My Comments..."))
+        btn_view_my_comments.clicked.connect(self._show_my_comments_dialog)
+        comments_layout.addWidget(btn_view_my_comments)
+
+        splitter.addWidget(comments_panel)
+
+        # Set equal sizes for all panels
+        splitter.setSizes([300, 300, 300])
+
+        main_layout.addWidget(splitter)
+
+        return panel
+
+    def _refresh_community_panels(self, use_cache_first=True):
+        """Refresh all community panels and update UI state.
+
+        Args:
+            use_cache_first: If True, display cached data first for instant response,
+                           then fetch fresh data in background.
+        """
+        print("[DEBUG] _refresh_community_panels started", flush=True)
+        try:
+            print("[DEBUG] Calling _update_community_header...", flush=True)
+            self._update_community_header()
+            print("[DEBUG] _update_community_header completed", flush=True)
+        except Exception as e:
+            print(f"Error in _update_community_header: {e}", flush=True)
+        try:
+            print("[DEBUG] Calling _refresh_discoveries_panel...", flush=True)
+            self._refresh_discoveries_panel(use_cache_first)
+            print("[DEBUG] _refresh_discoveries_panel completed", flush=True)
+        except Exception as e:
+            print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+        try:
+            print("[DEBUG] Calling _refresh_corrections_panel...", flush=True)
+            self._refresh_corrections_panel(use_cache_first)
+            print("[DEBUG] _refresh_corrections_panel completed", flush=True)
+        except Exception as e:
+            print(f"Error in _refresh_corrections_panel: {e}", flush=True)
+        try:
+            print("[DEBUG] Calling _refresh_comments_panel...", flush=True)
+            self._refresh_comments_panel(use_cache_first)
+            print("[DEBUG] _refresh_comments_panel completed", flush=True)
+        except Exception as e:
+            print(f"Error in _refresh_comments_panel: {e}", flush=True)
+        print("[DEBUG] _refresh_community_panels finished", flush=True)
+
+    def _update_community_header(self):
+        """Update the community header with user info."""
+        if self.corrections_client.is_logged_in() and self.corrections_client.current_user:
+            user = self.corrections_client.current_user
+            self.community_user_label.setText(
+                f"👤 {tr('Logged in as')} <b>{user.username}</b> | ⭐ {tr('Reputation')}: {user.reputation_score}"
+            )
+            self.community_register_btn.hide()
+        else:
+            self.community_user_label.setText(f"👤 {tr('Not logged in')} - {tr('Login to participate in the community')}")
+            self.community_register_btn.show()
+
+    def _refresh_discoveries_panel(self, use_cache_first=True):
+        """Refresh the discoveries list panel."""
+        self.discoveries_list.clear()
+
+        # Try to display cached data first for instant response
+        cached = self.corrections_client.get_cached_data('discoveries') if use_cache_first else None
+        if cached:
+            self._discoveries_cache_data = cached
+            self._populate_discoveries_list(cached)
+
+        # Fetch fresh data from API
+        try:
+            # Admins can see hidden discoveries
+            is_admin = False
+            if self.corrections_client.is_logged_in():
+                current_user = self.corrections_client.current_user
+                is_admin = current_user and current_user.role == 'admin'
+
+            print(f"[DEBUG] _refresh_discoveries_panel: is_admin={is_admin}, include_hidden={is_admin}", flush=True)
+
+            discoveries, total = self.corrections_client.get_discoveries(
+                page_size=20,
+                include_hidden=is_admin
+            )
+            print(f"[DEBUG] Got {len(discoveries)} discoveries from API, total={total}", flush=True)
+            for d in discoveries:
+                print(f"[DEBUG]   discovery id={d.id}, title={d.title[:30] if d.title else 'N/A'}, is_hidden={d.is_hidden}", flush=True)
+
+            # Convert to cacheable format with discovery_type, is_pinned, is_hidden
+            cache_data = [{
+                'id': d.id,
+                'title': d.title,
+                'author_username': d.author_username,
+                'discovery_type': d.discovery_type,
+                'shelfmark': d.shelfmark,
+                'document_id': d.document_id,
+                'is_pinned': d.is_pinned,
+                'is_hidden': d.is_hidden
+            } for d in discoveries]
+            self.corrections_client.set_cached_data('discoveries', cache_data)
+            self._discoveries_cache_data = cache_data
+
+            # Update display with fresh data
+            self.discoveries_list.clear()
+            self._filter_discoveries()  # Apply current filter
+        except Exception as e:
+            if not cached:
+                item = QListWidgetItem(f"⚠️ {tr('Error loading discoveries')}: {str(e)[:30]}")
+                self.discoveries_list.addItem(item)
+
+    def _filter_discoveries(self):
+        """Filter discoveries list by selected type."""
+        if not hasattr(self, '_discoveries_cache_data'):
+            self._discoveries_cache_data = []
+
+        # Check if current user is admin
+        is_admin = False
+        if self.corrections_client.is_logged_in():
+            current_user = self.corrections_client.current_user
+            is_admin = current_user and current_user.role == 'admin'
+
+        # Filter by type
+        filter_type = self.discoveries_filter.currentData()
+        if filter_type == "all":
+            filtered = self._discoveries_cache_data
+        else:
+            filtered = [d for d in self._discoveries_cache_data if d.get('discovery_type') == filter_type]
+
+        # Filter out hidden items for non-admins
+        if not is_admin:
+            filtered = [d for d in filtered if not d.get('is_hidden', False)]
+
+        # Sort: pinned items first, then by id (newest first)
+        filtered = sorted(filtered, key=lambda d: (not d.get('is_pinned', False), -d.get('id', 0)))
+
+        self.discoveries_list.clear()
+        self._populate_discoveries_list(filtered)
+
+    def _populate_discoveries_list(self, discoveries_data):
+        """Populate discoveries list from data."""
+        if not discoveries_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No discoveries yet')}")
+            self.discoveries_list.addItem(item)
+            return
+
+        # Type icons and colors
+        type_config = {
+            'discovery': ('📜', '#f39c12'),   # Orange
+            'question': ('❓', '#3498db'),    # Blue
+            'identification': ('🔍', '#9b59b6'),  # Purple
+            'note': ('📝', '#27ae60')         # Green
+        }
+
+        for disc in discoveries_data:
+            title = disc.get('title') or tr('Untitled')
+            author = disc.get('author_username') or tr('Anonymous')
+            disc_type = disc.get('discovery_type') or 'discovery'
+            is_pinned = disc.get('is_pinned', False)
+            is_hidden = disc.get('is_hidden', False)
+            icon, color = type_config.get(disc_type, ('📜', '#f39c12'))
+
+            # Add pin icon for pinned items
+            prefix = "📌 " if is_pinned else ""
+            # Add hidden indicator for admin view
+            suffix = " [hidden]" if is_hidden else ""
+
+            item = QListWidgetItem(f"{prefix}{icon} {title}{suffix}\n   {tr('by')} {author}")
+            item.setData(Qt.ItemDataRole.UserRole, {
+                'id': disc.get('id'),
+                'title': disc.get('title'),
+                'shelfmark': disc.get('shelfmark'),
+                'document_id': disc.get('document_id')
+            })
+            # Set foreground color based on type (gray for hidden)
+            if is_hidden:
+                item.setForeground(QColor('#888888'))
+            else:
+                item.setForeground(QColor(color))
+            self.discoveries_list.addItem(item)
+
+    def _refresh_corrections_panel(self, use_cache_first=True):
+        """Refresh the corrections list panels."""
+        self.my_corrections_list.clear()
+        self.all_corrections_list.clear()
+
+        # My corrections (only if logged in)
+        if self.corrections_client.is_logged_in():
+            # Try cached data first
+            cached_my = self.corrections_client.get_cached_data('my_corrections') if use_cache_first else None
+            if cached_my:
+                self._populate_my_corrections_list(cached_my)
+
+            try:
+                corrections, total = self.corrections_client.get_my_corrections(page_size=20)
+                cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'status': c.status, 'corrected_text': c.corrected_text, 'line_number': c.line_number} for c in corrections]
+                self.corrections_client.set_cached_data('my_corrections', cache_data)
+                self.my_corrections_list.clear()
+                self._populate_my_corrections_list(cache_data)
+            except Exception as e:
+                if not cached_my:
+                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                    self.my_corrections_list.addItem(item)
+
+        # All corrections
+        cached_all = self.corrections_client.get_cached_data('all_corrections') if use_cache_first else None
+        if cached_all:
+            self._populate_all_corrections_list(cached_all)
+
+        try:
+            corrections, total = self.corrections_client.search_corrections(page_size=20)
+            cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'line_number': c.line_number} for c in corrections]
+            self.corrections_client.set_cached_data('all_corrections', cache_data)
+            self.all_corrections_list.clear()
+            self._populate_all_corrections_list(cache_data)
+        except Exception as e:
+            if not cached_all:
+                item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                self.all_corrections_list.addItem(item)
+
+    def _populate_my_corrections_list(self, corrections_data):
+        """Populate my corrections list from data (only latest per document)."""
+        if not corrections_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No corrections submitted yet')}")
+            self.my_corrections_list.addItem(item)
+            return
+
+        # Deduplicate: keep only the latest correction per document (by system_id or shelfmark)
+        latest_by_doc = {}
+        for corr in corrections_data:
+            doc_key = corr.get('system_id') or corr.get('shelfmark') or 'unknown'
+            corr_id = corr.get('id', 0)
+            if doc_key not in latest_by_doc or corr_id > latest_by_doc[doc_key].get('id', 0):
+                latest_by_doc[doc_key] = corr
+
+        for corr in latest_by_doc.values():
+            shelfmark = corr.get('shelfmark') or tr('Unknown')
+            line_number = corr.get('line_number')
+            # Display shelfmark with page number if available
+            display_shelfmark = shelfmark
+            if line_number:
+                display_shelfmark = f"{shelfmark}:{line_number}"
+            status = corr.get('status') or 'pending'
+            status_icon = {'pending': '🔵', 'approved': '✅', 'rejected': '❌', 'draft': '📝'}.get(status, '⚪')
+            corrected_text = corr.get('corrected_text') or ''
+            preview = (corrected_text[:30] + '...') if len(corrected_text) > 30 else corrected_text
+            item = QListWidgetItem(f"{status_icon} {display_shelfmark}\n   {preview}")
+            item.setData(Qt.ItemDataRole.UserRole, {
+                'id': corr.get('id'),
+                'shelfmark': shelfmark,
+                'system_id': corr.get('system_id'),
+                'line_number': line_number
+            })
+            self.my_corrections_list.addItem(item)
+
+    def _populate_all_corrections_list(self, corrections_data):
+        """Populate all corrections list from data (only latest per user per document)."""
+        if not corrections_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No corrections yet')}")
+            self.all_corrections_list.addItem(item)
+            return
+
+        # Deduplicate: keep only the latest correction per user per document
+        latest_by_user_doc = {}
+        for corr in corrections_data:
+            doc_key = corr.get('system_id') or corr.get('shelfmark') or 'unknown'
+            author = corr.get('author_username') or 'anonymous'
+            key = f"{author}:{doc_key}"
+            corr_id = corr.get('id', 0)
+            if key not in latest_by_user_doc or corr_id > latest_by_user_doc[key].get('id', 0):
+                latest_by_user_doc[key] = corr
+
+        for corr in latest_by_user_doc.values():
+            shelfmark = corr.get('shelfmark') or tr('Unknown')
+            line_number = corr.get('line_number')
+            # Display shelfmark with page number if available
+            display_shelfmark = shelfmark
+            if line_number:
+                display_shelfmark = f"{shelfmark}:{line_number}"
+            author = corr.get('author_username') or tr('Anonymous')
+            status = corr.get('status') or 'pending'
+            status_icon = {'pending': '🔵', 'approved': '✅', 'rejected': '❌', 'draft': '📝'}.get(status, '⚪')
+            item = QListWidgetItem(f"{status_icon} {display_shelfmark}\n   {tr('by')} {author}")
+            item.setData(Qt.ItemDataRole.UserRole, {
+                'id': corr.get('id'),
+                'shelfmark': shelfmark,
+                'system_id': corr.get('system_id'),
+                'line_number': line_number
+            })
+            self.all_corrections_list.addItem(item)
+
+    def _refresh_comments_panel(self, use_cache_first=True):
+        """Refresh the comments list panels (My Comments + All Comments)."""
+        print("[DEBUG] _refresh_comments_panel started", flush=True)
+        self.my_comments_list.clear()
+        self.all_comments_list.clear()
+
+        # My Comments (only if logged in)
+        if self.corrections_client.is_logged_in():
+            cached_my = self.corrections_client.get_cached_data('my_comments') if use_cache_first else None
+            if cached_my:
+                print(f"[DEBUG] Using cached my comments: {len(cached_my)} items", flush=True)
+                self._populate_comments_list(cached_my, self.my_comments_list)
+
+            try:
+                comments, total = self.corrections_client.get_my_comments(page_size=20)
+                print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
+                cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.line_number} for c in comments]
+                self.corrections_client.set_cached_data('my_comments', cache_data)
+                self.my_comments_list.clear()
+                self._populate_comments_list(cache_data, self.my_comments_list)
+            except Exception as e:
+                print(f"[DEBUG] Error fetching my comments: {e}", flush=True)
+                if not cached_my:
+                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                    self.my_comments_list.addItem(item)
+        else:
+            item = QListWidgetItem(f"ℹ️ {tr('Login to see your comments')}")
+            self.my_comments_list.addItem(item)
+
+        # All Comments (no login required)
+        cached_all = self.corrections_client.get_cached_data('all_comments') if use_cache_first else None
+        if cached_all:
+            self._populate_comments_list(cached_all, self.all_comments_list, show_author=True)
+
+        try:
+            comments, total = self.corrections_client.get_all_comments(page_size=20)
+            print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
+            cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.line_number} for c in comments]
+            self.corrections_client.set_cached_data('all_comments', cache_data)
+            self.all_comments_list.clear()
+            self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
+        except Exception as e:
+            print(f"[DEBUG] Error fetching all comments: {e}", flush=True)
+            if not cached_all:
+                item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                self.all_comments_list.addItem(item)
+
+        print("[DEBUG] Comments panel refresh completed", flush=True)
+
+    def _populate_comments_list(self, comments_data, target_list, show_author=False):
+        """Populate comments list from data."""
+        if not comments_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No comments yet')}")
+            target_list.addItem(item)
+            return
+        for comment in comments_data:
+            sys_id = comment.get('document_id')  # This is actually a system ID
+            page_number = comment.get('page_number')
+            content = comment.get('content') or ''
+            text = (content[:50] + '...') if len(content) > 50 else content
+            author = comment.get('author_username') or tr('Anonymous')
+
+            # Get shelfmark and title from sys_id
+            shelfmark = sys_id or tr('Unknown')
+            title_preview = ''
+            if sys_id and self.meta_mgr:
+                shelf, title = self.meta_mgr.get_meta_for_id(sys_id)
+                if shelf:
+                    shelfmark = shelf
+                if title:
+                    words = title.split()[:4]
+                    title_preview = ' '.join(words)
+                    if len(title.split()) > 4:
+                        title_preview += '...'
+
+            # Display shelfmark with page number if available
+            display_shelfmark = shelfmark
+            if page_number:
+                display_shelfmark = f"{shelfmark}:{page_number}"
+
+            display_text = f"💬 {display_shelfmark}"
+            if title_preview:
+                display_text += f" - {title_preview}"
+            if show_author:
+                display_text += f"\n   by {author}"
+            display_text += f"\n   {text}"
+
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, {'id': comment.get('id'), 'document_id': sys_id, 'page_number': page_number})
+            target_list.addItem(item)
+
+    def _discoveries_context_menu(self, pos):
+        """Show context menu for discoveries list."""
+        item = self.discoveries_list.itemAt(pos)
+        if not item:
+            return
+
+        disc_data = item.data(Qt.ItemDataRole.UserRole)
+        if not disc_data:
+            return
+
+        menu = QMenu(self)
+        discovery_id = disc_data.get('id')
+
+        # View action
+        view_action = menu.addAction("👁 " + tr("View Details"))
+        view_action.triggered.connect(lambda: self._on_discovery_clicked(item))
+
+        # Get full discovery data for author check
+        discovery = self.corrections_client.get_discovery(discovery_id)
+        if not discovery:
+            menu.exec(self.discoveries_list.mapToGlobal(pos))
+            return
+
+        current_user = self.corrections_client.current_user
+        is_author = current_user and current_user.id == discovery.author_id
+        is_admin = current_user and current_user.role == 'admin'
+
+        menu.addSeparator()
+
+        # Edit action (author or admin)
+        if is_author or is_admin:
+            edit_action = menu.addAction("✏️ " + tr("Edit"))
+            edit_action.triggered.connect(lambda: self._edit_discovery_from_list(discovery_id))
+
+            delete_action = menu.addAction("🗑️ " + tr("Delete"))
+            delete_action.triggered.connect(lambda: self._delete_discovery_from_list(discovery_id))
+
+        # Admin actions
+        if is_admin:
+            menu.addSeparator()
+            pin_text = tr("Unpin") if discovery.is_pinned else tr("Pin")
+            pin_action = menu.addAction("📌 " + pin_text)
+            pin_action.triggered.connect(lambda: self._toggle_pin_discovery(discovery_id, not discovery.is_pinned))
+
+            hide_text = tr("Unhide") if discovery.is_hidden else tr("Hide")
+            hide_action = menu.addAction("👁 " + hide_text)
+            hide_action.triggered.connect(lambda: self._toggle_hide_discovery(discovery_id, discovery.is_hidden))
+
+        menu.exec(self.discoveries_list.mapToGlobal(pos))
+
+    def _edit_discovery_from_list(self, discovery_id):
+        """Open edit dialog for discovery from context menu."""
+        dialog = DiscoveryDetailDialog(self, self.corrections_client, discovery_id)
+        dialog.edit_discovery()
+        self._refresh_discoveries_panel(use_cache_first=False)
+
+    def _delete_discovery_from_list(self, discovery_id):
+        """Delete discovery from context menu."""
+        reply = QMessageBox.question(
+            self,
+            tr("Delete Discovery"),
+            tr("Are you sure you want to delete this discovery?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.corrections_client.delete_discovery(discovery_id)
+            if success:
+                QMessageBox.information(self, tr("Success"), tr("Discovery deleted"))
+                self._refresh_discoveries_panel(use_cache_first=False)
+            else:
+                QMessageBox.warning(self, tr("Error"), msg)
+
+    def _toggle_pin_discovery(self, discovery_id, pin):
+        """Toggle pin status from context menu."""
+        success, msg = self.corrections_client.pin_discovery(discovery_id, pin)
+        if success:
+            self._refresh_discoveries_panel(use_cache_first=False)
+        else:
+            QMessageBox.warning(self, tr("Error"), msg)
+
+    def _toggle_hide_discovery(self, discovery_id, is_hidden):
+        """Toggle hide status from context menu."""
+        if is_hidden:
+            success, msg = self.corrections_client.unhide_discovery(discovery_id)
+        else:
+            success, msg = self.corrections_client.hide_discovery(discovery_id)
+        if success:
+            self._refresh_discoveries_panel(use_cache_first=False)
+        else:
+            QMessageBox.warning(self, tr("Error"), msg)
+
+    def _corrections_context_menu(self, pos, list_widget):
+        """Show context menu for corrections list."""
+        item = list_widget.itemAt(pos)
+        if not item:
+            return
+
+        corr_data = item.data(Qt.ItemDataRole.UserRole)
+        if not corr_data:
+            return
+
+        menu = QMenu(self)
+
+        # View Document action
+        view_doc_action = menu.addAction("📄 " + tr("View Document"))
+        view_doc_action.triggered.connect(lambda: self._on_correction_clicked(item))
+
+        # View Correction Details
+        if corr_data.get('id'):
+            view_details_action = menu.addAction("🔍 " + tr("View Correction Details"))
+            view_details_action.triggered.connect(lambda: self._show_correction_details(corr_data.get('id')))
+
+        menu.exec(list_widget.mapToGlobal(pos))
+
+    def _show_correction_details(self, correction_id):
+        """Show correction details dialog."""
+        from corrections_ui import CorrectionDetailDialog
+        # Fetch the correction object first
+        correction = self.corrections_client.get_correction(correction_id)
+        if correction:
+            # Fetch the original V0.8 text using searcher.get_browse_page
+            original_v08_text = None
+            try:
+                doc_id = correction.document_id or correction.system_id
+                page_num = correction.line_number or 1
+                if doc_id and hasattr(self, 'searcher') and self.searcher:
+                    page_data = self.searcher.get_browse_page(doc_id, p_num=page_num)
+                    if page_data:
+                        original_v08_text = page_data.get('text', '')
+                        print(f"[DEBUG] Got V0.8 text from searcher: {len(original_v08_text) if original_v08_text else 0} chars", flush=True)
+            except Exception as e:
+                print(f"[DEBUG] Error fetching V0.8 text: {e}", flush=True)
+
+            dialog = CorrectionDetailDialog(self, self.corrections_client, correction, original_v08_text)
+            dialog.exec()
+        else:
+            QMessageBox.warning(self, tr("Error"), tr("Could not load correction details"))
+
+    def _comments_context_menu(self, pos, list_widget):
+        """Show context menu for comments list."""
+        item = list_widget.itemAt(pos)
+        if not item:
+            return
+
+        comment_data = item.data(Qt.ItemDataRole.UserRole)
+        if not comment_data:
+            return
+
+        menu = QMenu(self)
+
+        # View Document action
+        view_doc_action = menu.addAction("📄 " + tr("View Document"))
+        view_doc_action.triggered.connect(lambda: self._on_comment_clicked(item))
+
+        menu.exec(list_widget.mapToGlobal(pos))
+
+    def _on_discovery_clicked(self, item):
+        """Handle discovery item double-click."""
+        disc = item.data(Qt.ItemDataRole.UserRole)
+        if disc:
+            dialog = DiscoveryDetailDialog(self, self.corrections_client, disc.get('id'))
+            dialog.exec()
+
+    def _on_correction_clicked(self, item):
+        """Handle correction item double-click - open ResultDialog."""
+        print(f"[DEBUG] _on_correction_clicked called", flush=True)
+        try:
+            corr_data = item.data(Qt.ItemDataRole.UserRole)
+            print(f"[DEBUG] corr_data={corr_data}", flush=True)
+            if corr_data:
+                sys_id = corr_data.get('system_id')
+                shelfmark = corr_data.get('shelfmark')
+                page_num = corr_data.get('line_number') or 1
+                print(f"[DEBUG] sys_id={sys_id}, shelfmark={shelfmark}, page_num={page_num}", flush=True)
+                self._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id, page_num=page_num)
+        except Exception as e:
+            print(f"[DEBUG] Error in _on_correction_clicked: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+
+    def _on_comment_clicked(self, item):
+        """Handle comment item double-click - open ResultDialog."""
+        comment = item.data(Qt.ItemDataRole.UserRole)
+        if comment:
+            doc_id = comment.get('document_id')
+            page_num = comment.get('page_number') or 1
+            if doc_id:
+                # doc_id is actually a system ID, not a shelfmark
+                self._open_document_result_dialog(sys_id=doc_id, page_num=page_num)
 
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
@@ -8527,13 +10834,35 @@ class GenizahGUI(QMainWindow):
         """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
         if not shelfmark:
             return ""
-        
+
         cleaned = re.sub(r'\W+', '', shelfmark).casefold()
-        
+
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
-            
+
         return cleaned
+
+    def _ensure_shelf_map(self):
+        """Build a mapping from normalized shelfmark to sys_id for quick lookups."""
+        if self._shelf_to_sys is not None:
+            return
+        self._shelf_to_sys = {}
+        if not self.meta_mgr:
+            return
+        # Build mapping from csv_bank
+        for sys_id, meta in self.meta_mgr.csv_bank.items():
+            shelf = meta.get("shelfmark")
+            if shelf:
+                norm = self._normalize_shelfmark(shelf)
+                if norm and norm not in self._shelf_to_sys:
+                    self._shelf_to_sys[norm] = sys_id
+        # Also add from nli_cache
+        for sys_id, meta in self.meta_mgr.nli_cache.items():
+            shelf = meta.get("shelfmark")
+            if shelf:
+                norm = self._normalize_shelfmark(shelf)
+                if norm and norm not in self._shelf_to_sys:
+                    self._shelf_to_sys[norm] = sys_id
 
     def _get_meta_for_header(self, raw_header):
         """Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks."""

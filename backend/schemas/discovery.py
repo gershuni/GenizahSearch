@@ -98,6 +98,7 @@ class DiscoveryResponse(DiscoveryBase):
     is_featured: bool = False
     is_pinned: bool = False
     is_answered: bool = False
+    is_hidden: bool = False
     view_count: int = 0
     response_count: int = 0
     upvotes: int = 0

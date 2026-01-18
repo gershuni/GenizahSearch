@@ -12,10 +12,10 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
     QGroupBox, QFrame, QMessageBox, QProgressDialog,
     QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
-    QSplitter, QMenu, QStatusBar
+    QSplitter, QMenu, QStatusBar, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QAction
+from PyQt6.QtGui import QFont, QColor, QAction, QPalette
 
 try:
     from genizah_core import tr, CURRENT_LANG
@@ -424,26 +424,50 @@ class CorrectionsViewerDialog(QDialog):
         parent=None,
         client: CorrectionsClient = None,
         document_id: str = None,
-        shelfmark: str = None
+        shelfmark: str = None,
+        on_view_result=None,  # Callback for eye icon (view in result dialog)
+        on_browse=None        # Callback for book icon (browse in browse tab)
     ):
         super().__init__(parent)
         self.client = client or get_corrections_client()
         self.document_id = document_id
         self.shelfmark = shelfmark
+        self.on_view_result = on_view_result
+        self.on_browse = on_browse
 
         self.setWindowTitle(tr("Document Corrections"))
-        self.resize(800, 600)
+        self.resize(900, 600)
         self.init_ui()
         self.load_corrections()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
+        # Header with action buttons for current document
+        header_layout = QHBoxLayout()
         header_text = tr("Corrections for {}").format(self.shelfmark or self.document_id)
         header = QLabel(header_text)
         header.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(header)
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+
+        # Eye icon - view in result dialog
+        if self.on_view_result:
+            btn_view = QPushButton("👁️")
+            btn_view.setToolTip(tr("View in Result Dialog"))
+            btn_view.setFixedSize(32, 32)
+            btn_view.clicked.connect(lambda: self._do_view_result(self.shelfmark))
+            header_layout.addWidget(btn_view)
+
+        # Book icon - browse
+        if self.on_browse:
+            btn_browse = QPushButton("📖")
+            btn_browse.setToolTip(tr("Browse Document"))
+            btn_browse.setFixedSize(32, 32)
+            btn_browse.clicked.connect(lambda: self._do_browse(self.shelfmark))
+            header_layout.addWidget(btn_browse)
+
+        layout.addLayout(header_layout)
 
         # Table
         self.table = QTableWidget()
@@ -520,6 +544,16 @@ class CorrectionsViewerDialog(QDialog):
 
         self.table.resizeColumnsToContents()
 
+    def _do_view_result(self, shelfmark):
+        """Call view result callback"""
+        if self.on_view_result and shelfmark:
+            self.on_view_result(shelfmark)
+
+    def _do_browse(self, shelfmark):
+        """Call browse callback"""
+        if self.on_browse and shelfmark:
+            self.on_browse(shelfmark)
+
     def on_row_double_click(self, index):
         """Open correction detail on double-click"""
         correction_id = self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
@@ -537,11 +571,13 @@ class CorrectionDetailDialog(QDialog):
         self,
         parent=None,
         client: CorrectionsClient = None,
-        correction: Correction = None
+        correction: Correction = None,
+        original_v08_text: str = None
     ):
         super().__init__(parent)
         self.client = client or get_corrections_client()
         self.correction = correction
+        self.original_v08_text = original_v08_text
 
         self.setWindowTitle(tr("Correction Details"))
         self.resize(550, 450)
@@ -575,12 +611,20 @@ class CorrectionDetailDialog(QDialog):
         diff_box = QGroupBox(tr("Correction"))
         diff_layout = QVBoxLayout(diff_box)
 
-        diff_layout.addWidget(QLabel(tr("Original:")))
+        # Use V0.8 text if provided, otherwise fall back to stored original_text
+        if self.original_v08_text:
+            original_text = self.original_v08_text
+            version_label = "V0.8"
+        else:
+            original_text = c.original_text
+            version_label = tr("Original")
+
+        diff_layout.addWidget(QLabel(f"{version_label}:"))
         orig = QTextEdit()
-        orig.setPlainText(c.original_text)
+        orig.setPlainText(original_text)
         orig.setReadOnly(True)
         orig.setMaximumHeight(60)
-        orig.setStyleSheet("background-color: #ffebee;")
+        orig.setStyleSheet("background-color: #4a2020; color: #ffcccc; border: 1px solid #6a3030;")
         diff_layout.addWidget(orig)
 
         diff_layout.addWidget(QLabel(tr("Corrected:")))
@@ -588,7 +632,7 @@ class CorrectionDetailDialog(QDialog):
         corr.setPlainText(c.corrected_text)
         corr.setReadOnly(True)
         corr.setMaximumHeight(60)
-        corr.setStyleSheet("background-color: #e8f5e9;")
+        corr.setStyleSheet("background-color: #1a3a1a; color: #ccffcc; border: 1px solid #2a5a2a;")
         diff_layout.addWidget(corr)
 
         layout.addWidget(diff_box)
@@ -615,6 +659,7 @@ class CorrectionDetailDialog(QDialog):
             notes_text.setPlainText(c.notes)
             notes_text.setReadOnly(True)
             notes_text.setMaximumHeight(60)
+            notes_text.setStyleSheet("background-color: #2a2a3a; color: #ccccff; border: 1px solid #3a3a5a;")
             notes_layout.addWidget(notes_text)
             layout.addWidget(notes_box)
 
@@ -989,9 +1034,12 @@ class AllCorrectionsDialog(QDialog):
 class DiscoveriesDialog(QDialog):
     """Dialog for viewing and creating discoveries"""
 
-    def __init__(self, parent=None, client: CorrectionsClient = None):
+    def __init__(self, parent=None, client: CorrectionsClient = None,
+                 on_view_result=None, on_browse=None):
         super().__init__(parent)
         self.client = client or get_corrections_client()
+        self.on_view_result = on_view_result
+        self.on_browse = on_browse
         self.setWindowTitle(tr("Discoveries Center"))
         self.resize(1000, 700)
         self.init_ui()
@@ -1019,13 +1067,13 @@ class DiscoveriesDialog(QDialog):
 
         # Stats row
         self.stats_frame = QFrame()
-        self.stats_frame.setStyleSheet("background: #f5f5f5; border-radius: 5px;")
+        self.stats_frame.setStyleSheet("border-radius: 5px; border: 1px solid palette(mid);")
         stats_layout = QHBoxLayout(self.stats_frame)
 
         self.stat_labels = {}
         for stat_name in ['words_corrected', 'documents_edited', 'total_discoveries', 'open_questions', 'active_contributors']:
             stat_widget = QFrame()
-            stat_widget.setStyleSheet("background: white; border-radius: 3px; padding: 5px;")
+            stat_widget.setStyleSheet("border-radius: 3px; padding: 5px; border: 1px solid palette(mid);")
             stat_v = QVBoxLayout(stat_widget)
             value_label = QLabel("0")
             value_label.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -1131,8 +1179,7 @@ class DiscoveriesDialog(QDialog):
         frame = QFrame()
         frame.setStyleSheet("""
             QFrame {
-                background: white;
-                border: 1px solid #ddd;
+                border: 1px solid palette(mid);
                 border-radius: 5px;
                 padding: 10px;
                 margin: 2px;
@@ -1187,6 +1234,26 @@ class DiscoveriesDialog(QDialog):
             shelfmark_label.setStyleSheet("color: #3498db; font-family: monospace; font-size: 11px;")
             header_layout.addWidget(shelfmark_label)
 
+            # Eye icon - view in result dialog
+            if self.on_view_result:
+                btn_view = QPushButton("👁️")
+                btn_view.setToolTip(tr("View in Result Dialog"))
+                btn_view.setFixedSize(24, 24)
+                btn_view.setStyleSheet("border: none; background: transparent;")
+                shelfmark = item.shelfmark
+                btn_view.clicked.connect(lambda checked, s=shelfmark: self.on_view_result(s))
+                header_layout.addWidget(btn_view)
+
+            # Book icon - browse
+            if self.on_browse:
+                btn_browse = QPushButton("📖")
+                btn_browse.setToolTip(tr("Browse Document"))
+                btn_browse.setFixedSize(24, 24)
+                btn_browse.setStyleSheet("border: none; background: transparent;")
+                shelfmark = item.shelfmark
+                btn_browse.clicked.connect(lambda checked, s=shelfmark: self.on_browse(s))
+                header_layout.addWidget(btn_browse)
+
         header_layout.addStretch()
 
         # Date
@@ -1207,14 +1274,14 @@ class DiscoveriesDialog(QDialog):
         if item.content_preview:
             preview = item.content_preview[:200] + "..." if len(item.content_preview) > 200 else item.content_preview
             content_label = QLabel(preview)
-            content_label.setStyleSheet("color: #555; font-size: 11px;")
+            content_label.setStyleSheet("font-size: 11px;")
             content_label.setWordWrap(True)
             layout.addWidget(content_label)
 
         # For corrections: show diff
         if item.item_type == 'correction' and item.original_text and item.corrected_text:
             diff_frame = QFrame()
-            diff_frame.setStyleSheet("background: #f9f9f9; padding: 5px; border-radius: 3px;")
+            diff_frame.setStyleSheet("padding: 5px; border-radius: 3px; border: 1px solid palette(mid);")
             diff_layout = QHBoxLayout(diff_frame)
 
             orig_label = QLabel(f"{tr('Original')}: {item.original_text[:50]}...")
@@ -1347,6 +1414,40 @@ class DiscoveryDetailDialog(QDialog):
             header_layout.addWidget(answered_badge)
 
         header_layout.addStretch()
+
+        # Edit/Delete buttons (for author or admin only)
+        if self.client.is_logged_in():
+            current_user = self.client.current_user
+            is_author = current_user and current_user.id == d.author_id
+            is_admin = current_user and current_user.role == 'admin'
+
+            if is_author or is_admin:
+                self.btn_edit = QPushButton("✏️ " + tr("Edit"))
+                self.btn_edit.setStyleSheet("background: #3498db; color: white; padding: 5px 10px;")
+                self.btn_edit.clicked.connect(self.edit_discovery)
+                header_layout.addWidget(self.btn_edit)
+
+                self.btn_delete = QPushButton("🗑️ " + tr("Delete"))
+                self.btn_delete.setStyleSheet("background: #e74c3c; color: white; padding: 5px 10px;")
+                self.btn_delete.clicked.connect(self.confirm_delete_discovery)
+                header_layout.addWidget(self.btn_delete)
+
+            # Admin-only actions: Pin and Hide
+            if is_admin:
+                # Pin/Unpin button
+                pin_text = "📌 " + (tr("Unpin") if d.is_pinned else tr("Pin"))
+                self.btn_pin = QPushButton(pin_text)
+                self.btn_pin.setStyleSheet("background: #9b59b6; color: white; padding: 5px 10px;")
+                self.btn_pin.clicked.connect(self.toggle_pin)
+                header_layout.addWidget(self.btn_pin)
+
+                # Hide/Unhide button
+                hide_text = "👁 " + (tr("Unhide") if d.is_hidden else tr("Hide"))
+                self.btn_hide = QPushButton(hide_text)
+                self.btn_hide.setStyleSheet("background: #95a5a6; color: white; padding: 5px 10px;")
+                self.btn_hide.clicked.connect(self.toggle_hide)
+                header_layout.addWidget(self.btn_hide)
+
         layout.addLayout(header_layout)
 
         # Title
@@ -1372,14 +1473,69 @@ class DiscoveryDetailDialog(QDialog):
         author_name = tr("Anonymous") if d.is_anonymous else (d.author_full_name or d.author_username or "-")
         meta_layout.addWidget(QLabel(f"{tr('Author')}: {author_name}"))
 
-        if d.shelfmark:
-            meta_layout.addWidget(QLabel(f"{tr('Shelfmark')}: {d.shelfmark}"))
-
         if d.created_at:
             meta_layout.addWidget(QLabel(f"{tr('Date')}: {d.created_at[:10]}"))
 
         meta_layout.addStretch()
         layout.addLayout(meta_layout)
+
+        # Manuscripts section (supports multiple)
+        self._manuscripts = []  # List of (shelfmark, page_number)
+        if d.shelfmark:
+            self._manuscripts.append((d.shelfmark, d.page_number))
+        if d.additional_shelfmarks:
+            for ms in d.additional_shelfmarks:
+                shelf = ms.get('shelfmark') or ms.get('document_id', '')
+                page = ms.get('page_number')
+                if shelf:
+                    self._manuscripts.append((shelf, page))
+
+        if self._manuscripts:
+            if len(self._manuscripts) == 1:
+                # Single manuscript - inline display
+                shelf, page = self._manuscripts[0]
+                self._shelfmark = shelf
+                self._page_number = page
+                ms_layout = QHBoxLayout()
+                ms_layout.addWidget(QLabel(f"{tr('Shelfmark')}: {shelf}"))
+                btn_view = QPushButton("👁")
+                btn_view.setFixedWidth(30)
+                btn_view.setToolTip(tr("View in Result Dialog"))
+                btn_view.clicked.connect(self._view_document)
+                ms_layout.addWidget(btn_view)
+                btn_browse = QPushButton("📖")
+                btn_browse.setFixedWidth(30)
+                btn_browse.setToolTip(tr("Browse Document"))
+                btn_browse.clicked.connect(self._browse_document)
+                ms_layout.addWidget(btn_browse)
+                ms_layout.addStretch()
+                layout.addLayout(ms_layout)
+            else:
+                # Multiple manuscripts - show in a list
+                ms_box = QGroupBox(f"{tr('Manuscripts')} ({len(self._manuscripts)})")
+                ms_box_layout = QVBoxLayout(ms_box)
+                self.manuscripts_list = QListWidget()
+                self.manuscripts_list.setMaximumHeight(80)
+                for shelf, page in self._manuscripts:
+                    display = shelf
+                    if page:
+                        display += f" (p.{page})"
+                    item = QListWidgetItem(display)
+                    item.setData(Qt.ItemDataRole.UserRole, {'shelfmark': shelf, 'page': page})
+                    self.manuscripts_list.addItem(item)
+                ms_box_layout.addWidget(self.manuscripts_list)
+
+                # View/Browse buttons for selected manuscript
+                ms_btns = QHBoxLayout()
+                btn_view_ms = QPushButton("👁 " + tr("View"))
+                btn_view_ms.clicked.connect(self._view_selected_manuscript)
+                ms_btns.addWidget(btn_view_ms)
+                btn_browse_ms = QPushButton("📖 " + tr("Browse"))
+                btn_browse_ms.clicked.connect(self._browse_selected_manuscript)
+                ms_btns.addWidget(btn_browse_ms)
+                ms_btns.addStretch()
+                ms_box_layout.addLayout(ms_btns)
+                layout.addWidget(ms_box)
 
         # Vote section
         vote_box = QGroupBox(tr("Voting"))
@@ -1547,15 +1703,218 @@ class DiscoveryDetailDialog(QDialog):
         else:
             QMessageBox.warning(self, tr("Error"), error)
 
+    def _view_document(self):
+        """Open document in Result Dialog"""
+        if not hasattr(self, '_shelfmark') or not self._shelfmark:
+            return
+        parent = self.parent()
+        if hasattr(parent, '_open_document_result_dialog'):
+            parent._open_document_result_dialog(shelfmark=self._shelfmark)
+
+    def _browse_document(self):
+        """Open document in Browse tab"""
+        if not hasattr(self, '_shelfmark') or not self._shelfmark:
+            return
+        parent = self.parent()
+        if hasattr(parent, 'meta_mgr') and parent.meta_mgr:
+            # Resolve shelfmark to sys_id
+            result = parent.meta_mgr.resolve_shelfmark(self._shelfmark)
+            sys_id = result.get('sys_id')
+            if sys_id:
+                page = getattr(self, '_page_number', 1) or 1
+                if hasattr(parent, 'navigate_to_browse'):
+                    parent.navigate_to_browse(sys_id, page)
+                elif hasattr(parent, 'tabs') and hasattr(parent, 'show_in_browse'):
+                    parent.tabs.setCurrentWidget(parent.browse_tab)
+                    parent.show_in_browse(sys_id, page)
+
+    def _view_selected_manuscript(self):
+        """View selected manuscript from list in Result Dialog"""
+        if not hasattr(self, 'manuscripts_list'):
+            return
+        current = self.manuscripts_list.currentItem()
+        if not current:
+            # Select first if none selected
+            if self.manuscripts_list.count() > 0:
+                current = self.manuscripts_list.item(0)
+            else:
+                return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._shelfmark = data.get('shelfmark')
+            self._page_number = data.get('page')
+            self._view_document()
+
+    def _browse_selected_manuscript(self):
+        """Browse selected manuscript from list"""
+        if not hasattr(self, 'manuscripts_list'):
+            return
+        current = self.manuscripts_list.currentItem()
+        if not current:
+            # Select first if none selected
+            if self.manuscripts_list.count() > 0:
+                current = self.manuscripts_list.item(0)
+            else:
+                return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._shelfmark = data.get('shelfmark')
+            self._page_number = data.get('page')
+            self._browse_document()
+
+    def edit_discovery(self):
+        """Open edit dialog for the discovery"""
+        if not self.discovery:
+            return
+
+        d = self.discovery
+
+        # Create edit dialog
+        edit_dialog = QDialog(self)
+        edit_dialog.setWindowTitle(tr("Edit Discovery"))
+        edit_dialog.resize(500, 400)
+
+        layout = QVBoxLayout(edit_dialog)
+
+        # Title
+        layout.addWidget(QLabel(tr("Title")))
+        title_edit = QLineEdit(d.title)
+        layout.addWidget(title_edit)
+
+        # Content
+        layout.addWidget(QLabel(tr("Description")))
+        content_edit = QTextEdit()
+        content_edit.setPlainText(d.content)
+        layout.addWidget(content_edit)
+
+        # Anonymous checkbox
+        anonymous_check = QCheckBox(tr("Post anonymously"))
+        anonymous_check.setChecked(d.is_anonymous)
+        layout.addWidget(anonymous_check)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(edit_dialog.reject)
+        btn_layout.addWidget(btn_cancel)
+
+        btn_save = QPushButton(tr("Save"))
+        btn_save.setStyleSheet("background-color: #27ae60; color: white;")
+
+        def save_changes():
+            new_title = title_edit.text().strip()
+            new_content = content_edit.toPlainText().strip()
+
+            if not new_title or not new_content:
+                QMessageBox.warning(edit_dialog, tr("Error"), tr("Title and description are required"))
+                return
+
+            success, message = self.client.update_discovery(
+                self.discovery_id,
+                title=new_title,
+                content=new_content,
+                is_anonymous=anonymous_check.isChecked()
+            )
+
+            if success:
+                QMessageBox.information(edit_dialog, tr("Success"), tr("Discovery updated"))
+                edit_dialog.accept()
+                # Update local display
+                self.discovery.title = new_title
+                self.discovery.content = new_content
+                self.discovery.is_anonymous = anonymous_check.isChecked()
+                # Refresh parent if available
+                parent = self.parent()
+                if hasattr(parent, '_refresh_discoveries_panel'):
+                    parent._refresh_discoveries_panel(use_cache_first=False)
+                # Close and signal to reload
+                self.accept()
+            else:
+                QMessageBox.warning(edit_dialog, tr("Error"), message)
+
+        btn_save.clicked.connect(save_changes)
+        btn_layout.addWidget(btn_save)
+
+        layout.addLayout(btn_layout)
+        edit_dialog.exec()
+
+    def confirm_delete_discovery(self):
+        """Confirm and delete the discovery"""
+        reply = QMessageBox.question(
+            self,
+            tr("Delete Discovery"),
+            tr("Are you sure you want to delete this discovery? This cannot be undone."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            success, message = self.client.delete_discovery(self.discovery_id)
+            if success:
+                QMessageBox.information(self, tr("Success"), tr("Discovery deleted"))
+                # Refresh parent if available
+                parent = self.parent()
+                if hasattr(parent, '_refresh_discoveries_panel'):
+                    parent._refresh_discoveries_panel(use_cache_first=False)
+                self.accept()
+            else:
+                QMessageBox.warning(self, tr("Error"), message)
+
+    def toggle_pin(self):
+        """Toggle pin status of the discovery (admin only)"""
+        new_pinned = not self.discovery.is_pinned
+        success, message = self.client.pin_discovery(self.discovery_id, new_pinned)
+        if success:
+            self.discovery.is_pinned = new_pinned
+            # Update button text
+            self.btn_pin.setText("📌 " + (tr("Unpin") if new_pinned else tr("Pin")))
+            QMessageBox.information(self, tr("Success"), tr("Discovery pinned") if new_pinned else tr("Discovery unpinned"))
+            # Refresh parent
+            parent = self.parent()
+            if hasattr(parent, '_refresh_discoveries_panel'):
+                parent._refresh_discoveries_panel(use_cache_first=False)
+        else:
+            QMessageBox.warning(self, tr("Error"), message)
+
+    def toggle_hide(self):
+        """Toggle hide status of the discovery (admin only)"""
+        if self.discovery.is_hidden:
+            success, message = self.client.unhide_discovery(self.discovery_id)
+        else:
+            success, message = self.client.hide_discovery(self.discovery_id)
+
+        if success:
+            self.discovery.is_hidden = not self.discovery.is_hidden
+            # Update button text
+            self.btn_hide.setText("👁 " + (tr("Unhide") if self.discovery.is_hidden else tr("Hide")))
+            msg = tr("Discovery unhidden") if not self.discovery.is_hidden else tr("Discovery hidden")
+            QMessageBox.information(self, tr("Success"), msg)
+            # Refresh parent
+            parent = self.parent()
+            if hasattr(parent, '_refresh_discoveries_panel'):
+                parent._refresh_discoveries_panel(use_cache_first=False)
+        else:
+            QMessageBox.warning(self, tr("Error"), message)
+
 
 class CreateDiscoveryDialog(QDialog):
     """Dialog for creating a new discovery"""
 
-    def __init__(self, parent=None, client: CorrectionsClient = None):
+    def __init__(self, parent=None, client: CorrectionsClient = None,
+                 document_id: str = None, shelfmark: str = None, page_number: int = None,
+                 lists_mgr=None, shelf_completer=None, meta_mgr=None):
         super().__init__(parent)
         self.client = client or get_corrections_client()
+        self.document_id = document_id
+        self.initial_shelfmark = shelfmark
+        self.initial_page = page_number
+        self.lists_mgr = lists_mgr
+        self.shelf_completer = shelf_completer
+        self.meta_mgr = meta_mgr
+        self.shelfmarks_list = []  # List of (shelfmark, page, sys_id) tuples
         self.setWindowTitle(tr("Share a Discovery"))
-        self.resize(600, 500)
+        self.resize(650, 600)
         self.init_ui()
 
     def init_ui(self):
@@ -1593,20 +1952,100 @@ class CreateDiscoveryDialog(QDialog):
         self.content_input.setPlaceholderText(tr("Describe your discovery in detail..."))
         layout.addWidget(self.content_input)
 
-        # Document reference
-        doc_layout = QHBoxLayout()
-        doc_layout.addWidget(QLabel(tr("Document (optional):")))
-        self.shelfmark_input = QLineEdit()
-        self.shelfmark_input.setPlaceholderText(tr("Shelfmark, e.g., T-S 13J1.1"))
-        doc_layout.addWidget(self.shelfmark_input)
+        # Document reference section
+        doc_group = QGroupBox(tr("Document References (optional)"))
+        doc_group_layout = QVBoxLayout(doc_group)
 
-        doc_layout.addWidget(QLabel(tr("Page:")))
+        # From Personal List selection
+        if self.lists_mgr:
+            from_list_layout = QHBoxLayout()
+            from_list_layout.addWidget(QLabel(tr("From List:")))
+            self.list_combo = QComboBox()
+            self.list_combo.addItem(tr("-- Select from list --"), None)
+            # Populate lists
+            lists = self.lists_mgr.get_all_lists(include_recent=True)
+            for lst in lists:
+                display_name = lst.get('name', tr("Unnamed"))
+                if lst.get('is_recent'):
+                    display_name = tr("Recent")
+                self.list_combo.addItem(display_name, lst.get('id'))
+            self.list_combo.currentIndexChanged.connect(self._on_list_selected)
+            from_list_layout.addWidget(self.list_combo, 1)
+            doc_group_layout.addLayout(from_list_layout)
+
+            # List items combo
+            self.list_items_layout = QHBoxLayout()
+            self.list_items_layout.addWidget(QLabel(tr("Item:")))
+            self.list_items_combo = QComboBox()
+            self.list_items_combo.addItem(tr("-- Select item --"), None)
+            self.list_items_combo.currentIndexChanged.connect(self._on_list_item_selected)
+            self.list_items_layout.addWidget(self.list_items_combo, 1)
+            doc_group_layout.addLayout(self.list_items_layout)
+
+        # Shelfmark input with autocomplete
+        input_row = QHBoxLayout()
+        input_row.addWidget(QLabel(tr("Shelfmark:")))
+        self.shelfmark_input = QLineEdit()
+        self.shelfmark_input.setPlaceholderText(tr("Type or select, e.g., T-S 13J1.1"))
+        # Attach autocomplete if available
+        if self.shelf_completer:
+            self.shelfmark_input.setCompleter(self.shelf_completer)
+        input_row.addWidget(self.shelfmark_input, 1)
+
+        input_row.addWidget(QLabel(tr("Page:")))
         self.page_input = QSpinBox()
         self.page_input.setMinimum(0)
         self.page_input.setSpecialValueText("-")
-        doc_layout.addWidget(self.page_input)
+        input_row.addWidget(self.page_input)
 
-        layout.addLayout(doc_layout)
+        # Add button
+        self.btn_add_shelfmark = QPushButton("+")
+        self.btn_add_shelfmark.setFixedWidth(30)
+        self.btn_add_shelfmark.setToolTip(tr("Add shelfmark to list"))
+        self.btn_add_shelfmark.clicked.connect(self._add_shelfmark_to_list)
+        input_row.addWidget(self.btn_add_shelfmark)
+
+        doc_group_layout.addLayout(input_row)
+
+        # Shelfmarks list widget (for multiple shelfmarks)
+        self.shelfmarks_widget = QListWidget()
+        self.shelfmarks_widget.setMaximumHeight(100)
+        self.shelfmarks_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        doc_group_layout.addWidget(self.shelfmarks_widget)
+
+        # Buttons row for shelfmarks list
+        shelf_btns = QHBoxLayout()
+        self.btn_view_doc = QPushButton("👁 " + tr("View"))
+        self.btn_view_doc.setToolTip(tr("View in Result Dialog"))
+        self.btn_view_doc.clicked.connect(self._view_selected_doc)
+        self.btn_view_doc.setEnabled(False)
+        shelf_btns.addWidget(self.btn_view_doc)
+
+        self.btn_browse_doc = QPushButton("📖 " + tr("Browse"))
+        self.btn_browse_doc.setToolTip(tr("Browse Document"))
+        self.btn_browse_doc.clicked.connect(self._browse_selected_doc)
+        self.btn_browse_doc.setEnabled(False)
+        shelf_btns.addWidget(self.btn_browse_doc)
+
+        shelf_btns.addStretch()
+
+        self.btn_remove_shelfmark = QPushButton("−")
+        self.btn_remove_shelfmark.setFixedWidth(30)
+        self.btn_remove_shelfmark.setToolTip(tr("Remove selected shelfmark"))
+        self.btn_remove_shelfmark.clicked.connect(self._remove_selected_shelfmark)
+        self.btn_remove_shelfmark.setEnabled(False)
+        shelf_btns.addWidget(self.btn_remove_shelfmark)
+
+        doc_group_layout.addLayout(shelf_btns)
+
+        # Connect selection change
+        self.shelfmarks_widget.itemSelectionChanged.connect(self._on_shelfmark_selection_changed)
+
+        layout.addWidget(doc_group)
+
+        # Pre-populate if initial shelfmark provided
+        if self.initial_shelfmark:
+            self._add_shelfmark_entry(self.initial_shelfmark, self.initial_page or 0, self.document_id)
 
         # Anonymous option
         self.anonymous_check = QCheckBox(tr("Post anonymously"))
@@ -1637,8 +2076,29 @@ class CreateDiscoveryDialog(QDialog):
             return
 
         discovery_type = self.type_values[self.type_combo.currentIndex()]
-        shelfmark = self.shelfmark_input.text().strip() or None
-        page_number = self.page_input.value() if self.page_input.value() > 0 else None
+
+        # Use shelfmarks list if populated, otherwise use input field
+        shelfmark = None
+        page_number = None
+        additional_shelfmarks = None
+
+        if self.shelfmarks_list:
+            # First shelfmark is the main one
+            shelfmark = self.shelfmarks_list[0][0]
+            page_number = self.shelfmarks_list[0][1] if self.shelfmarks_list[0][1] and self.shelfmarks_list[0][1] > 0 else None
+
+            # Additional shelfmarks (if more than one)
+            if len(self.shelfmarks_list) > 1:
+                additional_shelfmarks = []
+                for shelf, page, sys_id in self.shelfmarks_list[1:]:
+                    additional_shelfmarks.append({
+                        'shelfmark': shelf,
+                        'page_number': page if page and page > 0 else None,
+                        'document_id': sys_id
+                    })
+        else:
+            shelfmark = self.shelfmark_input.text().strip() or None
+            page_number = self.page_input.value() if self.page_input.value() > 0 else None
 
         discovery, error = self.client.create_discovery(
             title=title,
@@ -1646,7 +2106,8 @@ class CreateDiscoveryDialog(QDialog):
             discovery_type=discovery_type,
             shelfmark=shelfmark,
             page_number=page_number,
-            is_anonymous=self.anonymous_check.isChecked()
+            is_anonymous=self.anonymous_check.isChecked(),
+            additional_shelfmarks=additional_shelfmarks
         )
 
         if discovery:
@@ -1654,6 +2115,168 @@ class CreateDiscoveryDialog(QDialog):
             self.accept()
         else:
             QMessageBox.warning(self, tr("Error"), error)
+
+    def _on_list_selected(self, index):
+        """Handle list selection - populate items combo with shelfmark+title"""
+        if not hasattr(self, 'list_items_combo') or not self.lists_mgr:
+            return
+        self.list_items_combo.clear()
+        self.list_items_combo.addItem(tr("-- Select item --"), None)
+
+        list_id = self.list_combo.currentData()
+        if not list_id:
+            return
+
+        # Get items from the selected list
+        items = self.lists_mgr.get_items_in_list(list_id)
+        for item in items:
+            sys_id = item.get('sys_id', '')
+            shelfmark = item.get('shelfmark', '')
+            title = item.get('title', '')
+
+            # Try to get metadata if not available
+            if (not shelfmark or shelfmark == 'Unknown') and self.meta_mgr and sys_id:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+            # Build display string: shelfmark + first words of title
+            if shelfmark and shelfmark != 'Unknown':
+                display = shelfmark
+                if title:
+                    # Take first 30 chars of title
+                    title_preview = title[:30] + "..." if len(title) > 30 else title
+                    display += f" - {title_preview}"
+            else:
+                display = sys_id
+
+            item['_display_shelfmark'] = shelfmark
+            item['_display_title'] = title
+            self.list_items_combo.addItem(display, item)
+
+    def _on_list_item_selected(self, index):
+        """Handle list item selection - add to shelfmarks list"""
+        if not hasattr(self, 'list_items_combo'):
+            return
+        item = self.list_items_combo.currentData()
+        if not item:
+            return
+
+        sys_id = item.get('sys_id', '')
+        shelfmark = item.get('_display_shelfmark') or item.get('shelfmark', '') or item.get('title', '')
+        page = item.get('img') or item.get('page_number') or item.get('page', 0)
+        if isinstance(page, str):
+            try:
+                page = int(page)
+            except:
+                page = 0
+
+        # Add to list
+        self._add_shelfmark_entry(shelfmark, page, sys_id)
+
+    def _add_shelfmark_to_list(self):
+        """Add current input to shelfmarks list"""
+        shelfmark = self.shelfmark_input.text().strip()
+        if not shelfmark:
+            return
+
+        page = self.page_input.value()
+
+        # Try to resolve sys_id if meta_mgr available
+        sys_id = None
+        if self.meta_mgr:
+            try:
+                result = self.meta_mgr.resolve_system_by_shelfmark(shelfmark)
+                if result:
+                    sys_id = result.get('sys_id')
+            except Exception:
+                pass  # If resolution fails, just use None
+
+        self._add_shelfmark_entry(shelfmark, page, sys_id)
+
+        # Clear inputs
+        self.shelfmark_input.clear()
+        self.page_input.setValue(0)
+
+    def _add_shelfmark_entry(self, shelfmark, page, sys_id):
+        """Add an entry to the shelfmarks list widget"""
+        if not shelfmark:
+            return
+
+        # Check for duplicates
+        for existing in self.shelfmarks_list:
+            if existing[0] == shelfmark and existing[1] == page:
+                return  # Already in list
+
+        self.shelfmarks_list.append((shelfmark, page, sys_id))
+
+        # Display string
+        display = shelfmark
+        if page > 0:
+            display += f" (p.{page})"
+
+        item = QListWidgetItem(display)
+        item.setData(Qt.ItemDataRole.UserRole, {'shelfmark': shelfmark, 'page': page, 'sys_id': sys_id})
+        self.shelfmarks_widget.addItem(item)
+
+    def _remove_selected_shelfmark(self):
+        """Remove selected shelfmark from list"""
+        current = self.shelfmarks_widget.currentItem()
+        if not current:
+            return
+
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if data:
+            # Remove from internal list
+            entry = (data['shelfmark'], data['page'], data['sys_id'])
+            if entry in self.shelfmarks_list:
+                self.shelfmarks_list.remove(entry)
+
+        row = self.shelfmarks_widget.row(current)
+        self.shelfmarks_widget.takeItem(row)
+
+    def _on_shelfmark_selection_changed(self):
+        """Update button states based on selection"""
+        has_selection = self.shelfmarks_widget.currentItem() is not None
+        self.btn_remove_shelfmark.setEnabled(has_selection)
+        self.btn_view_doc.setEnabled(has_selection)
+        self.btn_browse_doc.setEnabled(has_selection)
+
+    def _view_selected_doc(self):
+        """Open selected document in ResultDialog"""
+        current = self.shelfmarks_widget.currentItem()
+        if not current:
+            return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        sys_id = data.get('sys_id')
+        shelfmark = data.get('shelfmark')
+
+        # Find parent GUI and call its method
+        parent = self.parent()
+        if hasattr(parent, '_open_document_result_dialog'):
+            parent._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id)
+
+    def _browse_selected_doc(self):
+        """Open selected document in Browse tab"""
+        current = self.shelfmarks_widget.currentItem()
+        if not current:
+            return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        sys_id = data.get('sys_id')
+        page = data.get('page', 1) or 1
+
+        # Find parent GUI and navigate
+        parent = self.parent()
+        if hasattr(parent, 'navigate_to_browse') and sys_id:
+            parent.navigate_to_browse(sys_id, page)
+        elif hasattr(parent, 'tabs') and hasattr(parent, 'show_in_browse'):
+            parent.tabs.setCurrentWidget(parent.browse_tab)
+            if sys_id:
+                parent.show_in_browse(sys_id, page)
 
 
 class CommentDialog(QDialog):
@@ -1760,6 +2383,7 @@ class CommentDialog(QDialog):
             document_id=self.document_id,
             correction_id=self.correction_id,
             comment_type=comment_type,
+            line_number=self.page_number,
             is_public=self.public_check.isChecked(),
             is_anonymous=self.anonymous_check.isChecked()
         )
@@ -1841,7 +2465,8 @@ class CommentsViewerDialog(QDialog):
 
         if not comments:
             empty_label = QLabel(tr("No comments yet"))
-            empty_label.setStyleSheet("color: gray; font-size: 14px;")
+            secondary_color = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
+            empty_label.setStyleSheet(f"color: {secondary_color}; font-size: 14px;")
             empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.comments_layout.addWidget(empty_label)
             return
@@ -1853,14 +2478,18 @@ class CommentsViewerDialog(QDialog):
     def create_comment_widget(self, comment: Comment) -> QFrame:
         """Create a widget for a comment"""
         frame = QFrame()
-        frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #ddd;
+        # Use palette colors for dark mode support
+        palette = self.palette()
+        bg_color = palette.color(QPalette.ColorRole.Base).name()
+        border_color = palette.color(QPalette.ColorRole.Mid).name()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: {bg_color};
+                border: 1px solid {border_color};
                 border-radius: 5px;
                 padding: 10px;
                 margin: 2px;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(frame)
@@ -1902,7 +2531,8 @@ class CommentsViewerDialog(QDialog):
         # Date
         if comment.created_at:
             date_label = QLabel(comment.created_at[:10])
-            date_label.setStyleSheet("color: gray; font-size: 10px;")
+            secondary_color = palette.color(QPalette.ColorRole.PlaceholderText).name()
+            date_label.setStyleSheet(f"color: {secondary_color}; font-size: 10px;")
             header_layout.addWidget(date_label)
 
         layout.addLayout(header_layout)
@@ -1922,7 +2552,8 @@ class CommentsViewerDialog(QDialog):
         # Reply count
         if comment.reply_count > 0:
             reply_label = QLabel(f"💬 {comment.reply_count} {tr('replies')}")
-            reply_label.setStyleSheet("color: gray; font-size: 10px; margin-top: 5px;")
+            secondary_color = palette.color(QPalette.ColorRole.PlaceholderText).name()
+            reply_label.setStyleSheet(f"color: {secondary_color}; font-size: 10px; margin-top: 5px;")
             layout.addWidget(reply_label)
 
         return frame
@@ -1946,9 +2577,12 @@ class CommentsViewerDialog(QDialog):
 class MyCommentsDialog(QDialog):
     """Dialog showing user's own comments"""
 
-    def __init__(self, parent=None, client: CorrectionsClient = None):
+    def __init__(self, parent=None, client: CorrectionsClient = None,
+                 on_view_result=None, on_browse=None):
         super().__init__(parent)
         self.client = client or get_corrections_client()
+        self.on_view_result = on_view_result
+        self.on_browse = on_browse
         self.setWindowTitle(tr("My Comments"))
         self.resize(800, 600)
         self.init_ui()
@@ -2019,21 +2653,25 @@ class MyCommentsDialog(QDialog):
 
         if not comments:
             empty_label = QLabel(tr("No comments yet"))
-            empty_label.setStyleSheet("color: gray; font-size: 14px;")
+            secondary_color = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
+            empty_label.setStyleSheet(f"color: {secondary_color}; font-size: 14px;")
             empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.comments_layout.addWidget(empty_label)
             return
 
         for comment in comments:
             comment_frame = QFrame()
-            comment_frame.setStyleSheet("""
-                QFrame {
-                    background: white;
-                    border: 1px solid #ddd;
+            # Use palette colors for dark mode support
+            bg_color = self.palette().color(QPalette.ColorRole.Base).name()
+            border_color = self.palette().color(QPalette.ColorRole.Mid).name()
+            comment_frame.setStyleSheet(f"""
+                QFrame {{
+                    background: {bg_color};
+                    border: 1px solid {border_color};
                     border-radius: 5px;
                     padding: 10px;
                     margin: 2px;
-                }
+                }}
             """)
 
             frame_layout = QVBoxLayout(comment_frame)
@@ -2045,6 +2683,26 @@ class MyCommentsDialog(QDialog):
                 doc_label = QLabel(f"📄 {comment.document_id}")
                 doc_label.setStyleSheet("color: #3498db; font-family: monospace;")
                 header_layout.addWidget(doc_label)
+
+                # Eye icon - view in result dialog
+                if self.on_view_result:
+                    btn_view = QPushButton("👁️")
+                    btn_view.setToolTip(tr("View in Result Dialog"))
+                    btn_view.setFixedSize(24, 24)
+                    btn_view.setStyleSheet("border: none; background: transparent;")
+                    doc_id = comment.document_id
+                    btn_view.clicked.connect(lambda checked, d=doc_id: self.on_view_result(d))
+                    header_layout.addWidget(btn_view)
+
+                # Book icon - browse
+                if self.on_browse:
+                    btn_browse = QPushButton("📖")
+                    btn_browse.setToolTip(tr("Browse Document"))
+                    btn_browse.setFixedSize(24, 24)
+                    btn_browse.setStyleSheet("border: none; background: transparent;")
+                    doc_id = comment.document_id
+                    btn_browse.clicked.connect(lambda checked, d=doc_id: self.on_browse(d))
+                    header_layout.addWidget(btn_browse)
 
             # Type
             type_labels = {
@@ -2068,7 +2726,8 @@ class MyCommentsDialog(QDialog):
             # Date
             if comment.created_at:
                 date_label = QLabel(comment.created_at[:10])
-                date_label.setStyleSheet("color: gray; font-size: 10px;")
+                secondary_color = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
+                date_label.setStyleSheet(f"color: {secondary_color}; font-size: 10px;")
                 header_layout.addWidget(date_label)
 
             frame_layout.addLayout(header_layout)

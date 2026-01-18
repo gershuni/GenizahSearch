@@ -26,6 +26,7 @@ router = APIRouter(prefix="/discoveries", tags=["Discoveries"])
 
 def _to_response(discovery, db: Session = None) -> DiscoveryResponseSchema:
     """Convert Discovery model to response schema"""
+    from backend.models.discovery import DiscoveryStatus
     return DiscoveryResponseSchema(
         id=discovery.id,
         title=discovery.title,
@@ -40,6 +41,7 @@ def _to_response(discovery, db: Session = None) -> DiscoveryResponseSchema:
         is_featured=discovery.is_featured,
         is_pinned=getattr(discovery, 'is_pinned', False),
         is_answered=getattr(discovery, 'is_answered', False),
+        is_hidden=discovery.status == DiscoveryStatus.HIDDEN,
         view_count=discovery.view_count,
         response_count=discovery.response_count,
         upvotes=getattr(discovery, 'upvotes', 0) or 0,
@@ -90,8 +92,13 @@ async def get_discovery(
     Get a single discovery by ID.
 
     Public endpoint (but may show limited info for anonymous users).
+    Admins can view hidden discoveries.
     """
-    discovery = DiscoveryService.get_discovery(db, discovery_id, increment_views=True)
+    # Admins can see hidden discoveries
+    is_admin = current_user and current_user.role == 'admin'
+    discovery = DiscoveryService.get_discovery(
+        db, discovery_id, increment_views=True, include_hidden=is_admin
+    )
 
     if not discovery:
         raise HTTPException(
@@ -151,6 +158,7 @@ async def delete_discovery(
 async def list_discoveries(
     discovery_type: Optional[DiscoveryType] = None,
     featured_only: bool = False,
+    include_hidden: bool = False,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -159,12 +167,16 @@ async def list_discoveries(
     """
     List discoveries with optional filters.
 
-    Public endpoint.
+    Public endpoint. include_hidden only works for admins.
     """
+    # Only admins can see hidden discoveries
+    can_see_hidden = include_hidden and current_user and current_user.role == 'admin'
+
     discoveries, total = DiscoveryService.list_discoveries(
         db,
         discovery_type=discovery_type,
         featured_only=featured_only,
+        include_hidden=can_see_hidden,
         limit=limit,
         offset=offset
     )

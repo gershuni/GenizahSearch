@@ -520,6 +520,7 @@ class CommentService:
         document_id: str = None,
         author_id: int = None,
         comment_type: CommentType = None,
+        current_user_id: int = None,
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[Comment], int]:
@@ -528,6 +529,18 @@ class CommentService:
             Comment.is_deleted == False,
             Comment.content.ilike(f"%{query}%")
         )
+
+        # Filter private comments - only show public OR user's own private comments
+        if current_user_id:
+            q = q.filter(
+                or_(
+                    Comment.is_public == True,
+                    Comment.author_id == current_user_id
+                )
+            )
+        else:
+            # No user - only show public comments
+            q = q.filter(Comment.is_public == True)
 
         if document_id:
             q = q.filter(Comment.document_id == document_id)
