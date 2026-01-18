@@ -53,7 +53,7 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     affiliation = Column(String(255), nullable=True)  # University, institute
     bio = Column(Text, nullable=True)
-    avatar_url = Column(String(500), nullable=True)
+    avatar_url = Column(String(500), nullable=True)  # UNUSED: No UI displays avatars
 
     # Permissions and status
     role = Column(Enum(UserRole), default=UserRole.CONTRIBUTOR, nullable=False)
@@ -71,10 +71,10 @@ class User(Base):
     reputation_score = Column(Integer, default=0)
 
     # API key for programmatic access
-    api_key = Column(String(64), unique=True, nullable=True, index=True)
+    api_key = Column(String(64), unique=True, nullable=True, index=True)  # UNUSED: No API key auth implemented
 
     # Settings stored as JSON-like string
-    settings = Column(Text, nullable=True)
+    settings = Column(Text, nullable=True)  # UNUSED: Settings not implemented
 
     # Relationships
     corrections = relationship("Correction", back_populates="author", foreign_keys="Correction.author_id")

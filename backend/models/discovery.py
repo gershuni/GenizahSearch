@@ -101,9 +101,9 @@ class Discovery(Base):
 
     # Privacy and display
     is_anonymous = Column(Boolean, default=False)
-    is_featured = Column(Boolean, default=False, index=True)
-    is_pinned = Column(Boolean, default=False, index=True)  # Admin pinned
-    is_answered = Column(Boolean, default=False)  # For questions
+    is_featured = Column(Boolean, default=False, index=True)  # NOTE: Redundant with status=FEATURED
+    is_pinned = Column(Boolean, default=False, index=True)    # Admin pinned
+    is_answered = Column(Boolean, default=False)              # For questions
 
     # Engagement counts
     view_count = Column(Integer, default=0)

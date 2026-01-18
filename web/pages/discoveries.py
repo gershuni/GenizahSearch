@@ -87,9 +87,12 @@ async def create_discoveries_page():
                     on_refresh=refresh_feed
                 )
 
-        # Bind filter changes
-        type_filter.on('update:model-value', lambda: refresh_feed())
-        period_filter.on('update:model-value', lambda: refresh_feed())
+        # Bind filter changes - use async handler for proper await
+        async def on_filter_change():
+            await refresh_feed()
+
+        type_filter.on('update:model-value', on_filter_change)
+        period_filter.on('update:model-value', on_filter_change)
 
         # Initial load
         with feed_container:
