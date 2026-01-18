@@ -837,6 +837,10 @@ TRANSLATIONS = {
     "Delete User?": "למחוק משתמש?",
     "User deleted": "המשתמש נמחק",
     "Delete User": "מחק משתמש",
+
+    # Admin Panel - Corrections Review
+    "Pending Corrections": "תיקונים ממתינים",
+    "All corrections have been reviewed": "כל התיקונים נבדקו",
 }
 
 

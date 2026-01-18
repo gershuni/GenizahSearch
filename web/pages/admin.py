@@ -2,12 +2,24 @@
 """
 Admin Panel - Genizah Search Pro
 
-User management and system administration for admins.
+User management, corrections review, and system administration for admins.
 """
 
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
+from web.state import state
+
+
+def get_shelfmark_for_id(sys_id: str) -> tuple:
+    """Get shelfmark and title for a system ID."""
+    try:
+        if state.meta_mgr:
+            shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
+            return shelfmark or sys_id, title or ''
+    except:
+        pass
+    return sys_id, ''
 
 
 async def create_admin_page():
@@ -32,14 +44,14 @@ async def create_admin_page():
 
         # === Tabs ===
         with ui.tabs().classes('w-full') as tabs:
+            pending_tab = ui.tab(tr('Pending Corrections'))
             users_tab = ui.tab(tr('Users'))
-            pending_tab = ui.tab(tr('Pending Approval'))
             stats_tab = ui.tab(tr('Statistics'))
 
         with ui.tab_panels(tabs, value=pending_tab).classes('w-full'):
-            # Pending Approval panel
+            # Pending Corrections panel
             with ui.tab_panel(pending_tab):
-                await create_pending_users_view()
+                await create_pending_corrections_view()
 
             # All Users panel
             with ui.tab_panel(users_tab):
@@ -50,69 +62,111 @@ async def create_admin_page():
                 await create_stats_view()
 
 
-async def create_pending_users_view():
-    """View for approving pending users."""
-    result = await api_call("GET", "/admin/users/pending")
+async def create_pending_corrections_view():
+    """View for reviewing pending corrections."""
+    result = await api_call("GET", "/corrections/pending")
 
     if "error" in result:
         ui.label(f"{tr('Error')}: {result['error']}").style('color: var(--danger);')
         return
 
-    pending = result if isinstance(result, list) else result.get('users', [])
+    pending = result.get('items', []) if isinstance(result, dict) else result
 
     if not pending:
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('check_circle').classes('text-6xl').style('color: var(--success);')
-            ui.label(tr('No pending users')).classes('text-xl').style('color: var(--text-secondary);')
-            ui.label(tr('All registration requests have been processed')).style('color: var(--text-muted);')
+            ui.label(tr('No pending corrections')).classes('text-xl').style('color: var(--text-secondary);')
+            ui.label(tr('All corrections have been reviewed')).style('color: var(--text-muted);')
     else:
-        ui.label(f"{len(pending)} {tr('users pending approval')}").classes('text-lg font-medium mb-4')
+        ui.label(f"{len(pending)} {tr('corrections pending review')}").classes('text-lg font-medium mb-4')
 
-        for user in pending:
-            await create_pending_user_card(user)
+        for corr in pending:
+            await create_pending_correction_card(corr)
 
 
-async def create_pending_user_card(user):
-    """Create a card for a pending user."""
-    with ui.card().classes('w-full p-4 mb-3'):
-        with ui.row().classes('w-full items-start justify-between'):
-            with ui.column().classes('gap-2 flex-1'):
+async def create_pending_correction_card(corr):
+    """Create a card for a pending correction."""
+    doc_id = corr.get('document_id') or corr.get('system_id', 'Unknown')
+    page_num = corr.get('page_number', 1)
+    shelfmark, title = get_shelfmark_for_id(doc_id)
+
+    with ui.card().classes('w-full p-4 mb-4'):
+        with ui.column().classes('w-full gap-3'):
+            # Header row
+            with ui.row().classes('w-full items-center justify-between'):
+                with ui.row().classes('items-center gap-2'):
+                    def go_to_browse(sid=doc_id, pnum=page_num):
+                        ui.navigate.to(f'/browse?sys_id={sid}&page={pnum}')
+
+                    with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
+                        ui.label(f"{shelfmark}").classes('font-bold text-primary')
+                        if page_num:
+                            ui.label(f" • {tr('Image')} {page_num}").classes('text-sm')
+
                 with ui.row().classes('items-center gap-3'):
-                    ui.icon('person_add').classes('text-2xl').style('color: var(--primary-600);')
-                    with ui.column().classes('gap-0'):
-                        ui.label(user.get('full_name') or user.get('username', 'Unknown')).classes('font-bold text-lg')
-                        ui.label(user.get('email', '')).classes('text-sm').style('color: var(--text-secondary);')
+                    # Author info
+                    author = corr.get('author', {})
+                    ui.label(f"{tr('by')} {author.get('full_name') or author.get('username', 'Unknown')}").style('color: var(--text-secondary);')
 
-                with ui.row().classes('gap-4 mt-2'):
-                    if user.get('affiliation'):
-                        with ui.row().classes('items-center gap-1'):
-                            ui.icon('business').classes('text-sm').style('color: var(--text-muted);')
-                            ui.label(user.get('affiliation')).classes('text-sm')
+                    # Vote display
+                    upvotes = corr.get('upvotes', 0)
+                    downvotes = corr.get('downvotes', 0)
+                    vote_score = corr.get('vote_score', upvotes - downvotes)
 
-                    if user.get('created_at'):
-                        with ui.row().classes('items-center gap-1'):
-                            ui.icon('schedule').classes('text-sm').style('color: var(--text-muted);')
-                            ui.label(user.get('created_at', '')[:10]).classes('text-sm')
+                    with ui.row().classes('items-center gap-1'):
+                        ui.icon('thumb_up').classes('text-sm').style('color: var(--success);')
+                        ui.label(str(upvotes)).classes('text-sm').style('color: var(--success);')
+                        ui.icon('thumb_down').classes('text-sm ml-2').style('color: var(--danger);')
+                        ui.label(str(downvotes)).classes('text-sm').style('color: var(--danger);')
+                        if vote_score != 0:
+                            score_color = 'var(--success)' if vote_score > 0 else 'var(--danger)'
+                            ui.label(f"({'+' if vote_score > 0 else ''}{vote_score})").classes('text-sm ml-1').style(f'color: {score_color};')
+
+            # Text comparison
+            with ui.row().classes('w-full gap-4'):
+                with ui.column().classes('flex-1'):
+                    ui.label(tr('Original')).classes('font-medium text-sm')
+                    ui.label(corr.get('original_text', '-')).classes('font-mono text-sm p-2 rounded whitespace-pre-wrap').style('background: var(--surface-secondary); direction: rtl; text-align: right;')
+
+                with ui.column().classes('flex-1'):
+                    ui.label(tr('Corrected')).classes('font-medium text-sm')
+                    ui.label(corr.get('corrected_text', '-')).classes('font-mono text-sm p-2 rounded whitespace-pre-wrap').style('background: var(--surface-secondary); direction: rtl; text-align: right;')
+
+            # Notes if any
+            if corr.get('notes'):
+                ui.label(f"{tr('Notes')}: {corr['notes']}").style('color: var(--text-secondary);')
+
+            # Review actions
+            review_notes = ui.input(tr('Review notes')).classes('w-full').props('outlined dense')
+
+            corr_id = corr.get('id')
+
+            async def approve(cid=corr_id, notes=review_notes):
+                result = await api_call("POST", f"/corrections/{cid}/review", {
+                    "action": "approve",
+                    "review_notes": notes.value or None
+                })
+                if "error" in result:
+                    ui.notify(result.get("detail", result["error"]), type='negative')
+                else:
+                    ui.notify(tr('Correction approved'), type='positive')
+                    ui.navigate.reload()
+
+            async def reject(cid=corr_id, notes=review_notes):
+                rejection_text = notes.value or tr('Rejected by reviewer')
+                result = await api_call("POST", f"/corrections/{cid}/review", {
+                    "action": "reject",
+                    "rejection_reason": rejection_text
+                })
+                if "error" in result:
+                    ui.notify(result.get("detail", result["error"]), type='negative')
+                else:
+                    ui.notify(tr('Correction rejected'), type='info')
+                    ui.navigate.reload()
 
             with ui.row().classes('gap-2'):
-                async def approve_user(uid=user.get('id')):
-                    result = await api_call("POST", f"/admin/users/{uid}/approve")
-                    if "error" in result:
-                        ui.notify(result['error'], type='negative')
-                    else:
-                        ui.notify(tr('User approved'), type='positive')
-                        ui.navigate.reload()
-
-                async def reject_user(uid=user.get('id')):
-                    result = await api_call("POST", f"/admin/users/{uid}/reject")
-                    if "error" in result:
-                        ui.notify(result['error'], type='negative')
-                    else:
-                        ui.notify(tr('User rejected'), type='info')
-                        ui.navigate.reload()
-
-                ui.button(tr('Approve'), on_click=approve_user).props('color=positive')
-                ui.button(tr('Reject'), on_click=reject_user).props('flat color=negative')
+                ui.button(tr('Approve'), on_click=approve).props('color=positive')
+                ui.button(tr('Reject'), on_click=reject).props('flat color=negative')
 
 
 async def create_users_list_view():
@@ -233,13 +287,15 @@ async def create_stats_view():
     # Get various stats
     users_result = await api_call("GET", "/users/", {"limit": 1000})
     corrections_result = await api_call("GET", "/corrections/", {"limit": 1})
+    pending_result = await api_call("GET", "/corrections/pending")
 
     users = users_result if isinstance(users_result, list) else users_result.get('items', users_result.get('users', []))
+    pending_corrections = pending_result.get('items', []) if isinstance(pending_result, dict) else pending_result
 
     # Calculate stats
     total_users = len(users) if isinstance(users, list) else 0
-    pending_users = sum(1 for u in users if u.get('role') == 'pending') if isinstance(users, list) else 0
     editors = sum(1 for u in users if u.get('role') in ('editor', 'admin')) if isinstance(users, list) else 0
+    pending_count = len(pending_corrections) if isinstance(pending_corrections, list) else 0
 
     total_corrections = corrections_result.get('total', 0) if isinstance(corrections_result, dict) else 0
 
@@ -251,12 +307,12 @@ async def create_stats_view():
                 ui.label(str(total_users)).classes('text-3xl font-bold')
                 ui.label(tr('Total Users')).style('color: var(--text-secondary);')
 
-        # Pending stat card
+        # Pending corrections stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('hourglass_empty').classes('text-4xl').style('color: var(--accent-amber);')
-                ui.label(str(pending_users)).classes('text-3xl font-bold')
-                ui.label(tr('Pending Approval')).style('color: var(--text-secondary);')
+                ui.label(str(pending_count)).classes('text-3xl font-bold')
+                ui.label(tr('Pending Corrections')).style('color: var(--text-secondary);')
 
         # Editors stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
