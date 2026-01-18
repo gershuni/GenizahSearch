@@ -917,7 +917,7 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None):
     app.storage.user['current_page'] = '/browse'
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -925,7 +925,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page)
 
 @ui.page('/lists')
 def lists_page_route():

@@ -178,7 +178,7 @@ async def create_corrections_page():
 
                             # Link to browse page
                             def go_to_browse(sid=doc_id, pnum=page_num):
-                                ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+                                ui.navigate.to(f'/browse?sys_id={sid}&page={pnum}')
 
                             with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
                                 ui.label(f"{shelfmark}").classes('font-medium text-primary')
@@ -207,7 +207,7 @@ async def create_corrections_page():
                         with ui.row().classes('gap-1'):
                             # View in browse
                             def view_in_browse(sid=doc_id, pnum=page_num):
-                                ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+                                ui.navigate.to(f'/browse?sys_id={sid}&page={pnum}')
 
                             ui.button(icon='visibility', on_click=view_in_browse).props('flat round dense').tooltip(tr('View in Browse'))
 
@@ -344,7 +344,7 @@ async def create_corrections_page():
                             ui.icon('description').classes('text-lg').style('color: var(--primary-600);')
 
                             def go_to_browse(sid=doc_id, pnum=line_num):
-                                url = f'/browse?id={sid}'
+                                url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'
                                 ui.navigate.to(url)
@@ -370,7 +370,7 @@ async def create_corrections_page():
                         with ui.row().classes('gap-1'):
                             # View in browse
                             def view_in_browse(sid=doc_id, pnum=line_num):
-                                url = f'/browse?id={sid}'
+                                url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'
                                 ui.navigate.to(url)
@@ -472,7 +472,7 @@ async def create_corrections_page():
                             with ui.row().classes('w-full items-center justify-between'):
                                 with ui.row().classes('items-center gap-2'):
                                     def go_to_browse(sid=doc_id, pnum=page_num):
-                                        ui.navigate.to(f'/browse?id={sid}&page={pnum}')
+                                        ui.navigate.to(f'/browse?sys_id={sid}&page={pnum}')
 
                                     with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
                                         ui.label(f"{shelfmark}").classes('font-bold text-primary')

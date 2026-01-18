@@ -299,7 +299,9 @@ def create_edit_text_dialog(
                         # Submit to backend
                         result = await api_call("POST", "/corrections/", {
                             "document_id": document_id,
-                            "page_number": page_number,
+                            "system_id": document_id,
+                            "shelfmark": shelfmark if shelfmark else None,
+                            "line_number": page_number,
                             "original_text": original_text,
                             "corrected_text": text,
                             "correction_type": "text_correction",

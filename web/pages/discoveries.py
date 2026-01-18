@@ -256,7 +256,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             def go_to_doc(did=doc_id, pnum=page_num):
                                 if did:
-                                    url = f'/browse?id={did}'
+                                    url = f'/browse?sys_id={did}'
                                     if pnum:
                                         url += f'&page={pnum}'
                                     ui.navigate.to(url)
@@ -278,7 +278,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                                     def go_to_add_doc(did=add_doc_id, pnum=add_page):
                                         if did:
-                                            url = f'/browse?id={did}'
+                                            url = f'/browse?sys_id={did}'
                                             if pnum:
                                                 url += f'&page={pnum}'
                                             ui.navigate.to(url)
@@ -400,8 +400,16 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             ui.button(icon='delete', on_click=delete_correction_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete correction'))
 
-                # Title
-                ui.label(item.get('title', '')).classes('font-bold text-lg')
+                # Title - for corrections, generate localized title
+                if item_type == 'correction':
+                    corr_shelfmark = item.get('shelfmark') or item.get('document_id', '')
+                    corr_page = item.get('page_number')
+                    corr_title = f"{tr('Correction in')} {corr_shelfmark}"
+                    if corr_page:
+                        corr_title += f" ({tr('Image')} {corr_page})"
+                    ui.label(corr_title).classes('font-bold text-lg')
+                else:
+                    ui.label(item.get('title', '')).classes('font-bold text-lg')
 
                 # Full content in expansion (no truncation)
                 content = item.get('content_preview', '')
@@ -461,7 +469,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                     with ui.card().classes('p-2').style('background: var(--surface-secondary);'):
                                         def go_to_rel_doc(did=rel_doc_id):
                                             if did:
-                                                ui.navigate.to(f'/browse?id={did}')
+                                                ui.navigate.to(f'/browse?sys_id={did}')
 
                                         with ui.column().classes('gap-1'):
                                             with ui.row().classes('items-center gap-1'):
@@ -482,7 +490,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                     link_text += f" ({tr('Image')} {page_num})"
 
                                 def go_to_doc2(did=item.get('document_id'), pnum=page_num):
-                                    url = f'/browse?id={did}'
+                                    url = f'/browse?sys_id={did}'
                                     if pnum:
                                         url += f'&page={pnum}'
                                     ui.navigate.to(url)

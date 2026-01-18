@@ -307,7 +307,7 @@ class BrowseState:
         self.full_manuscript: List[DocumentPage] = []
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
     """Create the professional manuscript viewer page UI."""
     state = BrowseState()
     service = get_service()
@@ -1245,7 +1245,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = False
                 update_content()
         elif initial_sys_id:
-            load_page()
+            load_page(p_num=initial_page)
         else:
             # Try to restore previous position
             saved_position = app.storage.user.get('browse_position')

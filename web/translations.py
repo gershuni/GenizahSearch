@@ -780,6 +780,7 @@ TRANSLATIONS = {
     "more": "עוד",
     "Comments": "הערות",
     "Correction": "תיקון",
+    "Correction in": "תיקון ב-",
     "Contributors": "תורמים",
     "Community Hub": "מרכז קהילה",
     "Open Discoveries Center": "פתח מרכז חידושים",

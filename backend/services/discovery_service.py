@@ -377,8 +377,12 @@ class DiscoveryService:
                 corr_query = corr_query.filter(Correction.applied_at >= date_filter)
 
             for c in corr_query.all():
-                # Create a title from the correction
-                title = f"תיקון ב-{c.shelfmark or c.document_id}"
+                # Create a title from the correction - use shelfmark if available
+                display_name = c.shelfmark or c.document_id
+                page_num = c.line_number or c.page_number
+                title = f"תיקון ב-{display_name}"
+                if page_num:
+                    title += f" (תמונה {page_num})"
 
                 feed_items.append(FeedItem(
                     id=f"correction_{c.id}",
@@ -388,7 +392,7 @@ class DiscoveryService:
                     author=AuthorInfo.from_user(c.author, getattr(c, 'is_anonymous', False)),
                     document_id=c.document_id,
                     shelfmark=c.shelfmark,
-                    page_number=c.page_number,
+                    page_number=c.line_number or c.page_number,
                     created_at=c.applied_at or c.created_at,
                     response_count=len(c.comments) if c.comments else 0,
                     is_featured=False,

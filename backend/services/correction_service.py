@@ -71,11 +71,20 @@ class CorrectionService:
             db.refresh(existing)
             return existing, None
 
+        # Look up shelfmark from DocumentMetadata if not provided
+        shelfmark = data.shelfmark
+        if not shelfmark and doc_id:
+            doc_meta = db.query(DocumentMetadata).filter(
+                DocumentMetadata.document_id == doc_id
+            ).first()
+            if doc_meta and doc_meta.shelfmark:
+                shelfmark = doc_meta.shelfmark
+
         # Create new correction
         correction = Correction(
             document_id=data.document_id,
-            shelfmark=data.shelfmark,
-            system_id=data.system_id,
+            shelfmark=shelfmark,
+            system_id=data.system_id or data.document_id,
             author_id=user.id,
             original_text=data.original_text,
             corrected_text=data.corrected_text,
