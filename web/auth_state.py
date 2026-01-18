@@ -469,6 +469,7 @@ def create_auth_buttons():
                     ui.separator()
                     if GlobalAuthState.is_admin():
                         ui.menu_item(tr('Admin Panel'), lambda: ui.navigate.to('/admin'))
+                    ui.menu_item(tr('My Profile'), lambda: ui.navigate.to('/profile'))
                     ui.menu_item(tr('My Corrections'), lambda: ui.navigate.to('/corrections'))
                     ui.separator()
 

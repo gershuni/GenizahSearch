@@ -201,11 +201,31 @@ def create_user_row(user):
                         ui.notify(tr('Role updated'), type='positive')
                         ui.navigate.reload()
 
+                async def delete_user(uid=user.get('id'), uname=user.get('username')):
+                    with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
+                        ui.label(tr('Delete User?')).classes('text-lg font-bold')
+                        ui.label(f"{tr('Are you sure you want to delete')} {uname}?").classes('text-sm')
+                        ui.label(tr('This action cannot be undone.')).classes('text-sm text-red-500')
+                        with ui.row().classes('justify-end gap-2 mt-4'):
+                            ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+                            async def do_delete():
+                                result = await api_call("DELETE", f"/admin/users/{uid}")
+                                confirm_dialog.close()
+                                if "error" in result:
+                                    ui.notify(result.get('detail', result['error']), type='negative')
+                                else:
+                                    ui.notify(tr('User deleted'), type='positive')
+                                    ui.navigate.reload()
+                            ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                    confirm_dialog.open()
+
                 with ui.button(icon='more_vert').props('flat round dense'):
                     with ui.menu():
                         ui.menu_item(tr('Set as User'), lambda u=user: change_role(u.get('id'), 'user'))
                         ui.menu_item(tr('Set as Editor'), lambda u=user: change_role(u.get('id'), 'editor'))
                         ui.menu_item(tr('Set as Admin'), lambda u=user: change_role(u.get('id'), 'admin'))
+                        ui.separator()
+                        ui.menu_item(tr('Delete User'), lambda u=user: delete_user(u.get('id'), u.get('username'))).classes('text-red-500')
 
 
 async def create_stats_view():

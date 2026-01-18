@@ -814,6 +814,29 @@ TRANSLATIONS = {
     "Please login to view your corrections": "אנא התחבר כדי לצפות בתיקונים שלך",
     "Success": "הצלחה",
     "Please enter a response": "אנא הזן תגובה",
+
+    # Profile Page
+    "My Profile": "הפרופיל שלי",
+    "Edit your details and password": "ערוך את הפרטים והסיסמה שלך",
+    "Profile Details": "פרטי פרופיל",
+    "Please login to view your profile": "אנא התחבר כדי לצפות בפרופיל שלך",
+    "Profile updated": "הפרופיל עודכן",
+    "Bio": "אודות",
+    "Change Password": "שנה סיסמה",
+    "Current Password": "סיסמה נוכחית",
+    "New Password": "סיסמה חדשה",
+    "Confirm New Password": "אשר סיסמה חדשה",
+    "Please enter current password": "אנא הזן סיסמה נוכחית",
+    "Please enter new password": "אנא הזן סיסמה חדשה",
+    "Password must be at least 8 characters": "הסיסמה חייבת להכיל לפחות 8 תווים",
+    "Password changed successfully": "הסיסמה שונתה בהצלחה",
+    "Account Information": "מידע על החשבון",
+    "Member Since": "חבר מאז",
+
+    # Admin Panel - Delete User
+    "Delete User?": "למחוק משתמש?",
+    "User deleted": "המשתמש נמחק",
+    "Delete User": "מחק משתמש",
 }
 
 
