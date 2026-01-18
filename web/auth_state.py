@@ -327,7 +327,10 @@ async def do_login(email: str, password: str) -> Dict:
 async def do_register(email: str, username: str, password: str,
                       full_name: str = None, affiliation: str = None) -> Dict:
     """
-    Perform registration and update global auth state.
+    Perform registration and automatically log in.
+
+    The registration endpoint returns user info, not tokens.
+    After successful registration, we automatically log in.
 
     Returns:
         Success dict with user info or error dict
@@ -344,23 +347,9 @@ async def do_register(email: str, username: str, password: str,
     if "error" in result:
         return result
 
-    # Store tokens
-    token = result.get("access_token")
-    refresh_token = result.get("refresh_token")
-    if not token:
-        return {"error": "No token received"}
-
-    # Get user profile (set temporary auth to get headers)
-    GlobalAuthState.set_auth(token, {}, refresh_token)
-    profile = await api_call("GET", "/users/me")
-
-    if "error" in profile:
-        GlobalAuthState.clear_auth()
-        return profile
-
-    # Update with full user info (keep refresh token)
-    GlobalAuthState.set_auth(token, profile, refresh_token)
-    return {"success": True, "user": profile}
+    # Registration returns user info, not tokens
+    # Automatically log in after successful registration
+    return await do_login(email, password)
 
 
 def do_logout():
