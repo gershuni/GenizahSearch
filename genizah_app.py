@@ -7783,6 +7783,14 @@ class GenizahGUI(QMainWindow):
                            then fetch fresh data in background.
         """
         print("[DEBUG] _refresh_community_panels started", flush=True)
+
+        # Quick connectivity check to avoid long timeouts when offline
+        server_available = self.corrections_client.is_server_available()
+        print(f"[DEBUG] Server available: {server_available}", flush=True)
+
+        # If offline, only use cached data - skip all API calls
+        skip_api_calls = not server_available
+
         try:
             print("[DEBUG] Calling _update_community_header...", flush=True)
             self._update_community_header()
@@ -7791,7 +7799,7 @@ class GenizahGUI(QMainWindow):
             print(f"Error in _update_community_header: {e}", flush=True)
         try:
             print("[DEBUG] Calling _refresh_discoveries_panel...", flush=True)
-            self._refresh_discoveries_panel(use_cache_first)
+            self._refresh_discoveries_panel(use_cache_first, skip_api_calls=skip_api_calls)
             print("[DEBUG] _refresh_discoveries_panel completed", flush=True)
         except Exception as e:
             print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
@@ -7799,13 +7807,13 @@ class GenizahGUI(QMainWindow):
             traceback.print_exc()
         try:
             print("[DEBUG] Calling _refresh_corrections_panel...", flush=True)
-            self._refresh_corrections_panel(use_cache_first)
+            self._refresh_corrections_panel(use_cache_first, skip_api_calls=skip_api_calls)
             print("[DEBUG] _refresh_corrections_panel completed", flush=True)
         except Exception as e:
             print(f"Error in _refresh_corrections_panel: {e}", flush=True)
         try:
             print("[DEBUG] Calling _refresh_comments_panel...", flush=True)
-            self._refresh_comments_panel(use_cache_first)
+            self._refresh_comments_panel(use_cache_first, skip_api_calls=skip_api_calls)
             print("[DEBUG] _refresh_comments_panel completed", flush=True)
         except Exception as e:
             print(f"Error in _refresh_comments_panel: {e}", flush=True)
@@ -7823,7 +7831,7 @@ class GenizahGUI(QMainWindow):
             self.community_user_label.setText(f"👤 {tr('Not logged in')} - {tr('Login to participate in the community')}")
             self.community_register_btn.show()
 
-    def _refresh_discoveries_panel(self, use_cache_first=True):
+    def _refresh_discoveries_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the discoveries list panel."""
         self.discoveries_list.clear()
 
@@ -7832,6 +7840,13 @@ class GenizahGUI(QMainWindow):
         if cached:
             self._discoveries_cache_data = cached
             self._populate_discoveries_list(cached)
+
+        # Skip API calls if offline
+        if skip_api_calls:
+            if not cached:
+                item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+                self.discoveries_list.addItem(item)
+            return
 
         # Fetch fresh data from API
         try:
@@ -7943,7 +7958,7 @@ class GenizahGUI(QMainWindow):
                 item.setForeground(QColor(color))
             self.discoveries_list.addItem(item)
 
-    def _refresh_corrections_panel(self, use_cache_first=True):
+    def _refresh_corrections_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the corrections list panels."""
         self.my_corrections_list.clear()
         self.all_corrections_list.clear()
@@ -7955,32 +7970,40 @@ class GenizahGUI(QMainWindow):
             if cached_my:
                 self._populate_my_corrections_list(cached_my)
 
-            try:
-                corrections, total = self.corrections_client.get_my_corrections(page_size=20)
-                cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'status': c.status, 'corrected_text': c.corrected_text, 'page_number': c.page_number} for c in corrections]
-                self.corrections_client.set_cached_data('my_corrections', cache_data)
-                self.my_corrections_list.clear()
-                self._populate_my_corrections_list(cache_data)
-            except Exception as e:
-                if not cached_my:
-                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
-                    self.my_corrections_list.addItem(item)
+            if not skip_api_calls:
+                try:
+                    corrections, total = self.corrections_client.get_my_corrections(page_size=20)
+                    cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'status': c.status, 'corrected_text': c.corrected_text, 'page_number': c.page_number} for c in corrections]
+                    self.corrections_client.set_cached_data('my_corrections', cache_data)
+                    self.my_corrections_list.clear()
+                    self._populate_my_corrections_list(cache_data)
+                except Exception as e:
+                    if not cached_my:
+                        item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                        self.my_corrections_list.addItem(item)
+            elif not cached_my:
+                item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+                self.my_corrections_list.addItem(item)
 
         # All corrections
         cached_all = self.corrections_client.get_cached_data('all_corrections') if use_cache_first else None
         if cached_all:
             self._populate_all_corrections_list(cached_all)
 
-        try:
-            corrections, total = self.corrections_client.search_corrections(page_size=20)
-            cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'page_number': c.page_number} for c in corrections]
-            self.corrections_client.set_cached_data('all_corrections', cache_data)
-            self.all_corrections_list.clear()
-            self._populate_all_corrections_list(cache_data)
-        except Exception as e:
-            if not cached_all:
-                item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
-                self.all_corrections_list.addItem(item)
+        if not skip_api_calls:
+            try:
+                corrections, total = self.corrections_client.search_corrections(page_size=20)
+                cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'page_number': c.page_number} for c in corrections]
+                self.corrections_client.set_cached_data('all_corrections', cache_data)
+                self.all_corrections_list.clear()
+                self._populate_all_corrections_list(cache_data)
+            except Exception as e:
+                if not cached_all:
+                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                    self.all_corrections_list.addItem(item)
+        elif not cached_all:
+            item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+            self.all_corrections_list.addItem(item)
 
     def _populate_my_corrections_list(self, corrections_data):
         """Populate my corrections list from data (only latest per document)."""
@@ -8053,7 +8076,7 @@ class GenizahGUI(QMainWindow):
             })
             self.all_corrections_list.addItem(item)
 
-    def _refresh_comments_panel(self, use_cache_first=True):
+    def _refresh_comments_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the comments list panels (My Comments + All Comments)."""
         print("[DEBUG] _refresh_comments_panel started", flush=True)
         self.my_comments_list.clear()
@@ -8066,18 +8089,22 @@ class GenizahGUI(QMainWindow):
                 print(f"[DEBUG] Using cached my comments: {len(cached_my)} items", flush=True)
                 self._populate_comments_list(cached_my, self.my_comments_list)
 
-            try:
-                comments, total = self.corrections_client.get_my_comments(page_size=20)
-                print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
-                cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
-                self.corrections_client.set_cached_data('my_comments', cache_data)
-                self.my_comments_list.clear()
-                self._populate_comments_list(cache_data, self.my_comments_list)
-            except Exception as e:
-                print(f"[DEBUG] Error fetching my comments: {e}", flush=True)
-                if not cached_my:
-                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
-                    self.my_comments_list.addItem(item)
+            if not skip_api_calls:
+                try:
+                    comments, total = self.corrections_client.get_my_comments(page_size=20)
+                    print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
+                    cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
+                    self.corrections_client.set_cached_data('my_comments', cache_data)
+                    self.my_comments_list.clear()
+                    self._populate_comments_list(cache_data, self.my_comments_list)
+                except Exception as e:
+                    print(f"[DEBUG] Error fetching my comments: {e}", flush=True)
+                    if not cached_my:
+                        item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                        self.my_comments_list.addItem(item)
+            elif not cached_my:
+                item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+                self.my_comments_list.addItem(item)
         else:
             item = QListWidgetItem(f"ℹ️ {tr('Login to see your comments')}")
             self.my_comments_list.addItem(item)
@@ -8087,18 +8114,22 @@ class GenizahGUI(QMainWindow):
         if cached_all:
             self._populate_comments_list(cached_all, self.all_comments_list, show_author=True)
 
-        try:
-            comments, total = self.corrections_client.get_all_comments(page_size=20)
-            print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
-            cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
-            self.corrections_client.set_cached_data('all_comments', cache_data)
-            self.all_comments_list.clear()
-            self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
-        except Exception as e:
-            print(f"[DEBUG] Error fetching all comments: {e}", flush=True)
-            if not cached_all:
-                item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
-                self.all_comments_list.addItem(item)
+        if not skip_api_calls:
+            try:
+                comments, total = self.corrections_client.get_all_comments(page_size=20)
+                print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
+                cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
+                self.corrections_client.set_cached_data('all_comments', cache_data)
+                self.all_comments_list.clear()
+                self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
+            except Exception as e:
+                print(f"[DEBUG] Error fetching all comments: {e}", flush=True)
+                if not cached_all:
+                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                    self.all_comments_list.addItem(item)
+        elif not cached_all:
+            item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+            self.all_comments_list.addItem(item)
 
         print("[DEBUG] Comments panel refresh completed", flush=True)
 

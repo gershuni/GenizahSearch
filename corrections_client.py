@@ -173,6 +173,11 @@ class CorrectionsClient:
         self._cache: Dict[str, Any] = {}
         self._cache_loaded = False
 
+        # Offline mode tracking
+        self._is_offline = False
+        self._last_connectivity_check = 0
+        self._connectivity_check_interval = 30  # seconds between checks
+
         # Setup session with retries
         self.session = requests.Session()
         retries = Retry(
@@ -187,27 +192,52 @@ class CorrectionsClient:
         self._load_credentials()
 
     def _load_credentials(self):
-        """Load saved credentials from disk and validate"""
+        """Load saved credentials from disk (no network calls at startup)"""
         if self.credentials_file.exists():
             try:
                 with open(self.credentials_file, 'r') as f:
                     data = json.load(f)
                     self.access_token = data.get('access_token')
                     self.refresh_token = data.get('refresh_token')
-                # Validate token and load user info
-                if self.access_token:
-                    self.get_current_user()
+                    # Load cached user data if available (no network call)
+                    cached_user = data.get('cached_user')
+                    if cached_user and self.access_token:
+                        self.current_user = User(
+                            id=cached_user.get('id', 0),
+                            email=cached_user.get('email', ''),
+                            username=cached_user.get('username', ''),
+                            full_name=cached_user.get('full_name'),
+                            affiliation=cached_user.get('affiliation'),
+                            role=cached_user.get('role', 'contributor'),
+                            reputation_score=cached_user.get('reputation_score', 0),
+                            contribution_count=cached_user.get('contribution_count', 0),
+                            approved_corrections_count=cached_user.get('approved_corrections_count', 0)
+                        )
             except Exception as e:
                 logger.warning(f"Failed to load credentials: {e}")
 
     def _save_credentials(self):
-        """Save credentials to disk"""
+        """Save credentials and cached user data to disk"""
         try:
+            data = {
+                'access_token': self.access_token,
+                'refresh_token': self.refresh_token
+            }
+            # Cache user data for offline startup
+            if self.current_user:
+                data['cached_user'] = {
+                    'id': self.current_user.id,
+                    'email': self.current_user.email,
+                    'username': self.current_user.username,
+                    'full_name': self.current_user.full_name,
+                    'affiliation': self.current_user.affiliation,
+                    'role': self.current_user.role,
+                    'reputation_score': self.current_user.reputation_score,
+                    'contribution_count': self.current_user.contribution_count,
+                    'approved_corrections_count': self.current_user.approved_corrections_count
+                }
             with open(self.credentials_file, 'w') as f:
-                json.dump({
-                    'access_token': self.access_token,
-                    'refresh_token': self.refresh_token
-                }, f)
+                json.dump(data, f)
         except Exception as e:
             logger.warning(f"Failed to save credentials: {e}")
 
@@ -251,6 +281,54 @@ class CorrectionsClient:
                 self.cache_file.unlink()
             except:
                 pass
+
+    def is_server_available(self, force_check: bool = False) -> bool:
+        """
+        Quick check if the corrections server is available.
+
+        Uses a fast socket connection test (not HTTP) for near-instant failure detection.
+        Uses a cached result to avoid repeated checks.
+        Set force_check=True to bypass the cache.
+
+        Returns:
+            True if server is reachable, False otherwise
+        """
+        import time
+        import socket
+        from urllib.parse import urlparse
+
+        current_time = time.time()
+
+        # Return cached result if within check interval (unless force_check)
+        if not force_check and (current_time - self._last_connectivity_check) < self._connectivity_check_interval:
+            return not self._is_offline
+
+        self._last_connectivity_check = current_time
+
+        # Parse host and port from base_url
+        try:
+            parsed = urlparse(self.base_url)
+            host = parsed.hostname or 'localhost'
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        except Exception:
+            host, port = 'localhost', 8000
+
+        # Fast socket connection test - fails almost instantly if no server
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)  # 500ms timeout - very fast
+            result = sock.connect_ex((host, port))
+            sock.close()
+            self._is_offline = (result != 0)
+        except Exception:
+            self._is_offline = True
+
+        return not self._is_offline
+
+    def reset_offline_status(self):
+        """Reset offline status to force a fresh connectivity check."""
+        self._last_connectivity_check = 0
+        self._is_offline = False
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with authentication"""
@@ -364,7 +442,7 @@ class CorrectionsClient:
                 data = response.json()
                 self.access_token = data['access_token']
                 self.refresh_token = data.get('refresh_token')
-                self._save_credentials()
+                # get_current_user will also save credentials with user data
                 self.get_current_user()
                 return True, "Login successful"
             else:
@@ -419,10 +497,18 @@ class CorrectionsClient:
         if self.credentials_file.exists():
             self.credentials_file.unlink()
 
-    def get_current_user(self) -> Optional[User]:
-        """Get current logged-in user"""
+    def get_current_user(self, skip_if_cached: bool = False) -> Optional[User]:
+        """Get current logged-in user.
+
+        Args:
+            skip_if_cached: If True, return cached user without network call
+        """
         if not self.access_token:
             return None
+
+        # Return cached user if requested and available
+        if skip_if_cached and self.current_user:
+            return self.current_user
 
         try:
             data = self._request('GET', '/auth/me')
@@ -437,10 +523,12 @@ class CorrectionsClient:
                 contribution_count=data.get('contribution_count', 0),
                 approved_corrections_count=data.get('approved_corrections_count', 0)
             )
+            # Cache user data for offline use
+            self._save_credentials()
             return self.current_user
         except Exception as e:
             logger.warning(f"Failed to get current user: {e}")
-            return None
+            return self.current_user  # Return cached user if available
 
     # ==================== Corrections ====================
 
