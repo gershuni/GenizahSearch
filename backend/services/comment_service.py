@@ -61,6 +61,7 @@ class CommentService:
             line_number=data.line_number,
             char_start=data.char_start,
             char_end=data.char_end,
+            page_number=data.page_number,  # Page/image number in manuscript
             is_public=data.is_public
         )
 

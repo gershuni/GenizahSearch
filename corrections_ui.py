@@ -28,6 +28,17 @@ from corrections_client import (
     User, Correction, Comment, Discovery, DiscoveryResponse, FeedItem
 )
 
+
+def safe_date_str(date_value, default: str = "") -> str:
+    """Safely extract date string (YYYY-MM-DD) from various formats."""
+    if not date_value:
+        return default
+    if isinstance(date_value, datetime):
+        return date_value.strftime("%Y-%m-%d")
+    if isinstance(date_value, str) and len(date_value) >= 10:
+        return date_value[:10]
+    return str(date_value) if date_value else default
+
 logger = logging.getLogger(__name__)
 
 
@@ -235,7 +246,7 @@ class CorrectionSubmitDialog(QDialog):
         original_text: str = None,
         shelfmark: str = None,
         system_id: str = None,
-        line_number: int = None,
+        page_number: int = None,
         context_before: str = None,
         context_after: str = None
     ):
@@ -245,7 +256,7 @@ class CorrectionSubmitDialog(QDialog):
         self.original_text = original_text or ""
         self.shelfmark = shelfmark
         self.system_id = system_id
-        self.line_number = line_number
+        self.page_number = page_number
         self.context_before = context_before
         self.context_after = context_after
 
@@ -313,8 +324,8 @@ class CorrectionSubmitDialog(QDialog):
         self.confidence_spin.setSuffix("")
         options.addWidget(self.confidence_spin)
 
-        if self.line_number:
-            options.addWidget(QLabel(f"{tr('Line')}: {self.line_number}"))
+        if self.page_number:
+            options.addWidget(QLabel(f"{tr('Image')}: {self.page_number}"))
 
         options.addStretch()
         layout.addLayout(options)
@@ -399,7 +410,7 @@ class CorrectionSubmitDialog(QDialog):
             original_text=original,
             corrected_text=corrected,
             correction_type=self.type_values[self.type_combo.currentIndex()],
-            line_number=self.line_number,
+            page_number=self.page_number,
             confidence_score=self.confidence_spin.value(),
             source_reference=self.source_edit.text().strip() or None,
             notes=self.notes_edit.toPlainText().strip() or None,
@@ -536,7 +547,7 @@ class CorrectionsViewerDialog(QDialog):
                 score_item.setForeground(QColor('#e74c3c'))
             self.table.setItem(row, 4, score_item)
 
-            date_str = correction.created_at[:10] if correction.created_at else ""
+            date_str = safe_date_str(correction.created_at)
             self.table.setItem(row, 5, QTableWidgetItem(date_str))
 
             # Store correction ID
@@ -747,7 +758,8 @@ class CorrectionsStatusWidget(QWidget):
             self.login_btn.setText(tr("Login"))
             try:
                 self.login_btn.clicked.disconnect()
-            except:
+            except (TypeError, RuntimeError):
+                # Signal was not connected or already disconnected
                 pass
             self.login_btn.clicked.connect(self.show_login)
 
@@ -843,7 +855,7 @@ class MyCorrectionsDialog(QDialog):
             self.table.setItem(row, 4, QTableWidgetItem(str(score)))
 
             # Date
-            date_str = correction.created_at[:10] if correction.created_at else ""
+            date_str = safe_date_str(correction.created_at)
             self.table.setItem(row, 5, QTableWidgetItem(date_str))
 
             # Actions - placeholder
@@ -1005,7 +1017,7 @@ class AllCorrectionsDialog(QDialog):
             self.table.setItem(row, 6, score_item)
 
             # Date
-            date_str = correction.created_at[:10] if correction.created_at else ""
+            date_str = safe_date_str(correction.created_at)
             self.table.setItem(row, 7, QTableWidgetItem(date_str))
 
             # Store data
@@ -1258,7 +1270,7 @@ class DiscoveriesDialog(QDialog):
 
         # Date
         if item.created_at:
-            date_label = QLabel(item.created_at[:10])
+            date_label = QLabel(safe_date_str(item.created_at))
             date_label.setStyleSheet("color: gray; font-size: 10px;")
             header_layout.addWidget(date_label)
 
@@ -1474,7 +1486,7 @@ class DiscoveryDetailDialog(QDialog):
         meta_layout.addWidget(QLabel(f"{tr('Author')}: {author_name}"))
 
         if d.created_at:
-            meta_layout.addWidget(QLabel(f"{tr('Date')}: {d.created_at[:10]}"))
+            meta_layout.addWidget(QLabel(f"{tr('Date')}: {safe_date_str(d.created_at)}"))
 
         meta_layout.addStretch()
         layout.addLayout(meta_layout)
@@ -1640,7 +1652,7 @@ class DiscoveryDetailDialog(QDialog):
             header.addWidget(author_label)
 
             if resp.created_at:
-                date_label = QLabel(resp.created_at[:10])
+                date_label = QLabel(safe_date_str(resp.created_at))
                 date_label.setStyleSheet("color: gray; font-size: 10px;")
                 header.addWidget(date_label)
 
@@ -2383,7 +2395,7 @@ class CommentDialog(QDialog):
             document_id=self.document_id,
             correction_id=self.correction_id,
             comment_type=comment_type,
-            line_number=self.page_number,
+            page_number=self.page_number,
             is_public=self.public_check.isChecked(),
             is_anonymous=self.anonymous_check.isChecked()
         )
@@ -2530,7 +2542,7 @@ class CommentsViewerDialog(QDialog):
 
         # Date
         if comment.created_at:
-            date_label = QLabel(comment.created_at[:10])
+            date_label = QLabel(safe_date_str(comment.created_at))
             secondary_color = palette.color(QPalette.ColorRole.PlaceholderText).name()
             date_label.setStyleSheet(f"color: {secondary_color}; font-size: 10px;")
             header_layout.addWidget(date_label)
@@ -2725,7 +2737,7 @@ class MyCommentsDialog(QDialog):
 
             # Date
             if comment.created_at:
-                date_label = QLabel(comment.created_at[:10])
+                date_label = QLabel(safe_date_str(comment.created_at))
                 secondary_color = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
                 date_label.setStyleSheet(f"color: {secondary_color}; font-size: 10px;")
                 header_layout.addWidget(date_label)

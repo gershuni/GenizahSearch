@@ -13,8 +13,35 @@ import asyncio
 from nicegui import ui, app, run
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
+from web.state import state
 from typing import Optional
 from datetime import datetime
+
+
+def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
+    """
+    Resolve a document ID to its shelfmark and title.
+
+    Args:
+        doc_id: The document system ID
+        shelfmark: Optional existing shelfmark (used if available)
+
+    Returns:
+        Tuple of (display_shelfmark, title)
+    """
+    # If we already have a shelfmark, use it
+    if shelfmark:
+        return shelfmark, ''
+
+    # Try to look up from metadata
+    if doc_id and state.meta_mgr:
+        try:
+            sh, title = state.meta_mgr.get_meta_for_id(doc_id)
+            return sh or doc_id, title or ''
+        except:
+            pass
+
+    return doc_id or '', ''
 
 
 async def create_discoveries_page():
@@ -87,9 +114,12 @@ async def create_discoveries_page():
                     on_refresh=refresh_feed
                 )
 
-        # Bind filter changes
-        type_filter.on('update:model-value', lambda: refresh_feed())
-        period_filter.on('update:model-value', lambda: refresh_feed())
+        # Bind filter changes - use async handler for proper await
+        async def on_filter_change():
+            await refresh_feed()
+
+        type_filter.on('update:model-value', on_filter_change)
+        period_filter.on('update:model-value', on_filter_change)
 
         # Initial load
         with feed_container:
@@ -248,9 +278,12 @@ def create_feed_item(item: dict, on_refresh=None):
                         doc_id = item.get('document_id')
                         additional_shelfmarks = item.get('additional_shelfmarks', []) or []
 
+                        # Resolve shelfmark from document_id if needed
+                        display_shelfmark, _ = resolve_shelfmark(doc_id, shelfmark)
+
                         # Primary shelfmark
-                        if shelfmark or doc_id:
-                            link_text = shelfmark or doc_id
+                        if display_shelfmark:
+                            link_text = display_shelfmark
                             if page_num:
                                 link_text += f" • {tr('Image')} {page_num}"
 
@@ -271,8 +304,11 @@ def create_feed_item(item: dict, on_refresh=None):
                                 add_doc_id = add_sm.get('document_id')
                                 add_page = add_sm.get('page_number')
 
-                                if add_shelfmark or add_doc_id:
-                                    add_link_text = add_shelfmark or add_doc_id
+                                # Resolve shelfmark from document_id if needed
+                                add_display_shelfmark, _ = resolve_shelfmark(add_doc_id, add_shelfmark)
+
+                                if add_display_shelfmark:
+                                    add_link_text = add_display_shelfmark
                                     if add_page:
                                         add_link_text += f" • {tr('Image')} {add_page}"
 
@@ -402,7 +438,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                 # Title - for corrections, generate localized title
                 if item_type == 'correction':
-                    corr_shelfmark = item.get('shelfmark') or item.get('document_id', '')
+                    corr_shelfmark, _ = resolve_shelfmark(item.get('document_id'), item.get('shelfmark'))
                     corr_page = item.get('page_number')
                     corr_title = f"{tr('Correction in')} {corr_shelfmark}"
                     if corr_page:
@@ -466,6 +502,9 @@ def create_feed_item(item: dict, on_refresh=None):
                                     rel_type = rel.get('relationship_type', 'related')
                                     rel_notes = rel.get('notes', '')
 
+                                    # Resolve shelfmark
+                                    rel_display_shelfmark, _ = resolve_shelfmark(rel_doc_id, rel_shelfmark)
+
                                     with ui.card().classes('p-2').style('background: var(--surface-secondary);'):
                                         def go_to_rel_doc(did=rel_doc_id):
                                             if did:
@@ -475,7 +514,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                             with ui.row().classes('items-center gap-1'):
                                                 ui.badge(relationship_labels.get(rel_type, rel_type)).props('color=grey').classes('text-xs')
                                                 with ui.element('a').classes('cursor-pointer hover:underline text-sm font-mono').style('color: var(--primary-600);').on('click', go_to_rel_doc):
-                                                    ui.label(rel_shelfmark or rel_doc_id)
+                                                    ui.label(rel_display_shelfmark)
                                             if rel_notes:
                                                 ui.label(rel_notes).classes('text-xs').style('color: var(--text-tertiary);')
 
@@ -483,9 +522,9 @@ def create_feed_item(item: dict, on_refresh=None):
                         if item.get('document_id'):
                             with ui.row().classes('items-center gap-2'):
                                 ui.icon('link', size='sm')
-                                shelfmark = item.get('shelfmark') or item.get('document_id', '')
+                                doc_shelfmark, _ = resolve_shelfmark(item.get('document_id'), item.get('shelfmark'))
                                 page_num = item.get('page_number')
-                                link_text = f"{tr('View document')}: {shelfmark}"
+                                link_text = f"{tr('View document')}: {doc_shelfmark}"
                                 if page_num:
                                     link_text += f" ({tr('Image')} {page_num})"
 

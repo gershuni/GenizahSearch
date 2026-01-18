@@ -200,8 +200,47 @@ async def create_corrections_page():
                         if corr.get('notes'):
                             ui.label(f"{tr('Notes')}: {corr['notes']}").classes('text-sm').style('color: var(--text-secondary);')
 
-                    # Right side - date and actions
+                    # Right side - votes, date and actions
                     with ui.column().classes('items-end gap-2'):
+                        # Voting section
+                        upvotes = corr.get('upvotes', 0)
+                        downvotes = corr.get('downvotes', 0)
+                        user_vote = corr.get('user_vote')  # 1, -1, or None
+                        corr_id = corr.get('id')
+
+                        with ui.row().classes('items-center gap-1'):
+                            async def do_vote(vote_val: int, cid=corr_id):
+                                result = await api_call("POST", f"/corrections/{cid}/vote", {
+                                    "vote_value": vote_val
+                                })
+                                if "error" in result:
+                                    ui.notify(result.get("detail", result["error"]), type='negative')
+                                else:
+                                    ui.notify(tr('Vote recorded'), type='positive')
+                                    await refresh_page()
+
+                            async def upvote(cid=corr_id):
+                                await do_vote(1, cid)
+
+                            async def downvote(cid=corr_id):
+                                await do_vote(-1, cid)
+
+                            # Upvote button
+                            upvote_btn = ui.button(icon='thumb_up', on_click=upvote).props('flat round dense size=sm')
+                            if user_vote == 1:
+                                upvote_btn.props('color=primary')
+                            upvote_btn.tooltip(tr('Upvote'))
+
+                            ui.label(str(upvotes)).classes('text-sm min-w-[20px] text-center').style('color: var(--success);')
+
+                            # Downvote button
+                            downvote_btn = ui.button(icon='thumb_down', on_click=downvote).props('flat round dense size=sm')
+                            if user_vote == -1:
+                                downvote_btn.props('color=negative')
+                            downvote_btn.tooltip(tr('Downvote'))
+
+                            ui.label(str(downvotes)).classes('text-sm min-w-[20px] text-center').style('color: var(--danger);')
+
                         ui.label(corr.get('created_at', '')[:10]).classes('text-sm').style('color: var(--text-tertiary);')
 
                         with ui.row().classes('gap-1'):
@@ -332,7 +371,7 @@ async def create_corrections_page():
         async def create_comment_card(comment: dict):
             """Create a card for a single comment."""
             doc_id = comment.get('document_id', 'Unknown')
-            line_num = comment.get('line_number')  # Used as page number
+            page_num = comment.get('page_number')  # Page/image number in manuscript
 
             shelfmark, title = get_shelfmark_for_id(doc_id)
 
@@ -343,7 +382,7 @@ async def create_corrections_page():
                         with ui.row().classes('items-center gap-2'):
                             ui.icon('description').classes('text-lg').style('color: var(--primary-600);')
 
-                            def go_to_browse(sid=doc_id, pnum=line_num):
+                            def go_to_browse(sid=doc_id, pnum=page_num):
                                 url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'
@@ -351,8 +390,8 @@ async def create_corrections_page():
 
                             with ui.element('a').classes('cursor-pointer hover:underline').on('click', go_to_browse):
                                 ui.label(f"{shelfmark}").classes('font-medium text-primary')
-                                if line_num:
-                                    ui.label(f" • {tr('Image')} {line_num}").classes('text-sm').style('color: var(--text-secondary);')
+                                if page_num:
+                                    ui.label(f" • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
 
                         # Comment content
                         ui.label(comment.get('content', '')).classes('text-sm whitespace-pre-wrap').style(
@@ -369,7 +408,7 @@ async def create_corrections_page():
 
                         with ui.row().classes('gap-1'):
                             # View in browse
-                            def view_in_browse(sid=doc_id, pnum=line_num):
+                            def view_in_browse(sid=doc_id, pnum=page_num):
                                 url = f'/browse?sys_id={sid}'
                                 if pnum:
                                     url += f'&page={pnum}'
@@ -479,7 +518,22 @@ async def create_corrections_page():
                                         if page_num:
                                             ui.label(f" • {tr('Image')} {page_num}").classes('text-sm')
 
-                                ui.label(f"by {corr.get('author', {}).get('username', 'Unknown')}").style('color: var(--text-secondary);')
+                                with ui.row().classes('items-center gap-3'):
+                                    ui.label(f"by {corr.get('author', {}).get('username', 'Unknown')}").style('color: var(--text-secondary);')
+
+                                    # Vote display for reviewers
+                                    upvotes = corr.get('upvotes', 0)
+                                    downvotes = corr.get('downvotes', 0)
+                                    vote_score = corr.get('vote_score', upvotes - downvotes)
+
+                                    with ui.row().classes('items-center gap-1 ml-4'):
+                                        ui.icon('thumb_up').classes('text-sm').style('color: var(--success);')
+                                        ui.label(str(upvotes)).classes('text-sm').style('color: var(--success);')
+                                        ui.icon('thumb_down').classes('text-sm ml-2').style('color: var(--danger);')
+                                        ui.label(str(downvotes)).classes('text-sm').style('color: var(--danger);')
+                                        if vote_score != 0:
+                                            score_color = 'var(--success)' if vote_score > 0 else 'var(--danger)'
+                                            ui.label(f"({'+' if vote_score > 0 else ''}{vote_score})").classes('text-sm ml-2').style(f'color: {score_color};')
 
                             with ui.row().classes('w-full gap-4'):
                                 with ui.column().classes('flex-1'):
@@ -498,7 +552,7 @@ async def create_corrections_page():
                             async def approve(c=corr, notes=review_notes):
                                 result = await api_call("POST", f"/corrections/{c['id']}/review", {
                                     "action": "approve",
-                                    "notes": notes.value or None
+                                    "review_notes": notes.value or None
                                 })
                                 if "error" in result:
                                     ui.notify(result.get("detail", result["error"]), type='negative')
@@ -507,9 +561,10 @@ async def create_corrections_page():
                                     await refresh_page()
 
                             async def reject(c=corr, notes=review_notes):
+                                rejection_text = notes.value or tr('Rejected by reviewer')
                                 result = await api_call("POST", f"/corrections/{c['id']}/review", {
                                     "action": "reject",
-                                    "notes": notes.value or None
+                                    "rejection_reason": rejection_text
                                 })
                                 if "error" in result:
                                     ui.notify(result.get("detail", result["error"]), type='negative')

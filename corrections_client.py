@@ -41,9 +41,10 @@ class Correction:
     correction_type: str = "text_correction"
     author_id: Optional[int] = None
     author_username: Optional[str] = None
-    line_number: Optional[int] = None
+    line_number: Optional[int] = None  # Line within text (for inline corrections)
     char_start: Optional[int] = None
     char_end: Optional[int] = None
+    page_number: Optional[int] = None  # Page/image number in manuscript
     confidence_score: float = 0.8
     source_reference: Optional[str] = None
     notes: Optional[str] = None
@@ -70,7 +71,8 @@ class Comment:
     is_public: bool = True
     is_anonymous: bool = False
     reply_count: int = 0
-    line_number: Optional[int] = None
+    line_number: Optional[int] = None  # Line within text (for inline comments)
+    page_number: Optional[int] = None  # Page/image number in manuscript
 
 
 @dataclass
@@ -451,6 +453,7 @@ class CorrectionsClient:
         line_number: int = None,
         char_start: int = None,
         char_end: int = None,
+        page_number: int = None,
         confidence_score: float = None,
         source_reference: str = None,
         notes: str = None,
@@ -481,6 +484,8 @@ class CorrectionsClient:
                 payload['char_start'] = char_start
             if char_end is not None:
                 payload['char_end'] = char_end
+            if page_number is not None:
+                payload['page_number'] = page_number
             if confidence_score is not None:
                 payload['confidence_score'] = confidence_score
             if source_reference:
@@ -618,6 +623,7 @@ class CorrectionsClient:
             line_number=data.get('line_number'),
             char_start=data.get('char_start'),
             char_end=data.get('char_end'),
+            page_number=data.get('page_number'),
             confidence_score=data.get('confidence_score', 0.8),
             source_reference=data.get('source_reference'),
             notes=data.get('notes'),
@@ -638,6 +644,7 @@ class CorrectionsClient:
         parent_id: int = None,
         comment_type: str = "general",
         line_number: int = None,
+        page_number: int = None,
         is_public: bool = True,
         is_anonymous: bool = False
     ) -> Tuple[Optional[Comment], str]:
@@ -650,6 +657,7 @@ class CorrectionsClient:
                 'parent_id': parent_id,
                 'comment_type': comment_type,
                 'line_number': line_number,
+                'page_number': page_number,
                 'is_public': is_public,
                 'is_anonymous': is_anonymous
             })
@@ -712,7 +720,8 @@ class CorrectionsClient:
             is_public=data.get('is_public', True),
             is_anonymous=data.get('is_anonymous', False),
             reply_count=data.get('reply_count', 0),
-            line_number=data.get('line_number')
+            line_number=data.get('line_number'),
+            page_number=data.get('page_number')
         )
 
     def get_my_comments(

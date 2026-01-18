@@ -45,18 +45,30 @@ class CorrectionService:
 
         # Check for existing correction by this user for this document/page
         # Enforce one version per user per image rule
-        doc_id = data.document_id or data.system_id
-        page_num = data.page_number or 1
+        # Normalize document identifiers - use system_id as primary, fall back to document_id
+        doc_id = data.system_id or data.document_id
+        if not doc_id:
+            return None, "Document ID or System ID is required"
 
-        existing = db.query(Correction).filter(
+        page_num = data.page_number  # Keep as None if not provided
+
+        # Build query for existing correction
+        existing_query = db.query(Correction).filter(
             Correction.author_id == user.id,
             or_(
                 Correction.document_id == doc_id,
                 Correction.system_id == doc_id
             ),
-            Correction.page_number == page_num,
             Correction.status.in_([CorrectionStatus.DRAFT, CorrectionStatus.PENDING, CorrectionStatus.APPROVED])
-        ).first()
+        )
+
+        # Handle page_number matching - if None, match corrections with NULL page_number
+        if page_num is not None:
+            existing_query = existing_query.filter(Correction.page_number == page_num)
+        else:
+            existing_query = existing_query.filter(Correction.page_number.is_(None))
+
+        existing = existing_query.first()
 
         if existing:
             # Update existing correction instead of creating new one
@@ -81,10 +93,11 @@ class CorrectionService:
                 shelfmark = doc_meta.shelfmark
 
         # Create new correction
+        # Ensure both document_id and system_id are set consistently
         correction = Correction(
-            document_id=data.document_id,
+            document_id=doc_id,  # Use normalized doc_id
             shelfmark=shelfmark,
-            system_id=data.system_id or data.document_id,
+            system_id=doc_id,   # Same as document_id for consistency
             author_id=user.id,
             original_text=data.original_text,
             corrected_text=data.corrected_text,
@@ -117,7 +130,7 @@ class CorrectionService:
             user_id=user.id,
             target_type='correction',
             target_id=str(correction.id),
-            description=f"Created correction for document {data.document_id}",
+            description=f"Created correction for document {doc_id}",
             ip_address=ip_address
         )
 

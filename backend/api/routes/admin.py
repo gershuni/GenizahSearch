@@ -110,6 +110,48 @@ async def reject_user(
     )
 
 
+@router.delete("/users/{user_id}", response_model=SuccessResponse)
+async def delete_user(
+    user_id: int,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a user account permanently.
+
+    Admin only. Cannot delete yourself or other admins.
+    """
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account"
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if user.role == UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete admin users"
+        )
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+
+    return SuccessResponse(
+        success=True,
+        message=f"User {username} deleted successfully"
+    )
+
+
 @router.get("/stats/overview")
 async def get_admin_stats(
     current_user: User = Depends(require_admin),

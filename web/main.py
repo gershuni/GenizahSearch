@@ -993,6 +993,17 @@ async def admin_page_route():
         from web.pages.admin import create_admin_page
         await create_admin_page()
 
+@ui.page('/profile')
+async def profile_page_route():
+    app.storage.user['current_page'] = '/profile'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.profile import create_profile_page
+        await create_profile_page()
+
 # ============================================================================
 # Startup Logic
 # ============================================================================

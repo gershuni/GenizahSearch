@@ -20,9 +20,10 @@ class CommentBase(BaseModel):
     """Base comment fields"""
     content: str = Field(..., min_length=1, max_length=10000)
     comment_type: CommentTypeEnum = CommentTypeEnum.GENERAL
-    line_number: Optional[int] = Field(None, ge=1)
+    line_number: Optional[int] = Field(None, ge=1)  # Line within text (for inline comments)
     char_start: Optional[int] = Field(None, ge=0)
     char_end: Optional[int] = Field(None, ge=0)
+    page_number: Optional[int] = Field(None, ge=1)  # Page/image number in manuscript
 
 
 class CommentCreate(CommentBase):
@@ -67,9 +68,10 @@ class CommentResponse(BaseModel):
     content: str
     comment_type: CommentTypeEnum
 
-    line_number: Optional[int] = None
+    line_number: Optional[int] = None  # Line within text (for inline comments)
     char_start: Optional[int] = None
     char_end: Optional[int] = None
+    page_number: Optional[int] = None  # Page/image number in manuscript
 
     is_pinned: bool = False
     is_resolved: bool = False

@@ -85,10 +85,10 @@ class Correction(Base):
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Location in document
-    line_number = Column(Integer, nullable=True)
-    char_start = Column(Integer, nullable=True)
-    char_end = Column(Integer, nullable=True)
-    page_number = Column(Integer, nullable=True)
+    line_number = Column(Integer, nullable=True)  # Line within text (for inline corrections)
+    char_start = Column(Integer, nullable=True)   # DEPRECATED: Rarely used, consider removing
+    char_end = Column(Integer, nullable=True)     # DEPRECATED: Rarely used, consider removing
+    page_number = Column(Integer, nullable=True)  # Page/image number in manuscript
 
     # Content of correction
     original_text = Column(Text, nullable=False)
@@ -125,14 +125,14 @@ class Correction(Base):
     downvotes = Column(Integer, default=0)
 
     # Calculated scores
-    quality_score = Column(Float, default=0.0)
-    relevance_score = Column(Float, default=0.0)
+    quality_score = Column(Float, default=0.0)   # Based on votes: (upvotes - downvotes) / total
+    relevance_score = Column(Float, default=0.0) # DEPRECATED: Never calculated, consider removing
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     submitted_at = Column(DateTime, nullable=True)  # When moved to pending
-    applied_at = Column(DateTime, nullable=True)    # When applied to document
+    applied_at = Column(DateTime, nullable=True)    # DEPRECATED: Duplicates reviewed_at for approved
 
     # For tracking changes
     revision_number = Column(Integer, default=1)
