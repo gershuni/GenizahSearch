@@ -804,7 +804,7 @@ def create_layout():
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white')
+                menu_btn = ui.button(icon='menu').props('flat round text-color=white')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
@@ -844,12 +844,24 @@ def create_layout():
                 ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
     # Left Sidebar (Drawer)
-    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+    # Use stored state, default to True (open) on desktop
+    drawer_open = app.storage.user.get('drawer_open', True)
+    left_drawer = ui.left_drawer(value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    def toggle_drawer():
+        """Toggle drawer and save state."""
+        left_drawer.toggle()
+        app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
 
     def nav_to(path):
         """Navigate and close drawer on mobile."""
+        # On mobile, close drawer and save state
+        app.storage.user['drawer_open'] = False
         left_drawer.hide()
         ui.navigate.to(path)
+
+    # Connect menu button to toggle function
+    menu_btn.on('click', toggle_drawer)
 
     with left_drawer:
         with ui.column().classes('h-full'):
