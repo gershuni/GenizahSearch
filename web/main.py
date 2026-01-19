@@ -1047,8 +1047,6 @@ COMMON_STYLES = '''
         background: rgba(0, 0, 0, 0.5);
         z-index: 1999;
         display: none;
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
     }
 
     .drawer-overlay.visible {
@@ -1179,13 +1177,17 @@ COMMON_STYLES = '''
        ======================================================================== */
 
     .skeleton {
+        background: var(--surface-secondary);
+        border-radius: 4px;
+    }
+
+    .skeleton.animated {
         background: linear-gradient(90deg,
             var(--surface-secondary) 0%,
             var(--surface-hover) 50%,
             var(--surface-secondary) 100%);
         background-size: 200% 100%;
         animation: skeleton-pulse 1.5s ease-in-out infinite;
-        border-radius: 4px;
     }
 
     @keyframes skeleton-pulse {
@@ -1228,6 +1230,9 @@ COMMON_STYLES = '''
         border: 3px solid var(--surface-secondary);
         border-top-color: var(--primary-600);
         border-radius: 50%;
+    }
+
+    .loading-spinner.active {
         animation: spin 0.8s linear infinite;
     }
 
@@ -1257,24 +1262,6 @@ COMMON_STYLES = '''
                 animation-duration: 1.2s;
             }
         }
-    }
-
-    /* Performance: will-change hints */
-    .q-drawer,
-    .mobile-search-overlay,
-    .drawer-overlay {
-        will-change: transform, opacity;
-    }
-
-    /* GPU acceleration for animations */
-    .q-card:hover,
-    .stat-card:hover {
-        transform: translateZ(0);
-    }
-
-    /* Optimize image loading */
-    img {
-        content-visibility: auto;
     }
 
     /* Lazy loading placeholder */
