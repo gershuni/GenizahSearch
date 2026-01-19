@@ -1875,7 +1875,7 @@ if __name__ in {'__main__', '__mp_main__'}:
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
-        reload=True,
+        reload=False,
         show=True,
         favicon='📜',
         storage_secret='genizah-secret-v5',
