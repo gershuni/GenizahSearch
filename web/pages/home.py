@@ -129,7 +129,8 @@ def create_page():
                                 if state.is_ready():
                                     val_label.text = str(value_fn())
 
-                            ui.timer(2.0, refresh)
+                            # Update once after short delay (state should be ready)
+                            ui.timer(1.0, refresh, once=True)
 
                     def get_doc_count():
                         if state.searcher and state.searcher.searcher:
@@ -343,7 +344,8 @@ def create_page():
                             if state.is_ready():
                                 val.text = str(value_fn())
 
-                        ui.timer(3.0, refresh)
+                        # Update once after short delay (state should be ready)
+                        ui.timer(1.5, refresh, once=True)
 
                 status_item(
                     tr('Indexed Pages'),
