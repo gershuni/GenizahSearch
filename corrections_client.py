@@ -98,6 +98,31 @@ class Discovery:
     is_answered: bool = False
     view_count: int = 0
     response_count: int = 0
+
+
+@dataclass
+class FragmentLink:
+    """Fragment link data class"""
+    id: int
+    fragment_a: str
+    fragment_b: str
+    relationship_type: Optional[str] = None
+    notes: Optional[str] = None
+    source: str = "user"
+    source_url: Optional[str] = None
+    created_by_username: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
+class ConnectedFragments:
+    """Connected fragments response"""
+    shelfmark: str
+    shelfmark_normalized: str
+    fragments: List[str] = field(default_factory=list)
+    links: List[FragmentLink] = field(default_factory=list)
+    total_fragments: int = 0
+    total_links: int = 0
     upvotes: int = 0
     downvotes: int = 0
     created_at: Optional[str] = None
@@ -1287,6 +1312,138 @@ class CorrectionsClient:
         except Exception as e:
             logger.warning(f"Failed to get leaderboard: {e}")
             return []
+
+    # ==================== Fragment Links ====================
+
+    def create_link(
+        self,
+        fragment_a: str,
+        fragment_b: str,
+        relationship_type: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Tuple[Optional[FragmentLink], str]:
+        """
+        Create a link between two fragments.
+
+        Args:
+            fragment_a: First fragment shelfmark
+            fragment_b: Second fragment shelfmark
+            relationship_type: Optional - 'physical_join' or 'same_composition'
+            notes: Optional notes about the link
+
+        Returns:
+            (FragmentLink, message) on success, (None, error) on failure
+        """
+        try:
+            data = self._request('POST', '/links/', {
+                'fragment_a': fragment_a,
+                'fragment_b': fragment_b,
+                'relationship_type': relationship_type,
+                'notes': notes
+            })
+            return self._parse_link(data), "Link created"
+        except Exception as e:
+            return None, str(e)
+
+    def get_connected_fragments(self, shelfmark: str) -> Optional[ConnectedFragments]:
+        """
+        Get all fragments connected to the given shelfmark.
+
+        Returns the full connected component - if A links to B and B links to C,
+        querying any of them returns all three.
+
+        Args:
+            shelfmark: The shelfmark to query
+
+        Returns:
+            ConnectedFragments object or None on error
+        """
+        try:
+            from urllib.parse import quote
+            encoded = quote(shelfmark, safe='')
+            data = self._request('GET', f'/links/connected/{encoded}')
+            return ConnectedFragments(
+                shelfmark=data['shelfmark'],
+                shelfmark_normalized=data['shelfmark_normalized'],
+                fragments=data.get('fragments', []),
+                links=[self._parse_link(l) for l in data.get('links', [])],
+                total_fragments=data.get('total_fragments', 0),
+                total_links=data.get('total_links', 0)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get connected fragments: {e}")
+            return None
+
+    def get_link_by_id(self, link_id: int) -> Optional[FragmentLink]:
+        """Get a specific link by ID"""
+        try:
+            data = self._request('GET', f'/links/{link_id}')
+            return self._parse_link(data)
+        except Exception as e:
+            logger.warning(f"Failed to get link: {e}")
+            return None
+
+    def delete_link(self, link_id: int) -> Tuple[bool, str]:
+        """Delete a link"""
+        try:
+            self._request('DELETE', f'/links/{link_id}')
+            return True, "Link deleted"
+        except Exception as e:
+            return False, str(e)
+
+    def update_link(
+        self,
+        link_id: int,
+        relationship_type: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Tuple[Optional[FragmentLink], str]:
+        """Update a link's metadata"""
+        try:
+            data = self._request('PATCH', f'/links/{link_id}', {
+                'relationship_type': relationship_type,
+                'notes': notes
+            })
+            return self._parse_link(data), "Link updated"
+        except Exception as e:
+            return None, str(e)
+
+    def search_links(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        relationship_type: Optional[str] = None,
+        limit: int = 50
+    ) -> List[FragmentLink]:
+        """Search links by shelfmark pattern or filters"""
+        try:
+            params = {'limit': limit}
+            if query:
+                params['q'] = query
+            if source:
+                params['source'] = source
+            if relationship_type:
+                params['relationship_type'] = relationship_type
+
+            data = self._request('GET', '/links/', params=params)
+            return [self._parse_link(l) for l in data.get('results', [])]
+        except Exception as e:
+            logger.warning(f"Failed to search links: {e}")
+            return []
+
+    def _parse_link(self, data: Dict) -> FragmentLink:
+        """Parse link data into FragmentLink object"""
+        created_by = data.get('created_by', {})
+        return FragmentLink(
+            id=data['id'],
+            fragment_a=data['fragment_a'],
+            fragment_b=data['fragment_b'],
+            relationship_type=data.get('relationship_type'),
+            notes=data.get('notes'),
+            source=data.get('source', 'user'),
+            source_url=data.get('source_url'),
+            created_by_username=created_by.get('username') if created_by else None,
+            created_at=data.get('created_at')
+        )
 
 
 # Singleton instance for easy access

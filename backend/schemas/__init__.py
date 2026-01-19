@@ -26,6 +26,11 @@ from .discovery import (
     DiscoveryListResponse, ResponseCreate, ResponseItem, ResponseListResponse,
     DiscoveryStats, FeedItem, FeedResponse, AuthorInfo
 )
+from .link import (
+    LinkCreate, LinkUpdate, LinkResponse,
+    ConnectedFragmentsResponse, LinkSearchResponse,
+    LinkedFragment, RelationshipTypeEnum
+)
 
 __all__ = [
     # User
@@ -49,4 +54,8 @@ __all__ = [
     'DiscoveryCreate', 'DiscoveryUpdate', 'DiscoveryResponse',
     'DiscoveryListResponse', 'ResponseCreate', 'ResponseItem', 'ResponseListResponse',
     'DiscoveryStats', 'FeedItem', 'FeedResponse', 'AuthorInfo',
+    # Link
+    'LinkCreate', 'LinkUpdate', 'LinkResponse',
+    'ConnectedFragmentsResponse', 'LinkSearchResponse',
+    'LinkedFragment', 'RelationshipTypeEnum',
 ]

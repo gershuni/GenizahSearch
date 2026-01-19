@@ -6,6 +6,7 @@ from .comment_service import CommentService
 from .version_service import VersionService
 from .correction_indexer import CorrectionIndexer, get_correction_indexer
 from .version_indexer import VersionIndexer, get_version_indexer
+from .link_service import LinkService
 
 __all__ = [
     'AuthService',
@@ -17,4 +18,5 @@ __all__ = [
     'get_correction_indexer',
     'VersionIndexer',
     'get_version_indexer',
+    'LinkService',
 ]
