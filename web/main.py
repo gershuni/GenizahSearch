@@ -804,7 +804,7 @@ def create_layout():
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white').classes('md:hidden')
+                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
