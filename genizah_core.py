@@ -1086,7 +1086,7 @@ class LabEngine:
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
 
-    @staticmethod
+#    @staticmethod
     def _pick_writable_dir(primary: str, fallback: str) -> str:
         """
         Prefer primary; if we cannot create/write there, use fallback.
@@ -1107,7 +1107,7 @@ class Config:
         os.makedirs(fallback, exist_ok=True)
         return fallback
 
-    @staticmethod
+#    @staticmethod
     def _get_documents_dir() -> str:
         """Best-effort Documents directory (Windows-aware), falling back to home."""
         documents_dir = None
@@ -1212,27 +1212,42 @@ class Config:
 
 def dedupe_browse_map(browse_map):
     """
-    Remove duplicate page entries per system ID, keeping the first occurrence
-    of each page number.
+    Remove duplicate page entries per system ID, preferring V0.8 over V0.7
+    when the same page number appears in both versions.
     """
     cleaned = {}
     changed = False
 
     for sid, pages in browse_map.items():
-        seen_p_nums = set()
-        deduped_pages = []
+        # Group pages by p_num
+        p_num_map = {}
         for page in pages:
             p_num = page.get('p_num')
             if p_num is None:
-                deduped_pages.append(page)
+                # Keep pages without p_num as-is
+                if None not in p_num_map:
+                    p_num_map[None] = []
+                p_num_map[None].append(page)
                 continue
 
-            if p_num in seen_p_nums:
+            if p_num not in p_num_map:
+                p_num_map[p_num] = []
+            p_num_map[p_num].append(page)
+
+        # For each p_num, prefer V0.8 over V0.7
+        deduped_pages = []
+        for p_num, page_list in p_num_map.items():
+            if len(page_list) == 1:
+                deduped_pages.append(page_list[0])
+            else:
+                # Multiple pages with same p_num - prefer V0.8
                 changed = True
-                continue
-
-            seen_p_nums.add(p_num)
-            deduped_pages.append(page)
+                v08_pages = [p for p in page_list if 'V0.8' in p.get('full_header', '')]
+                if v08_pages:
+                    deduped_pages.append(v08_pages[0])
+                else:
+                    # No V0.8, take first V0.7 or other
+                    deduped_pages.append(page_list[0])
 
         cleaned[sid] = deduped_pages
 
@@ -3046,35 +3061,108 @@ class MetadataManager:
         self.save_caches()
 
     def search_by_meta(self, query, field):
-        """Search for system IDs where the specified field matches the query."""
+        """Search for system IDs where the specified field matches the query.
+
+        Uses precise matching to avoid false positives like 120.2 matching 120.25.
+        First tries exact match, then word-boundary aware substring match.
+        """
         results = set()
-        q_norm = query.lower()
+        q_norm = query.lower().strip()
+
+        # Helper function for smart matching
+        def matches(value, query_norm):
+            val_norm = value.lower().strip()
+
+            # 1. Exact match
+            if val_norm == query_norm:
+                return True
+
+            # 2. For shelfmarks, use precise sequential token matching
+            # Split by spaces, dots, hyphens to avoid 12.4 matching 121.4
+            if field == 'shelfmark':
+                # Tokenize both query and value
+                val_tokens = [t for t in re.split(r'[\s\.\-]+', val_norm) if t]
+                query_tokens = [t for t in re.split(r'[\s\.\-]+', query_norm) if t]
+
+                if not query_tokens:
+                    return False
+
+                # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
+                # Query: ["t", "s", "ns", "12", "4"]
+                # Value: ["t", "s", "ns", "121", "4"] -> NO MATCH (12 != 121)
+                # Value: ["t", "s", "ns", "12", "4"] -> MATCH
+
+                query_idx = 0
+                val_idx = 0
+
+                while query_idx < len(query_tokens) and val_idx < len(val_tokens):
+                    qt = query_tokens[query_idx]
+                    vt = val_tokens[val_idx]
+
+                    # Check if tokens match
+                    if qt == vt:
+                        # Exact match - advance both
+                        query_idx += 1
+                        val_idx += 1
+                    elif vt.startswith(qt):
+                        # Prefix match - only allow if both are not purely numeric
+                        # This prevents "12" from matching "121" but allows "8j6" to match "8j6a"
+                        if qt.isdigit() and vt.isdigit():
+                            # Both numeric: must be exact or vt must start with qt followed by non-digit
+                            # "12" can match "12" but not "121"
+                            # To allow "12" to be prefix of "12a", we need to check the next char
+                            if len(vt) > len(qt) and vt[len(qt)].isdigit():
+                                # Next char is digit, so "12" doesn't match "121"
+                                val_idx += 1  # Try next token
+                                continue
+                        # Valid prefix match
+                        query_idx += 1
+                        val_idx += 1
+                    else:
+                        # No match, try next value token
+                        val_idx += 1
+
+                # Success if all query tokens were matched
+                return query_idx == len(query_tokens)
+
+            # 3. For other fields (title), use substring match
+            else:
+                return query_norm in val_norm
+
+            return False
 
         # 1. Search in CSV Bank (Fastest)
         for sys_id, data in self.csv_bank.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         # 2. Search in NLI Cache (for items not in CSV or updated)
         for sys_id, data in self.nli_cache.items():
             val = data.get(field, '')
-            if val and q_norm in val.lower():
+            if val and matches(val, q_norm):
                 results.add(sys_id)
 
         return list(results)
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
+        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots between digits."""
         if not shelfmark:
             return ""
-        
-        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
-        
+
+        # First, preserve dots that appear between digits (like 120.2) by replacing with a marker
+        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', shelfmark)
+
+        # Remove all other non-alphanumeric characters
+        cleaned = re.sub(r'\W+', '', temp).casefold()
+
+        # Restore the preserved dots
+        cleaned = cleaned.replace('dotmarker', '.')
+
         if cleaned.startswith("ms"):
             cleaned = cleaned[2:]
-            
+
         return cleaned
 
     def _iter_shelfmark_sources(self):

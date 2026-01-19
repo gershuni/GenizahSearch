@@ -21,5 +21,9 @@ build/
 /Reports
 Genizah_Index/genizah.log
 genizah.log
+backend.log
+web.log
 .claude/settings.local.json
 פקודת אריזה.txt
+/web/.nicegui
+data/
