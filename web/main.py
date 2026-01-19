@@ -777,6 +777,15 @@ COMMON_STYLES = '''
             min-height: 32px !important;
             padding: 4px !important;
         }
+        /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
+        .help-btn-header { display: none !important; }
+    }
+
+    /* Mobile drawer - CSS only, hide when screen is small */
+    @media (max-width: 1023px) {
+        .q-drawer--left:not(.q-drawer--on-top) {
+            transform: translateX(-100%) !important;
+        }
     }
 </style>
 '''
@@ -831,8 +840,8 @@ def create_layout():
                     from web.auth_state import create_auth_buttons
                     create_auth_buttons()
 
-                # Help Button
-                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help'))
+                # Help Button (hidden on mobile via CSS)
+                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
     # Left Sidebar (Drawer)
     left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=1024')
