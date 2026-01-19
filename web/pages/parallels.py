@@ -19,6 +19,62 @@ import html
 def create_parallels_page(initial_text: str = None):
     """Create the parallels (composition) search page."""
 
+    # Add mobile-responsive styles
+    ui.add_head_html('''
+    <style>
+        /* Parallels page mobile styles */
+        @media (max-width: 768px) {
+            .parallels-header-title {
+                font-size: 1.75rem !important;
+            }
+            .parallels-input-section {
+                flex-direction: column !important;
+            }
+            .parallels-text-col {
+                width: 100% !important;
+            }
+            .parallels-options-col {
+                width: 100% !important;
+            }
+            .parallels-results-header {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 12px !important;
+            }
+            .parallels-result-card {
+                padding: 12px !important;
+            }
+        }
+        @media (max-width: 480px) {
+            .parallels-header-title {
+                font-size: 1.5rem !important;
+            }
+            .parallels-input-card {
+                padding: 12px !important;
+            }
+            .parallels-text-area {
+                font-size: 16px !important;
+            }
+            .parallels-run-btn {
+                min-height: 48px !important;
+            }
+            .parallels-result-card {
+                padding: 10px !important;
+            }
+            .parallels-result-shelfmark {
+                font-size: 0.95rem !important;
+            }
+            .parallels-result-score {
+                font-size: 0.8rem !important;
+            }
+        }
+        /* Touch targets */
+        .parallels-page button {
+            min-height: 44px;
+        }
+    </style>
+    ''')
+
     # === State ===
     class ParallelsState:
         def __init__(self):
@@ -46,29 +102,29 @@ def create_parallels_page(initial_text: str = None):
             decoded_text = initial_text
 
     # === UI Layout ===
-    with ui.column().classes('w-full max-w-7xl mx-auto gap-6 fade-in'):
+    with ui.column().classes('w-full max-w-7xl mx-auto gap-4 md:gap-6 fade-in parallels-page px-0'):
 
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Find Parallels')).classes('text-3xl font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Discover parallel texts in the Genizah corpus')).style('color: var(--text-secondary);')
+                ui.label(tr('Find Parallels')).classes('text-2xl md:text-3xl font-bold parallels-header-title').style('color: var(--text-primary);')
+                ui.label(tr('Discover parallel texts in the Genizah corpus')).classes('text-sm md:text-base').style('color: var(--text-secondary);')
 
         # === Input Section ===
-        with ui.card().classes('w-full p-6'):
-            with ui.row().classes('w-full gap-6'):
+        with ui.card().classes('w-full p-4 md:p-6 parallels-input-card'):
+            with ui.row().classes('w-full gap-4 md:gap-6 flex-wrap parallels-input-section'):
 
                 # Left: Text Input
-                with ui.column().classes('flex-grow gap-4'):
-                    ui.label(tr('Source text')).classes('font-bold').style('color: var(--text-primary);')
+                with ui.column().classes('flex-grow gap-3 md:gap-4 parallels-text-col').style('min-width: 280px;'):
+                    ui.label(tr('Source text')).classes('font-bold text-sm md:text-base').style('color: var(--text-primary);')
 
                     text_input = ui.textarea(
                         placeholder=tr('Paste your Hebrew text here...'),
                         value=decoded_text
-                    ).classes('w-full').props('outlined rows=8').style('direction: rtl;')
+                    ).classes('w-full parallels-text-area').props('outlined rows=6').style('direction: rtl; font-size: 16px;')
 
                     # Word count
-                    word_count_label = ui.label('0 ' + tr('Words')).classes('text-sm').style('color: var(--text-muted);')
+                    word_count_label = ui.label('0 ' + tr('Words')).classes('text-xs md:text-sm').style('color: var(--text-muted);')
 
                     def update_word_count():
                         text = text_input.value or ""
@@ -81,8 +137,8 @@ def create_parallels_page(initial_text: str = None):
                         update_word_count()
 
                 # Right: Options Panel
-                with ui.column().classes('w-80 gap-4'):
-                    ui.label(tr('Options')).classes('font-bold').style('color: var(--text-primary);')
+                with ui.column().classes('w-full md:w-80 gap-3 md:gap-4 parallels-options-col'):
+                    ui.label(tr('Options')).classes('font-bold text-sm md:text-base').style('color: var(--text-primary);')
 
                     # Mode
                     mode_select = ui.select(
@@ -97,12 +153,12 @@ def create_parallels_page(initial_text: str = None):
 
                     # Chunk Size
                     with ui.column().classes('gap-1'):
-                        ui.label(tr('Chunk size')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        ui.label(tr('Chunk size')).classes('text-xs md:text-sm font-medium').style('color: var(--text-secondary);')
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Deep Scan
-                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
+                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2').style('min-height: 44px;')
 
                     ui.separator().classes('my-2')
 
@@ -111,14 +167,14 @@ def create_parallels_page(initial_text: str = None):
                         tr('Find Parallels'),
                         icon='compare_arrows',
                         on_click=lambda: execute_parallels()
-                    ).classes('btn-primary w-full')
+                    ).classes('btn-primary w-full parallels-run-btn').style('min-height: 48px;')
 
                     # Cancel Button (hidden by default)
                     cancel_btn = ui.button(
                         tr('Cancel'),
                         icon='close',
                         on_click=lambda: cancel_search()
-                    ).classes('w-full').props('outline color=red').style('display: none;')
+                    ).classes('w-full').props('outline color=red').style('display: none; min-height: 48px;')
 
                     # Progress
                     progress_bar = ui.linear_progress(0).classes('w-full opacity-0')

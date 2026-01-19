@@ -13,21 +13,70 @@ from web.translations import tr
 def create_settings_page():
     """Create the Settings page."""
 
-    with ui.column().classes('w-full max-w-5xl mx-auto gap-8 fade-in'):
+    # Add mobile-responsive styles
+    ui.add_head_html('''
+    <style>
+        /* Settings page mobile styles */
+        @media (max-width: 768px) {
+            .settings-header-title {
+                font-size: 1.75rem !important;
+            }
+            .settings-card {
+                padding: 16px !important;
+            }
+            .settings-grid {
+                grid-template-columns: 1fr !important;
+                gap: 16px !important;
+            }
+            .settings-section-title {
+                font-size: 1.125rem !important;
+            }
+        }
+        @media (max-width: 480px) {
+            .settings-header-title {
+                font-size: 1.5rem !important;
+            }
+            .settings-card {
+                padding: 12px !important;
+            }
+            .settings-grid {
+                gap: 12px !important;
+            }
+            .settings-input {
+                font-size: 16px !important;
+            }
+            .settings-btn {
+                width: 100% !important;
+                min-height: 48px !important;
+            }
+        }
+        /* Touch targets */
+        .settings-page button,
+        .settings-page .q-toggle,
+        .settings-page .q-checkbox {
+            min-height: 44px;
+        }
+        .settings-page .q-field {
+            min-height: 44px;
+        }
+    </style>
+    ''')
+
+    with ui.column().classes('w-full max-w-5xl mx-auto gap-6 md:gap-8 fade-in settings-page px-0'):
 
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Settings')).classes('text-3xl font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Configure search and display preferences')).style('color: var(--text-secondary);')
+                ui.label(tr('Settings')).classes('text-2xl md:text-3xl font-bold settings-header-title').style('color: var(--text-primary);')
+                ui.label(tr('Configure search and display preferences')).classes('text-sm md:text-base').style('color: var(--text-secondary);')
 
         # === Display Settings ===
-        with ui.card().classes('w-full p-6'):
-            with ui.row().classes('items-center gap-3 mb-6'):
-                ui.icon('palette').classes('text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Display Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
+            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
+                ui.icon('palette').classes('text-2xl md:text-3xl').style('color: var(--primary-600);')
+                ui.label(tr('Display Settings')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
 
-            with ui.grid(columns=2).classes('w-full gap-6'):
+            with ui.grid(columns=2).classes('w-full gap-4 md:gap-6 settings-grid'):
                 # Theme
                 with ui.column().classes('gap-2'):
                     ui.label(tr('Theme')).classes('font-medium').style('color: var(--text-secondary);')
@@ -64,12 +113,12 @@ def create_settings_page():
                     rpp_select.on('update:model-value', change_rpp)
 
         # === Search Settings ===
-        with ui.card().classes('w-full p-6'):
-            with ui.row().classes('items-center gap-3 mb-6'):
-                ui.icon('search').classes('text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Search Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
+            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
+                ui.icon('search').classes('text-2xl md:text-3xl').style('color: var(--primary-600);')
+                ui.label(tr('Search Settings')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
 
-            with ui.grid(columns=2).classes('w-full gap-6'):
+            with ui.grid(columns=2).classes('w-full gap-4 md:gap-6 settings-grid'):
                 # Default search mode
                 with ui.column().classes('gap-2'):
                     ui.label(tr('Default search mode')).classes('font-medium').style('color: var(--text-secondary);')
@@ -115,10 +164,10 @@ def create_settings_page():
             lab_switch.on('update:model-value', toggle_lab)
 
         # === Lab Mode Configuration ===
-        with ui.card().classes('w-full p-6'):
-            with ui.row().classes('items-center gap-3 mb-6'):
-                ui.icon('science').classes('text-3xl').style('color: var(--accent-blue);')
-                ui.label(tr('Lab Mode Parameters')).classes('text-xl font-bold').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
+            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
+                ui.icon('science').classes('text-2xl md:text-3xl').style('color: var(--accent-blue);')
+                ui.label(tr('Lab Mode Parameters')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
 
             ui.markdown('''
             **Lab Mode** uses the Shmidman-Koppel-Porat algorithm for detecting parallel texts
