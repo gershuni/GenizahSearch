@@ -19,62 +19,6 @@ import html
 def create_parallels_page(initial_text: str = None):
     """Create the parallels (composition) search page."""
 
-    # Add mobile-responsive styles
-    ui.add_head_html('''
-    <style>
-        /* Parallels page mobile styles */
-        @media (max-width: 768px) {
-            .parallels-header-title {
-                font-size: 1.75rem !important;
-            }
-            .parallels-input-section {
-                flex-direction: column !important;
-            }
-            .parallels-text-col {
-                width: 100% !important;
-            }
-            .parallels-options-col {
-                width: 100% !important;
-            }
-            .parallels-results-header {
-                flex-direction: column !important;
-                align-items: stretch !important;
-                gap: 12px !important;
-            }
-            .parallels-result-card {
-                padding: 12px !important;
-            }
-        }
-        @media (max-width: 480px) {
-            .parallels-header-title {
-                font-size: 1.5rem !important;
-            }
-            .parallels-input-card {
-                padding: 12px !important;
-            }
-            .parallels-text-area {
-                font-size: 16px !important;
-            }
-            .parallels-run-btn {
-                min-height: 48px !important;
-            }
-            .parallels-result-card {
-                padding: 10px !important;
-            }
-            .parallels-result-shelfmark {
-                font-size: 0.95rem !important;
-            }
-            .parallels-result-score {
-                font-size: 0.8rem !important;
-            }
-        }
-        /* Touch targets */
-        .parallels-page button {
-            min-height: 44px;
-        }
-    </style>
-    ''')
-
     # === State ===
     class ParallelsState:
         def __init__(self):

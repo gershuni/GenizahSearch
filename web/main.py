@@ -1274,6 +1274,142 @@ COMMON_STYLES = '''
         min-height: auto;
         background-color: transparent;
     }
+
+    /* ========================================================================
+       Page-Specific Mobile Styles (consolidated for performance)
+       ======================================================================== */
+
+    /* === Home Page === */
+    @media (max-width: 640px) {
+        .hero-section { padding: 16px !important; }
+        .hero-title { font-size: 1.5rem !important; }
+        .hero-subtitle { font-size: 0.95rem !important; }
+        .hero-content { flex-direction: column !important; }
+        .mini-stats-row { width: 100% !important; justify-content: center !important; }
+        .mini-stat-card { min-width: 100px !important; padding: 12px !important; }
+        .tool-cards-grid { gap: 16px !important; }
+        .tool-card { min-width: unset !important; width: 100% !important; flex: none !important; }
+        .tool-card-header { padding: 16px !important; }
+        .tool-card-content { padding: 16px !important; }
+        .tool-card-icon { font-size: 2rem !important; }
+        .tool-card-title { font-size: 1.125rem !important; }
+        .secondary-card { min-width: unset !important; width: 100% !important; flex: none !important; }
+        .recent-items-grid { gap: 12px !important; }
+        .recent-item-card { min-width: 140px !important; flex: 1 1 140px !important; }
+        .status-grid { gap: 16px !important; }
+        .status-item { min-width: unset !important; width: 45% !important; }
+    }
+    @media (max-width: 480px) {
+        .mini-stats-row { gap: 8px !important; }
+        .mini-stat-card { min-width: 80px !important; padding: 10px !important; }
+        .mini-stat-value { font-size: 1.25rem !important; }
+        .status-item { width: 100% !important; }
+    }
+
+    /* === Search Page === */
+    @media (max-width: 768px) {
+        .search-controls { flex-direction: column !important; gap: 12px !important; }
+        .search-input-wrapper { width: 100% !important; }
+        .search-input-wrapper .q-input { font-size: 16px !important; }
+        .search-buttons { width: 100% !important; justify-content: stretch !important; }
+        .search-buttons .q-btn { flex: 1 !important; min-height: 44px !important; }
+        .search-splitter { flex-direction: column !important; }
+        .search-splitter > div { width: 100% !important; max-width: 100% !important; }
+        .search-filters-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+        .filter-select { width: 100% !important; }
+        .results-header { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+        .result-card { padding: 12px !important; }
+        .result-card-header { flex-wrap: wrap !important; gap: 8px !important; }
+        .result-card-actions { width: 100% !important; justify-content: flex-end !important; }
+        .result-card-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
+    }
+    @media (max-width: 480px) {
+        .search-buttons { flex-direction: column !important; }
+        .result-card { padding: 10px !important; }
+        .result-snippet { font-size: 0.9rem !important; }
+    }
+
+    /* === Browse Page === */
+    @media (max-width: 768px) {
+        .browse-container { flex-direction: column !important; }
+        .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
+        .browse-toolbar { flex-wrap: wrap !important; gap: 8px !important; justify-content: center !important; }
+        .browse-toolbar .q-btn { min-width: 40px !important; min-height: 40px !important; }
+        .zoom-controls { position: fixed !important; bottom: 16px !important; right: 16px !important; z-index: 100 !important; }
+    }
+    @media (max-width: 480px) {
+        .image-panel, .transcription-panel { max-height: 45vh !important; }
+        .browse-nav-btn { min-width: 44px !important; min-height: 44px !important; padding: 8px !important; }
+    }
+
+    /* === Parallels Page === */
+    @media (max-width: 768px) {
+        .parallels-container { flex-direction: column !important; }
+        .parallels-input-section { width: 100% !important; }
+        .parallels-results-section { width: 100% !important; }
+        .parallels-textarea { min-height: 150px !important; }
+        .parallels-controls { flex-direction: column !important; gap: 12px !important; }
+        .parallels-controls .q-btn { width: 100% !important; min-height: 44px !important; }
+    }
+
+    /* === Lists Page === */
+    @media (max-width: 768px) {
+        .lists-container { flex-direction: column !important; }
+        .lists-sidebar { width: 100% !important; max-height: 200px !important; overflow-y: auto !important; }
+        .lists-content { width: 100% !important; }
+        .list-item { min-height: 44px !important; }
+        .list-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
+    }
+
+    /* === Settings Page === */
+    @media (max-width: 768px) {
+        .settings-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+        .settings-card { padding: 16px !important; }
+        .settings-header { font-size: 1.25rem !important; }
+    }
+    @media (max-width: 480px) {
+        .settings-card { padding: 12px !important; }
+    }
+
+    /* === Help Page === */
+    @media (max-width: 768px) {
+        .help-header-title { font-size: 1.75rem !important; }
+        .help-card { padding: 16px !important; }
+        .help-section-title { font-size: 1.125rem !important; }
+        .help-mode-card { padding: 12px !important; }
+    }
+    @media (max-width: 480px) {
+        .help-header-title { font-size: 1.5rem !important; }
+        .help-card { padding: 12px !important; }
+        .help-section-title { font-size: 1rem !important; }
+        .help-mode-card { padding: 10px !important; }
+        .help-content { font-size: 0.9rem !important; }
+    }
+
+    /* === Discoveries Page === */
+    @media (max-width: 768px) {
+        .discoveries-header-title { font-size: 1.75rem !important; }
+        .discoveries-stats-row { flex-wrap: wrap !important; gap: 8px !important; }
+        .discoveries-stats-row .q-card { min-width: calc(50% - 8px) !important; flex: 1 1 calc(50% - 8px) !important; padding: 12px !important; }
+        .discoveries-stats-row .q-icon { font-size: 1.5rem !important; }
+        .discoveries-stats-row .text-2xl { font-size: 1.25rem !important; }
+        .discoveries-filter-bar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+        .discoveries-filter-bar .q-select { min-width: 100% !important; }
+        .discoveries-filter-bar .q-btn { width: 100% !important; min-height: 44px !important; }
+        .feed-item-card { padding: 12px !important; }
+        .feed-item-header { flex-wrap: wrap !important; gap: 8px !important; }
+        .feed-item-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
+    }
+    @media (max-width: 480px) {
+        .discoveries-header-title { font-size: 1.5rem !important; }
+        .discoveries-stats-row .q-card { min-width: 100% !important; flex: 1 1 100% !important; padding: 10px !important; }
+        .discoveries-stats-row .text-2xl { font-size: 1.125rem !important; }
+        .feed-item-card { padding: 10px !important; }
+        .feed-item-content { gap: 8px !important; }
+        .feed-item-title { font-size: 1rem !important; }
+        .correction-diff-row { flex-direction: column !important; }
+        .correction-diff-row > div { width: 100% !important; }
+    }
 </style>
 '''
 

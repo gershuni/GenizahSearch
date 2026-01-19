@@ -13,55 +13,6 @@ from web.translations import tr
 def create_settings_page():
     """Create the Settings page."""
 
-    # Add mobile-responsive styles
-    ui.add_head_html('''
-    <style>
-        /* Settings page mobile styles */
-        @media (max-width: 768px) {
-            .settings-header-title {
-                font-size: 1.75rem !important;
-            }
-            .settings-card {
-                padding: 16px !important;
-            }
-            .settings-grid {
-                grid-template-columns: 1fr !important;
-                gap: 16px !important;
-            }
-            .settings-section-title {
-                font-size: 1.125rem !important;
-            }
-        }
-        @media (max-width: 480px) {
-            .settings-header-title {
-                font-size: 1.5rem !important;
-            }
-            .settings-card {
-                padding: 12px !important;
-            }
-            .settings-grid {
-                gap: 12px !important;
-            }
-            .settings-input {
-                font-size: 16px !important;
-            }
-            .settings-btn {
-                width: 100% !important;
-                min-height: 48px !important;
-            }
-        }
-        /* Touch targets */
-        .settings-page button,
-        .settings-page .q-toggle,
-        .settings-page .q-checkbox {
-            min-height: 44px;
-        }
-        .settings-page .q-field {
-            min-height: 44px;
-        }
-    </style>
-    ''')
-
     with ui.column().classes('w-full max-w-5xl mx-auto gap-6 md:gap-8 fade-in settings-page px-0'):
 
         # === Page Header ===
