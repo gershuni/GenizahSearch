@@ -727,6 +727,33 @@ COMMON_STYLES = '''
     @media (min-width: 641px) {
         .show-mobile-only { display: none !important; }
     }
+
+    /* === Page-specific mobile styles === */
+
+    /* Home page */
+    @media (max-width: 640px) {
+        .tool-card { min-width: 100% !important; }
+        .mini-stat-card { padding: 12px !important; }
+    }
+
+    /* Search page */
+    @media (max-width: 768px) {
+        .search-splitter { flex-direction: column !important; }
+        .search-splitter > div { width: 100% !important; }
+        .filters-grid { grid-template-columns: 1fr !important; }
+    }
+
+    /* Browse page */
+    @media (max-width: 768px) {
+        .browse-container { flex-direction: column !important; }
+        .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
+    }
+
+    /* Lists page */
+    @media (max-width: 768px) {
+        .lists-layout { flex-direction: column !important; }
+        .lists-sidebar { width: 100% !important; max-height: 200px !important; }
+    }
 </style>
 '''
 
