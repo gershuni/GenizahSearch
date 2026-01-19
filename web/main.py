@@ -1332,21 +1332,16 @@ def create_layout():
                     status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
                     status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
-                    status_timer = None
-
                     def update_status():
-                        nonlocal status_timer
                         if state.is_ready():
                             status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
                             status_text.text = tr('Ready')
-                            # Stop timer once ready
-                            if status_timer:
-                                status_timer.deactivate()
                         else:
                             status_dot.classes('bg-yellow-400', remove='bg-green-400')
                             status_text.text = tr('Loading...')
 
-                    status_timer = ui.timer(2.0, update_status)
+                    # Update once after 3 seconds (enough time for state to be ready)
+                    ui.timer(3.0, update_status, once=True)
 
                 # Auth Buttons (Login/Register or User Menu)
                 from web.auth_state import create_auth_buttons
