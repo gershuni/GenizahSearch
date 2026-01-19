@@ -738,9 +738,17 @@ COMMON_STYLES = '''
 
     /* Search page */
     @media (max-width: 768px) {
-        .search-splitter { flex-direction: column !important; }
-        .search-splitter > div { width: 100% !important; }
+        /* Hide viewer panel on mobile - results expand inline instead */
+        .search-splitter .q-splitter__after { display: none !important; }
+        .search-splitter .q-splitter__separator { display: none !important; }
+        .search-splitter .q-splitter__before { width: 100% !important; flex: 1 !important; }
         .filters-grid { grid-template-columns: 1fr !important; }
+        /* Show mobile expansion in result cards */
+        .result-mobile-expand { display: block !important; }
+    }
+    @media (min-width: 769px) {
+        /* Hide mobile expansion on desktop */
+        .result-mobile-expand { display: none !important; }
     }
 
     /* Browse page */
