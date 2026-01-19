@@ -710,6 +710,22 @@ COMMON_STYLES = '''
     @media (max-width: 480px) {
         .main-content { padding: 8px; }
         .page-title { font-size: 1.25rem; }
+
+        /* Dialogs fullscreen */
+        .q-dialog__inner { padding: 0 !important; }
+        .q-dialog .q-card {
+            width: 100vw !important;
+            max-width: 100vw !important;
+            border-radius: 0 !important;
+        }
+    }
+
+    /* Utility classes */
+    @media (max-width: 640px) {
+        .hide-mobile { display: none !important; }
+    }
+    @media (min-width: 641px) {
+        .show-mobile-only { display: none !important; }
     }
 </style>
 '''
