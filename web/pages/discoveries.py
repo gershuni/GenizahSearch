@@ -52,16 +52,16 @@ async def create_discoveries_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Discoveries Center')).classes('text-3xl font-bold discoveries-header-title').style('color: var(--text-primary);')
+                ui.label(tr('Discoveries Center')).classes('text-3xl font-bold').style('color: var(--text-primary);')
                 ui.label(tr('Community discoveries, questions, and contributions')).style('color: var(--text-secondary);')
 
         # === Statistics Cards ===
-        stats_row = ui.row().classes('w-full gap-4 discoveries-stats-row')
+        stats_row = ui.row().classes('w-full gap-4')
         await load_stats(stats_row)
 
         # === Filter Bar ===
-        with ui.row().classes('w-full items-center justify-between p-3 rounded discoveries-filter-bar').style('background: var(--surface-secondary);'):
-            with ui.row().classes('items-center gap-4 flex-wrap'):
+        with ui.row().classes('w-full items-center justify-between p-3 rounded').style('background: var(--surface-secondary);'):
+            with ui.row().classes('items-center gap-4'):
                 # Type filter
                 type_filter = ui.select(
                     {
@@ -238,7 +238,7 @@ def create_feed_item(item: dict, on_refresh=None):
     is_hidden = item.get('is_hidden', False)
 
     # Card styling - hidden items have muted appearance
-    card_classes = 'w-full p-4 hover:shadow-md transition-shadow feed-item-card'
+    card_classes = 'w-full p-4 hover:shadow-md transition-shadow'
     card_style = ''
     if is_hidden:
         card_classes += ' opacity-60'
@@ -262,9 +262,9 @@ def create_feed_item(item: dict, on_refresh=None):
                     ui.icon('check_circle').classes('text-sm text-green-500').tooltip(tr('Answered'))
 
             # Content
-            with ui.column().classes('flex-1 gap-2 feed-item-content'):
+            with ui.column().classes('flex-1 gap-2'):
                 # Header row
-                with ui.row().classes('w-full items-center justify-between feed-item-header'):
+                with ui.row().classes('w-full items-center justify-between'):
                     with ui.row().classes('items-center gap-2 flex-wrap'):
                         ui.badge(style['label']).props(f'color={style["color"]}').classes('text-xs')
 
@@ -326,7 +326,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 ui.label(f"+{len(additional_shelfmarks) - 3} {tr('more')}").classes('text-xs ml-1').style('color: var(--text-tertiary);')
 
                     # Date and actions
-                    with ui.row().classes('items-center gap-2 feed-item-actions'):
+                    with ui.row().classes('items-center gap-2'):
                         created_at = item.get('created_at', '')
                         if created_at:
                             ui.label(format_date(created_at)).classes('text-xs').style('color: var(--text-tertiary);')
@@ -443,9 +443,9 @@ def create_feed_item(item: dict, on_refresh=None):
                     corr_title = f"{tr('Correction in')} {corr_shelfmark}"
                     if corr_page:
                         corr_title += f" ({tr('Image')} {corr_page})"
-                    ui.label(corr_title).classes('font-bold text-lg feed-item-title')
+                    ui.label(corr_title).classes('font-bold text-lg')
                 else:
-                    ui.label(item.get('title', '')).classes('font-bold text-lg feed-item-title')
+                    ui.label(item.get('title', '')).classes('font-bold text-lg')
 
                 # Full content in expansion (no truncation)
                 content = item.get('content_preview', '')
@@ -458,7 +458,7 @@ def create_feed_item(item: dict, on_refresh=None):
                             original_text = item.get('original_text', '')
                             corrected_text = item.get('corrected_text', '')
                             if original_text or corrected_text:
-                                with ui.row().classes('w-full gap-4 correction-diff-row'):
+                                with ui.row().classes('w-full gap-4'):
                                     if original_text:
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Original')).classes('font-medium text-xs').style('color: var(--text-tertiary);')

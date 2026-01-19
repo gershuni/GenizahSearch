@@ -15,12 +15,12 @@ def create_help_page():
     lang = get_language()
     is_hebrew = lang == 'he'
 
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 md:gap-8 fade-in p-2 md:p-4 help-page'):
+    with ui.column().classes('w-full max-w-4xl mx-auto gap-8 fade-in p-4'):
 
         # === Page Header ===
-        with ui.column().classes('gap-2 mb-2 md:mb-4'):
-            ui.label(tr('Help Center')).classes('text-2xl md:text-3xl font-bold help-header-title').style('color: var(--text-primary);')
-            ui.label(tr('Learn how to use Genizah Search effectively')).classes('text-sm md:text-base').style('color: var(--text-secondary);')
+        with ui.column().classes('gap-2 mb-4'):
+            ui.label(tr('Help Center')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+            ui.label(tr('Learn how to use Genizah Search effectively')).style('color: var(--text-secondary);')
 
         # === Quick Start ===
         with ui.card().classes('w-full p-6'):

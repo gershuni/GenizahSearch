@@ -615,291 +615,9 @@ COMMON_STYLES = '''
     }
 
     /* ========================================================================
-       Mobile-First CSS Variables
+       Responsive Styles
        ======================================================================== */
 
-    :root {
-        /* Touch targets (Apple HIG: 44px min, Material: 48dp recommended) */
-        --touch-target-min: 44px;
-        --touch-target-comfortable: 48px;
-
-        /* Mobile-specific spacing */
-        --spacing-mobile-xs: 4px;
-        --spacing-mobile-sm: 8px;
-        --spacing-mobile-md: 12px;
-        --spacing-mobile-lg: 16px;
-
-        /* Mobile font sizes */
-        --font-size-mobile-xs: 0.75rem;
-        --font-size-mobile-sm: 0.875rem;
-        --font-size-mobile-base: 1rem;
-        --font-size-mobile-lg: 1.125rem;
-        --font-size-mobile-xl: 1.25rem;
-
-        /* Mobile sidebar */
-        --sidebar-width-mobile: 85vw;
-        --sidebar-max-width: 280px;
-
-        /* Header heights */
-        --header-height-desktop: 64px;
-        --header-height-mobile: 56px;
-    }
-
-    /* ========================================================================
-       Responsive Styles - Mobile First Approach
-       ======================================================================== */
-
-    /* ===== Extra Small Devices (320px and below) ===== */
-    @media (max-width: 320px) {
-        .app-header {
-            padding: 0 8px !important;
-            height: var(--header-height-mobile) !important;
-        }
-
-        .logo-text {
-            font-size: 0.95rem !important;
-        }
-
-        .logo-version {
-            display: none !important;
-        }
-
-        .main-content {
-            padding: 8px !important;
-        }
-
-        .page-title {
-            font-size: 1.15rem !important;
-        }
-
-        .page-subtitle {
-            font-size: 0.8rem !important;
-        }
-
-        .stat-card {
-            padding: 10px !important;
-        }
-
-        .stat-value {
-            font-size: 1.25rem !important;
-        }
-
-        .stat-label {
-            font-size: 0.75rem !important;
-        }
-
-        .result-card {
-            padding: 10px !important;
-        }
-
-        .nav-item {
-            padding: 10px 16px !important;
-            font-size: 0.9rem !important;
-        }
-    }
-
-    /* ===== Small Mobile (375px) ===== */
-    @media (max-width: 375px) {
-        .app-header {
-            padding: 0 10px !important;
-        }
-
-        .main-content {
-            padding: 10px !important;
-        }
-
-        .page-title {
-            font-size: 1.2rem !important;
-        }
-
-        .stat-value {
-            font-size: 1.35rem !important;
-        }
-    }
-
-    /* ===== Standard Mobile (480px) ===== */
-    @media (max-width: 480px) {
-        .app-header {
-            padding: 0 12px !important;
-            height: var(--header-height-mobile) !important;
-        }
-
-        .header-logo-text {
-            display: none !important;
-        }
-
-        .main-content {
-            padding: 12px !important;
-        }
-
-        .page-title {
-            font-size: 1.25rem !important;
-        }
-
-        .page-subtitle {
-            font-size: 0.85rem !important;
-        }
-
-        .stat-card {
-            padding: 12px !important;
-        }
-
-        .stat-value {
-            font-size: 1.5rem !important;
-        }
-
-        .stat-label {
-            font-size: 0.8rem !important;
-        }
-
-        .result-card {
-            padding: 12px !important;
-        }
-
-        .result-shelfmark {
-            font-size: 1rem !important;
-        }
-
-        .result-snippet {
-            font-size: 0.9rem !important;
-            padding: 10px !important;
-        }
-
-        /* Sidebar adjustments */
-        .q-drawer {
-            width: var(--sidebar-width-mobile) !important;
-            max-width: var(--sidebar-max-width) !important;
-        }
-
-        .nav-item {
-            padding: 14px 20px !important;
-            min-height: var(--touch-target-comfortable) !important;
-            font-size: 1rem !important;
-        }
-
-        .nav-item-icon {
-            font-size: 1.25rem !important;
-        }
-
-        .sidebar-footer {
-            padding: 12px 16px !important;
-        }
-
-        .theme-switcher {
-            gap: 4px !important;
-        }
-
-        .theme-btn {
-            min-width: 40px !important;
-            min-height: 40px !important;
-        }
-
-        /* Cards in single column */
-        .options-grid {
-            grid-template-columns: 1fr !important;
-        }
-
-        /* Touch-friendly buttons */
-        .btn-primary, .btn-secondary {
-            min-height: var(--touch-target-comfortable) !important;
-            padding: 12px 20px !important;
-        }
-
-        /* Dialogs fullscreen on mobile */
-        .q-dialog__inner {
-            padding: 0 !important;
-        }
-
-        .q-dialog .q-card {
-            border-radius: 0 !important;
-            max-height: 100vh !important;
-            width: 100vw !important;
-            max-width: 100vw !important;
-            margin: 0 !important;
-        }
-
-        .q-dialog .q-card.max-w-lg,
-        .q-dialog .q-card.w-96 {
-            width: 100vw !important;
-            max-width: 100vw !important;
-        }
-
-        /* Dialog content scrollable */
-        .q-dialog .q-card > .q-card__section {
-            max-height: calc(100vh - 120px);
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        /* Dialog buttons stacked on small screens */
-        .q-dialog .justify-end.gap-2 {
-            flex-direction: column !important;
-            gap: 8px !important;
-        }
-
-        .q-dialog .justify-end .q-btn {
-            width: 100% !important;
-        }
-
-        /* Dialog titles */
-        .q-dialog .text-xl,
-        .q-dialog .text-lg {
-            font-size: 1.125rem !important;
-        }
-
-        /* Expansion panels in dialogs */
-        .q-dialog .q-expansion-item {
-            margin: 0 -16px !important;
-            padding: 0 16px !important;
-        }
-    }
-
-    /* ===== Large Mobile / Phablet (640px) ===== */
-    @media (max-width: 640px) {
-        .app-header {
-            padding: 0 14px;
-        }
-
-        .main-content {
-            padding: 14px;
-        }
-
-        .page-title {
-            font-size: 1.35rem;
-        }
-
-        .stat-value {
-            font-size: 1.6rem;
-        }
-
-        /* Quick search hidden - show toggle button instead */
-        .quick-search-desktop {
-            display: none !important;
-        }
-
-        .quick-search-toggle {
-            display: flex !important;
-        }
-
-        /* Mobile search overlay */
-        .mobile-search-overlay {
-            position: fixed;
-            top: var(--header-height-mobile);
-            left: 0;
-            right: 0;
-            padding: 12px 16px;
-            background: var(--bg-header);
-            z-index: 100;
-            box-shadow: var(--shadow-lg);
-            display: none;
-        }
-
-        .mobile-search-overlay.open {
-            display: block;
-        }
-    }
-
-    /* ===== Tablet (768px) ===== */
     @media (max-width: 768px) {
         .app-header {
             padding: 0 16px;
@@ -919,213 +637,6 @@ COMMON_STYLES = '''
 
         .stat-value {
             font-size: 1.75rem;
-        }
-
-        /* Prevent iOS zoom on input focus */
-        input, select, textarea {
-            font-size: 16px !important;
-        }
-
-        /* Larger touch targets */
-        button, .clickable, [role="button"] {
-            min-height: var(--touch-target-min);
-        }
-
-        /* Dialog responsive styles at tablet */
-        .q-dialog__inner {
-            padding: 16px !important;
-        }
-
-        .q-dialog .q-card {
-            max-width: calc(100vw - 32px) !important;
-            max-height: calc(100vh - 100px) !important;
-        }
-
-        .q-dialog .q-card.max-w-lg {
-            max-width: calc(100vw - 32px) !important;
-        }
-
-        .q-dialog .q-card .q-input,
-        .q-dialog .q-card .q-select,
-        .q-dialog .q-card .q-textarea {
-            font-size: 16px !important;
-        }
-
-        .q-dialog .q-card .q-btn {
-            min-height: var(--touch-target-min) !important;
-            font-size: 0.9rem !important;
-        }
-
-        /* Prevent horizontal scroll */
-        body {
-            overflow-x: hidden;
-        }
-
-        /* Better touch scrolling */
-        .scroll-area, .q-scrollarea {
-            -webkit-overflow-scrolling: touch;
-        }
-
-        /* Status indicator smaller on tablet */
-        .status-indicator {
-            padding: 4px 12px !important;
-        }
-
-        .status-text {
-            font-size: 0.7rem !important;
-        }
-
-        /* Notification toasts */
-        .q-notification {
-            max-width: calc(100vw - 32px) !important;
-            margin: 8px !important;
-            font-size: 0.9rem !important;
-        }
-
-        .q-notification__message {
-            font-size: 0.875rem !important;
-        }
-    }
-
-    /* ===== Small Desktop (1024px) ===== */
-    @media (max-width: 1024px) {
-        .main-content {
-            padding: 20px;
-        }
-
-        .content-container {
-            max-width: 100%;
-        }
-    }
-
-    /* ========================================================================
-       Accessibility - Reduced Motion
-       ======================================================================== */
-
-    @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-            scroll-behavior: auto !important;
-        }
-
-        .fade-in, .slide-in-left {
-            animation: none !important;
-        }
-
-        .stat-card:hover,
-        .result-card:hover,
-        .q-card:hover {
-            transform: none !important;
-        }
-    }
-
-    /* ========================================================================
-       Focus Visible States (Accessibility)
-       ======================================================================== */
-
-    *:focus-visible {
-        outline: 2px solid var(--border-focus) !important;
-        outline-offset: 2px !important;
-    }
-
-    button:focus-visible,
-    .nav-item:focus-visible,
-    a:focus-visible {
-        outline: 2px solid var(--primary-500) !important;
-        outline-offset: 2px !important;
-    }
-
-    /* ========================================================================
-       Mobile Overlay for Sidebar
-       ======================================================================== */
-
-    .drawer-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 1999;
-        display: none;
-    }
-
-    .drawer-overlay.visible {
-        display: block;
-    }
-
-    /* ========================================================================
-       Mobile-specific utility classes
-       ======================================================================== */
-
-    @media (max-width: 640px) {
-        .hide-mobile {
-            display: none !important;
-        }
-    }
-
-    @media (min-width: 641px) {
-        .show-mobile-only {
-            display: none !important;
-        }
-    }
-
-    @media (max-width: 768px) {
-        .hide-tablet {
-            display: none !important;
-        }
-    }
-
-    @media (min-width: 769px) {
-        .show-tablet-only {
-            display: none !important;
-        }
-    }
-
-    /* Full-width buttons on mobile */
-    @media (max-width: 480px) {
-        .mobile-full-width {
-            width: 100% !important;
-        }
-    }
-
-    /* Grid to single column on mobile */
-    @media (max-width: 640px) {
-        .mobile-single-col {
-            grid-template-columns: 1fr !important;
-        }
-    }
-
-    /* ========================================================================
-       Bottom Action Bar (for mobile)
-       ======================================================================== */
-
-    .mobile-bottom-bar {
-        display: none;
-    }
-
-    @media (max-width: 480px) {
-        .mobile-bottom-bar {
-            display: flex;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--bg-card);
-            border-top: 1px solid var(--border-light);
-            padding: 12px 16px;
-            gap: 8px;
-            z-index: 100;
-            box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1);
-        }
-
-        .mobile-bottom-bar button {
-            flex: 1;
-            min-height: var(--touch-target-comfortable);
-        }
-
-        /* Add padding to content so it's not hidden behind bottom bar */
-        .has-bottom-bar {
-            padding-bottom: 80px !important;
         }
     }
 
@@ -1171,245 +682,6 @@ COMMON_STYLES = '''
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
     }
-
-    /* ========================================================================
-       Skeleton Loading States
-       ======================================================================== */
-
-    .skeleton {
-        background: var(--surface-secondary);
-        border-radius: 4px;
-    }
-
-    .skeleton.animated {
-        background: linear-gradient(90deg,
-            var(--surface-secondary) 0%,
-            var(--surface-hover) 50%,
-            var(--surface-secondary) 100%);
-        background-size: 200% 100%;
-        animation: skeleton-pulse 1.5s ease-in-out infinite;
-    }
-
-    @keyframes skeleton-pulse {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
-
-    .skeleton-text {
-        height: 1em;
-        margin-bottom: 0.5em;
-    }
-
-    .skeleton-text.short { width: 40%; }
-    .skeleton-text.medium { width: 70%; }
-    .skeleton-text.long { width: 100%; }
-
-    .skeleton-circle {
-        border-radius: 50%;
-    }
-
-    .skeleton-card {
-        padding: 16px;
-        border-radius: 8px;
-    }
-
-    /* Loading spinner for mobile */
-    .loading-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(255, 255, 255, 0.9);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-    }
-
-    .loading-spinner {
-        width: 48px;
-        height: 48px;
-        border: 3px solid var(--surface-secondary);
-        border-top-color: var(--primary-600);
-        border-radius: 50%;
-    }
-
-    .loading-spinner.active {
-        animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-
-    /* Mobile loading optimizations */
-    @media (max-width: 768px) {
-        .skeleton-card {
-            padding: 12px;
-        }
-
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-        }
-
-        /* Reduce motion for performance */
-        @media (prefers-reduced-motion: reduce) {
-            .skeleton {
-                animation: none;
-                background: var(--surface-secondary);
-            }
-
-            .loading-spinner {
-                animation-duration: 1.2s;
-            }
-        }
-    }
-
-    /* Lazy loading placeholder */
-    .lazy-image {
-        background-color: var(--surface-secondary);
-        min-height: 200px;
-    }
-
-    .lazy-image.loaded {
-        min-height: auto;
-        background-color: transparent;
-    }
-
-    /* ========================================================================
-       Page-Specific Mobile Styles (consolidated for performance)
-       ======================================================================== */
-
-    /* === Home Page === */
-    @media (max-width: 640px) {
-        .hero-section { padding: 16px !important; }
-        .hero-title { font-size: 1.5rem !important; }
-        .hero-subtitle { font-size: 0.95rem !important; }
-        .hero-content { flex-direction: column !important; }
-        .mini-stats-row { width: 100% !important; justify-content: center !important; }
-        .mini-stat-card { min-width: 100px !important; padding: 12px !important; }
-        .tool-cards-grid { gap: 16px !important; }
-        .tool-card { min-width: unset !important; width: 100% !important; flex: none !important; }
-        .tool-card-header { padding: 16px !important; }
-        .tool-card-content { padding: 16px !important; }
-        .tool-card-icon { font-size: 2rem !important; }
-        .tool-card-title { font-size: 1.125rem !important; }
-        .secondary-card { min-width: unset !important; width: 100% !important; flex: none !important; }
-        .recent-items-grid { gap: 12px !important; }
-        .recent-item-card { min-width: 140px !important; flex: 1 1 140px !important; }
-        .status-grid { gap: 16px !important; }
-        .status-item { min-width: unset !important; width: 45% !important; }
-    }
-    @media (max-width: 480px) {
-        .mini-stats-row { gap: 8px !important; }
-        .mini-stat-card { min-width: 80px !important; padding: 10px !important; }
-        .mini-stat-value { font-size: 1.25rem !important; }
-        .status-item { width: 100% !important; }
-    }
-
-    /* === Search Page === */
-    @media (max-width: 768px) {
-        .search-controls { flex-direction: column !important; gap: 12px !important; }
-        .search-input-wrapper { width: 100% !important; }
-        .search-input-wrapper .q-input { font-size: 16px !important; }
-        .search-buttons { width: 100% !important; justify-content: stretch !important; }
-        .search-buttons .q-btn { flex: 1 !important; min-height: 44px !important; }
-        .search-splitter { flex-direction: column !important; }
-        .search-splitter > div { width: 100% !important; max-width: 100% !important; }
-        .search-filters-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
-        .filter-select { width: 100% !important; }
-        .results-header { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
-        .result-card { padding: 12px !important; }
-        .result-card-header { flex-wrap: wrap !important; gap: 8px !important; }
-        .result-card-actions { width: 100% !important; justify-content: flex-end !important; }
-        .result-card-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
-    }
-    @media (max-width: 480px) {
-        .search-buttons { flex-direction: column !important; }
-        .result-card { padding: 10px !important; }
-        .result-snippet { font-size: 0.9rem !important; }
-    }
-
-    /* === Browse Page === */
-    @media (max-width: 768px) {
-        .browse-container { flex-direction: column !important; }
-        .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
-        .browse-toolbar { flex-wrap: wrap !important; gap: 8px !important; justify-content: center !important; }
-        .browse-toolbar .q-btn { min-width: 40px !important; min-height: 40px !important; }
-        .zoom-controls { position: fixed !important; bottom: 16px !important; right: 16px !important; z-index: 100 !important; }
-    }
-    @media (max-width: 480px) {
-        .image-panel, .transcription-panel { max-height: 45vh !important; }
-        .browse-nav-btn { min-width: 44px !important; min-height: 44px !important; padding: 8px !important; }
-    }
-
-    /* === Parallels Page === */
-    @media (max-width: 768px) {
-        .parallels-container { flex-direction: column !important; }
-        .parallels-input-section { width: 100% !important; }
-        .parallels-results-section { width: 100% !important; }
-        .parallels-textarea { min-height: 150px !important; }
-        .parallels-controls { flex-direction: column !important; gap: 12px !important; }
-        .parallels-controls .q-btn { width: 100% !important; min-height: 44px !important; }
-    }
-
-    /* === Lists Page === */
-    @media (max-width: 768px) {
-        .lists-container { flex-direction: column !important; }
-        .lists-sidebar { width: 100% !important; max-height: 200px !important; overflow-y: auto !important; }
-        .lists-content { width: 100% !important; }
-        .list-item { min-height: 44px !important; }
-        .list-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
-    }
-
-    /* === Settings Page === */
-    @media (max-width: 768px) {
-        .settings-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
-        .settings-card { padding: 16px !important; }
-        .settings-header { font-size: 1.25rem !important; }
-    }
-    @media (max-width: 480px) {
-        .settings-card { padding: 12px !important; }
-    }
-
-    /* === Help Page === */
-    @media (max-width: 768px) {
-        .help-header-title { font-size: 1.75rem !important; }
-        .help-card { padding: 16px !important; }
-        .help-section-title { font-size: 1.125rem !important; }
-        .help-mode-card { padding: 12px !important; }
-    }
-    @media (max-width: 480px) {
-        .help-header-title { font-size: 1.5rem !important; }
-        .help-card { padding: 12px !important; }
-        .help-section-title { font-size: 1rem !important; }
-        .help-mode-card { padding: 10px !important; }
-        .help-content { font-size: 0.9rem !important; }
-    }
-
-    /* === Discoveries Page === */
-    @media (max-width: 768px) {
-        .discoveries-header-title { font-size: 1.75rem !important; }
-        .discoveries-stats-row { flex-wrap: wrap !important; gap: 8px !important; }
-        .discoveries-stats-row .q-card { min-width: calc(50% - 8px) !important; flex: 1 1 calc(50% - 8px) !important; padding: 12px !important; }
-        .discoveries-stats-row .q-icon { font-size: 1.5rem !important; }
-        .discoveries-stats-row .text-2xl { font-size: 1.25rem !important; }
-        .discoveries-filter-bar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
-        .discoveries-filter-bar .q-select { min-width: 100% !important; }
-        .discoveries-filter-bar .q-btn { width: 100% !important; min-height: 44px !important; }
-        .feed-item-card { padding: 12px !important; }
-        .feed-item-header { flex-wrap: wrap !important; gap: 8px !important; }
-        .feed-item-actions .q-btn { min-width: 40px !important; min-height: 40px !important; }
-    }
-    @media (max-width: 480px) {
-        .discoveries-header-title { font-size: 1.5rem !important; }
-        .discoveries-stats-row .q-card { min-width: 100% !important; flex: 1 1 100% !important; padding: 10px !important; }
-        .discoveries-stats-row .text-2xl { font-size: 1.125rem !important; }
-        .feed-item-card { padding: 10px !important; }
-        .feed-item-content { gap: 8px !important; }
-        .feed-item-title { font-size: 1rem !important; }
-        .correction-diff-row { flex-direction: column !important; }
-        .correction-diff-row > div { width: 100% !important; }
-    }
 </style>
 '''
 
@@ -1422,51 +694,31 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
 
-    # Mobile search state
-    mobile_search_visible = {'value': False}
-
     # Header
     with ui.header().classes('q-py-none').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between app-header'):
+        with ui.row().classes('w-full h-full items-center justify-between px-6'):
             # Left: Menu + Logo
-            with ui.row().classes('items-center gap-2 md:gap-4'):
-                # Mobile menu button
-                menu_btn = ui.button(icon='menu', on_click=lambda: left_drawer.toggle())
-                menu_btn.props('flat round text-color=white')
-                menu_btn.classes('lg:hidden')
-                menu_btn.style('min-width: 44px; min-height: 44px;')
+            with ui.row().classes('items-center gap-4'):
+                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white').classes('lg:hidden')
 
                 # Logo
-                with ui.row().classes('items-center gap-2 md:gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
-                    ui.icon('auto_stories').classes('text-2xl md:text-3xl text-white opacity-90')
-                    with ui.column().classes('gap-0 hide-mobile'):
-                        ui.label('Genizah Search').classes('text-base md:text-lg font-bold text-white tracking-wide header-logo-text')
-                        ui.label('Pro').classes('text-xs text-white/60 logo-version')
+                with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
+                    ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
+                    with ui.column().classes('gap-0'):
+                        ui.label('Genizah Search').classes('text-lg font-bold text-white tracking-wide')
+                        ui.label('Pro').classes('text-xs text-white/60')
 
-            # Center: Search Quick Access (hidden on mobile, shown on md+)
-            with ui.row().classes('hidden md:flex items-center quick-search-desktop'):
-                quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-64 lg:w-80').props('dark dense outlined rounded')
+            # Center: Search Quick Access (optional)
+            with ui.row().classes('hidden md:flex items-center'):
+                quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
-            # Right: Actions
-            with ui.row().classes('items-center gap-1 md:gap-4'):
-                # Mobile search toggle button (visible only on mobile)
-                def toggle_mobile_search():
-                    mobile_search_visible['value'] = not mobile_search_visible['value']
-                    if mobile_search_visible['value']:
-                        mobile_search_container.classes(add='open')
-                    else:
-                        mobile_search_container.classes(remove='open')
-
-                mobile_search_btn = ui.button(icon='search', on_click=toggle_mobile_search)
-                mobile_search_btn.props('flat round text-color=white')
-                mobile_search_btn.classes('md:hidden quick-search-toggle')
-                mobile_search_btn.style('min-width: 44px; min-height: 44px;')
-
-                # Status Indicator (hidden on very small screens)
-                with ui.row().classes('items-center gap-2 bg-white/15 px-2 md:px-4 py-1 md:py-2 rounded-full hide-mobile'):
+            # Right: Status + Actions + Auth
+            with ui.row().classes('items-center gap-4'):
+                # Status Indicator
+                with ui.row().classes('items-center gap-2 bg-white/15 px-4 py-2 rounded-full'):
                     status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
-                    status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
+                    status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90')
 
                     def update_status():
                         if state.is_ready():
@@ -1476,52 +728,17 @@ def create_layout():
                             status_dot.classes('bg-yellow-400', remove='bg-green-400')
                             status_text.text = tr('Loading...')
 
-                    # Update once after 3 seconds (enough time for state to be ready)
-                    ui.timer(3.0, update_status, once=True)
+                    ui.timer(2.0, update_status)
 
                 # Auth Buttons (Login/Register or User Menu)
                 from web.auth_state import create_auth_buttons
                 create_auth_buttons()
 
                 # Help Button
-                help_btn = ui.button(icon='help_outline', on_click=lambda: show_help_dialog())
-                help_btn.props('flat round text-color=white')
-                help_btn.tooltip(tr('Help'))
-                help_btn.style('min-width: 44px; min-height: 44px;')
+                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help'))
 
-    # Mobile Search Overlay (below header)
-    mobile_search_container = ui.element('div').classes('mobile-search-overlay')
-    with mobile_search_container:
-        with ui.row().classes('w-full items-center gap-2'):
-            mobile_quick_search = ui.input(placeholder=tr('Search manuscripts...')).classes('flex-grow').props('dark dense outlined rounded autofocus')
-            mobile_quick_search.on('keydown.enter', lambda: (ui.navigate.to(f'/search?q={mobile_quick_search.value}'), toggle_mobile_search()))
-            close_search_btn = ui.button(icon='close', on_click=toggle_mobile_search).props('flat round text-color=white')
-            close_search_btn.style('min-width: 44px; min-height: 44px;')
-
-    # Left Sidebar (Drawer) with mobile overlay
-    drawer_overlay = ui.element('div').classes('drawer-overlay')
-
-    def close_drawer():
-        left_drawer.hide()
-        drawer_overlay.classes(remove='visible')
-
-    def toggle_drawer():
-        if left_drawer.value:
-            close_drawer()
-        else:
-            left_drawer.show()
-            # Only show overlay on mobile
-            ui.run_javascript('''
-                if (window.innerWidth <= 1024) {
-                    document.querySelector('.drawer-overlay').classList.add('visible');
-                }
-            ''')
-
-    drawer_overlay.on('click', close_drawer)
-
-    # Update menu button to use toggle function
-    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=1024')
-
+    # Left Sidebar (Drawer)
+    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280')
     with left_drawer:
         with ui.column().classes('h-full'):
             # Navigation Section
@@ -1540,20 +757,7 @@ def create_layout():
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
 
-                    def nav_click(p=path):
-                        ui.navigate.to(p)
-                        # Close drawer on mobile after navigation
-                        ui.run_javascript('''
-                            if (window.innerWidth <= 1024) {
-                                document.querySelector('.q-drawer').classList.remove('q-drawer--opened');
-                                document.querySelector('.drawer-overlay').classList.remove('visible');
-                            }
-                        ''')
-
-                    nav_item = ui.row().classes(f'nav-item {"active" if is_active else ""}')
-                    nav_item.on('click', nav_click)
-                    nav_item.style('min-height: var(--touch-target-comfortable);')
-                    with nav_item:
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: ui.navigate.to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
                         if badge:
@@ -1570,20 +774,7 @@ def create_layout():
 
                 for path, icon, label, badge in tool_items:
                     is_active = current_page == path
-
-                    def tool_click(p=path):
-                        ui.navigate.to(p)
-                        ui.run_javascript('''
-                            if (window.innerWidth <= 1024) {
-                                document.querySelector('.q-drawer').classList.remove('q-drawer--opened');
-                                document.querySelector('.drawer-overlay').classList.remove('visible');
-                            }
-                        ''')
-
-                    tool_item = ui.row().classes(f'nav-item {"active" if is_active else ""}')
-                    tool_item.on('click', tool_click)
-                    tool_item.style('min-height: var(--touch-target-comfortable);')
-                    with tool_item:
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: ui.navigate.to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
 
@@ -1597,32 +788,21 @@ def create_layout():
                     ui.navigate.reload()
 
                 lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                lang_row = ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100')
-                lang_row.on('click', toggle_lang)
-                lang_row.style('min-height: var(--touch-target-min);')
-                with lang_row:
+                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').on('click', toggle_lang):
                     ui.icon('translate').classes('text-lg')
                     ui.label(lang_btn_text).classes('text-sm font-medium')
 
                 # Theme Switcher
-                with ui.row().classes('theme-switcher w-full justify-center'):
+                with ui.row().classes('theme-switcher w-full'):
                     def set_theme(theme_name):
                         app.storage.user['theme'] = theme_name
                         ui.run_javascript(f'document.body.setAttribute("data-theme", "{theme_name}")')
 
                     current_theme = app.storage.user.get('theme', 'light')
 
-                    light_btn = ui.button(icon='light_mode', on_click=lambda: set_theme('light'))
-                    light_btn.props('flat round').classes(f'theme-btn {"active" if current_theme == "light" else ""}')
-                    light_btn.style('min-width: 40px; min-height: 40px;')
-
-                    parchment_btn = ui.button(icon='history_edu', on_click=lambda: set_theme('parchment'))
-                    parchment_btn.props('flat round').classes(f'theme-btn {"active" if current_theme == "parchment" else ""}')
-                    parchment_btn.style('min-width: 40px; min-height: 40px;')
-
-                    dark_btn = ui.button(icon='dark_mode', on_click=lambda: set_theme('dark'))
-                    dark_btn.props('flat round').classes(f'theme-btn {"active" if current_theme == "dark" else ""}')
-                    dark_btn.style('min-width: 40px; min-height: 40px;')
+                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "light" else ""}'): pass
+                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "parchment" else ""}'): pass
+                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "dark" else ""}'): pass
 
                 # Version Info
                 ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
@@ -1875,7 +1055,7 @@ if __name__ in {'__main__', '__mp_main__'}:
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
-        reload=False,
+        reload=True,
         show=True,
         favicon='📜',
         storage_secret='genizah-secret-v5',

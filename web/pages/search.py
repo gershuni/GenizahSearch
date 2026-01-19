@@ -57,26 +57,26 @@ def create_search_page(initial_query: str = None):
             pass
 
     # === UI Layout ===
-    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0 search-page'):
+    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
 
         # === Search Header Panel ===
-        with ui.card().classes('w-full p-4 md:p-6 rounded-none border-0 border-b search-header-card').style(
+        with ui.card().classes('w-full p-6 rounded-none border-0 border-b').style(
             'background: var(--bg-card); border-color: var(--border-light) !important;'
         ):
             # Main Search Row
-            with ui.row().classes('w-full items-end gap-3 md:gap-4 flex-wrap search-controls-row'):
+            with ui.row().classes('w-full items-end gap-4 flex-wrap'):
 
                 # Search Input (Main)
-                with ui.column().classes('flex-grow min-w-full md:min-w-80 gap-1 search-query-col'):
+                with ui.column().classes('flex-grow min-w-80 gap-1'):
                     ui.label(tr('Search Query')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     query_input = ui.input(
                         placeholder=tr('Enter Hebrew text to search'),
                         value=initial_query or ''
-                    ).classes('w-full text-base md:text-lg').props('outlined dense clearable').style('direction: rtl; font-size: 16px;')
+                    ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
                     query_input.on('keydown.enter', lambda: execute_search())
 
                 # Mode Selector - Default to exact
-                with ui.column().classes('gap-1 search-mode-col'):
+                with ui.column().classes('gap-1'):
                     ui.label(tr('Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     mode_select = ui.select(
                         {
@@ -90,49 +90,49 @@ def create_search_page(initial_query: str = None):
                             'Title': tr('Title') + ' ($)',
                         },
                         value='exact'  # Default to exact
-                    ).classes('w-full md:w-48').props('outlined dense')
+                    ).classes('w-48').props('outlined dense')
 
                 # Gap Control
-                with ui.column().classes('gap-1 search-gap-col'):
+                with ui.column().classes('gap-1'):
                     ui.label(tr('Gap')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     gap_input = ui.number(value=0, min=0, max=10).classes('w-20').props('outlined dense')
                     ui.tooltip(tr('Gap description'))
 
                 # Search Button
                 search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
-                    'btn-primary h-10 md:h-10 px-6 md:px-8 search-btn'
-                ).style('min-height: 48px;')
+                    'btn-primary h-10 px-8'
+                )
 
             # Advanced Options Row
-            with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-3 md:mt-4').style(
+            with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
                 'background: var(--bg-tertiary); border-radius: 12px;'
             ):
-                with ui.column().classes('w-full p-3 md:p-4 gap-4 md:gap-6 advanced-options-content'):
+                with ui.column().classes('w-full p-4 gap-6'):
 
                     # Options Grid
-                    with ui.row().classes('w-full gap-4 md:gap-8 flex-wrap advanced-options-row'):
+                    with ui.row().classes('w-full gap-8 flex-wrap'):
 
                         # Lab Mode Section
-                        with ui.column().classes('gap-3 min-w-full md:min-w-64 advanced-option-section'):
-                            ui.label(tr('Lab Mode')).classes('font-bold text-sm md:text-base').style('color: var(--text-primary);')
-                            lab_mode = ui.switch(tr('Enable Lab Mode algorithms')).style('min-height: 44px;')
+                        with ui.column().classes('gap-3 min-w-64'):
+                            ui.label(tr('Lab Mode')).classes('font-bold').style('color: var(--text-primary);')
+                            lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
                             with ui.row().classes('gap-2 items-center'):
-                                deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm').style('min-height: 44px;')
+                                deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
                                 ui.icon('info').classes('text-sm cursor-help').tooltip(
                                     tr('Searches more candidates for comprehensive results')
                                 )
 
                         # NOT Filter Section
-                        with ui.column().classes('gap-3 min-w-full md:min-w-64 advanced-option-section'):
-                            ui.label(tr('Exclude Words')).classes('font-bold text-sm md:text-base').style('color: var(--text-primary);')
+                        with ui.column().classes('gap-3 min-w-64'):
+                            ui.label(tr('Exclude Words')).classes('font-bold').style('color: var(--text-primary);')
                             not_filter = ui.input(
                                 placeholder=tr('Words to exclude (space separated)')
-                            ).classes('w-full').props('outlined dense').style('direction: rtl; font-size: 16px;')
+                            ).classes('w-full').props('outlined dense').style('direction: rtl;')
                             ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
 
                         # Syntax Shortcuts Section
-                        with ui.column().classes('gap-3 min-w-full md:min-w-64 advanced-option-section'):
-                            ui.label(tr('Shortcuts')).classes('font-bold text-sm md:text-base').style('color: var(--text-primary);')
+                        with ui.column().classes('gap-3 min-w-64'):
+                            ui.label(tr('Shortcuts')).classes('font-bold').style('color: var(--text-primary);')
                             with ui.row().classes('gap-2 flex-wrap'):
                                 shortcuts = [
                                     ('=', tr('Exact')),
@@ -144,8 +144,8 @@ def create_search_page(initial_query: str = None):
                                 ]
                                 for prefix, tip in shortcuts:
                                     ui.button(prefix, on_click=lambda p=prefix: prepend_to_query(p)).props(
-                                        'flat dense'
-                                    ).tooltip(tip).style('min-width: 44px; min-height: 44px;')
+                                        'flat dense size=sm'
+                                    ).tooltip(tip)
 
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
@@ -154,46 +154,46 @@ def create_search_page(initial_query: str = None):
             status_label = ui.label('').classes('text-xs px-6 py-1').style('color: var(--text-muted);')
 
         # === Main Content Area (Splitter) ===
-        with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
+        with ui.splitter(value=35).classes('w-full flex-grow') as splitter:
 
             # === LEFT: Results List ===
             with splitter.before:
-                results_header = ui.row().classes('w-full px-3 md:px-4 py-2 md:py-3 items-center justify-between results-header').style(
+                results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between').style(
                     'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
                 )
                 with results_header:
-                    with ui.row().classes('items-center gap-2 md:gap-3'):
+                    with ui.row().classes('items-center gap-3'):
                         # Select all checkbox
-                        select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense').style('min-height: 44px;')
-                        results_count = ui.label(tr('Results')).classes('font-medium text-sm md:text-base').style('color: var(--text-secondary);')
+                        select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
+                        results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
                         # Selection counter (initially hidden)
-                        selection_counter = ui.label('').classes('text-xs md:text-sm').style('color: var(--primary-600); display: none;')
+                        selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
 
-                    with ui.row().classes('gap-1 md:gap-2 results-actions-row'):
+                    with ui.row().classes('gap-2'):
                         # Bulk actions (initially hidden)
-                        bulk_actions_row = ui.row().classes('gap-1 md:gap-2').style('display: none;')
+                        bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
                         with bulk_actions_row:
                             ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
-                                'flat round dense'
-                            ).tooltip(tr('Add Selected to List')).style('min-width: 40px; min-height: 40px;')
+                                'flat round dense size=sm'
+                            ).tooltip(tr('Add Selected to List'))
                             ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
-                                'flat round dense'
-                            ).tooltip(tr('Copy Selected Text')).style('min-width: 40px; min-height: 40px;')
+                                'flat round dense size=sm'
+                            ).tooltip(tr('Copy Selected Text'))
 
                         # Filter toggle button
                         filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
-                            'flat round dense'
-                        ).tooltip(tr('Toggle Filters')).style('min-width: 40px; min-height: 40px;')
+                            'flat round dense size=sm'
+                        ).tooltip(tr('Toggle Filters'))
 
                         ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
-                            'flat round dense'
-                        ).tooltip(tr('Export Word')).style('min-width: 40px; min-height: 40px;')
+                            'flat round dense size=sm'
+                        ).tooltip(tr('Export Word'))
                         ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
-                            'flat round dense'
-                        ).tooltip(tr('Export Excel')).style('min-width: 40px; min-height: 40px;')
+                            'flat round dense size=sm'
+                        ).tooltip(tr('Export Excel'))
 
                 # Filters Panel (initially hidden)
-                filters_panel = ui.column().classes('w-full px-3 md:px-4 py-2 md:py-3 gap-2 md:gap-3').style(
+                filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
                     'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); display: none;'
                 )
                 with filters_panel:
@@ -201,26 +201,26 @@ def create_search_page(initial_query: str = None):
                         ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
                         ui.label(tr('Filter Results')).classes('text-sm font-medium').style('color: var(--text-secondary);')
 
-                    with ui.grid(columns=3).classes('w-full gap-2 filters-grid'):
+                    with ui.grid(columns=3).classes('w-full gap-2'):
                         filter_shelfmark = ui.input(
                             placeholder=tr('Filter by shelfmark')
-                        ).classes('w-full').props('outlined dense clearable').style('font-size: 16px;')
+                        ).classes('w-full').props('outlined dense clearable')
 
                         filter_title = ui.input(
                             placeholder=tr('Filter by title')
-                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl; font-size: 16px;')
+                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
                         filter_snippet = ui.input(
                             placeholder=tr('Filter by text')
-                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl; font-size: 16px;')
+                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
-                    with ui.row().classes('gap-2 flex-wrap'):
+                    with ui.row().classes('gap-2'):
                         ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
-                            'flat dense color=green'
-                        ).style('min-height: 44px;')
+                            'flat dense color=green size=sm'
+                        )
                         ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
-                            'flat dense'
-                        ).style('min-height: 44px;')
+                            'flat dense size=sm'
+                        )
 
                 results_container = ui.scroll_area().classes('w-full flex-grow').style(
                     'background: var(--bg-secondary);'
@@ -228,12 +228,12 @@ def create_search_page(initial_query: str = None):
 
             # === RIGHT: Result Viewer ===
             with splitter.after:
-                viewer_container = ui.column().classes('w-full h-full p-4 md:p-6 viewer-container').style('background: var(--bg-primary);')
+                viewer_container = ui.column().classes('w-full h-full p-6').style('background: var(--bg-primary);')
                 with viewer_container:
                     # Placeholder
                     with ui.column().classes('w-full h-full items-center justify-center'):
-                        ui.icon('menu_book').classes('text-4xl md:text-6xl viewer-placeholder-icon').style('color: var(--text-muted);')
-                        ui.label(tr('Select a result to view')).classes('mt-4 text-sm md:text-base').style('color: var(--text-muted);')
+                        ui.icon('menu_book').classes('text-6xl').style('color: var(--text-muted);')
+                        ui.label(tr('Select a result to view')).classes('mt-4').style('color: var(--text-muted);')
 
     # === Helper Functions ===
 

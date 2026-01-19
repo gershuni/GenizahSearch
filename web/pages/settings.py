@@ -13,21 +13,21 @@ from web.translations import tr
 def create_settings_page():
     """Create the Settings page."""
 
-    with ui.column().classes('w-full max-w-5xl mx-auto gap-6 md:gap-8 fade-in settings-page px-0'):
+    with ui.column().classes('w-full max-w-5xl mx-auto gap-8 fade-in'):
 
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Settings')).classes('text-2xl md:text-3xl font-bold settings-header-title').style('color: var(--text-primary);')
-                ui.label(tr('Configure search and display preferences')).classes('text-sm md:text-base').style('color: var(--text-secondary);')
+                ui.label(tr('Settings')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                ui.label(tr('Configure search and display preferences')).style('color: var(--text-secondary);')
 
         # === Display Settings ===
-        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
-            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
-                ui.icon('palette').classes('text-2xl md:text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Display Settings')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-6'):
+            with ui.row().classes('items-center gap-3 mb-6'):
+                ui.icon('palette').classes('text-3xl').style('color: var(--primary-600);')
+                ui.label(tr('Display Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
 
-            with ui.grid(columns=2).classes('w-full gap-4 md:gap-6 settings-grid'):
+            with ui.grid(columns=2).classes('w-full gap-6'):
                 # Theme
                 with ui.column().classes('gap-2'):
                     ui.label(tr('Theme')).classes('font-medium').style('color: var(--text-secondary);')
@@ -64,12 +64,12 @@ def create_settings_page():
                     rpp_select.on('update:model-value', change_rpp)
 
         # === Search Settings ===
-        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
-            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
-                ui.icon('search').classes('text-2xl md:text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Search Settings')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-6'):
+            with ui.row().classes('items-center gap-3 mb-6'):
+                ui.icon('search').classes('text-3xl').style('color: var(--primary-600);')
+                ui.label(tr('Search Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
 
-            with ui.grid(columns=2).classes('w-full gap-4 md:gap-6 settings-grid'):
+            with ui.grid(columns=2).classes('w-full gap-6'):
                 # Default search mode
                 with ui.column().classes('gap-2'):
                     ui.label(tr('Default search mode')).classes('font-medium').style('color: var(--text-secondary);')
@@ -115,10 +115,10 @@ def create_settings_page():
             lab_switch.on('update:model-value', toggle_lab)
 
         # === Lab Mode Configuration ===
-        with ui.card().classes('w-full p-4 md:p-6 settings-card'):
-            with ui.row().classes('items-center gap-3 mb-4 md:mb-6'):
-                ui.icon('science').classes('text-2xl md:text-3xl').style('color: var(--accent-blue);')
-                ui.label(tr('Lab Mode Parameters')).classes('text-lg md:text-xl font-bold settings-section-title').style('color: var(--text-primary);')
+        with ui.card().classes('w-full p-6'):
+            with ui.row().classes('items-center gap-3 mb-6'):
+                ui.icon('science').classes('text-3xl').style('color: var(--accent-blue);')
+                ui.label(tr('Lab Mode Parameters')).classes('text-xl font-bold').style('color: var(--text-primary);')
 
             ui.markdown('''
             **Lab Mode** uses the Shmidman-Koppel-Porat algorithm for detecting parallel texts
