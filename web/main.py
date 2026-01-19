@@ -781,8 +781,8 @@ COMMON_STYLES = '''
         .help-btn-header { display: none !important; }
     }
 
-    /* Mobile drawer - CSS only, hide when screen is small */
-    @media (max-width: 1023px) {
+    /* Mobile drawer - CSS only, hide on phones/tablets */
+    @media (max-width: 768px) {
         .q-drawer--left:not(.q-drawer--on-top) {
             transform: translateX(-100%) !important;
         }
@@ -804,7 +804,7 @@ def create_layout():
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white').classes('lg:hidden')
+                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white').classes('md:hidden')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
@@ -844,7 +844,7 @@ def create_layout():
                 ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
     # Left Sidebar (Drawer)
-    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=1024')
+    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
     def nav_to(path):
         """Navigate and close drawer on mobile."""
