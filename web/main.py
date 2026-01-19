@@ -728,7 +728,7 @@ def create_layout():
                             status_dot.classes('bg-yellow-400', remove='bg-green-400')
                             status_text.text = tr('Loading...')
 
-                    ui.timer(2.0, update_status)
+                    ui.timer(3.0, update_status, once=True)
 
                 # Auth Buttons (Login/Register or User Menu)
                 from web.auth_state import create_auth_buttons
