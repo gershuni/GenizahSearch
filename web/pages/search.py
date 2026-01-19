@@ -154,7 +154,7 @@ def create_search_page(initial_query: str = None):
             status_label = ui.label('').classes('text-xs px-6 py-1').style('color: var(--text-muted);')
 
         # === Main Content Area (Splitter) ===
-        with ui.splitter(value=35).classes('w-full flex-grow') as splitter:
+        with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
 
             # === LEFT: Results List ===
             with splitter.before:
@@ -627,6 +627,45 @@ def create_search_page(initial_query: str = None):
                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
                 ):
                     ui.html(snippet_html, sanitize=False)
+
+            # Mobile expansion (hidden on desktop via CSS)
+            with ui.expansion(tr('View Full Text')).classes('w-full mt-2 result-mobile-expand').props('dense') as mobile_expand:
+                mobile_content = ui.column().classes('w-full gap-3')
+
+                async def load_mobile_content():
+                    """Load full text content for mobile view."""
+                    mobile_content.clear()
+                    with mobile_content:
+                        full_text = result.get('full_text', '')
+                        if not full_text:
+                            # Try to load full text
+                            sys_id = display.get('id', '')
+                            page_num = int(display.get('img', '1'))
+                            if sys_id and state.meta_mgr:
+                                try:
+                                    page_data = await run.io_bound(
+                                        state.meta_mgr.get_page_data, sys_id, page_num
+                                    )
+                                    if page_data:
+                                        full_text = page_data.text or ''
+                                        result['full_text'] = full_text
+                                except Exception:
+                                    pass
+
+                        if full_text:
+                            ui.label(full_text).classes('text-sm whitespace-pre-wrap').style(
+                                'direction: rtl; text-align: right; line-height: 2;'
+                            )
+                        else:
+                            ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+
+                        # Actions row
+                        with ui.row().classes('w-full gap-2 mt-3'):
+                            ui.button(tr('Open in Viewer'), icon='open_in_new',
+                                on_click=lambda: ui.navigate.to(f'/browse?sys_id={display.get("id", "")}&page={display.get("img", "1")}')
+                            ).props('flat dense')
+
+                mobile_expand.on('show', load_mobile_content)
 
     def open_advanced_dialog(index, result):
         """Open a maximized dialog showing the full result with navigation."""

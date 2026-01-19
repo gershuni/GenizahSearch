@@ -233,7 +233,7 @@ function handleImageError(img, fallbackUrl) {
         color: #1e40af;
     }
 
-    /* Collapsible panels for mobile */
+    /* Collapsible panels for tablet */
     @media (max-width: 1024px) {
         .viewer-panels {
             flex-direction: column !important;
@@ -248,6 +248,129 @@ function handleImageError(img, fallbackUrl) {
             height: auto;
             max-height: 50vh;
         }
+    }
+
+    /* Mobile-specific styles */
+    @media (max-width: 768px) {
+        .metadata-header {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        .shelfmark-title {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .metadata-row {
+            gap: 12px;
+            font-size: 0.875rem;
+        }
+        .metadata-item {
+            padding: 4px 8px;
+            font-size: 0.8rem;
+        }
+        .navigation-bar {
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+        .image-container {
+            height: 40vh;
+            min-height: 250px;
+        }
+        .transcription-panel {
+            max-height: 45vh;
+        }
+        .transcription-content {
+            padding: 16px;
+        }
+        .transcription-text {
+            font-size: 1.3rem;
+            line-height: 2.2;
+        }
+        .image-controls {
+            padding: 6px 12px;
+            gap: 4px;
+        }
+        .image-controls button {
+            min-width: 44px !important;
+            min-height: 44px !important;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .metadata-header {
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+        .shelfmark-title {
+            font-size: 1.25rem;
+            margin-bottom: 6px;
+        }
+        .metadata-row {
+            gap: 8px;
+            font-size: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .metadata-item {
+            padding: 3px 6px;
+            font-size: 0.75rem;
+        }
+        .navigation-bar {
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+        }
+        .nav-controls-row {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+        }
+        .nav-btn {
+            min-width: 44px !important;
+            min-height: 44px !important;
+        }
+        .image-container {
+            height: 35vh;
+            min-height: 200px;
+        }
+        .image-viewer-container {
+            min-height: 200px;
+            border-radius: 6px;
+        }
+        .transcription-panel {
+            max-height: 40vh;
+            border-radius: 6px;
+        }
+        .transcription-header {
+            padding: 10px 12px;
+        }
+        .transcription-content {
+            padding: 12px;
+        }
+        .transcription-text {
+            font-size: 1.15rem;
+            line-height: 2;
+        }
+        /* Floating zoom controls for mobile */
+        .image-controls {
+            bottom: 12px;
+            padding: 6px 10px;
+            gap: 2px;
+            border-radius: 20px;
+        }
+        .shortcuts-hint {
+            display: none !important;
+        }
+        /* Page input narrower */
+        .page-input {
+            width: 60px !important;
+        }
+    }
+
+    /* Touch-friendly navigation buttons */
+    .nav-btn {
+        min-width: 44px;
+        min-height: 44px;
     }
 
     /* Keyboard shortcuts hint */

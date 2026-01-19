@@ -682,6 +682,111 @@ COMMON_STYLES = '''
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
     }
+
+    /* ========================================================================
+       Mobile Responsive - Minimal Breakpoints
+       ======================================================================== */
+
+    /* Tablet and below */
+    @media (max-width: 768px) {
+        /* Prevent iOS zoom on input focus */
+        input, select, textarea { font-size: 16px !important; }
+
+        /* Touch-friendly targets */
+        button, .clickable, [role="button"] { min-height: 44px; }
+
+        /* Prevent horizontal scroll */
+        body { overflow-x: hidden; }
+    }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+        .app-header { padding: 0 12px; }
+        .main-content { padding: 12px; }
+        .page-title { font-size: 1.5rem; }
+    }
+
+    /* Small mobile */
+    @media (max-width: 480px) {
+        .main-content { padding: 8px; }
+        .page-title { font-size: 1.25rem; }
+
+        /* Dialogs fullscreen */
+        .q-dialog__inner { padding: 0 !important; }
+        .q-dialog .q-card {
+            width: 100vw !important;
+            max-width: 100vw !important;
+            border-radius: 0 !important;
+        }
+    }
+
+    /* Utility classes */
+    @media (max-width: 640px) {
+        .hide-mobile { display: none !important; }
+    }
+    @media (min-width: 641px) {
+        .show-mobile-only { display: none !important; }
+    }
+
+    /* === Page-specific mobile styles === */
+
+    /* Home page */
+    @media (max-width: 640px) {
+        .tool-card { min-width: 100% !important; }
+        .mini-stat-card { padding: 12px !important; }
+    }
+
+    /* Search page */
+    @media (max-width: 768px) {
+        /* Hide viewer panel on mobile - results expand inline instead */
+        .search-splitter .q-splitter__after { display: none !important; }
+        .search-splitter .q-splitter__separator { display: none !important; }
+        .search-splitter .q-splitter__before { width: 100% !important; flex: 1 !important; }
+        .filters-grid { grid-template-columns: 1fr !important; }
+        /* Show mobile expansion in result cards */
+        .result-mobile-expand { display: block !important; }
+    }
+    @media (min-width: 769px) {
+        /* Hide mobile expansion on desktop */
+        .result-mobile-expand { display: none !important; }
+    }
+
+    /* Browse page */
+    @media (max-width: 768px) {
+        .browse-container { flex-direction: column !important; }
+        .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
+    }
+
+    /* Lists page */
+    @media (max-width: 768px) {
+        .lists-layout { flex-direction: column !important; }
+        .lists-sidebar { width: 100% !important; max-height: 200px !important; }
+    }
+
+    /* Header mobile adjustments */
+    @media (max-width: 640px) {
+        .app-header { padding: 0 8px !important; }
+        .app-header .status-indicator {
+            padding: 4px 8px !important;
+            font-size: 0.7rem !important;
+        }
+        .app-header .status-indicator .status-text { display: none; }
+        .app-header .auth-buttons { gap: 4px !important; }
+        .app-header .auth-buttons .q-btn {
+            min-width: 32px !important;
+            min-height: 32px !important;
+            padding: 4px !important;
+        }
+        /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
+        .help-btn-header { display: none !important; }
+    }
+
+    /* Mobile drawer - CSS only, hide on phones/tablets */
+    @media (max-width: 768px) {
+        .q-drawer--left:not(.q-drawer--on-top) {
+            transform: translateX(-100%) !important;
+        }
+    }
 </style>
 '''
 
@@ -696,15 +801,15 @@ def create_layout():
 
     # Header
     with ui.header().classes('q-py-none').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between px-6'):
+        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                ui.button(icon='menu', on_click=lambda: left_drawer.toggle()).props('flat round text-color=white').classes('lg:hidden')
+                menu_btn = ui.button(icon='menu').props('flat round text-color=white')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
                     ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
-                    with ui.column().classes('gap-0'):
+                    with ui.column().classes('gap-0 hidden sm:flex'):
                         ui.label('Genizah Search').classes('text-lg font-bold text-white tracking-wide')
                         ui.label('Pro').classes('text-xs text-white/60')
 
@@ -714,11 +819,11 @@ def create_layout():
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
             # Right: Status + Actions + Auth
-            with ui.row().classes('items-center gap-4'):
+            with ui.row().classes('items-center gap-2 sm:gap-4'):
                 # Status Indicator
-                with ui.row().classes('items-center gap-2 bg-white/15 px-4 py-2 rounded-full'):
+                with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
                     status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
-                    status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90')
+                    status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
                     def update_status():
                         if state.is_ready():
@@ -728,17 +833,38 @@ def create_layout():
                             status_dot.classes('bg-yellow-400', remove='bg-green-400')
                             status_text.text = tr('Loading...')
 
-                    ui.timer(2.0, update_status)
+                    ui.timer(3.0, update_status, once=True)
 
                 # Auth Buttons (Login/Register or User Menu)
-                from web.auth_state import create_auth_buttons
-                create_auth_buttons()
+                with ui.row().classes('auth-buttons'):
+                    from web.auth_state import create_auth_buttons
+                    create_auth_buttons()
 
-                # Help Button
-                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help'))
+                # Help Button (hidden on mobile via CSS)
+                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
     # Left Sidebar (Drawer)
-    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280')
+    # Use stored state, default to True (open) on desktop
+    drawer_open = app.storage.user.get('drawer_open', True)
+    left_drawer = ui.left_drawer(value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    def toggle_drawer():
+        """Toggle drawer and save state."""
+        left_drawer.toggle()
+        app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
+
+    async def nav_to(path):
+        """Navigate and close drawer on mobile only."""
+        # Check screen width - only close drawer on mobile (<768px)
+        width = await ui.run_javascript('window.innerWidth')
+        if width < 768:
+            app.storage.user['drawer_open'] = False
+            left_drawer.hide()
+        ui.navigate.to(path)
+
+    # Connect menu button to toggle function
+    menu_btn.on('click', toggle_drawer)
+
     with left_drawer:
         with ui.column().classes('h-full'):
             # Navigation Section
@@ -757,7 +883,7 @@ def create_layout():
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
 
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: ui.navigate.to(p)):
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
                         if badge:
@@ -774,7 +900,7 @@ def create_layout():
 
                 for path, icon, label, badge in tool_items:
                     is_active = current_page == path
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: ui.navigate.to(p)):
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
 
