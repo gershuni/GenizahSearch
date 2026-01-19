@@ -682,6 +682,35 @@ COMMON_STYLES = '''
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
     }
+
+    /* ========================================================================
+       Mobile Responsive - Minimal Breakpoints
+       ======================================================================== */
+
+    /* Tablet and below */
+    @media (max-width: 768px) {
+        /* Prevent iOS zoom on input focus */
+        input, select, textarea { font-size: 16px !important; }
+
+        /* Touch-friendly targets */
+        button, .clickable, [role="button"] { min-height: 44px; }
+
+        /* Prevent horizontal scroll */
+        body { overflow-x: hidden; }
+    }
+
+    /* Mobile */
+    @media (max-width: 640px) {
+        .app-header { padding: 0 12px; }
+        .main-content { padding: 12px; }
+        .page-title { font-size: 1.5rem; }
+    }
+
+    /* Small mobile */
+    @media (max-width: 480px) {
+        .main-content { padding: 8px; }
+        .page-title { font-size: 1.25rem; }
+    }
 </style>
 '''
 
