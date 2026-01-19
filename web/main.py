@@ -831,11 +831,11 @@ def create_layout():
                     from web.auth_state import create_auth_buttons
                     create_auth_buttons()
 
-                # Help Button (hidden on mobile - shows keyboard shortcuts)
-                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('hidden sm:flex')
+                # Help Button
+                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help'))
 
-    # Left Sidebar (Drawer) - overlay mode on mobile
-    left_drawer = ui.left_drawer(bordered=True).classes('shadow-xl').props('width=280 breakpoint=1024 behavior=mobile overlay')
+    # Left Sidebar (Drawer)
+    left_drawer = ui.left_drawer(value=True, bordered=True).classes('shadow-xl').props('width=280 breakpoint=1024')
 
     def nav_to(path):
         """Navigate and close drawer on mobile."""
