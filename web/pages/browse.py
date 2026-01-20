@@ -1087,10 +1087,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     if shelfmark_lower.startswith('ms. heb') or shelfmark_lower.startswith('heb.') or 'bodleian' in shelfmark_lower:
                         is_oxford = True
 
-                # Also check via CodicologicalManager if available
+                # Also check via CodicologicalManager if available and loaded
                 if not is_oxford and page.sys_id and state.meta_mgr and hasattr(state.meta_mgr, 'codico_mgr'):
                     codico = state.meta_mgr.codico_mgr
-                    if codico and codico.get_part_for_folio(page.sys_id):
+                    if codico and getattr(codico, '_loaded', False) and codico.get_part_for_folio(page.sys_id):
                         is_oxford = True
 
                 if is_oxford and page.sys_id:

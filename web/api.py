@@ -157,6 +157,8 @@ def init_api_routes():
             return Response(content="Oxford manager not initialized", status_code=503)
 
         codico = state.meta_mgr.codico_mgr
+        if not getattr(codico, '_loaded', False):
+            return Response(content="Oxford database still loading", status_code=503)
 
         # Get the Part ID for this system ID
         part_id = codico.get_part_for_folio(sys_id)
@@ -222,6 +224,8 @@ def init_api_routes():
             return {"error": "Oxford manager not initialized", "images": []}
 
         codico = state.meta_mgr.codico_mgr
+        if not getattr(codico, '_loaded', False):
+            return {"error": "Oxford database still loading", "images": []}
 
         # Get the Part ID for this system ID
         part_id = codico.get_part_for_folio(sys_id)
