@@ -28,10 +28,10 @@ VIEWER_STYLES = '''
 // Global function for handling image errors with fallback
 function handleImageError(img, fallbackUrl) {
     if (fallbackUrl && img.src !== fallbackUrl) {
-        console.log('IIIF image failed, trying Rosetta fallback');
+        console.log('Primary image failed, trying fallback:', fallbackUrl);
         img.src = fallbackUrl;
     } else {
-        console.log('All image sources failed');
+        console.log('All image sources failed for:', img.src);
         img.style.display = 'none';
         const parent = img.parentElement;
         if (parent) {
@@ -1077,12 +1077,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 fallback_url = None
                 has_image = False
 
-                if fl_id:
+                # Try to get image - prefer system ID (fetches valid FL IDs from NLI)
+                if page.sys_id:
+                    has_image = True
+                    # Use system ID endpoint - dynamically fetches correct FL IDs from NLI
+                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}"
+                    fallback_url = None
+                elif fl_id:
                     digits = re.sub(r"\D", "", str(fl_id))
                     if digits:
                         has_image = True
-                        img_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
-                        fallback_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+                        img_url = f"/api/nli_image/{digits}"
+                        fallback_url = None
 
                 # Main text area
                 with ui.card().classes('w-full').style('min-height: 60vh;'):

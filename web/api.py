@@ -2,6 +2,7 @@ from nicegui import app
 from fastapi import Response
 from web.state import state
 import requests
+import re
 from genizah_core import Config
 import io
 import openpyxl
@@ -39,6 +40,107 @@ def init_api_routes():
     app.include_router(versions.router, prefix="/api/v1", tags=["versions"])
     app.include_router(discoveries.router, prefix="/api/v1", tags=["discoveries"])
 
+    def fetch_fl_ids_from_nli(system_id: str) -> list:
+        """Fetch valid FL IDs from NLI MARC API (like desktop does)."""
+        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=10, verify=False)
+            if resp.status_code == 200:
+                # Parse FL IDs from XML response
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(resp.text)
+                fl_ids = []
+                for field in root.findall('.//*[@tag="856"]'):
+                    for subfield in field.findall('subfield[@code="u"]'):
+                        url_text = subfield.text or ''
+                        match = re.search(r'FL(\d+)', url_text)
+                        if match:
+                            fl_ids.append(match.group(1))
+                return fl_ids
+        except Exception as e:
+            print(f"Failed to fetch FL IDs for {system_id}: {e}")
+        return []
+
+    @app.get('/api/nli_image/{fl_id}')
+    def nli_image(fl_id: str):
+        """
+        Fetch NLI image by FL ID. Tries IIIF first (for valid IDs), then Rosetta.
+        """
+        # Clean the FL ID
+        digits = re.sub(r"\D", "", str(fl_id))
+        if not digits:
+            return Response(content="Invalid FL ID", status_code=400)
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.nli.org.il/',
+        }
+
+        # Try IIIF first (works for valid FL IDs, returns real images)
+        iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+        try:
+            resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+            if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
+                # Verify it's not a tiny placeholder (real images are > 5KB)
+                if len(resp.content) > 5000:
+                    return Response(
+                        content=resp.content,
+                        media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                    )
+        except Exception as e:
+            print(f"IIIF failed for FL{digits}: {e}")
+
+        # Fallback to Rosetta - but filter out the "no image" placeholder
+        rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
+        try:
+            resp = requests.get(rosetta_url, headers=headers, timeout=15, verify=False)
+            if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
+                # The "no image" placeholder is ~1615 bytes, real images are larger
+                if len(resp.content) > 2000:
+                    return Response(
+                        content=resp.content,
+                        media_type=resp.headers.get('Content-Type', 'image/png')
+                    )
+        except Exception as e:
+            print(f"Rosetta failed for FL{digits}: {e}")
+
+        return Response(content="Image not found", status_code=404)
+
+    @app.get('/api/nli_image_by_sysid/{sys_id}')
+    def nli_image_by_sysid(sys_id: str):
+        """
+        Fetch NLI image by System ID. Dynamically gets FL IDs from NLI MARC API.
+        This is what the desktop does - it fetches the correct FL IDs from NLI.
+        """
+        # Fetch FL IDs from NLI
+        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        if not fl_ids:
+            return Response(content="No FL IDs found for this document", status_code=404)
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.nli.org.il/',
+        }
+
+        # Try each FL ID until one works
+        for fl_id in fl_ids:
+            # Try IIIF
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
+            try:
+                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                    return Response(
+                        content=resp.content,
+                        media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                    )
+            except Exception:
+                pass
+
+        return Response(content="Image not found", status_code=404)
+
     @app.get('/api/proxy_image')
     def proxy_image(url: str):
         """
@@ -60,24 +162,28 @@ def init_api_routes():
         except Exception:
             return Response(content="Invalid URL format", status_code=400)
 
-        headers = dict(Config.HTTP_HEADERS)
-        headers["Referer"] = "https://www.nli.org.il/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.nli.org.il/',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        }
 
         try:
-            # Fetch the image with timeout
-            resp = requests.get(url, headers=headers, timeout=10)
+            # Fetch the image with timeout (verify=False for NLI SSL issues)
+            resp = requests.get(url, headers=headers, timeout=15, verify=False)
             if resp.status_code == 200:
                 return Response(
                     content=resp.content,
                     media_type=resp.headers.get('Content-Type', 'image/jpeg')
                 )
             else:
+                print(f"Proxy got status {resp.status_code} for URL: {url}")
                 return Response(status_code=resp.status_code)
         except requests.Timeout:
             print(f"Proxy timeout for URL: {url}")
             return Response(content="Request timeout", status_code=504)
         except Exception as e:
-            print(f"Proxy error: {e}")
+            print(f"Proxy error for {url}: {e}")
             return Response(status_code=500)
 
     @app.get('/api/export/excel')

@@ -6,8 +6,23 @@ import html
 
 # --- Helpers ---
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+ROSETTA_BASE = "https://rosetta.nli.org.il/delivery/DeliveryManagerServlet"
+
+def get_image_urls(fl_id):
+    """Get primary (Rosetta thumbnail) and fallback (IIIF) image URLs for direct browser loading."""
+    if not fl_id:
+        return None, None
+    digits = re.sub(r"\D", "", str(fl_id))
+    if not digits:
+        return None, None
+    # Primary: Rosetta thumbnail (works for all FL IDs)
+    primary = f"{ROSETTA_BASE}?dps_func=thumbnail&dps_pid=FL{digits}"
+    # Fallback: IIIF full image (works for some FL IDs)
+    fallback = f"{NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
+    return primary, fallback
 
 def get_full_image_url(fl_id):
+    """Legacy helper - returns IIIF URL."""
     if not fl_id: return None
     digits = re.sub(r"\D", "", str(fl_id))
     if not digits: return None
@@ -188,15 +203,16 @@ def load_result(container, result):
             # 2. Image Panel
             with ui.tab_panel(tab_img).classes('p-0 h-full bg-black flex items-center justify-center relative'):
                 if fl_id:
-                    img_url = get_full_image_url(fl_id)
-                    # Proxy URL
-                    proxy_url = f"/api/proxy_image?url={img_url}"
+                    digits = re.sub(r"\D", "", str(fl_id))
 
                     with ui.scroll_area().classes('w-full h-full flex items-center justify-center bg-gray-900'):
-                        # Use min-h-0 to allow proper flex sizing in scroll area
-                        ui.image(proxy_url).props('fit=contain').classes('h-[80vh] w-auto max-w-none')
+                        # Simple NLI image endpoint - just pass FL ID
+                        img_url = f"/api/nli_image/{digits}"
+                        ui.image(img_url).props('fit=contain').classes('h-[80vh] w-auto max-w-none').style(
+                            'max-height: 80vh; object-fit: contain;'
+                        )
 
-                    ui.label(tr("High-Res via NLI Proxy")).classes('absolute bottom-2 right-2 text-xs text-white/50 bg-black/30 px-2 rounded')
+                    ui.label(tr("NLI Image")).classes('absolute bottom-2 right-2 text-xs text-white/50 bg-black/30 px-2 rounded')
                 else:
                     ui.label(tr("No image available")).classes('text-white')
 
