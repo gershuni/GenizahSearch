@@ -49,17 +49,18 @@ def init_api_routes():
         try:
             resp = requests.get(url, headers=headers, timeout=10, verify=False)
             if resp.status_code == 200:
-                # Parse FL IDs from XML response
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(resp.text)
-                fl_ids = []
-                for field in root.findall('.//*[@tag="856"]'):
-                    for subfield in field.findall('subfield[@code="u"]'):
-                        url_text = subfield.text or ''
-                        match = re.search(r'FL(\d+)', url_text)
-                        if match:
-                            fl_ids.append(match.group(1))
-                return fl_ids
+                # Simple regex approach - FL IDs appear in field 907 subfield d
+                # Format: <subfield code="d">FL156446080</subfield>
+                fl_ids = re.findall(r'FL(\d+)', resp.text)
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_fl_ids = []
+                for fl_id in fl_ids:
+                    if fl_id not in seen:
+                        seen.add(fl_id)
+                        unique_fl_ids.append(fl_id)
+                print(f"Found FL IDs for {system_id}: {unique_fl_ids}")
+                return unique_fl_ids
         except Exception as e:
             print(f"Failed to fetch FL IDs for {system_id}: {e}")
         return []
