@@ -24,7 +24,12 @@ from .common import (
 from .discovery import (
     DiscoveryCreate, DiscoveryUpdate, DiscoveryResponse,
     DiscoveryListResponse, ResponseCreate, ResponseItem, ResponseListResponse,
-    DiscoveryStats, FeedItem, FeedResponse, AuthorInfo
+    DiscoveryStats, FeedItem, FeedResponse, AuthorInfo, ClusterJoinInfo
+)
+from .join import (
+    JoinCreate, JoinUpdate, JoinResponse,
+    ConnectedFragmentsResponse, JoinSearchResponse,
+    JoinedFragment, RelationshipTypeEnum
 )
 
 __all__ = [
@@ -48,5 +53,9 @@ __all__ = [
     # Discovery
     'DiscoveryCreate', 'DiscoveryUpdate', 'DiscoveryResponse',
     'DiscoveryListResponse', 'ResponseCreate', 'ResponseItem', 'ResponseListResponse',
-    'DiscoveryStats', 'FeedItem', 'FeedResponse', 'AuthorInfo',
+    'DiscoveryStats', 'FeedItem', 'FeedResponse', 'AuthorInfo', 'ClusterJoinInfo',
+    # Join
+    'JoinCreate', 'JoinUpdate', 'JoinResponse',
+    'ConnectedFragmentsResponse', 'JoinSearchResponse',
+    'JoinedFragment', 'RelationshipTypeEnum',
 ]

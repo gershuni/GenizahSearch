@@ -70,6 +70,7 @@ async def create_discoveries_page():
                         'question': tr('Questions'),
                         'correction': tr('Corrections'),
                         'comment': tr('Comments'),
+                        'join': tr('Joins'),
                     },
                     value='all',
                     label=tr('Type')
@@ -169,6 +170,12 @@ async def load_stats(container):
                 'label': tr('Active Contributors'),
                 'color': 'teal'
             },
+            {
+                'icon': 'link',
+                'value': stats.get('user_joins', 0),
+                'label': tr('User Joins'),
+                'color': 'green'
+            },
         ]
 
         for card in stat_cards:
@@ -228,6 +235,7 @@ def create_feed_item(item: dict, on_refresh=None):
         'identification': {'icon': 'search', 'color': 'green', 'label': tr('Identification')},
         'note': {'icon': 'note', 'color': 'gray', 'label': tr('Note')},
         'comment': {'icon': 'comment', 'color': 'teal', 'label': tr('Comment')},
+        'join': {'icon': 'link', 'color': 'green', 'label': tr('Join (noun)')},
     }
     style = type_styles.get(item_type, type_styles['discovery'])
 
@@ -436,7 +444,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             ui.button(icon='delete', on_click=delete_correction_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete correction'))
 
-                # Title - for corrections, generate localized title
+                # Title - for corrections and joins, generate localized title
                 if item_type == 'correction':
                     corr_shelfmark, _ = resolve_shelfmark(item.get('document_id'), item.get('shelfmark'))
                     corr_page = item.get('page_number')
@@ -444,6 +452,40 @@ def create_feed_item(item: dict, on_refresh=None):
                     if corr_page:
                         corr_title += f" ({tr('Image')} {corr_page})"
                     ui.label(corr_title).classes('font-bold text-lg')
+                elif item_type == 'join':
+                    # For joins: show cluster title
+                    cluster_fragments = item.get('cluster_fragments', [])
+                    cluster_joins = item.get('cluster_joins', [])
+                    num_joins = len(cluster_joins) if cluster_joins else 1
+
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                        # Show cluster title
+                        if cluster_fragments and len(cluster_fragments) > 2:
+                            # Multi-fragment cluster: show fragments connected by arrows
+                            if len(cluster_fragments) <= 4:
+                                for i, frag in enumerate(cluster_fragments):
+                                    if i > 0:
+                                        ui.icon('sync_alt', size='sm').style('color: var(--text-tertiary);')
+                                    ui.label(frag).classes('font-bold font-mono')
+                            else:
+                                # Too many fragments, show summary
+                                ui.label(cluster_fragments[0]).classes('font-bold font-mono')
+                                ui.icon('sync_alt', size='sm').style('color: var(--text-tertiary);')
+                                ui.label(f"+{len(cluster_fragments) - 1}").classes('font-bold')
+                        elif cluster_fragments and len(cluster_fragments) == 2:
+                            # Simple 2-fragment cluster
+                            ui.label(cluster_fragments[0]).classes('font-bold font-mono')
+                            ui.icon('sync_alt', size='sm').style('color: var(--text-tertiary);')
+                            ui.label(cluster_fragments[1]).classes('font-bold font-mono')
+                        else:
+                            # Fallback to title from backend
+                            ui.label(item.get('title', '')).classes('font-bold text-lg')
+
+                        # Show count badges
+                        if num_joins > 1:
+                            ui.badge(f"{num_joins} {tr('joins')}").props('color=teal').classes('text-xs ml-2')
+                        if cluster_fragments and len(cluster_fragments) > 2:
+                            ui.badge(f"{len(cluster_fragments)} {tr('fragments')}").props('color=blue outline').classes('text-xs')
                 else:
                     ui.label(item.get('title', '')).classes('font-bold text-lg')
 
@@ -477,6 +519,101 @@ def create_feed_item(item: dict, on_refresh=None):
                                     with ui.row().classes('w-full items-center gap-2 mt-2'):
                                         ui.icon('compare_arrows', size='sm').style('color: var(--text-tertiary);')
                                         ui.label(tr('Change highlighted')).classes('text-xs').style('color: var(--text-tertiary);')
+                        elif item_type == 'join':
+                            # For joins: show cluster details with individual joins
+                            cluster_fragments = item.get('cluster_fragments', [])
+                            cluster_joins = item.get('cluster_joins', [])
+
+                            join_rel_labels = {
+                                'physical_join': tr('Physical join'),
+                                'same_composition': tr('Same composition')
+                            }
+
+                            # Show all fragments in the cluster
+                            if cluster_fragments:
+                                ui.label(tr('Fragments in cluster')).classes('text-xs font-medium mb-2').style('color: var(--text-tertiary);')
+                                with ui.row().classes('w-full flex-wrap gap-2 mb-3'):
+                                    for frag in cluster_fragments:
+                                        # Try to find document_id for this fragment from cluster_joins
+                                        frag_doc_id = None
+                                        for cj in cluster_joins:
+                                            if cj.get('fragment_a') == frag:
+                                                frag_doc_id = cj.get('document_id_a')
+                                                break
+                                            elif cj.get('fragment_b') == frag:
+                                                frag_doc_id = cj.get('document_id_b')
+                                                break
+
+                                        def nav_to_frag(did=frag_doc_id):
+                                            if did:
+                                                ui.navigate.to(f'/browse?sys_id={did}')
+
+                                        with ui.card().classes('p-2 cursor-pointer hover:bg-gray-100').style('background: var(--surface-secondary);').on('click', nav_to_frag if frag_doc_id else None):
+                                            with ui.row().classes('items-center gap-1'):
+                                                ui.icon('description', size='xs').style('color: var(--text-tertiary);')
+                                                ui.label(frag).classes('font-mono text-sm').style('color: var(--primary-600);' if frag_doc_id else 'color: var(--text-secondary);')
+
+                            # Show individual joins
+                            if cluster_joins:
+                                ui.separator().classes('my-2')
+                                ui.label(f"{tr('Joins')} ({len(cluster_joins)})").classes('text-xs font-medium mb-2').style('color: var(--text-tertiary);')
+
+                                for cj in cluster_joins:
+                                    cj_frag_a = cj.get('fragment_a', '')
+                                    cj_frag_b = cj.get('fragment_b', '')
+                                    cj_rel_type = cj.get('relationship_type', '')
+                                    cj_notes = cj.get('notes', '')
+                                    cj_author = cj.get('created_by_username', '')
+                                    cj_id = cj.get('id')
+
+                                    with ui.card().classes('w-full p-2 mb-2').style('background: var(--surface-secondary);'):
+                                        with ui.row().classes('w-full items-center justify-between'):
+                                            with ui.row().classes('items-center gap-2'):
+                                                ui.label(cj_frag_a).classes('font-mono text-sm font-medium')
+                                                ui.icon('sync_alt', size='xs').style('color: var(--text-tertiary);')
+                                                ui.label(cj_frag_b).classes('font-mono text-sm font-medium')
+
+                                                if cj_rel_type:
+                                                    ui.badge(join_rel_labels.get(cj_rel_type, cj_rel_type)).props('color=teal outline').classes('text-xs ml-2')
+
+                                            # Admin delete button for individual join
+                                            if is_admin and cj_id:
+                                                async def delete_single_join(jid=cj_id):
+                                                    confirm_dialog = ui.dialog()
+                                                    with confirm_dialog, ui.card().classes('p-4'):
+                                                        ui.label(tr('Delete this join?')).classes('font-bold')
+                                                        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                                        with ui.row().classes('justify-end gap-2 mt-4'):
+                                                            ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+
+                                                            async def do_delete():
+                                                                result = await api_call("DELETE", f"/joins/{jid}")
+                                                                confirm_dialog.close()
+                                                                if "error" not in result:
+                                                                    ui.notify(tr('Join deleted'), type='positive')
+                                                                    if on_refresh:
+                                                                        await on_refresh()
+                                                                else:
+                                                                    ui.notify(result.get("error", tr('Error')), type='negative')
+
+                                                            ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
+                                                    confirm_dialog.open()
+
+                                                ui.button(icon='delete', on_click=delete_single_join).props('flat round dense size=xs color=negative').tooltip(tr('Delete join'))
+
+                                        if cj_notes:
+                                            ui.label(cj_notes).classes('text-xs mt-1').style('color: var(--text-secondary);')
+
+                                        if cj_author:
+                                            ui.label(f"{tr('By')}: {cj_author}").classes('text-xs').style('color: var(--text-tertiary);')
+
+                            # View cluster button
+                            first_doc_id = item.get('document_id')
+                            if first_doc_id:
+                                with ui.row().classes('w-full items-center gap-2 mt-3'):
+                                    def view_cluster_browse(did=first_doc_id):
+                                        ui.navigate.to(f'/browse?sys_id={did}')
+                                    ui.button(tr('View in browser'), icon='open_in_new', on_click=view_cluster_browse).props('outlined dense')
                         else:
                             # Full content for non-corrections
                             ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')

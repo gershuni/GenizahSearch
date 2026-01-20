@@ -1176,13 +1176,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     on_click=toggle_image
                                 ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
 
-                            # Edit and Comment buttons
+                            # Edit, Comment, Notes, and Joins buttons
                             if page.text:
-                                from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button
+                                from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button, create_joins_button
 
                                 # Refresh callback to reload page after edits/comments
                                 def refresh_page():
                                     load_page(direction=0)
+
+                                # Navigation callback for joins
+                                def navigate_to_shelfmark(target_shelfmark: str):
+                                    state.shelfmark_query = target_shelfmark
+                                    search_shelfmark()
 
                                 create_edit_button(
                                     document_id=page.sys_id,
@@ -1202,6 +1207,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id
                                 )
+
+                                # Joins button - show connected fragments
+                                if page.shelfmark:
+                                    create_joins_button(
+                                        shelfmark=page.shelfmark,
+                                        document_id=page.sys_id,
+                                        on_navigate=navigate_to_shelfmark
+                                    )
 
                     # Main text content - use container for version switching
                     text_container = ui.column().classes('w-full')

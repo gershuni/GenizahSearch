@@ -7,6 +7,7 @@ from .document_metadata import DocumentMetadata
 from .activity_log import ActivityLog
 from .transcription_version import TranscriptionVersion, PageDefault, VersionSource
 from .discovery import Discovery, DiscoveryResponse, DiscoveryType, DiscoveryStatus
+from .fragment_join import FragmentJoin, RelationshipType, normalize_shelfmark, normalize_join_order
 
 __all__ = [
     'Base', 'engine', 'SessionLocal', 'get_db', 'init_db',
@@ -17,4 +18,5 @@ __all__ = [
     'ActivityLog',
     'TranscriptionVersion', 'PageDefault', 'VersionSource',
     'Discovery', 'DiscoveryResponse', 'DiscoveryType', 'DiscoveryStatus',
+    'FragmentJoin', 'RelationshipType', 'normalize_shelfmark', 'normalize_join_order',
 ]

@@ -97,11 +97,50 @@ class Discovery:
     is_hidden: bool = False
     is_answered: bool = False
     view_count: int = 0
-    response_count: int = 0
     upvotes: int = 0
     downvotes: int = 0
+    response_count: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+@dataclass
+class FragmentJoin:
+    """Fragment join data class"""
+    id: int
+    fragment_a: str
+    fragment_b: str
+    document_id_a: Optional[str] = None  # sys_id for fragment A
+    document_id_b: Optional[str] = None  # sys_id for fragment B
+    relationship_type: Optional[str] = None
+    notes: Optional[str] = None
+    source: str = "user"
+    source_url: Optional[str] = None
+    created_by_username: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
+class JoinedFragmentDetail:
+    """A fragment in the connected component with relationship info"""
+    shelfmark: str
+    document_id: Optional[str] = None
+    is_current: bool = False
+    relationship_type: Optional[str] = None
+    join_id: Optional[int] = None
+    join_source: Optional[str] = None
+
+
+@dataclass
+class ConnectedFragments:
+    """Connected fragments response"""
+    shelfmark: str
+    shelfmark_normalized: str
+    fragments: List[str] = field(default_factory=list)
+    fragment_details: List[JoinedFragmentDetail] = field(default_factory=list)
+    joins: List[FragmentJoin] = field(default_factory=list)
+    total_fragments: int = 0
+    total_joins: int = 0
 
 
 @dataclass
@@ -120,7 +159,7 @@ class DiscoveryResponse:
 class FeedItem:
     """Activity feed item"""
     id: str
-    item_type: str  # discovery, question, correction, comment
+    item_type: str  # discovery, question, correction, comment, join
     title: str
     content_preview: str
     author_username: Optional[str] = None
@@ -140,6 +179,13 @@ class FeedItem:
     # For corrections
     original_text: Optional[str] = None
     corrected_text: Optional[str] = None
+    # For joins
+    fragment_a: Optional[str] = None
+    fragment_b: Optional[str] = None
+    document_id_a: Optional[str] = None
+    document_id_b: Optional[str] = None
+    relationship_type: Optional[str] = None
+    join_source: Optional[str] = None
 
 
 class CorrectionsClient:
@@ -176,7 +222,7 @@ class CorrectionsClient:
         # Offline mode tracking
         self._is_offline = False
         self._last_connectivity_check = 0
-        self._connectivity_check_interval = 30  # seconds between checks
+        self._connectivity_check_interval = 5  # seconds between checks (reduced for faster offline detection)
 
         # Setup session with retries
         self.session = requests.Session()
@@ -342,7 +388,8 @@ class CorrectionsClient:
         method: str,
         endpoint: str,
         data: Dict = None,
-        params: Dict = None
+        params: Dict = None,
+        timeout: int = 30
     ) -> Dict:
         """
         Make an API request.
@@ -352,6 +399,7 @@ class CorrectionsClient:
             endpoint: API endpoint
             data: Request body data
             params: Query parameters
+            timeout: Request timeout in seconds (default 30)
 
         Returns:
             Response JSON data
@@ -369,7 +417,7 @@ class CorrectionsClient:
                 headers=headers,
                 json=data,
                 params=params,
-                timeout=30
+                timeout=timeout
             )
 
             # Handle token refresh
@@ -1124,7 +1172,14 @@ class CorrectionsClient:
             upvotes=data.get('upvotes', 0),
             downvotes=data.get('downvotes', 0),
             original_text=data.get('original_text'),
-            corrected_text=data.get('corrected_text')
+            corrected_text=data.get('corrected_text'),
+            # Join fields
+            fragment_a=data.get('fragment_a'),
+            fragment_b=data.get('fragment_b'),
+            document_id_a=data.get('document_id_a'),
+            document_id_b=data.get('document_id_b'),
+            relationship_type=data.get('relationship_type'),
+            join_source=data.get('join_source')
         )
 
     # ==================== All Users Corrections ====================
@@ -1287,6 +1342,231 @@ class CorrectionsClient:
         except Exception as e:
             logger.warning(f"Failed to get leaderboard: {e}")
             return []
+
+    # ==================== Fragment Joins ====================
+
+    def create_join(
+        self,
+        fragment_a: str,
+        fragment_b: str,
+        relationship_type: Optional[str] = None,
+        notes: Optional[str] = None,
+        document_id_a: Optional[str] = None,
+        document_id_b: Optional[str] = None
+    ) -> Tuple[Optional[FragmentJoin], str]:
+        """
+        Create a join between two fragments.
+
+        Args:
+            fragment_a: First fragment shelfmark
+            fragment_b: Second fragment shelfmark
+            relationship_type: Optional - 'physical_join' or 'same_composition'
+            notes: Optional notes about the join
+            document_id_a: System ID (sys_id) for fragment A
+            document_id_b: System ID (sys_id) for fragment B
+
+        Returns:
+            (FragmentJoin, message) on success, (None, error) on failure
+        """
+        try:
+            payload = {
+                'fragment_a': fragment_a,
+                'fragment_b': fragment_b,
+                'relationship_type': relationship_type,
+                'notes': notes
+            }
+            # Only include document_ids if provided
+            if document_id_a:
+                payload['document_id_a'] = document_id_a
+            if document_id_b:
+                payload['document_id_b'] = document_id_b
+
+            data = self._request('POST', '/joins/', payload)
+            return self._parse_join(data), "Join created"
+        except Exception as e:
+            return None, str(e)
+
+    def get_connected_fragments(self, shelfmark: str, timeout: int = 30) -> Optional[ConnectedFragments]:
+        """
+        Get all fragments connected to the given shelfmark.
+
+        Returns the full connected component - if A joins to B and B joins to C,
+        querying any of them returns all three.
+
+        Args:
+            shelfmark: The shelfmark to query
+            timeout: Request timeout in seconds (default 30)
+
+        Returns:
+            ConnectedFragments object or None on error
+        """
+        try:
+            # Use query parameter approach to avoid URL path encoding issues with /
+            data = self._request('GET', '/joins/connected', params={'shelfmark': shelfmark}, timeout=timeout)
+            return ConnectedFragments(
+                shelfmark=data['shelfmark'],
+                shelfmark_normalized=data['shelfmark_normalized'],
+                fragments=data.get('fragments', []),
+                fragment_details=[
+                    JoinedFragmentDetail(
+                        shelfmark=fd.get('shelfmark', ''),
+                        document_id=fd.get('document_id'),
+                        is_current=fd.get('is_current', False),
+                        relationship_type=fd.get('relationship_type'),
+                        join_id=fd.get('join_id'),
+                        join_source=fd.get('join_source')
+                    ) for fd in data.get('fragment_details', [])
+                ],
+                joins=[self._parse_join(j) for j in data.get('joins', [])],
+                total_fragments=data.get('total_fragments', 0),
+                total_joins=data.get('total_joins', 0)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get connected fragments: {e}")
+            return None
+
+    def get_connected_fragments_quick(self, shelfmark: str) -> Optional[ConnectedFragments]:
+        """
+        Get connected fragments with a short timeout (3 seconds).
+        Use this for UI updates where blocking is unacceptable.
+        """
+        return self.get_connected_fragments(shelfmark, timeout=3)
+
+    def get_connected_fragments_by_id(self, document_id: str, timeout: int = 30) -> Optional[ConnectedFragments]:
+        """
+        Get all fragments connected to the given document_id (sys_id).
+
+        This is the preferred method as document_id is the stable identifier.
+
+        Args:
+            document_id: The system ID (sys_id) to query
+            timeout: Request timeout in seconds (default 30)
+
+        Returns:
+            ConnectedFragments object or None on error
+        """
+        try:
+            data = self._request('GET', '/joins/connected', params={'document_id': document_id}, timeout=timeout)
+            return ConnectedFragments(
+                shelfmark=data.get('shelfmark', ''),
+                shelfmark_normalized=data.get('shelfmark_normalized', ''),
+                fragments=data.get('fragments', []),
+                fragment_details=[
+                    JoinedFragmentDetail(
+                        shelfmark=fd.get('shelfmark', ''),
+                        document_id=fd.get('document_id'),
+                        is_current=fd.get('is_current', False),
+                        relationship_type=fd.get('relationship_type'),
+                        join_id=fd.get('join_id'),
+                        join_source=fd.get('join_source')
+                    ) for fd in data.get('fragment_details', [])
+                ],
+                joins=[self._parse_join(j) for j in data.get('joins', [])],
+                total_fragments=data.get('total_fragments', 0),
+                total_joins=data.get('total_joins', 0)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get connected fragments by id: {e}")
+            return None
+
+    def get_join_by_id(self, join_id: int) -> Optional[FragmentJoin]:
+        """Get a specific join by ID"""
+        try:
+            data = self._request('GET', f'/joins/{join_id}')
+            return self._parse_join(data)
+        except Exception as e:
+            logger.warning(f"Failed to get join: {e}")
+            return None
+
+    def delete_join(self, join_id: int) -> Tuple[bool, str]:
+        """Delete a join"""
+        try:
+            self._request('DELETE', f'/joins/{join_id}')
+            return True, "Join deleted"
+        except Exception as e:
+            return False, str(e)
+
+    def update_join(
+        self,
+        join_id: int,
+        relationship_type: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Tuple[Optional[FragmentJoin], str]:
+        """Update a join's metadata"""
+        try:
+            data = self._request('PATCH', f'/joins/{join_id}', {
+                'relationship_type': relationship_type,
+                'notes': notes
+            })
+            return self._parse_join(data), "Join updated"
+        except Exception as e:
+            return None, str(e)
+
+    def search_joins(
+        self,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        relationship_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> Tuple[List[FragmentJoin], int]:
+        """Search joins by shelfmark pattern or filters. Returns (joins, total)."""
+        try:
+            params = {'limit': limit, 'offset': offset}
+            if query:
+                params['q'] = query
+            if source:
+                params['source'] = source
+            if relationship_type:
+                params['relationship_type'] = relationship_type
+
+            data = self._request('GET', '/joins/', params=params)
+            joins = [self._parse_join(j) for j in data.get('results', [])]
+            total = data.get('total', len(joins))
+            return joins, total
+        except Exception as e:
+            logger.warning(f"Failed to search joins: {e}")
+            return [], 0
+
+    def get_my_joins(
+        self,
+        query: Optional[str] = None,
+        relationship_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> Tuple[List[FragmentJoin], int]:
+        """Get current user's joins. Returns (joins, total)."""
+        try:
+            params = {'limit': limit, 'offset': offset}
+            if query:
+                params['q'] = query
+            if relationship_type:
+                params['relationship_type'] = relationship_type
+
+            data = self._request('GET', '/joins/my', params=params)
+            joins = [self._parse_join(j) for j in data.get('results', [])]
+            total = data.get('total', len(joins))
+            return joins, total
+        except Exception as e:
+            logger.warning(f"Failed to get my joins: {e}")
+            return [], 0
+
+    def _parse_join(self, data: Dict) -> FragmentJoin:
+        """Parse join data into FragmentJoin object"""
+        created_by = data.get('created_by', {})
+        return FragmentJoin(
+            id=data['id'],
+            fragment_a=data['fragment_a'],
+            fragment_b=data['fragment_b'],
+            document_id_a=data.get('document_id_a'),
+            document_id_b=data.get('document_id_b'),
+            relationship_type=data.get('relationship_type'),
+            notes=data.get('notes'),
+            source=data.get('source', 'user'),
+            source_url=data.get('source_url'),
+            created_by_username=created_by.get('username') if created_by else None,
+            created_at=data.get('created_at')
+        )
 
 
 # Singleton instance for easy access

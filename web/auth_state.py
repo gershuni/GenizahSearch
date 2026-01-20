@@ -25,14 +25,26 @@ def get_api_base() -> str:
     Get the full API base URL for the backend API.
 
     The backend API runs on port 8000 (separate from web interface on 8081).
-    Supports both CORRECTIONS_API_URL (full URL) and GENIZAH_BACKEND_PORT (port only).
+
+    Configuration options (in order of priority):
+    1. CORRECTIONS_API_URL - Full URL (e.g., https://api.genizah.dicta.org.il/api/v1)
+    2. API_HOST + API_SCHEME + GENIZAH_BACKEND_PORT - Build URL from parts
+    3. Fallback to localhost:8000 for development
     """
-    # Support full URL (for compatibility with desktop client)
+    # Option 1: Full URL (preferred for production)
     full_url = os.environ.get('CORRECTIONS_API_URL')
     if full_url:
         return full_url
 
-    # Support port-only configuration
+    # Option 2: Build from parts (useful for flexible deployment)
+    host = os.environ.get('API_HOST')
+    if host:
+        scheme = os.environ.get('API_SCHEME', 'https')
+        port = os.environ.get('GENIZAH_BACKEND_PORT', '')
+        port_suffix = f":{port}" if port else ""
+        return f"{scheme}://{host}{port_suffix}/api/v1"
+
+    # Option 3: Development fallback
     port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
     return f"http://localhost:{port}/api/v1"
 
@@ -214,6 +226,8 @@ async def api_call(
                     resp = await client.post(url, headers=all_headers, json=data, timeout=timeout)
                 elif method == "PUT":
                     resp = await client.put(url, headers=all_headers, json=data, timeout=timeout)
+                elif method == "PATCH":
+                    resp = await client.patch(url, headers=all_headers, json=data, timeout=timeout)
                 elif method == "DELETE":
                     resp = await client.delete(url, headers=all_headers, timeout=timeout)
                 else:

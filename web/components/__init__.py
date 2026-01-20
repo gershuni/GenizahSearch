@@ -34,6 +34,14 @@ from .notes_display import (
     fetch_document_comments
 )
 
+from .joins_panel import (
+    create_joins_button,
+    create_joins_dialog,
+    create_joins_indicator,
+    fetch_connected_fragments,
+    invalidate_joins_cache
+)
+
 __all__ = [
     'create_edit_button',
     'create_edit_text_dialog',
@@ -49,4 +57,9 @@ __all__ = [
     'create_notes_panel',
     'create_notes_button',
     'fetch_document_comments',
+    'create_joins_button',
+    'create_joins_dialog',
+    'create_joins_indicator',
+    'fetch_connected_fragments',
+    'invalidate_joins_cache',
 ]

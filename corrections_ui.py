@@ -12,10 +12,11 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
     QGroupBox, QFrame, QMessageBox, QProgressDialog,
     QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
-    QSplitter, QMenu, QStatusBar, QListWidget, QListWidgetItem
+    QSplitter, QMenu, QStatusBar, QListWidget, QListWidgetItem,
+    QCompleter
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QAction, QPalette
+from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
 
 try:
     from genizah_core import tr, CURRENT_LANG
@@ -25,7 +26,8 @@ except ImportError:
 
 from corrections_client import (
     CorrectionsClient, get_corrections_client,
-    User, Correction, Comment, Discovery, DiscoveryResponse, FeedItem
+    User, Correction, Comment, Discovery, DiscoveryResponse, FeedItem,
+    FragmentJoin, ConnectedFragments
 )
 
 
@@ -513,6 +515,10 @@ class CorrectionsViewerDialog(QDialog):
             return
 
         self.table.setRowCount(0)
+
+        # Quick server availability check (500ms timeout) to prevent UI freeze
+        if not self.client.is_server_available():
+            return
 
         corrections = self.client.get_corrections_for_document(
             self.document_id,
@@ -1083,7 +1089,7 @@ class DiscoveriesDialog(QDialog):
         stats_layout = QHBoxLayout(self.stats_frame)
 
         self.stat_labels = {}
-        for stat_name in ['words_corrected', 'documents_edited', 'total_discoveries', 'open_questions', 'active_contributors']:
+        for stat_name in ['words_corrected', 'documents_edited', 'total_discoveries', 'open_questions', 'active_contributors', 'user_joins']:
             stat_widget = QFrame()
             stat_widget.setStyleSheet("border-radius: 3px; padding: 5px; border: 1px solid palette(mid);")
             stat_v = QVBoxLayout(stat_widget)
@@ -1097,7 +1103,8 @@ class DiscoveriesDialog(QDialog):
                 'documents_edited': tr('Documents Edited'),
                 'total_discoveries': tr('Discoveries'),
                 'open_questions': tr('Open Questions'),
-                'active_contributors': tr('Contributors')
+                'active_contributors': tr('Contributors'),
+                'user_joins': tr('User Joins')
             }
             name_label = QLabel(name_labels.get(stat_name, stat_name))
             name_label.setStyleSheet("font-size: 10px; color: gray;")
@@ -1114,8 +1121,8 @@ class DiscoveriesDialog(QDialog):
 
         filter_layout.addWidget(QLabel(tr("Type:")))
         self.type_combo = QComboBox()
-        self.type_combo.addItems([tr("All"), tr("Discoveries"), tr("Questions"), tr("Corrections"), tr("Comments")])
-        self.type_values = ['all', 'discovery', 'question', 'correction', 'comment']
+        self.type_combo.addItems([tr("All"), tr("Discoveries"), tr("Questions"), tr("Corrections"), tr("Comments"), tr("Joins")])
+        self.type_values = ['all', 'discovery', 'question', 'correction', 'comment', 'join']
         self.type_combo.currentIndexChanged.connect(self.load_feed)
         filter_layout.addWidget(self.type_combo)
 
@@ -1211,13 +1218,15 @@ class DiscoveriesDialog(QDialog):
             'discovery': '#f39c12',
             'question': '#9b59b6',
             'correction': '#3498db',
-            'comment': '#1abc9c'
+            'comment': '#1abc9c',
+            'join': '#27ae60'
         }
         type_labels = {
             'discovery': tr('Discovery'),
             'question': tr('Question'),
             'correction': tr('Correction'),
-            'comment': tr('Comment')
+            'comment': tr('Comment'),
+            'join': tr('Join (noun)')
         }
         type_badge = QLabel(type_labels.get(item.item_type, item.item_type))
         type_badge.setStyleSheet(f"""
@@ -1310,6 +1319,41 @@ class DiscoveriesDialog(QDialog):
             diff_layout.addStretch()
             layout.addWidget(diff_frame)
 
+        # For joins: show both fragments with relationship
+        if item.item_type == 'join':
+            join_frame = QFrame()
+            join_frame.setStyleSheet("padding: 5px; border-radius: 3px; border: 1px solid palette(mid); background-color: rgba(39, 174, 96, 0.1);")
+            join_layout = QHBoxLayout(join_frame)
+
+            frag_a = getattr(item, 'fragment_a', None) or ''
+            frag_b = getattr(item, 'fragment_b', None) or ''
+            rel_type = getattr(item, 'relationship_type', None) or ''
+
+            rel_labels = {
+                'physical_join': tr('Physical join'),
+                'same_composition': tr('Same composition')
+            }
+
+            frag_a_label = QLabel(frag_a)
+            frag_a_label.setStyleSheet("color: #3498db; font-family: monospace; font-size: 11px; font-weight: bold;")
+            join_layout.addWidget(frag_a_label)
+
+            arrow = QLabel("↔")
+            arrow.setStyleSheet("font-size: 14px;")
+            join_layout.addWidget(arrow)
+
+            frag_b_label = QLabel(frag_b)
+            frag_b_label.setStyleSheet("color: #3498db; font-family: monospace; font-size: 11px; font-weight: bold;")
+            join_layout.addWidget(frag_b_label)
+
+            if rel_type:
+                rel_label = QLabel(f"({rel_labels.get(rel_type, rel_type)})")
+                rel_label.setStyleSheet("color: #27ae60; font-size: 10px; margin-left: 10px;")
+                join_layout.addWidget(rel_label)
+
+            join_layout.addStretch()
+            layout.addWidget(join_frame)
+
         # Footer row
         footer_layout = QHBoxLayout()
 
@@ -1356,6 +1400,12 @@ class DiscoveriesDialog(QDialog):
             if correction:
                 dialog = CorrectionDetailDialog(self, self.client, correction)
                 dialog.exec()
+        elif item.item_type == 'join':
+            # For joins, navigate to fragment A if on_browse is available
+            doc_id_a = getattr(item, 'document_id_a', None)
+            frag_a = getattr(item, 'fragment_a', None)
+            if self.on_browse and (frag_a or doc_id_a):
+                self.on_browse(frag_a or doc_id_a)
 
     def open_create_dialog(self):
         """Open dialog to create new discovery"""
@@ -2473,6 +2523,15 @@ class CommentsViewerDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
+        # Quick server availability check (500ms timeout) to prevent UI freeze
+        if not self.client.is_server_available():
+            unavailable_label = QLabel(tr("Server unavailable"))
+            secondary_color = self.palette().color(QPalette.ColorRole.PlaceholderText).name()
+            unavailable_label.setStyleSheet(f"color: {secondary_color}; font-size: 14px;")
+            unavailable_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.comments_layout.addWidget(unavailable_label)
+            return
+
         comments = self.client.get_comments_for_document(self.document_id)
 
         if not comments:
@@ -3054,6 +3113,16 @@ class CommunityHubWidget(QWidget):
         comments_layout.addStretch()
         self.tabs.addTab(my_comments_widget, tr("My Comments"))
 
+        # Joins tab - צירופים
+        self.joins_btn = QPushButton(tr("View Fragment Joins"))
+        self.joins_btn.clicked.connect(self.open_joins_feed)
+        joins_widget = QWidget()
+        joins_layout = QVBoxLayout(joins_widget)
+        joins_layout.addWidget(QLabel(tr("View user-created fragment joins and connections.")))
+        joins_layout.addWidget(self.joins_btn)
+        joins_layout.addStretch()
+        self.tabs.addTab(joins_widget, tr("Joins"))
+
         layout.addWidget(self.tabs)
 
     def open_discoveries(self):
@@ -3081,3 +3150,1304 @@ class CommunityHubWidget(QWidget):
             return
         dialog = MyCommentsDialog(self, self.client)
         dialog.exec()
+
+    def open_joins_feed(self):
+        """Open joins feed dialog"""
+        # Get on_browse callback from parent if available
+        on_browse = None
+        parent = self.parent()
+        if parent and hasattr(parent, 'browse_shelf_input'):
+            def browse_shelfmark(shelfmark):
+                parent.browse_shelf_input.setText(shelfmark)
+                parent._set_last_browse_field("shelf")
+                parent.browse_load()
+            on_browse = browse_shelfmark
+
+        dialog = JoinsFeedDialog(self, self.client, on_browse=on_browse)
+        dialog.exec()
+
+
+# =============================================================================
+# Fragment Joins Dialog
+# =============================================================================
+
+class JoinsDialog(QDialog):
+    """Dialog for viewing and managing fragment joins with autocomplete support"""
+
+    def __init__(
+        self,
+        parent=None,
+        client: CorrectionsClient = None,
+        document_id: str = None,
+        shelfmark: str = None,
+        on_browse=None,  # Callback to browse a shelfmark
+        shelf_model=None,  # QStandardItemModel for shelfmark autocomplete
+        joins_mgr=None,  # JoinsManager for offline-first data
+        shelf_completer=None,  # ShelfmarkCompleter instance for autocomplete
+        lists_mgr=None,  # ListsManager for picking from personal lists
+        meta_mgr=None  # MetadataManager for getting titles
+    ):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.document_id = document_id
+        self.shelfmark = shelfmark
+        self.on_browse = on_browse
+        self.shelf_model = shelf_model
+        self.joins_mgr = joins_mgr
+        self.shelf_completer = shelf_completer
+        self.lists_mgr = lists_mgr
+        self.meta_mgr = meta_mgr
+        self.connected_data = None
+
+        self.setWindowTitle(tr("Fragment Joins"))
+        self.resize(800, 550)
+        self.init_ui()
+        self.load_joins()
+
+    def _normalize_shelfmark(self, text: str) -> str:
+        """Normalize shelfmark for matching (same as ShelfmarkCompleter)."""
+        import re
+        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
+        return re.sub(r"[^\w\./]", "", t).lower()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header - get canonical shelfmark from document_id via meta_mgr
+        header_layout = QHBoxLayout()
+        header_shelfmark = None
+        if self.document_id and self.meta_mgr:
+            try:
+                header_shelfmark, _ = self.meta_mgr.get_meta_for_id(self.document_id)
+            except:
+                pass
+        if not header_shelfmark or header_shelfmark == "Unknown":
+            header_shelfmark = self.shelfmark
+            if header_shelfmark and ' | ' in header_shelfmark:
+                header_shelfmark = header_shelfmark.split(' | ')[-1]
+        header_text = tr("Connected Fragments for {}").format(header_shelfmark or self.document_id or tr("Unknown"))
+        self.header = QLabel(header_text)
+        self.header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.header)
+        header_layout.addStretch()
+
+        # Info label showing cluster size
+        self.cluster_info = QLabel("")
+        self.cluster_info.setStyleSheet("color: #666;")
+        header_layout.addWidget(self.cluster_info)
+
+        layout.addLayout(header_layout)
+
+        # Main content splitter
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # ---- Connected Fragments List ----
+        fragments_group = QGroupBox(tr("Connected Fragments"))
+        fragments_layout = QVBoxLayout(fragments_group)
+
+        self.fragments_list = QListWidget()
+        self.fragments_list.setMinimumHeight(120)
+        self.fragments_list.itemDoubleClicked.connect(self.on_fragment_double_click)
+        fragments_layout.addWidget(self.fragments_list)
+
+        # Navigate button
+        frag_btn_layout = QHBoxLayout()
+        self.btn_navigate = QPushButton(tr("Navigate to Selected"))
+        self.btn_navigate.setEnabled(False)
+        self.btn_navigate.clicked.connect(self.navigate_to_selected)
+        frag_btn_layout.addWidget(self.btn_navigate)
+        frag_btn_layout.addStretch()
+        fragments_layout.addLayout(frag_btn_layout)
+
+        splitter.addWidget(fragments_group)
+
+        # ---- Joins Table ----
+        joins_group = QGroupBox(tr("Join Details"))
+        joins_layout = QVBoxLayout(joins_group)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            tr("Fragment A"), tr("Fragment B"), tr("Relationship"),
+            tr("Source"), tr("Created By"), tr("Date")
+        ])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setMinimumHeight(150)
+        joins_layout.addWidget(self.table)
+
+        splitter.addWidget(joins_group)
+
+        layout.addWidget(splitter)
+
+        # ---- Create Join Section ----
+        create_group = QGroupBox(tr("Create New Join"))
+        create_layout = QGridLayout(create_group)
+
+        # Fragment A - get canonical shelfmark from document_id via meta_mgr
+        # This is the current document, we have its document_id
+        canonical_shelfmark_a = None
+        if self.document_id and self.meta_mgr:
+            try:
+                canonical_shelfmark_a, _ = self.meta_mgr.get_meta_for_id(self.document_id)
+            except:
+                pass
+        # Fallback to extracting plain shelfmark if meta_mgr lookup failed
+        if not canonical_shelfmark_a or canonical_shelfmark_a == "Unknown":
+            canonical_shelfmark_a = self.shelfmark
+            if canonical_shelfmark_a and ' | ' in canonical_shelfmark_a:
+                canonical_shelfmark_a = canonical_shelfmark_a.split(' | ')[-1]
+
+        create_layout.addWidget(QLabel(tr("Fragment A:")), 0, 0)
+        self.frag_a_input = QLineEdit()
+        self.frag_a_input.setText(canonical_shelfmark_a or self.document_id or "")
+        self.frag_a_input.setReadOnly(True)  # Read-only since we use document_id
+        # Use palette-aware color for dark mode support
+        palette = self.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        readonly_bg = "#3a3a3a" if is_dark else "#f0f0f0"
+        readonly_fg = "#cccccc" if is_dark else "#333333"
+        self.frag_a_input.setStyleSheet(f"background-color: {readonly_bg}; color: {readonly_fg};")
+        create_layout.addWidget(self.frag_a_input, 0, 1)
+
+        # Fragment B (with autocomplete)
+        create_layout.addWidget(QLabel(tr("Fragment B:")), 0, 2)
+
+        # Fragment B input with "From List" button
+        frag_b_layout = QHBoxLayout()
+        self.frag_b_input = QLineEdit()
+        self.frag_b_input.setPlaceholderText(tr("Start typing shelfmark..."))
+        self._setup_completer(self.frag_b_input)
+        self._selected_doc_id_b = None  # Store document_id when picked from list
+        # Clear stored doc_id when user types (need to resolve from shelfmark instead)
+        self.frag_b_input.textChanged.connect(lambda: setattr(self, '_selected_doc_id_b', None))
+        frag_b_layout.addWidget(self.frag_b_input, 1)
+
+        # "From List" button
+        if self.lists_mgr:
+            self.btn_from_list = QPushButton("📋")
+            self.btn_from_list.setFixedWidth(30)
+            self.btn_from_list.setToolTip(tr("Pick from personal list"))
+            self.btn_from_list.clicked.connect(self._show_list_picker)
+            frag_b_layout.addWidget(self.btn_from_list)
+
+        frag_b_widget = QWidget()
+        frag_b_widget.setLayout(frag_b_layout)
+        frag_b_layout.setContentsMargins(0, 0, 0, 0)
+        create_layout.addWidget(frag_b_widget, 0, 3)
+
+        # Relationship type
+        create_layout.addWidget(QLabel(tr("Relationship:")), 1, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItem(tr("Not sure / Related"), "")
+        self.type_combo.addItem(tr("Physical join"), "physical_join")
+        self.type_combo.addItem(tr("Same composition"), "same_composition")
+        create_layout.addWidget(self.type_combo, 1, 1)
+
+        # Notes
+        create_layout.addWidget(QLabel(tr("Notes:")), 1, 2)
+        self.notes_input = QLineEdit()
+        self.notes_input.setPlaceholderText(tr("Optional notes about this join"))
+        create_layout.addWidget(self.notes_input, 1, 3)
+
+        # Create button
+        self.btn_create = QPushButton(tr("Create Join"))
+        self.btn_create.setStyleSheet("background-color: #27ae60; color: white;")
+        self.btn_create.clicked.connect(self.create_new_join)
+        create_layout.addWidget(self.btn_create, 0, 4, 2, 1)
+
+        # Login message
+        if not self.client.is_logged_in():
+            self.btn_create.setEnabled(False)
+            login_msg = QLabel(tr("Login to create joins"))
+            login_msg.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            create_layout.addWidget(login_msg, 2, 0, 1, 5)
+
+        layout.addWidget(create_group)
+
+        # ---- Bottom Buttons ----
+        btn_layout = QHBoxLayout()
+
+        self.btn_refresh = QPushButton(tr("Refresh"))
+        self.btn_refresh.clicked.connect(lambda: self.load_joins(force_fresh=True))
+        btn_layout.addWidget(self.btn_refresh)
+
+        self.btn_delete = QPushButton(tr("Delete Selected Join"))
+        self.btn_delete.setEnabled(False)
+        self.btn_delete.clicked.connect(self.delete_selected_join)
+        # Only show delete button for admins
+        is_admin = (self.client.is_logged_in() and
+                    self.client.current_user and
+                    self.client.current_user.role == 'admin')
+        self.btn_delete.setVisible(is_admin)
+        self.btn_delete.setToolTip(tr("Delete selected join (admin only)"))
+        btn_layout.addWidget(self.btn_delete)
+
+        btn_layout.addStretch()
+
+        self.btn_close = QPushButton(tr("Close"))
+        self.btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_close)
+
+        layout.addLayout(btn_layout)
+
+        # Connect selection changes
+        self.fragments_list.itemSelectionChanged.connect(self.on_fragment_selection_changed)
+        self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
+
+    def _setup_completer(self, line_edit: QLineEdit):
+        """Setup autocomplete on a line edit using the parent's completer/model."""
+        import re
+
+        # Try to get model from parent's shelf_completer or shelf_model
+        model = None
+        if self.shelf_completer and hasattr(self.shelf_completer, 'model'):
+            model = self.shelf_completer.model()
+        elif self.shelf_model:
+            model = self.shelf_model
+
+        if not model:
+            return
+
+        # Create a custom completer that normalizes input like ShelfmarkCompleter
+        class NormalizingCompleter(QCompleter):
+            @staticmethod
+            def normalize(text):
+                t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
+                return re.sub(r"[^\w\./]", "", t).lower()
+
+            def splitPath(self, path):
+                return [self.normalize(path)]
+
+            def pathFromIndex(self, index):
+                return index.data(Qt.ItemDataRole.DisplayRole)
+
+        completer = NormalizingCompleter(model, self)
+        completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+        line_edit.setCompleter(completer)
+
+    def load_joins(self, force_fresh: bool = False):
+        """Load connected fragments - from cache if available, else API
+
+        Args:
+            force_fresh: If True, try to refresh from API first (but fall back to cache if unavailable)
+        """
+        if not self.shelfmark and not self.document_id:
+            self.cluster_info.setText(tr("No shelfmark available"))
+            return
+
+        self.fragments_list.clear()
+        self.table.setRowCount(0)
+
+        # Extract plain shelfmark (without library prefix like "Cambridge | ")
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        # Helper to get local cache data
+        def get_local_cache():
+            if not self.joins_mgr:
+                return None
+            cached = None
+            # First try document_id lookup (most reliable)
+            if self.document_id:
+                cached = self.joins_mgr.get_connected_fragments_by_id(self.document_id)
+            # Fall back to plain shelfmark lookup
+            if (not cached or cached.get('total_fragments', 0) <= 1) and plain_shelfmark:
+                cached = self.joins_mgr.get_connected_fragments(plain_shelfmark)
+            return cached
+
+        # Check server availability first (500ms timeout)
+        server_available = self.client.is_server_available()
+
+        # If server unavailable, always use local cache
+        if not server_available:
+            cached = get_local_cache()
+            if cached and (cached.get('total_joins', 0) > 0 or cached.get('total_fragments', 0) > 1):
+                self._display_cached_joins(cached)
+            else:
+                self.cluster_info.setText(tr("No joins found (offline)"))
+            return
+
+        # Server is available
+        # If not force_fresh, try local cache first
+        if not force_fresh:
+            cached = get_local_cache()
+            if cached and (cached.get('total_joins', 0) > 0 or cached.get('total_fragments', 0) > 1):
+                self._display_cached_joins(cached)
+                return
+
+        # Load from API - prefer document_id lookup
+        if self.document_id:
+            self.connected_data = self.client.get_connected_fragments_by_id(self.document_id)
+        else:
+            self.connected_data = self.client.get_connected_fragments(plain_shelfmark or self.shelfmark)
+
+        if not self.connected_data:
+            self.cluster_info.setText(tr("No joins found"))
+            return
+
+        # Update local cache with fetched data
+        if self.joins_mgr and self.connected_data:
+            self._update_local_cache(self.connected_data)
+
+        self._display_connected_data(self.connected_data)
+
+    def _update_local_cache(self, connected_data):
+        """Update the local JoinsManager cache with data fetched from API."""
+        if not self.joins_mgr:
+            return
+
+        # Get joins from the response
+        joins = []
+        if hasattr(connected_data, 'joins'):
+            joins = connected_data.joins
+        elif isinstance(connected_data, dict):
+            joins = connected_data.get('joins', [])
+
+        # Get fragment_details for document_id mapping
+        fragment_details = []
+        if hasattr(connected_data, 'fragment_details'):
+            fragment_details = connected_data.fragment_details
+        elif isinstance(connected_data, dict):
+            fragment_details = connected_data.get('fragment_details', [])
+
+        # Build document_id mapping from fragment_details
+        doc_id_map = {}
+        for fd in fragment_details:
+            if hasattr(fd, 'shelfmark') and hasattr(fd, 'document_id'):
+                if fd.document_id:
+                    doc_id_map[fd.shelfmark] = fd.document_id
+            elif isinstance(fd, dict):
+                shelf = fd.get('shelfmark', '')
+                doc_id = fd.get('document_id')
+                if shelf and doc_id:
+                    doc_id_map[shelf] = doc_id
+
+        # Add each join to the local cache
+        for join in joins:
+            join_dict = {}
+            if hasattr(join, 'id'):
+                # It's a Join object
+                join_dict = {
+                    'id': join.id,
+                    'fragment_a': join.fragment_a,
+                    'fragment_b': join.fragment_b,
+                    'document_id_a': getattr(join, 'document_id_a', None) or doc_id_map.get(join.fragment_a),
+                    'document_id_b': getattr(join, 'document_id_b', None) or doc_id_map.get(join.fragment_b),
+                    'relationship_type': join.relationship_type,
+                    'notes': join.notes,
+                    'source': join.source,
+                    'created_by_username': getattr(join, 'created_by_username', None),
+                    'created_at': getattr(join, 'created_at', None)
+                }
+            elif isinstance(join, dict):
+                join_dict = {
+                    'id': join.get('id'),
+                    'fragment_a': join.get('fragment_a'),
+                    'fragment_b': join.get('fragment_b'),
+                    'document_id_a': join.get('document_id_a') or doc_id_map.get(join.get('fragment_a', '')),
+                    'document_id_b': join.get('document_id_b') or doc_id_map.get(join.get('fragment_b', '')),
+                    'relationship_type': join.get('relationship_type'),
+                    'notes': join.get('notes'),
+                    'source': join.get('source'),
+                    'created_by_username': join.get('created_by_username'),
+                    'created_at': join.get('created_at')
+                }
+
+            if join_dict.get('id'):
+                # Add to local cache
+                self.joins_mgr.data['joins'][join_dict['id']] = join_dict
+                self.joins_mgr._index_join(join_dict)
+
+        # Save the updated cache
+        self.joins_mgr.save()
+
+    def _display_cached_joins(self, cached: dict):
+        """Display joins from the local cache."""
+        total_frags = cached.get('total_fragments', 0)
+        total_joins = cached.get('total_joins', 0)
+
+        if total_frags <= 1:
+            self.cluster_info.setText(tr("No joins found"))
+        else:
+            self.cluster_info.setText(tr("{} fragments in cluster, {} joins").format(total_frags, total_joins))
+
+        # Extract plain shelfmark for comparison (without library prefix)
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        # Populate fragments list - use fragment_details if available for document_id lookup
+        fragment_details = cached.get('fragment_details', [])
+        fragments = cached.get('fragments', [])
+
+        # Build a map of shelfmark -> document_id from fragment_details
+        shelfmark_to_docid = {}
+        for fd in fragment_details:
+            shelf = fd.get('shelfmark', '')
+            doc_id = fd.get('document_id')
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        # Build fallback map from csv_bank for shelfmarks without document_id
+        shelf_to_sys = {}
+        if self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
+            for sys_id, meta in self.meta_mgr.csv_bank.items():
+                shelf = meta.get('shelfmark', '')
+                if shelf:
+                    shelf_to_sys[self._normalize_shelfmark(shelf)] = sys_id
+
+        for frag in fragments:
+            # Try to get title using document_id
+            title = ""
+            doc_id = shelfmark_to_docid.get(frag.upper())
+
+            # Fallback: look up sys_id from csv_bank using normalized shelfmark
+            if not doc_id and self.meta_mgr:
+                norm_frag = self._normalize_shelfmark(frag)
+                doc_id = shelf_to_sys.get(norm_frag)
+
+            if doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(doc_id)
+                    if title and len(title) > 35:
+                        title = title[:35] + "..."
+                except:
+                    pass
+
+            display_text = f"{frag} - {title}" if title else frag
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, frag)  # Store plain shelfmark for navigation
+
+            # Compare with plain shelfmark (joins store plain shelfmarks)
+            if plain_shelfmark and frag.upper() == plain_shelfmark.upper():
+                item.setForeground(QColor('#27ae60'))
+                item.setText(f"{display_text} ({tr('current')})")
+            self.fragments_list.addItem(item)
+
+        # Populate joins table
+        for join in cached.get('joins', []):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            frag_a = join.get('fragment_a', '')
+            frag_b = join.get('fragment_b', '')
+
+            self.table.setItem(row, 0, QTableWidgetItem(frag_a))
+            self.table.setItem(row, 1, QTableWidgetItem(frag_b))
+
+            rel_type = join.get('relationship_type')
+            rel_display = {
+                'physical_join': tr('Physical join'),
+                'same_composition': tr('Same composition')
+            }.get(rel_type, rel_type or tr('Unknown'))
+            self.table.setItem(row, 2, QTableWidgetItem(rel_display))
+
+            self.table.setItem(row, 3, QTableWidgetItem(join.get('source', 'user')))
+            self.table.setItem(row, 4, QTableWidgetItem(join.get('created_by_username', '')))
+
+            date_str = safe_date_str(join.get('created_at'))
+            self.table.setItem(row, 5, QTableWidgetItem(date_str))
+
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, join.get('id'))
+
+            # Highlight direct joins (joins that involve the current shelfmark)
+            is_direct = (frag_a.upper() == plain_shelfmark.upper() or
+                         frag_b.upper() == plain_shelfmark.upper()) if plain_shelfmark else False
+            if is_direct:
+                # Use palette-aware color for dark mode support
+                palette = self.palette()
+                is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+                highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
+                for col in range(6):
+                    item = self.table.item(row, col)
+                    if item:
+                        item.setBackground(highlight_color)
+
+        self.table.resizeColumnsToContents()
+
+    def _display_connected_data(self, data):
+        """Display joins from API response."""
+        total_frags = data.total_fragments
+        total_joins = data.total_joins
+
+        if total_frags <= 1:
+            self.cluster_info.setText(tr("No joins found"))
+        else:
+            self.cluster_info.setText(tr("{} fragments in cluster, {} joins").format(total_frags, total_joins))
+
+        # Extract plain shelfmark for comparison (without library prefix)
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        # Build a map of shelfmark -> document_id from fragment_details
+        shelfmark_to_docid = {}
+        for fd in data.fragment_details:
+            shelf = fd.shelfmark
+            doc_id = fd.document_id
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        # Build fallback map from csv_bank for shelfmarks without document_id
+        shelf_to_sys = {}
+        if self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
+            for sys_id, meta in self.meta_mgr.csv_bank.items():
+                shelf = meta.get('shelfmark', '')
+                if shelf:
+                    shelf_to_sys[self._normalize_shelfmark(shelf)] = sys_id
+
+        # Populate fragments list
+        for frag in data.fragments:
+            # Try to get title using document_id
+            title = ""
+            doc_id = shelfmark_to_docid.get(frag.upper())
+
+            # Fallback: look up sys_id from csv_bank using normalized shelfmark
+            if not doc_id and self.meta_mgr:
+                norm_frag = self._normalize_shelfmark(frag)
+                doc_id = shelf_to_sys.get(norm_frag)
+
+            if doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(doc_id)
+                    if title and len(title) > 35:
+                        title = title[:35] + "..."
+                except:
+                    pass
+
+            display_text = f"{frag} - {title}" if title else frag
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, frag)  # Store plain shelfmark for navigation
+
+            # Compare with plain shelfmark (joins store plain shelfmarks)
+            if plain_shelfmark and frag.upper() == plain_shelfmark.upper():
+                item.setForeground(QColor('#27ae60'))
+                item.setText(f"{display_text} ({tr('current')})")
+            self.fragments_list.addItem(item)
+
+        # Populate joins table
+        for join in data.joins:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            frag_a = join.fragment_a
+            frag_b = join.fragment_b
+
+            self.table.setItem(row, 0, QTableWidgetItem(frag_a))
+            self.table.setItem(row, 1, QTableWidgetItem(frag_b))
+
+            rel_display = {
+                'physical_join': tr('Physical join'),
+                'same_composition': tr('Same composition')
+            }.get(join.relationship_type, join.relationship_type or tr('Unknown'))
+            self.table.setItem(row, 2, QTableWidgetItem(rel_display))
+
+            self.table.setItem(row, 3, QTableWidgetItem(join.source or 'user'))
+            self.table.setItem(row, 4, QTableWidgetItem(join.created_by_username or ""))
+
+            date_str = safe_date_str(join.created_at)
+            self.table.setItem(row, 5, QTableWidgetItem(date_str))
+
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, join.id)
+
+            # Highlight direct joins (joins that involve the current shelfmark)
+            is_direct = (frag_a.upper() == plain_shelfmark.upper() or
+                         frag_b.upper() == plain_shelfmark.upper()) if plain_shelfmark else False
+            if is_direct:
+                # Use palette-aware color for dark mode support
+                palette = self.palette()
+                is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+                highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
+                for col in range(6):
+                    item = self.table.item(row, col)
+                    if item:
+                        item.setBackground(highlight_color)
+
+        self.table.resizeColumnsToContents()
+
+    def create_new_join(self):
+        """Create a new join between fragments"""
+        frag_a = self.frag_a_input.text().strip()
+        frag_b = self.frag_b_input.text().strip()
+
+        if not frag_a or not frag_b:
+            QMessageBox.warning(self, tr("Error"), tr("Please enter both fragment shelfmarks"))
+            return
+
+        if frag_a.upper() == frag_b.upper():
+            QMessageBox.warning(self, tr("Error"), tr("Cannot join a fragment to itself"))
+            return
+
+        rel_type = self.type_combo.currentData() or None
+        notes = self.notes_input.text().strip() or None
+
+        # Always use document_id for fragment A - that's the primary identifier
+        doc_id_a = self.document_id
+
+        # Get document_id for fragment B
+        doc_id_b = getattr(self, '_selected_doc_id_b', None)
+
+        # If not picked from list, try to resolve from shelfmark using csv_bank
+        if not doc_id_b and self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
+            # Build lookup map if not already done
+            for sys_id, meta in self.meta_mgr.csv_bank.items():
+                shelf = meta.get('shelfmark', '')
+                if shelf and self._normalize_shelfmark(shelf) == self._normalize_shelfmark(frag_b):
+                    doc_id_b = sys_id
+                    break
+
+        # Try to create via API first
+        join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
+        if join:
+            QMessageBox.information(self, tr("Success"), tr("Join created successfully"))
+            self.frag_b_input.clear()
+            self.notes_input.clear()
+            # Immediately add to local cache (faster than full sync)
+            if self.joins_mgr and join:
+                join_data = {
+                    'id': join.id,
+                    'fragment_a': join.fragment_a,
+                    'fragment_b': join.fragment_b,
+                    'document_id_a': getattr(join, 'document_id_a', None) or doc_id_a,
+                    'document_id_b': getattr(join, 'document_id_b', None) or doc_id_b,
+                    'relationship_type': join.relationship_type,
+                    'notes': join.notes,
+                    'source': join.source,
+                    'created_by_username': getattr(join, 'created_by_username', None),
+                    'created_at': getattr(join, 'created_at', None)
+                }
+                self.joins_mgr.data['joins'][join.id] = join_data
+                self.joins_mgr._index_join(join_data)
+                self.joins_mgr.save()
+            # Reload to show the new join
+            self.load_joins()
+        else:
+            # If online create failed but we have JoinsManager, queue for later
+            if self.joins_mgr and "connection" in msg.lower():
+                self.joins_mgr.create_join_local(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
+                QMessageBox.information(
+                    self, tr("Saved Offline"),
+                    tr("Join saved locally. Will sync when connection is restored.")
+                )
+                self.frag_b_input.clear()
+                self.notes_input.clear()
+                self.load_joins()
+            else:
+                QMessageBox.critical(self, tr("Error"), tr("Failed to create join: {}").format(msg))
+
+    def delete_selected_join(self):
+        """Delete the selected join"""
+        selected = self.table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        join_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+
+        if not join_id:
+            return
+
+        reply = QMessageBox.question(
+            self, tr("Confirm Delete"),
+            tr("Are you sure you want to delete this join?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.client.delete_join(join_id)
+            if success:
+                QMessageBox.information(self, tr("Success"), tr("Join deleted"))
+                # Immediately remove from local cache
+                if self.joins_mgr:
+                    self.joins_mgr.delete_join_local(join_id)
+                # Reload to show updated state
+                self.load_joins()
+            else:
+                # If online delete failed, try local delete
+                if self.joins_mgr:
+                    self.joins_mgr.delete_join_local(join_id)
+                    QMessageBox.information(
+                        self, tr("Deleted Locally"),
+                        tr("Join deleted locally. Will sync when connection is restored.")
+                    )
+                    self.load_joins()
+                else:
+                    QMessageBox.critical(self, tr("Error"), tr("Failed to delete: {}").format(msg))
+
+    def on_fragment_selection_changed(self):
+        """Enable/disable navigate button based on selection"""
+        selected = self.fragments_list.selectedItems()
+        self.btn_navigate.setEnabled(bool(selected))
+
+    def on_table_selection_changed(self):
+        """Enable/disable delete button based on selection - admin only, direct joins only"""
+        selected = self.table.selectedItems()
+        can_delete = False
+
+        # Only allow delete if logged in as admin
+        is_admin = (self.client.is_logged_in() and
+                    self.client.current_user and
+                    self.client.current_user.role == 'admin')
+
+        if is_admin and selected:
+            # Get selected row
+            row = selected[0].row()
+            frag_a = self.table.item(row, 0).text() if self.table.item(row, 0) else ''
+            frag_b = self.table.item(row, 1).text() if self.table.item(row, 1) else ''
+
+            # Extract plain shelfmark for comparison
+            plain_shelfmark = self.shelfmark
+            if plain_shelfmark and ' | ' in plain_shelfmark:
+                plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+            # Only allow delete if this join DIRECTLY involves the current shelfmark
+            if plain_shelfmark:
+                is_direct = (frag_a.upper() == plain_shelfmark.upper() or
+                             frag_b.upper() == plain_shelfmark.upper())
+                can_delete = is_direct
+
+        self.btn_delete.setEnabled(can_delete)
+
+    def _show_list_picker(self):
+        """Show dialog to pick a fragment from personal lists."""
+        if not self.lists_mgr:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Pick from List"))
+        dialog.resize(400, 300)
+
+        layout = QVBoxLayout(dialog)
+
+        # List selection
+        list_layout = QHBoxLayout()
+        list_layout.addWidget(QLabel(tr("List:")))
+        list_combo = QComboBox()
+        list_combo.addItem(tr("-- Select list --"), None)
+        lists = self.lists_mgr.get_all_lists(include_recent=True)
+        for lst in lists:
+            display_name = lst.get('name', tr("Unnamed"))
+            if lst.get('is_recent'):
+                display_name = tr("Recent")
+            list_combo.addItem(display_name, lst.get('id'))
+        list_layout.addWidget(list_combo, 1)
+        layout.addLayout(list_layout)
+
+        # Items list
+        items_list = QListWidget()
+        layout.addWidget(items_list, 1)
+
+        def load_list_items():
+            items_list.clear()
+            list_id = list_combo.currentData()
+            if not list_id:
+                return
+
+            items = self.lists_mgr.get_items_in_list(list_id)
+            for item in items:
+                sys_id = item.get('sys_id', '')
+                shelfmark = sys_id  # Default to sys_id
+                title = ""
+
+                # Try to get shelfmark and title from meta_mgr
+                if self.meta_mgr and sys_id:
+                    try:
+                        shelf, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                        if shelf:
+                            shelfmark = shelf
+                        # Try to get title
+                        cached = self.meta_mgr.nli_cache.get(sys_id, {})
+                        title = cached.get('title', '')
+                        if title and len(title) > 40:
+                            title = title[:40] + "..."
+                    except:
+                        pass
+
+                display = shelfmark
+                if title:
+                    display = f"{shelfmark} - {title}"
+
+                list_item = QListWidgetItem(display)
+                list_item.setData(Qt.ItemDataRole.UserRole, {'sys_id': sys_id, 'shelfmark': shelfmark})
+                items_list.addItem(list_item)
+
+        list_combo.currentIndexChanged.connect(load_list_items)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_layout.addWidget(btn_cancel)
+        btn_select = QPushButton(tr("Select"))
+        btn_select.setEnabled(False)
+        btn_layout.addWidget(btn_select)
+        layout.addLayout(btn_layout)
+
+        def on_item_selected():
+            btn_select.setEnabled(bool(items_list.selectedItems()))
+
+        items_list.itemSelectionChanged.connect(on_item_selected)
+        items_list.itemDoubleClicked.connect(lambda: btn_select.click())
+
+        def do_select():
+            selected = items_list.selectedItems()
+            if selected:
+                data = selected[0].data(Qt.ItemDataRole.UserRole)
+                # Store document_id for use when creating join
+                self._selected_doc_id_b = data.get('sys_id')
+                self.frag_b_input.setText(data.get('shelfmark', ''))
+                dialog.accept()
+
+        btn_select.clicked.connect(do_select)
+
+        dialog.exec()
+
+    def on_fragment_double_click(self, item):
+        """Navigate to fragment on double-click"""
+        # Get shelfmark from UserRole if available, otherwise parse from text
+        shelfmark = item.data(Qt.ItemDataRole.UserRole)
+        if not shelfmark:
+            shelfmark = item.text()
+        self.navigate_to_fragment(shelfmark)
+
+    def navigate_to_selected(self):
+        """Navigate to the selected fragment"""
+        selected = self.fragments_list.selectedItems()
+        if selected:
+            # Get shelfmark from UserRole if available, otherwise parse from text
+            shelfmark = selected[0].data(Qt.ItemDataRole.UserRole)
+            if not shelfmark:
+                shelfmark = selected[0].text()
+            self.navigate_to_fragment(shelfmark)
+
+    def navigate_to_fragment(self, fragment_text):
+        """Navigate to a fragment"""
+        # Remove " (current)" suffix if present - handle various formats
+        shelfmark = fragment_text
+        current_suffix = f" ({tr('current')})"
+        if shelfmark.endswith(current_suffix):
+            shelfmark = shelfmark[:-len(current_suffix)]
+        shelfmark = shelfmark.strip()
+
+        if self.on_browse and shelfmark:
+            # Store callback and shelfmark, close dialog, then call callback
+            # Using QTimer to ensure dialog is fully closed before callback
+            callback = self.on_browse
+            self.accept()  # Close dialog
+            try:
+                QTimer.singleShot(50, lambda: self._safe_navigate(callback, shelfmark))
+            except Exception as e:
+                print(f"[ERROR] Navigation failed: {e}", flush=True)
+        else:
+            QMessageBox.information(
+                self, tr("Navigate"),
+                tr("To view {}, search for it in the Browse tab").format(shelfmark)
+            )
+
+    def _safe_navigate(self, callback, shelfmark):
+        """Safely call navigation callback with error handling."""
+        try:
+            callback(shelfmark)
+        except Exception as e:
+            print(f"[ERROR] Navigation callback failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+
+
+# =============================================================================
+# Joins Feed Dialog - Browse all joins or user's joins
+# =============================================================================
+
+class JoinsFeedDialog(QDialog):
+    """
+    Dialog for browsing fragment joins with two tabs:
+    - My Joins: User's own created joins
+    - All Joins: All user-created joins from community
+    """
+
+    def __init__(self, parent=None, client: CorrectionsClient = None, on_browse=None):
+        super().__init__(parent)
+        self.client = client or get_corrections_client()
+        self.on_browse = on_browse  # Callback to navigate to a shelfmark
+        self.setWindowTitle(tr("Fragment Joins"))
+        self.resize(1000, 700)
+        self.current_page = 1
+        self.total_pages = 1
+        self.page_size = 30
+        self.init_ui()
+        # Load data in background to avoid freezing
+        QTimer.singleShot(100, self.load_joins_safe)
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(tr("Fragment Joins"))
+        header.setStyleSheet("font-weight: bold; font-size: 16px;")
+        layout.addWidget(header)
+
+        # Tabs for My Joins / All Joins
+        self.tabs = QTabWidget()
+
+        # My Joins tab
+        self.my_joins_widget = self._create_joins_tab(is_my_joins=True)
+        self.tabs.addTab(self.my_joins_widget, tr("My Joins"))
+
+        # All Joins tab
+        self.all_joins_widget = self._create_joins_tab(is_my_joins=False)
+        self.tabs.addTab(self.all_joins_widget, tr("All Joins"))
+
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        layout.addWidget(self.tabs)
+
+        # Bottom buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_close = QPushButton(tr("Close"))
+        self.btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+
+    def _create_joins_tab(self, is_my_joins: bool):
+        """Create a tab widget for joins"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Filter row
+        filter_layout = QHBoxLayout()
+
+        filter_layout.addWidget(QLabel(tr("Search:")))
+        search_input = QLineEdit()
+        search_input.setPlaceholderText(tr("Search shelfmarks..."))
+        search_input.setObjectName("my_search" if is_my_joins else "all_search")
+        filter_layout.addWidget(search_input, 1)
+
+        filter_layout.addWidget(QLabel(tr("Type:")))
+        type_combo = QComboBox()
+        type_combo.addItems([tr("All"), tr("Physical join"), tr("Same composition")])
+        type_combo.setObjectName("my_type" if is_my_joins else "all_type")
+        filter_layout.addWidget(type_combo)
+
+        btn_search = QPushButton(tr("Search"))
+        btn_search.setObjectName("my_btn_search" if is_my_joins else "all_btn_search")
+        filter_layout.addWidget(btn_search)
+
+        btn_refresh = QPushButton(tr("Refresh"))
+        btn_refresh.setObjectName("my_btn_refresh" if is_my_joins else "all_btn_refresh")
+        filter_layout.addWidget(btn_refresh)
+
+        layout.addLayout(filter_layout)
+
+        # Status label (for loading/error states)
+        status_label = QLabel("")
+        status_label.setObjectName("my_status" if is_my_joins else "all_status")
+        status_label.setStyleSheet("color: #666;")
+        layout.addWidget(status_label)
+
+        # Table
+        table = QTableWidget()
+        table.setObjectName("my_table" if is_my_joins else "all_table")
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels([
+            tr("Fragment A"), tr("Fragment B"), tr("Type"),
+            tr("Author"), tr("Date"), tr("Notes")
+        ])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            lambda pos: self._show_context_menu(pos, table, is_my_joins)
+        )
+        table.doubleClicked.connect(lambda: self._on_double_click(table))
+        layout.addWidget(table)
+
+        # Pagination
+        page_layout = QHBoxLayout()
+        btn_prev = QPushButton(tr("Previous"))
+        btn_prev.setObjectName("my_prev" if is_my_joins else "all_prev")
+        page_layout.addWidget(btn_prev)
+
+        page_label = QLabel("1 / 1")
+        page_label.setObjectName("my_page" if is_my_joins else "all_page")
+        page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page_layout.addWidget(page_label)
+
+        btn_next = QPushButton(tr("Next"))
+        btn_next.setObjectName("my_next" if is_my_joins else "all_next")
+        page_layout.addWidget(btn_next)
+
+        page_layout.addStretch()
+
+        total_label = QLabel("")
+        total_label.setObjectName("my_total" if is_my_joins else "all_total")
+        page_layout.addWidget(total_label)
+
+        layout.addLayout(page_layout)
+
+        # Connect signals
+        search_input.returnPressed.connect(lambda: self.load_joins(is_my_joins))
+        btn_search.clicked.connect(lambda: self.load_joins(is_my_joins))
+        btn_refresh.clicked.connect(lambda: self.load_joins(is_my_joins))
+        type_combo.currentIndexChanged.connect(lambda: self.load_joins(is_my_joins))
+        btn_prev.clicked.connect(lambda: self._prev_page(is_my_joins))
+        btn_next.clicked.connect(lambda: self._next_page(is_my_joins))
+
+        return widget
+
+    def _get_widget(self, name: str, is_my_joins: bool):
+        """Get a widget by name from the appropriate tab"""
+        parent = self.my_joins_widget if is_my_joins else self.all_joins_widget
+        return parent.findChild(QWidget, name)
+
+    def load_joins_safe(self):
+        """Load joins with error handling to prevent freezing"""
+        # Check server availability first with short timeout
+        try:
+            is_my_tab = self.tabs.currentIndex() == 0
+            self.load_joins(is_my_tab)
+        except Exception as e:
+            print(f"[ERROR] Failed to load joins: {e}", flush=True)
+            # Show error in status
+            status = self._get_widget("my_status" if self.tabs.currentIndex() == 0 else "all_status",
+                                      self.tabs.currentIndex() == 0)
+            if status:
+                status.setText(tr("Failed to load joins. Server may be unavailable."))
+
+    def on_tab_changed(self, index):
+        """Load data when tab changes"""
+        is_my_joins = (index == 0)
+        # Load in background
+        QTimer.singleShot(50, lambda: self.load_joins(is_my_joins))
+
+    def load_joins(self, is_my_joins: bool):
+        """Load joins from server"""
+        prefix = "my_" if is_my_joins else "all_"
+        parent = self.my_joins_widget if is_my_joins else self.all_joins_widget
+
+        table = parent.findChild(QTableWidget, f"{prefix}table")
+        search_input = parent.findChild(QLineEdit, f"{prefix}search")
+        type_combo = parent.findChild(QComboBox, f"{prefix}type")
+        page_label = parent.findChild(QLabel, f"{prefix}page")
+        total_label = parent.findChild(QLabel, f"{prefix}total")
+        status_label = parent.findChild(QLabel, f"{prefix}status")
+        btn_prev = parent.findChild(QPushButton, f"{prefix}prev")
+        btn_next = parent.findChild(QPushButton, f"{prefix}next")
+
+        if not table:
+            return
+
+        table.setRowCount(0)
+        if status_label:
+            status_label.setText(tr("Loading..."))
+
+        # Get filter values
+        query = search_input.text().strip() if search_input else None
+        type_idx = type_combo.currentIndex() if type_combo else 0
+        type_values = [None, "physical_join", "same_composition"]
+        rel_type = type_values[type_idx] if type_idx < len(type_values) else None
+
+        # Check server availability with short timeout
+        if not self.client.is_server_available():
+            if status_label:
+                status_label.setText(tr("Server unavailable - showing cached data"))
+            # Could show cached data here if available
+            return
+
+        try:
+            offset = (self.current_page - 1) * self.page_size
+
+            if is_my_joins:
+                if not self.client.is_logged_in():
+                    if status_label:
+                        status_label.setText(tr("Login required to view your joins"))
+                    return
+                joins, total = self.client.get_my_joins(
+                    query=query,
+                    relationship_type=rel_type,
+                    limit=self.page_size,
+                    offset=offset
+                )
+            else:
+                joins, total = self.client.search_joins(
+                    query=query,
+                    source='user',  # Only show user-created joins
+                    relationship_type=rel_type,
+                    limit=self.page_size,
+                    offset=offset
+                )
+
+            if status_label:
+                status_label.setText("")
+
+            self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
+            if page_label:
+                page_label.setText(f"{self.current_page} / {self.total_pages}")
+            if total_label:
+                total_label.setText(tr("{} joins total").format(total))
+            if btn_prev:
+                btn_prev.setEnabled(self.current_page > 1)
+            if btn_next:
+                btn_next.setEnabled(self.current_page < self.total_pages)
+
+            # Populate table
+            for join in joins:
+                row = table.rowCount()
+                table.insertRow(row)
+
+                # Fragment A
+                item_a = QTableWidgetItem(join.fragment_a or "")
+                item_a.setData(Qt.ItemDataRole.UserRole, {
+                    'join_id': join.id,
+                    'fragment_a': join.fragment_a,
+                    'fragment_b': join.fragment_b,
+                    'document_id_a': join.document_id_a,
+                    'document_id_b': join.document_id_b
+                })
+                table.setItem(row, 0, item_a)
+
+                # Fragment B
+                table.setItem(row, 1, QTableWidgetItem(join.fragment_b or ""))
+
+                # Relationship type
+                rel_labels = {
+                    'physical_join': tr('Physical join'),
+                    'same_composition': tr('Same composition')
+                }
+                rel_display = rel_labels.get(join.relationship_type, join.relationship_type or "")
+                table.setItem(row, 2, QTableWidgetItem(rel_display))
+
+                # Author
+                table.setItem(row, 3, QTableWidgetItem(join.created_by_username or ""))
+
+                # Date
+                date_str = safe_date_str(join.created_at)
+                table.setItem(row, 4, QTableWidgetItem(date_str))
+
+                # Notes
+                notes = join.notes or ""
+                if len(notes) > 50:
+                    notes = notes[:50] + "..."
+                table.setItem(row, 5, QTableWidgetItem(notes))
+
+            table.resizeColumnsToContents()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load joins: {e}", flush=True)
+            if status_label:
+                status_label.setText(tr("Failed to load joins"))
+
+    def _prev_page(self, is_my_joins: bool):
+        """Go to previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_joins(is_my_joins)
+
+    def _next_page(self, is_my_joins: bool):
+        """Go to next page"""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.load_joins(is_my_joins)
+
+    def _show_context_menu(self, pos, table: QTableWidget, is_my_joins: bool):
+        """Show context menu for join row"""
+        item = table.itemAt(pos)
+        if not item:
+            return
+
+        row = item.row()
+        data = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        menu = QMenu(self)
+
+        # Navigate to Fragment A
+        if data.get('document_id_a') or data.get('fragment_a'):
+            action_nav_a = menu.addAction(tr("Open Fragment A: {}").format(data.get('fragment_a', '')))
+            action_nav_a.triggered.connect(
+                lambda: self._navigate_to_fragment(data.get('document_id_a'), data.get('fragment_a'))
+            )
+
+        # Navigate to Fragment B
+        if data.get('document_id_b') or data.get('fragment_b'):
+            action_nav_b = menu.addAction(tr("Open Fragment B: {}").format(data.get('fragment_b', '')))
+            action_nav_b.triggered.connect(
+                lambda: self._navigate_to_fragment(data.get('document_id_b'), data.get('fragment_b'))
+            )
+
+        menu.addSeparator()
+
+        # Copy shelfmarks
+        action_copy = menu.addAction(tr("Copy shelfmarks"))
+        action_copy.triggered.connect(
+            lambda: self._copy_shelfmarks(data.get('fragment_a'), data.get('fragment_b'))
+        )
+
+        # Delete (for own joins or admin)
+        is_admin = (self.client.is_logged_in() and
+                    self.client.current_user and
+                    self.client.current_user.role == 'admin')
+
+        if is_my_joins or is_admin:
+            menu.addSeparator()
+            action_delete = menu.addAction(tr("Delete join"))
+            action_delete.triggered.connect(
+                lambda: self._delete_join(data.get('join_id'), is_my_joins)
+            )
+
+        menu.exec(table.viewport().mapToGlobal(pos))
+
+    def _on_double_click(self, table: QTableWidget):
+        """Handle double click on a row - navigate to fragment A"""
+        selected = table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        data = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._navigate_to_fragment(data.get('document_id_a'), data.get('fragment_a'))
+
+    def _navigate_to_fragment(self, doc_id: str, shelfmark: str):
+        """Navigate to a fragment"""
+        if self.on_browse:
+            self.accept()  # Close dialog first
+            # Use shelfmark for navigation
+            if shelfmark:
+                QTimer.singleShot(50, lambda: self.on_browse(shelfmark))
+        elif doc_id:
+            QMessageBox.information(
+                self, tr("Navigate"),
+                tr("Document ID: {}").format(doc_id)
+            )
+
+    def _copy_shelfmarks(self, frag_a: str, frag_b: str):
+        """Copy shelfmarks to clipboard"""
+        from PyQt6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(f"{frag_a} ↔ {frag_b}")
+
+    def _delete_join(self, join_id: int, is_my_joins: bool):
+        """Delete a join"""
+        if not join_id:
+            return
+
+        reply = QMessageBox.question(
+            self, tr("Confirm Delete"),
+            tr("Are you sure you want to delete this join?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.client.delete_join(join_id)
+            if success:
+                QMessageBox.information(self, tr("Success"), tr("Join deleted"))
+                self.load_joins(is_my_joins)
+            else:
+                QMessageBox.critical(self, tr("Error"), tr("Failed to delete: {}").format(msg))
