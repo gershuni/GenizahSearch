@@ -19,6 +19,7 @@ ALLOWED_IMAGE_DOMAINS = [
     'iiif.nli.org.il',
     'www.nli.org.il',
     'nli.org.il',
+    'hebrew.bodleian.ox.ac.uk',
 ]
 
 def init_api_routes():
@@ -141,6 +142,107 @@ def init_api_routes():
                 pass
 
         return Response(content="Image not found", status_code=404)
+
+    @app.get('/api/oxford_image/{sys_id}')
+    def oxford_image(sys_id: str, page: int = 0):
+        """
+        Fetch Oxford image by System ID using CodicologicalManager.
+        Uses the same logic as the desktop app.
+
+        Args:
+            sys_id: The system ID (folio ID)
+            page: Optional page index within the part (default 0 = first image)
+        """
+        if not state.meta_mgr or not state.meta_mgr.codico_mgr:
+            return Response(content="Oxford manager not initialized", status_code=503)
+
+        codico = state.meta_mgr.codico_mgr
+
+        # Get the Part ID for this system ID
+        part_id = codico.get_part_for_folio(sys_id)
+        if not part_id:
+            # Try to find by shelfmark
+            meta = state.meta_mgr.get_cached_meta(sys_id)
+            if meta:
+                shelfmark = meta.get('shelfmark', '')
+                # Try to resolve the part from shelfmark
+                part_id, is_part = codico.parse_part_identifier(shelfmark)
+                if not is_part:
+                    part_id = None
+
+        if not part_id:
+            print(f"No Oxford Part found for sys_id: {sys_id}")
+            return Response(content="No Oxford Part found for this document", status_code=404)
+
+        # Get images for this part
+        images = codico.get_part_images(part_id)
+        if not images:
+            print(f"No images for Oxford Part: {part_id}")
+            return Response(content="No images available for this Part", status_code=404)
+
+        # Get the requested image (default to first)
+        if page < 0 or page >= len(images):
+            page = 0
+
+        img_data = images[page]
+        img_url = img_data.get('full_url', '')
+
+        if not img_url:
+            return Response(content="No image URL available", status_code=404)
+
+        print(f"Fetching Oxford image: {img_url}")
+
+        # Fetch the image from Oxford
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://hebrew.bodleian.ox.ac.uk/',
+        }
+
+        try:
+            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
+                return Response(
+                    content=resp.content,
+                    media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                )
+            else:
+                print(f"Oxford image fetch failed: {resp.status_code}")
+                return Response(content=f"Failed to fetch image: {resp.status_code}", status_code=resp.status_code)
+        except Exception as e:
+            print(f"Oxford image fetch error: {e}")
+            return Response(content=f"Error fetching image: {e}", status_code=500)
+
+    @app.get('/api/oxford_images/{sys_id}')
+    def oxford_images_list(sys_id: str):
+        """
+        Get list of available Oxford images for a system ID.
+        Returns JSON with image metadata.
+        """
+        if not state.meta_mgr or not state.meta_mgr.codico_mgr:
+            return {"error": "Oxford manager not initialized", "images": []}
+
+        codico = state.meta_mgr.codico_mgr
+
+        # Get the Part ID for this system ID
+        part_id = codico.get_part_for_folio(sys_id)
+        if not part_id:
+            return {"error": "No Oxford Part found", "images": [], "part_id": None}
+
+        # Get images for this part
+        images = codico.get_part_images(part_id)
+
+        return {
+            "part_id": part_id,
+            "images": [
+                {
+                    "index": i,
+                    "label": img.get('label', ''),
+                    "folio_num": img.get('folio_num'),
+                    "url": f"/api/oxford_image/{sys_id}?page={i}"
+                }
+                for i, img in enumerate(images)
+            ]
+        }
 
     @app.get('/api/proxy_image')
     def proxy_image(url: str):

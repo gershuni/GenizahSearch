@@ -16,6 +16,7 @@ import re
 import html as html_module
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
+from web.state import state
 from web.translations import tr, is_rtl
 
 
@@ -1076,19 +1077,41 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 img_url = None
                 fallback_url = None
                 has_image = False
+                image_source = None  # 'nli' or 'oxford'
 
-                # Try to get image - prefer system ID (fetches valid FL IDs from NLI)
-                if page.sys_id:
+                # Detect if this is an Oxford manuscript
+                is_oxford = False
+                if page.shelfmark:
+                    # Oxford shelfmarks start with "MS. Heb" or "heb." or similar patterns
+                    shelfmark_lower = page.shelfmark.lower()
+                    if shelfmark_lower.startswith('ms. heb') or shelfmark_lower.startswith('heb.') or 'bodleian' in shelfmark_lower:
+                        is_oxford = True
+
+                # Also check via CodicologicalManager if available
+                if not is_oxford and page.sys_id and state.meta_mgr and hasattr(state.meta_mgr, 'codico_mgr'):
+                    codico = state.meta_mgr.codico_mgr
+                    if codico and codico.get_part_for_folio(page.sys_id):
+                        is_oxford = True
+
+                if is_oxford and page.sys_id:
+                    # Use Oxford image endpoint
                     has_image = True
-                    # Use system ID endpoint - dynamically fetches correct FL IDs from NLI
+                    img_url = f"/api/oxford_image/{page.sys_id}"
+                    fallback_url = None
+                    image_source = 'oxford'
+                elif page.sys_id:
+                    has_image = True
+                    # Use NLI system ID endpoint - dynamically fetches correct FL IDs from NLI
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}"
                     fallback_url = None
+                    image_source = 'nli'
                 elif fl_id:
                     digits = re.sub(r"\D", "", str(fl_id))
                     if digits:
                         has_image = True
                         img_url = f"/api/nli_image/{digits}"
                         fallback_url = None
+                        image_source = 'nli'
 
                 # Main text area
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
