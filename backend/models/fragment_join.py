@@ -1,5 +1,5 @@
 """
-Fragment Link Model - Pairwise links between Genizah fragments
+Fragment Join Model - Pairwise joins between Genizah fragments
 Supports connected components for showing all related fragments
 """
 import enum
@@ -58,7 +58,7 @@ def normalize_shelfmark(shelfmark: str) -> str:
     return s.strip()
 
 
-def normalize_link_order(frag_a: str, frag_b: str) -> tuple:
+def normalize_join_order(frag_a: str, frag_b: str) -> tuple:
     """
     Ensure consistent ordering for deduplication.
     Always store fragments alphabetically to prevent A-B and B-A duplicates.
@@ -70,21 +70,21 @@ def normalize_link_order(frag_a: str, frag_b: str) -> tuple:
     return (b_norm, a_norm)
 
 
-class FragmentLink(Base):
+class FragmentJoin(Base):
     """
-    Pairwise link between two Genizah fragments.
+    Pairwise join between two Genizah fragments.
 
-    Links form a graph. When viewing any fragment, the UI shows all
+    Joins form a graph. When viewing any fragment, the UI shows all
     fragments in its connected component.
 
     Example:
-        A-B, B-C links mean viewing A, B, or C shows all three.
+        A-B, B-C joins mean viewing A, B, or C shows all three.
     """
-    __tablename__ = "fragment_links"
+    __tablename__ = "fragment_joins"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # The two linked fragments (stored alphabetically for deduplication)
+    # The two joined fragments (stored alphabetically for deduplication)
     fragment_a = Column(String(200), nullable=False)
     fragment_b = Column(String(200), nullable=False)
 
@@ -109,19 +109,19 @@ class FragmentLink(Base):
     is_active = Column(Boolean, default=True)
 
     # Relationships
-    creator = relationship("User", backref="created_links", foreign_keys=[created_by])
+    creator = relationship("User", backref="created_joins", foreign_keys=[created_by])
 
     # Indexes and constraints
     __table_args__ = (
-        Index('ix_fragment_links_a', 'fragment_a'),
-        Index('ix_fragment_links_b', 'fragment_b'),
-        Index('ix_fragment_links_source', 'source'),
-        Index('ix_fragment_links_active', 'is_active'),
-        Index('ix_fragment_links_unique', 'fragment_a', 'fragment_b', unique=True),
+        Index('ix_fragment_joins_a', 'fragment_a'),
+        Index('ix_fragment_joins_b', 'fragment_b'),
+        Index('ix_fragment_joins_source', 'source'),
+        Index('ix_fragment_joins_active', 'is_active'),
+        Index('ix_fragment_joins_unique', 'fragment_a', 'fragment_b', unique=True),
     )
 
     def __repr__(self):
-        return f"<FragmentLink(id={self.id}, {self.fragment_a} <-> {self.fragment_b})>"
+        return f"<FragmentJoin(id={self.id}, {self.fragment_a} <-> {self.fragment_b})>"
 
     @classmethod
     def create_normalized(
@@ -135,12 +135,12 @@ class FragmentLink(Base):
         created_by: Optional[int] = None,
         document_id_a: Optional[str] = None,
         document_id_b: Optional[str] = None
-    ) -> 'FragmentLink':
+    ) -> 'FragmentJoin':
         """
-        Create a link with normalized and ordered shelfmarks.
+        Create a join with normalized and ordered shelfmarks.
         """
         # Normalize and order
-        norm_a, norm_b = normalize_link_order(fragment_a, fragment_b)
+        norm_a, norm_b = normalize_join_order(fragment_a, fragment_b)
 
         # Also reorder document_ids if provided
         orig_a_norm = normalize_shelfmark(fragment_a)

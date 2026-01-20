@@ -1,5 +1,5 @@
 """
-Fragment Link Pydantic Schemas for API validation
+Fragment Join Pydantic Schemas for API validation
 """
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
@@ -12,8 +12,8 @@ class RelationshipTypeEnum(str, Enum):
     SAME_COMPOSITION = "same_composition"
 
 
-class LinkCreate(BaseModel):
-    """Schema for creating a link between two fragments"""
+class JoinCreate(BaseModel):
+    """Schema for creating a join between two fragments"""
     fragment_a: str = Field(..., min_length=1, max_length=200, description="First fragment shelfmark")
     fragment_b: str = Field(..., min_length=1, max_length=200, description="Second fragment shelfmark")
     relationship_type: Optional[RelationshipTypeEnum] = Field(None, description="Type of relationship (optional)")
@@ -27,12 +27,12 @@ class LinkCreate(BaseModel):
         if 'fragment_a' in info.data:
             # Basic check - full normalization done in service
             if v.strip().upper() == info.data['fragment_a'].strip().upper():
-                raise ValueError('Cannot link a fragment to itself')
+                raise ValueError('Cannot join a fragment to itself')
         return v
 
 
-class LinkUpdate(BaseModel):
-    """Schema for updating a link"""
+class JoinUpdate(BaseModel):
+    """Schema for updating a join"""
     relationship_type: Optional[RelationshipTypeEnum] = None
     notes: Optional[str] = Field(None, max_length=2000)
 
@@ -46,8 +46,8 @@ class CreatorInfo(BaseModel):
         from_attributes = True
 
 
-class LinkResponse(BaseModel):
-    """Schema for link response"""
+class JoinResponse(BaseModel):
+    """Schema for join response"""
     id: int
     fragment_a: str
     fragment_b: str
@@ -65,14 +65,14 @@ class LinkResponse(BaseModel):
         from_attributes = True
 
 
-class LinkedFragment(BaseModel):
+class JoinedFragment(BaseModel):
     """A fragment in the connected component"""
     shelfmark: str
     document_id: Optional[str] = None
     is_current: bool = False
     relationship_type: Optional[str] = None
-    link_id: Optional[int] = None  # ID of the direct link (if direct)
-    link_source: Optional[str] = None
+    join_id: Optional[int] = None  # ID of the direct join (if direct)
+    join_source: Optional[str] = None
 
 
 class ConnectedFragmentsResponse(BaseModel):
@@ -80,15 +80,15 @@ class ConnectedFragmentsResponse(BaseModel):
     shelfmark: str
     shelfmark_normalized: str
     fragments: List[str]
-    fragment_details: List[LinkedFragment]
-    links: List[LinkResponse]
+    fragment_details: List[JoinedFragment]
+    joins: List[JoinResponse]
     total_fragments: int
-    total_links: int
+    total_joins: int
 
 
-class LinkSearchResponse(BaseModel):
-    """Response for link search"""
-    results: List[LinkResponse]
+class JoinSearchResponse(BaseModel):
+    """Response for join search"""
+    results: List[JoinResponse]
     total: int
 
 

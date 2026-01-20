@@ -170,11 +170,25 @@ class DiscoveryStats(BaseModel):
     documents_edited: int = 0
     total_comments: int = 0
     active_contributors: int = 0
+    user_joins: int = 0  # User-created joins count
 
 
 # ============================================
 # Feed item schemas
 # ============================================
+
+class ClusterJoinInfo(BaseModel):
+    """Individual join info within a cluster"""
+    id: int
+    fragment_a: str
+    fragment_b: str
+    document_id_a: Optional[str] = None
+    document_id_b: Optional[str] = None
+    relationship_type: Optional[str] = None
+    notes: Optional[str] = None
+    created_by_username: Optional[str] = None
+    created_at: Optional[datetime] = None
+
 
 class FeedItem(BaseModel):
     """A single item in the activity feed"""
@@ -204,6 +218,18 @@ class FeedItem(BaseModel):
     correction_status: Optional[str] = None
     original_text: Optional[str] = None  # For corrections
     corrected_text: Optional[str] = None  # For corrections
+
+    # Join-specific fields (for single join - backward compatibility)
+    fragment_a: Optional[str] = None
+    fragment_b: Optional[str] = None
+    document_id_a: Optional[str] = None
+    document_id_b: Optional[str] = None
+    relationship_type: Optional[str] = None  # "physical_join" or "same_composition"
+    join_source: Optional[str] = None  # "user", "FGP", "catalog"
+
+    # Cluster-specific fields (for grouped joins)
+    cluster_fragments: Optional[List[str]] = None  # All fragments in the cluster
+    cluster_joins: Optional[List[ClusterJoinInfo]] = None  # All joins in the cluster
 
 
 class FeedResponse(BaseModel):

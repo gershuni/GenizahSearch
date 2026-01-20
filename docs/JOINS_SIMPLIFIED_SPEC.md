@@ -1,5 +1,5 @@
 # Simplified Joins System
-## Pairwise Fragment Links with Connected Components
+## Pairwise Fragment Joins with Connected Components
 
 **Date:** January 2026
 **Version:** 2.0 (Simplified)
@@ -10,10 +10,10 @@
 
 ## Overview
 
-A simplified system for linking related Genizah fragments.
+A simplified system for joining related Genizah fragments.
 
 **Key simplifications:**
-1. **Pairwise links instead of groups** - Each link connects exactly two fragments
+1. **Pairwise joins instead of groups** - Each join connects exactly two fragments
 2. **Relationship type is optional** - User doesn't have to decide
 3. **Connected components** - If A→B and B→C, viewing any shows all three
 
@@ -21,7 +21,7 @@ A simplified system for linking related Genizah fragments.
 
 ## Core Concept: Connected Components
 
-Links form a graph. When viewing any fragment, we show all fragments in its **connected component**.
+Joins form a graph. When viewing any fragment, we show all fragments in its **connected component**.
 
 ```
 Example:
@@ -29,7 +29,7 @@ Example:
        │
        D
 
-Links stored: A-B, B-C, B-D
+Joins stored: A-B, B-C, B-D
 
 When viewing A: Shows A, B, C, D (all connected)
 When viewing B: Shows A, B, C, D (all connected)
@@ -47,13 +47,13 @@ When viewing Y: Shows X, Y only
 
 ## Data Model
 
-### Table: `fragment_links`
+### Table: `fragment_joins`
 
 ```sql
-CREATE TABLE fragment_links (
+CREATE TABLE fragment_joins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    -- The two linked fragments (stored alphabetically for deduplication)
+    -- The two joined fragments (stored alphabetically for deduplication)
     fragment_a VARCHAR(200) NOT NULL,          -- shelfmark (normalized)
     fragment_b VARCHAR(200) NOT NULL,          -- shelfmark (normalized)
 
@@ -81,9 +81,9 @@ CREATE TABLE fragment_links (
     UNIQUE(fragment_a, fragment_b)
 );
 
-CREATE INDEX idx_links_fragment_a ON fragment_links(fragment_a);
-CREATE INDEX idx_links_fragment_b ON fragment_links(fragment_b);
-CREATE INDEX idx_links_source ON fragment_links(source);
+CREATE INDEX idx_joins_fragment_a ON fragment_joins(fragment_a);
+CREATE INDEX idx_joins_fragment_b ON fragment_joins(fragment_b);
+CREATE INDEX idx_joins_source ON fragment_joins(source);
 ```
 
 ### Relationship Types (Optional)
@@ -106,9 +106,9 @@ def normalize_shelfmark(shelfmark: str) -> str:
     return s.strip()
 ```
 
-**2. Link ordering (prevent A-B and B-A duplicates):**
+**2. Join ordering (prevent A-B and B-A duplicates):**
 ```python
-def normalize_link(frag_a: str, frag_b: str) -> tuple[str, str]:
+def normalize_join_order(frag_a: str, frag_b: str) -> tuple[str, str]:
     a_norm = normalize_shelfmark(frag_a)
     b_norm = normalize_shelfmark(frag_b)
     return (a_norm, b_norm) if a_norm <= b_norm else (b_norm, a_norm)
@@ -118,13 +118,13 @@ def normalize_link(frag_a: str, frag_b: str) -> tuple[str, str]:
 
 ## Service Layer
 
-### LinkService
+### JoinService
 
 ```python
-class LinkService:
+class JoinService:
 
     @staticmethod
-    def create_link(
+    def create_join(
         db: Session,
         fragment_a: str,
         fragment_b: str,
@@ -133,27 +133,27 @@ class LinkService:
         source: str = "user",
         source_url: Optional[str] = None,
         user: Optional[User] = None
-    ) -> Tuple[Optional[FragmentLink], Optional[str]]:
-        """Create a link between two fragments."""
+    ) -> Tuple[Optional[FragmentJoin], Optional[str]]:
+        """Create a join between two fragments."""
 
         # Normalize and order
-        frag_a, frag_b = normalize_link(fragment_a, fragment_b)
+        frag_a, frag_b = normalize_join_order(fragment_a, fragment_b)
 
         # Check if same fragment
         if frag_a == frag_b:
-            return None, "Cannot link a fragment to itself"
+            return None, "Cannot join a fragment to itself"
 
         # Check if already exists
-        existing = db.query(FragmentLink).filter(
-            FragmentLink.fragment_a == frag_a,
-            FragmentLink.fragment_b == frag_b,
-            FragmentLink.is_active == True
+        existing = db.query(FragmentJoin).filter(
+            FragmentJoin.fragment_a == frag_a,
+            FragmentJoin.fragment_b == frag_b,
+            FragmentJoin.is_active == True
         ).first()
 
         if existing:
-            return None, f"Link already exists (id: {existing.id})"
+            return None, f"Join already exists (id: {existing.id})"
 
-        link = FragmentLink(
+        join = FragmentJoin(
             fragment_a=frag_a,
             fragment_b=frag_b,
             relationship_type=relationship_type,
@@ -163,11 +163,11 @@ class LinkService:
             created_by=user.id if user else None
         )
 
-        db.add(link)
+        db.add(join)
         db.commit()
-        db.refresh(link)
+        db.refresh(join)
 
-        return link, None
+        return join, None
 
     @staticmethod
     def get_connected_fragments(db: Session, shelfmark: str) -> dict:
@@ -180,7 +180,7 @@ class LinkService:
         # BFS to find all connected fragments
         visited = set()
         to_visit = [normalized]
-        links_found = []
+        joins_found = []
 
         while to_visit:
             current = to_visit.pop(0)
@@ -188,80 +188,80 @@ class LinkService:
                 continue
             visited.add(current)
 
-            # Get all links involving current fragment
-            direct_links = db.query(FragmentLink).filter(
-                FragmentLink.is_active == True,
+            # Get all joins involving current fragment
+            direct_joins = db.query(FragmentJoin).filter(
+                FragmentJoin.is_active == True,
                 or_(
-                    FragmentLink.fragment_a == current,
-                    FragmentLink.fragment_b == current
+                    FragmentJoin.fragment_a == current,
+                    FragmentJoin.fragment_b == current
                 )
             ).all()
 
-            for link in direct_links:
-                links_found.append(link)
-                other = link.fragment_b if link.fragment_a == current else link.fragment_a
+            for join in direct_joins:
+                joins_found.append(join)
+                other = join.fragment_b if join.fragment_a == current else join.fragment_a
                 if other not in visited:
                     to_visit.append(other)
 
-        # Deduplicate links
-        unique_links = {link.id: link for link in links_found}.values()
+        # Deduplicate joins
+        unique_joins = {join.id: join for join in joins_found}.values()
 
         return {
             "shelfmark": shelfmark,
             "shelfmark_normalized": normalized,
             "fragments": sorted(list(visited)),
-            "links": list(unique_links),
+            "joins": list(unique_joins),
             "total_fragments": len(visited),
-            "total_links": len(unique_links)
+            "total_joins": len(unique_joins)
         }
 
     @staticmethod
-    def delete_link(db: Session, link_id: int, user: Optional[User] = None) -> bool:
-        """Soft delete a link."""
-        link = db.query(FragmentLink).filter(FragmentLink.id == link_id).first()
-        if not link:
+    def delete_join(db: Session, join_id: int, user: Optional[User] = None) -> bool:
+        """Soft delete a join."""
+        join = db.query(FragmentJoin).filter(FragmentJoin.id == join_id).first()
+        if not join:
             return False
 
-        link.is_active = False
-        link.updated_at = datetime.utcnow()
+        join.is_active = False
+        join.updated_at = datetime.utcnow()
         db.commit()
         return True
 
     @staticmethod
-    def update_link(
+    def update_join(
         db: Session,
-        link_id: int,
+        join_id: int,
         relationship_type: Optional[str] = None,
         notes: Optional[str] = None
-    ) -> Optional[FragmentLink]:
-        """Update link metadata."""
-        link = db.query(FragmentLink).filter(
-            FragmentLink.id == link_id,
-            FragmentLink.is_active == True
+    ) -> Optional[FragmentJoin]:
+        """Update join metadata."""
+        join = db.query(FragmentJoin).filter(
+            FragmentJoin.id == join_id,
+            FragmentJoin.is_active == True
         ).first()
 
-        if not link:
+        if not join:
             return None
 
         if relationship_type is not None:
-            link.relationship_type = relationship_type
+            join.relationship_type = relationship_type
         if notes is not None:
-            link.notes = notes
-        link.updated_at = datetime.utcnow()
+            join.notes = notes
+        join.updated_at = datetime.utcnow()
 
         db.commit()
-        db.refresh(link)
-        return link
+        db.refresh(join)
+        return join
 ```
 
 ---
 
 ## API Endpoints
 
-### Create Link
+### Create Join
 
 ```
-POST /api/v1/links
+POST /api/v1/joins
 
 Request:
 {
@@ -284,16 +284,16 @@ Response (201):
 
 Error (409):
 {
-    "detail": "Link already exists (id: 45)"
+    "detail": "Join already exists (id: 45)"
 }
 ```
 
 ### Get Connected Fragments
 
 ```
-GET /api/v1/links/connected/{shelfmark}
+GET /api/v1/joins/connected/{shelfmark}
 
-Example: GET /api/v1/links/connected/T-S%2013J35.3
+Example: GET /api/v1/joins/connected/T-S%2013J35.3
 
 Response:
 {
@@ -303,7 +303,7 @@ Response:
         "T-S 13J35.3",
         "T-S 13J35.4"
     ],
-    "links": [
+    "joins": [
         {
             "id": 123,
             "fragment_a": "AIU VII.A.23",
@@ -324,26 +324,26 @@ Response:
         }
     ],
     "total_fragments": 3,
-    "total_links": 2
+    "total_joins": 2
 }
 ```
 
-### Delete Link
+### Delete Join
 
 ```
-DELETE /api/v1/links/{id}
+DELETE /api/v1/joins/{id}
 
 Response (200):
 { "success": true }
 
 Error (404):
-{ "detail": "Link not found" }
+{ "detail": "Join not found" }
 ```
 
-### Update Link
+### Update Join
 
 ```
-PATCH /api/v1/links/{id}
+PATCH /api/v1/joins/{id}
 
 Request:
 {
@@ -362,10 +362,10 @@ Response (200):
 }
 ```
 
-### Search Links
+### Search Joins
 
 ```
-GET /api/v1/links/search?q=13J35&source=princeton
+GET /api/v1/joins?q=13J35&source=princeton
 
 Response:
 {
@@ -388,14 +388,14 @@ Response:
 
 ### Design Principles
 
-1. **Show the full cluster** - All connected fragments, not just direct links
+1. **Show the full cluster** - All connected fragments, not just direct joins
 2. **Minimal decisions** - Relationship type is optional, default to "not sure"
 3. **One simple dialog** - No multi-step wizards
 4. **Quick navigation** - Click any fragment to go there
 
 ### Desktop UI (PyQt6)
 
-#### Links Button in Document View
+#### Joins Button in Document View
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -404,18 +404,18 @@ Response:
 │                                                             │
 │ [📷 Images] [📝 Edit] [🔗 3] [⭐ Star]                       │
 │                        ↑                                    │
-│              Shows count of linked fragments                │
+│              Shows count of joined fragments                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 - Number shows total fragments in cluster (including current)
-- Gray `[🔗]` if no links, colored `[🔗 3]` if has links
+- Gray `[🔗]` if no joins, colored `[🔗 3]` if has joins
 
-#### Links Panel (Click Button → Opens Panel)
+#### Joins Panel (Click Button → Opens Panel)
 
 ```
 ┌─────────────────────────────────────────┐
-│ Linked Fragments                    [×] │
+│ Joined Fragments                    [×] │
 ├─────────────────────────────────────────┤
 │                                         │
 │ This fragment is part of a group of 3:  │
@@ -427,7 +427,7 @@ Response:
 │                                         │
 │ ┌─────────────────────────────────────┐ │
 │ │ 📄 T-S 13J35.3 (current)            │ │
-│ │    ↳ linked via AIU VII.A.23        │ │
+│ │    ↳ joined via AIU VII.A.23        │ │
 │ └─────────────────────────────────────┘ │
 │                                         │
 │ ┌─────────────────────────────────────┐ │
@@ -435,7 +435,7 @@ Response:
 │ │    (relationship unknown)           │ │
 │ └─────────────────────────────────────┘ │
 │                                         │
-│ [+ Link Another Fragment]               │
+│ [+ Join Another Fragment]               │
 └─────────────────────────────────────────┘
 ```
 
@@ -443,14 +443,14 @@ Response:
 - Click any other fragment → Navigate to it
 - Shows relationship type if known
 
-#### Add Link Dialog
+#### Add Join Dialog
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Link Fragment                                           [×] │
+│ Join Fragment                                           [×] │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│ Link T-S 13J35.3 to another fragment:                       │
+│ Join T-S 13J35.3 to another fragment:                       │
 │                                                             │
 │ ┌─────────────────────────────────────────────────────────┐ │
 │ │ Enter shelfmark...                              [🔍]    │ │
@@ -467,7 +467,7 @@ Response:
 │ │                                                         │ │
 │ └─────────────────────────────────────────────────────────┘ │
 │                                                             │
-│                              [Cancel]  [Create Link]        │
+│                              [Cancel]  [Create Join]        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -476,19 +476,19 @@ Response:
 Same design, using NiceGUI components:
 
 ```python
-async def show_links_panel(shelfmark: str):
-    """Show linked fragments panel."""
+async def show_joins_panel(shelfmark: str):
+    """Show joined fragments panel."""
 
     # Fetch connected fragments
-    data = await api.get(f"/links/connected/{quote(shelfmark)}")
+    data = await api.get(f"/joins/connected/{quote(shelfmark)}")
     fragments = data["fragments"]
-    links = data["links"]
+    joins = data["joins"]
 
     with ui.card().classes('w-80'):
-        ui.label('Linked Fragments').classes('text-lg font-bold')
+        ui.label('Joined Fragments').classes('text-lg font-bold')
 
         if len(fragments) <= 1:
-            ui.label('No links yet').classes('text-gray-500')
+            ui.label('No joins yet').classes('text-gray-500')
         else:
             ui.label(f'Part of a group of {len(fragments)}:').classes('text-sm text-gray-600')
 
@@ -505,14 +505,14 @@ async def show_links_panel(shelfmark: str):
                             ui.icon('arrow_forward').classes('ml-auto')
 
                     # Show relationship if known
-                    rel = get_relationship_for_fragment(frag, links)
+                    rel = get_relationship_for_fragment(frag, joins)
                     if rel:
                         ui.label(rel).classes('text-xs text-gray-500 ml-6')
 
                 if not is_current:
                     ui.on('click', lambda f=frag: navigate_to(f))
 
-        ui.button('+ Link Another', on_click=lambda: show_add_link_dialog(shelfmark))
+        ui.button('+ Join Another', on_click=lambda: show_add_join_dialog(shelfmark))
 ```
 
 ---
@@ -526,25 +526,25 @@ class CorrectionsClient:
 
     # ... existing methods ...
 
-    def get_linked_fragments(self, shelfmark: str) -> dict:
-        """Get all fragments linked to this one."""
+    def get_connected_fragments(self, shelfmark: str) -> dict:
+        """Get all fragments joined to this one."""
         response = self._request(
             "GET",
-            f"/links/connected/{quote(shelfmark)}"
+            f"/joins/connected/{quote(shelfmark)}"
         )
         return response
 
-    def create_link(
+    def create_join(
         self,
         fragment_a: str,
         fragment_b: str,
         relationship_type: Optional[str] = None,
         notes: Optional[str] = None
     ) -> dict:
-        """Create a link between two fragments."""
+        """Create a join between two fragments."""
         response = self._request(
             "POST",
-            "/links",
+            "/joins",
             json={
                 "fragment_a": fragment_a,
                 "fragment_b": fragment_b,
@@ -554,9 +554,9 @@ class CorrectionsClient:
         )
         return response
 
-    def delete_link(self, link_id: int) -> bool:
-        """Delete a link."""
-        response = self._request("DELETE", f"/links/{link_id}")
+    def delete_join(self, join_id: int) -> bool:
+        """Delete a join."""
+        response = self._request("DELETE", f"/joins/{join_id}")
         return response.get("success", False)
 ```
 
@@ -576,15 +576,15 @@ def import_princeton_document(
     """
     Import a Princeton joined document.
 
-    1. Creates pairwise links between all fragments
+    1. Creates pairwise joins between all fragments
     2. Stores the transcription (separate table, covered in searchable corrections spec)
     """
 
-    # Create links between all pairs
-    links_created = []
+    # Create joins between all pairs
+    joins_created = []
     for i, frag_a in enumerate(shelfmarks):
         for frag_b in shelfmarks[i+1:]:
-            link, error = LinkService.create_link(
+            join, error = JoinService.create_join(
                 db=db,
                 fragment_a=frag_a,
                 fragment_b=frag_b,
@@ -593,15 +593,15 @@ def import_princeton_document(
                 source_url=source_url,
                 notes=source_reference
             )
-            if link:
-                links_created.append(link)
+            if join:
+                joins_created.append(join)
 
     # Store transcription (see SEARCHABLE_CORRECTIONS_SPEC.md)
     # ...
 
     return {
         "shelfmarks": shelfmarks,
-        "links_created": len(links_created),
+        "joins_created": len(joins_created),
         "transcription_stored": True
     }
 ```
@@ -610,40 +610,38 @@ def import_princeton_document(
 
 ## Implementation Plan
 
-### Phase 1: Backend (1-2 days)
+### Phase 1: Backend ✅ COMPLETE
 
-- [ ] Create migration: `fragment_links` table
-- [ ] Create model: `backend/models/fragment_link.py`
-- [ ] Create schemas: `backend/schemas/link.py`
-- [ ] Create service: `backend/services/link_service.py`
-- [ ] Create routes: `backend/api/routes/links.py`
-- [ ] Add shelfmark normalization utility
-- [ ] Unit tests
+- [x] Create migration: `fragment_joins` table
+- [x] Create model: `backend/models/fragment_join.py`
+- [x] Create schemas: `backend/schemas/join.py`
+- [x] Create service: `backend/services/join_service.py`
+- [x] Create routes: `backend/api/routes/joins.py`
+- [x] Add shelfmark normalization utility
+- [x] Add to `corrections_client.py`
 
-### Phase 2: Desktop UI (2 days)
+### Phase 2: Desktop UI ✅ COMPLETE
 
-- [ ] Add "Links" button to browse toolbar
-- [ ] Create `LinksPanel` widget
-- [ ] Create `AddLinkDialog`
-- [ ] Add to `corrections_client.py`
-- [ ] Non-blocking API calls
-- [ ] Navigation to linked fragments
+- [x] Add "Joins" button to browse toolbar (`genizah_app.py`)
+- [x] Create `JoinsDialog` widget (`corrections_ui.py`)
+- [x] Create join form in dialog
+- [x] API integration via `corrections_client.py`
+- [x] Navigation to joined fragments
 
-### Phase 3: Web UI (1-2 days)
+### Phase 3: Web UI ✅ COMPLETE
 
-- [ ] Add links indicator to document view
-- [ ] Create links panel component
-- [ ] Create add link dialog
-- [ ] Navigation integration
+- [x] Add joins button to document view (`web/pages/browse.py`)
+- [x] Create joins panel component (`web/components/joins_panel.py`)
+- [x] Create add join dialog
+- [x] Navigation integration
+- [x] Add translations (Hebrew/English)
 
-### Phase 4: Testing & Polish (1 day)
+### Phase 4: Testing & Polish
 
 - [ ] Integration testing
-- [ ] Edge cases (self-link, duplicates, large clusters)
+- [ ] Edge cases (self-join, duplicates, large clusters)
 - [ ] Performance testing (large connected components)
 - [ ] UI polish
-
-**Total: ~6-8 days**
 
 ---
 
@@ -652,24 +650,24 @@ def import_princeton_document(
 ```
 backend/
 ├── models/
-│   └── fragment_link.py        # NEW
+│   └── fragment_join.py        # ✅ DONE
 ├── schemas/
-│   └── link.py                 # NEW
+│   └── join.py                 # ✅ DONE
 ├── services/
-│   └── link_service.py         # NEW
+│   └── join_service.py         # ✅ DONE
 ├── api/routes/
-│   └── links.py                # NEW
+│   └── joins.py                # ✅ DONE
 └── migrations/
-    └── add_fragment_links.py   # NEW
+    └── add_fragment_joins.py   # ✅ DONE
 
 desktop/
-└── (existing genizah_app.py - add links UI)
+└── (existing genizah_app.py - add joins UI)
 
 web/
 ├── components/
-│   └── links_panel.py          # NEW
+│   └── joins_panel.py          # TODO
 └── pages/
-    └── (existing - add links integration)
+    └── (existing - add joins integration)
 ```
 
 ---

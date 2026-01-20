@@ -38,13 +38,13 @@ class Settings(BaseSettings):
     PASSWORD_REQUIRE_UPPERCASE: bool = True
     PASSWORD_REQUIRE_NUMBERS: bool = True
 
-    # CORS
+    # CORS - can be overridden via CORS_ORIGINS env var (comma-separated)
+    # Example: CORS_ORIGINS=https://genizah.dicta.org.il,https://api.genizah.dicta.org.il
     CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:8080",
-        "http://localhost:8081",  # Genizah web interface default port
-        "http://127.0.0.1:8000",
-        "http://127.0.0.1:8081"
+        origin.strip() for origin in os.environ.get(
+            'CORS_ORIGINS',
+            'http://localhost:3000,http://localhost:8080,http://localhost:8081,http://127.0.0.1:8000,http://127.0.0.1:8081'
+        ).split(',')
     ]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]

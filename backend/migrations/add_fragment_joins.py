@@ -1,5 +1,5 @@
 """
-Migration: Add fragment_links table
+Migration: Add fragment_joins table
 Created: January 2026
 """
 from sqlalchemy import (
@@ -10,22 +10,22 @@ from datetime import datetime
 
 
 def upgrade(engine):
-    """Create the fragment_links table"""
+    """Create the fragment_joins table"""
     inspector = inspect(engine)
 
     # Check if table already exists
-    if 'fragment_links' in inspector.get_table_names():
-        print("Table 'fragment_links' already exists, skipping creation")
+    if 'fragment_joins' in inspector.get_table_names():
+        print("Table 'fragment_joins' already exists, skipping creation")
         return
 
     metadata = MetaData()
 
-    fragment_links = Table(
-        'fragment_links',
+    fragment_joins = Table(
+        'fragment_joins',
         metadata,
         Column('id', Integer, primary_key=True, autoincrement=True),
 
-        # The two linked fragments (stored alphabetically for deduplication)
+        # The two joined fragments (stored alphabetically for deduplication)
         Column('fragment_a', String(200), nullable=False),
         Column('fragment_b', String(200), nullable=False),
 
@@ -50,27 +50,27 @@ def upgrade(engine):
         Column('is_active', Boolean, default=True),
 
         # Indexes
-        Index('ix_fragment_links_a', 'fragment_a'),
-        Index('ix_fragment_links_b', 'fragment_b'),
-        Index('ix_fragment_links_source', 'source'),
-        Index('ix_fragment_links_active', 'is_active'),
-        Index('ix_fragment_links_unique', 'fragment_a', 'fragment_b', unique=True),
+        Index('ix_fragment_joins_a', 'fragment_a'),
+        Index('ix_fragment_joins_b', 'fragment_b'),
+        Index('ix_fragment_joins_source', 'source'),
+        Index('ix_fragment_joins_active', 'is_active'),
+        Index('ix_fragment_joins_unique', 'fragment_a', 'fragment_b', unique=True),
     )
 
     metadata.create_all(engine)
-    print("Created table 'fragment_links' with indexes")
+    print("Created table 'fragment_joins' with indexes")
 
 
 def downgrade(engine):
-    """Drop the fragment_links table"""
+    """Drop the fragment_joins table"""
     metadata = MetaData()
     metadata.reflect(bind=engine)
 
-    if 'fragment_links' in metadata.tables:
-        metadata.tables['fragment_links'].drop(engine)
-        print("Dropped table 'fragment_links'")
+    if 'fragment_joins' in metadata.tables:
+        metadata.tables['fragment_joins'].drop(engine)
+        print("Dropped table 'fragment_joins'")
     else:
-        print("Table 'fragment_links' does not exist")
+        print("Table 'fragment_joins' does not exist")
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -67,10 +67,34 @@ from corrections_ui import (
     MyCorrectionsDialog, AllCorrectionsDialog,
     CommentDialog, CommentsViewerDialog, MyCommentsDialog,
     DiscoveriesDialog, CreateDiscoveryDialog, DiscoveryDetailDialog,
-    TextEditorDialog
+    TextEditorDialog, JoinsDialog
 )
 
 logger = get_logger(__name__)
+
+# Global exception handler to log crashes to file
+def _setup_crash_handler():
+    import traceback
+    from datetime import datetime
+
+    def exception_hook(exc_type, exc_value, exc_tb):
+        # Log to file
+        try:
+            crash_log = os.path.join(os.path.dirname(__file__), 'crash_log.txt')
+            with open(crash_log, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"Crash at {datetime.now().isoformat()}\n")
+                f.write(''.join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+        except:
+            pass
+        # Also print to console
+        traceback.print_exception(exc_type, exc_value, exc_tb)
+        # Call default handler
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = exception_hook
+
+_setup_crash_handler()
 
 def apply_find_highlight(text_browser, query):
     if not text_browser:
@@ -2135,6 +2159,19 @@ class ResultDialog(QDialog):
         self.btn_view_comments.clicked.connect(self.view_comments)
         community_row.addWidget(self.btn_view_comments)
 
+        # Joins button with dropdown
+        self.btn_joins = QToolButton()
+        self.btn_joins.setText("🔗")
+        self.btn_joins.setToolTip(tr("View joined fragments"))
+        self.btn_joins.setFixedSize(40, 32)
+        self.btn_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
+        self.btn_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.btn_joins.clicked.connect(self._rd_view_joins)
+        self.rd_joins_menu = QMenu(self)
+        self.rd_joins_menu.aboutToShow.connect(self._rd_on_joins_menu_show)
+        self.btn_joins.setMenu(self.rd_joins_menu)
+        community_row.addWidget(self.btn_joins)
+
         community_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
@@ -2336,6 +2373,182 @@ class ResultDialog(QDialog):
         )
         dialog.exec()
 
+    def _rd_view_joins(self):
+        """View joined fragments for current document."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        shelfmark = self.lbl_shelf.text()
+        if not shelfmark:
+            return
+
+        def navigate_to_shelfmark(target_shelfmark):
+            """Navigate to a shelfmark within the same results dialog."""
+            # Note: JoinsDialog already closes itself before calling this callback
+            # Load the document in the same ResultDialog
+            self.load_by_shelfmark(target_shelfmark)
+
+        dialog = JoinsDialog(
+            self, parent.corrections_client,
+            document_id=self.current_sys_id,
+            shelfmark=shelfmark,
+            on_browse=navigate_to_shelfmark,
+            shelf_model=getattr(parent, 'shelf_model', None),
+            joins_mgr=getattr(parent, 'joins_mgr', None),
+            shelf_completer=getattr(parent, 'shelf_completer', None),
+            lists_mgr=getattr(parent, 'lists_mgr', None),
+            meta_mgr=getattr(parent, 'meta_mgr', None)
+        )
+        dialog.exec()
+
+    def _rd_update_joins_menu(self):
+        """Update the joins dropdown menu with connected fragments."""
+        self.rd_joins_menu.clear()
+        parent = self.parent()
+
+        # Use document_id (sys_id) for lookup - this is the reliable key
+        document_id = self.current_sys_id
+        display_shelfmark = self.lbl_shelf.text()  # For display purposes only
+
+        if not document_id:
+            action = self.rd_joins_menu.addAction(tr("No document ID"))
+            action.setEnabled(False)
+            return
+
+        # Get joins from JoinsManager using document_id (offline-first)
+        connected = None
+        plain_shelfmark = display_shelfmark.split(' | ')[-1] if ' | ' in display_shelfmark else display_shelfmark
+
+        if parent and hasattr(parent, 'joins_mgr') and parent.joins_mgr:
+            # Debug: show what's in the indexes
+            joins_mgr = parent.joins_mgr
+            by_doc_id = joins_mgr.data.get('by_document_id', {})
+            by_normalized = joins_mgr.data.get('by_normalized', {})
+            total_joins = len(joins_mgr.data.get('joins', {}))
+            print(f"[DEBUG] ResultDialog joins: total_joins={total_joins}, by_document_id={len(by_doc_id)}, by_normalized={len(by_normalized)}", flush=True)
+            print(f"[DEBUG] Looking for doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}'", flush=True)
+
+            # First try document_id lookup
+            if document_id in by_doc_id:
+                print(f"[DEBUG] Found in by_document_id with join_ids: {by_doc_id[document_id]}", flush=True)
+            connected = joins_mgr.get_connected_fragments_by_id(document_id)
+
+            # If no results by document_id, try shelfmark
+            if not connected or connected.get('total_fragments', 0) <= 1:
+                normalized = joins_mgr._normalize_shelfmark(plain_shelfmark)
+                print(f"[DEBUG] Not found by doc_id, trying normalized shelfmark: '{normalized}'", flush=True)
+                if normalized in by_normalized:
+                    print(f"[DEBUG] Found in by_normalized with join_ids: {by_normalized[normalized]}", flush=True)
+                connected = joins_mgr.get_connected_fragments(plain_shelfmark)
+
+            print(f"[DEBUG] Final connected result: fragments={connected.get('fragments', []) if connected else 'None'}", flush=True)
+
+        if not connected or connected.get('total_fragments', 0) <= 1:
+            action = self.rd_joins_menu.addAction(tr("No joined fragments"))
+            action.setEnabled(False)
+            self.btn_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
+            return
+
+        # Has joins - update button style
+        self.btn_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+
+        header_action = self.rd_joins_menu.addAction(
+            tr("{} connected fragments").format(connected.get('total_fragments', 0))
+        )
+        header_action.setEnabled(False)
+        self.rd_joins_menu.addSeparator()
+
+        fragments_list = connected.get('fragments', []) if connected else []
+        joins_list = connected.get('joins', []) if connected else []
+        fragment_details = connected.get('fragment_details', []) if connected else []
+
+        # Extract plain shelfmark for comparison
+        plain_shelfmark = display_shelfmark.split(' | ')[-1] if ' | ' in display_shelfmark else display_shelfmark
+
+        # Build set of directly connected fragments
+        direct_fragments = set()
+        for join in joins_list:
+            frag_a = join.get('fragment_a', '') if isinstance(join, dict) else getattr(join, 'fragment_a', '')
+            frag_b = join.get('fragment_b', '') if isinstance(join, dict) else getattr(join, 'fragment_b', '')
+            if frag_a.upper() == plain_shelfmark.upper():
+                direct_fragments.add(frag_b.upper())
+            elif frag_b.upper() == plain_shelfmark.upper():
+                direct_fragments.add(frag_a.upper())
+
+        # Build map of shelfmark -> document_id from fragment_details for title lookup
+        shelfmark_to_docid = {}
+        for fd in fragment_details:
+            shelf = fd.get('shelfmark', '') if isinstance(fd, dict) else getattr(fd, 'shelfmark', '')
+            doc_id = fd.get('document_id') if isinstance(fd, dict) else getattr(fd, 'document_id', None)
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        print(f"[DEBUG] _rd_update_joins_menu: doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}', direct={direct_fragments}", flush=True)
+        for frag in fragments_list:
+            # Compare with plain shelfmark (joins store plain shelfmarks)
+            is_current = frag.upper() == plain_shelfmark.upper()
+            is_direct = frag.upper() in direct_fragments
+
+            # Get title for display
+            title_preview = ""
+            frag_doc_id = shelfmark_to_docid.get(frag.upper())
+
+            # Fallback: use parent's _shelf_to_sys map from csv_bank
+            if not frag_doc_id and parent and hasattr(parent, '_shelf_to_sys') and parent._shelf_to_sys:
+                norm = parent._normalize_shelfmark(frag) if hasattr(parent, '_normalize_shelfmark') else None
+                if norm:
+                    frag_doc_id = parent._shelf_to_sys.get(norm)
+
+            if frag_doc_id and parent and hasattr(parent, 'meta_mgr') and parent.meta_mgr:
+                try:
+                    _, title = parent.meta_mgr.get_meta_for_id(frag_doc_id)
+                    if title:
+                        words = title.split()[:4]
+                        title_preview = ' '.join(words)
+                        if len(title.split()) > 4:
+                            title_preview += "..."
+                except:
+                    pass
+
+            if is_current:
+                label = f"• {frag}"
+                if title_preview:
+                    label += f" - {title_preview}"
+                label += f" ({tr('current')})"
+                action = self.rd_joins_menu.addAction(label)
+                action.setEnabled(False)
+            else:
+                label = f"→ {frag}"
+                if title_preview:
+                    label += f" - {title_preview}"
+                if is_direct:
+                    label += f" ({tr('direct')})"
+                action = self.rd_joins_menu.addAction(label)
+                action.setData(frag)
+                action.triggered.connect(lambda checked, f=frag: self._rd_navigate_to_joined_fragment(f))
+
+        self.rd_joins_menu.addSeparator()
+        view_all = self.rd_joins_menu.addAction(tr("View all joins..."))
+        view_all.triggered.connect(self._rd_view_joins)
+
+    def _rd_on_joins_menu_show(self):
+        """Called when joins menu is about to show - trigger sync and update."""
+        parent = self.parent()
+        # Trigger a background sync to get latest joins from server
+        if parent and hasattr(parent, 'joins_mgr') and parent.joins_mgr:
+            import threading
+            def sync_and_update():
+                parent.joins_mgr.sync_with_server()
+            threading.Thread(target=sync_and_update, daemon=True).start()
+        # Update menu with current data
+        self._rd_update_joins_menu()
+
+    def _rd_navigate_to_joined_fragment(self, shelfmark: str):
+        """Navigate to a joined fragment within the same results dialog."""
+        # Load the document in the same ResultDialog instead of switching to browse tab
+        self.load_by_shelfmark(shelfmark)
+
     def _rd_load_versions(self):
         """Load versions for current document page."""
         parent = self.parent()
@@ -2350,6 +2563,12 @@ class ResultDialog(QDialog):
         original_text = self.text_ms.toPlainText()
         self._rd_original_text = original_text
         self._rd_versions_cache = {'original': original_text}
+
+        # Force fresh server availability check (500ms timeout) to prevent UI freeze
+        if not client.is_server_available(force_check=True):
+            # Server is down - skip API calls, hide version-related UI
+            self.btn_view_comments.setVisible(False)
+            return
 
         # Check for comments
         try:
@@ -2379,6 +2598,11 @@ class ResultDialog(QDialog):
         doc_id = self.current_sys_id
         page_num = self.current_p_num or 1
         client = parent.corrections_client
+
+        # Quick server availability check (500ms timeout) to prevent UI freeze
+        if not client.is_server_available():
+            # Server is down - skip API calls
+            return
 
         # Remember current selection
         current_data = self.rd_version_combo.currentData()
@@ -2593,6 +2817,9 @@ class ResultDialog(QDialog):
         elif version_id:
             parent = self.parent()
             if parent and hasattr(parent, 'corrections_client'):
+                # Quick server availability check (500ms timeout) to prevent UI freeze
+                if not parent.corrections_client.is_server_available():
+                    return
                 try:
                     ver_data = parent.corrections_client.get_version_content(version_id)
                     content = ver_data.get('content', '')
@@ -2928,6 +3155,66 @@ class ResultDialog(QDialog):
         self.preload_meta_worker = EnrichMetadataThread(self.meta_mgr, sid)
         self.preload_meta_worker.start()
 
+    def load_by_shelfmark(self, shelfmark: str, page_num: int = 1):
+        """Load a document by shelfmark within the same dialog."""
+        try:
+            parent = self.parent()
+            if not parent:
+                return False
+
+            # Look up sys_id from shelfmark
+            if hasattr(parent, '_ensure_shelf_map'):
+                parent._ensure_shelf_map()
+            if hasattr(parent, '_normalize_shelfmark') and hasattr(parent, '_shelf_to_sys'):
+                norm = parent._normalize_shelfmark(shelfmark)
+                sys_id = parent._shelf_to_sys.get(norm) if norm else None
+            else:
+                return False
+
+            if not sys_id:
+                QMessageBox.warning(self, tr("Error"), tr("Document not found: {}").format(shelfmark))
+                return False
+
+            # Get page data
+            page_data = self.searcher.get_browse_page(sys_id, p_num=page_num)
+            if not page_data:
+                QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
+                return False
+
+            try:
+                shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
+            except:
+                shelfmark_display = shelfmark
+                title = ""
+
+            # Create result dict
+            result = {
+                'uid': page_data.get('uid', ''),
+                'raw_header': page_data.get('full_header', ''),
+                'full_header': page_data.get('full_header', ''),
+                'text': page_data.get('text', ''),
+                'full_text': page_data.get('text', ''),
+                'display': {
+                    'id': sys_id,
+                    'shelfmark': shelfmark_display,
+                    'title': title,
+                    'img': str(page_num),
+                    'source': ''
+                }
+            }
+
+            # Add to results and navigate
+            self.all_results.append(result)
+            new_idx = len(self.all_results) - 1
+            self.current_result_idx = new_idx
+            self.load_result_by_index(new_idx)
+            return True
+        except Exception as e:
+            print(f"[ERROR] load_by_shelfmark failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return False
+
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         self.cancel_image_thread()
@@ -3012,6 +3299,9 @@ class ResultDialog(QDialog):
 
         # Load versions for this page
         self._rd_load_versions()
+
+        # Update joins menu
+        self._rd_update_joins_menu()
 
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
@@ -3492,6 +3782,7 @@ class GenizahGUI(QMainWindow):
         self.ai_mgr = None
         self.lab_engine = None
         self.lists_mgr = None
+        self.joins_mgr = None
 
         # Community features - corrections client
         self.corrections_client = get_corrections_client()
@@ -3582,6 +3873,10 @@ class GenizahGUI(QMainWindow):
 
             # Init Lists Manager
             self.lists_mgr = ListsManager(self.meta_mgr)
+
+            # Init Joins Manager (offline-first fragment connections)
+            self.joins_mgr = JoinsManager(self.corrections_client)
+            self.joins_mgr.start_background_sync()
 
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
@@ -4171,6 +4466,9 @@ class GenizahGUI(QMainWindow):
                 if hasattr(self, 'browse_original_page_text'):
                     self._browse_display_version_text(self.browse_original_page_text)
         elif version_id:
+            # Quick server availability check (500ms timeout) to prevent UI freeze
+            if not self.corrections_client.is_server_available():
+                return
             # Fetch version content from API
             try:
                 ver_data = self.corrections_client.get_version_content(version_id)
@@ -4214,6 +4512,12 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.clear()
         self.browse_version_combo.addItem("V0.8", {"source": "original"})
         self.browse_version_combo.blockSignals(False)
+
+        # Force fresh server availability check (500ms timeout) to prevent UI freeze
+        if not self.corrections_client.is_server_available(force_check=True):
+            # Server is down - skip API calls, hide community UI elements
+            self.btn_b_view_comments.setVisible(False)
+            return
 
         # Check for comments
         try:
@@ -4430,6 +4734,174 @@ class GenizahGUI(QMainWindow):
             shelfmark=shelfmark
         )
         dialog.exec()
+
+    def _browse_view_joins(self):
+        """View joined fragments for current document."""
+        if not self.current_browse_sid:
+            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
+            return
+
+        doc_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
+            except:
+                pass
+
+        if not shelfmark:
+            QMessageBox.warning(self, tr("No Shelfmark"), tr("Could not determine shelfmark for this document."))
+            return
+
+        def browse_shelfmark(target_shelfmark):
+            """Navigate to a shelfmark in the browse tab."""
+            self.browse_shelf_input.setText(target_shelfmark)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+
+        dialog = JoinsDialog(
+            self, self.corrections_client,
+            document_id=doc_id,
+            shelfmark=shelfmark,
+            on_browse=browse_shelfmark,
+            shelf_model=getattr(self, 'shelf_model', None),
+            joins_mgr=getattr(self, 'joins_mgr', None),
+            shelf_completer=getattr(self, 'shelf_completer', None),
+            lists_mgr=getattr(self, 'lists_mgr', None),
+            meta_mgr=getattr(self, 'meta_mgr', None)
+        )
+        dialog.exec()
+
+    def _update_joins_dropdown(self):
+        """Update the joins dropdown menu with connected fragments."""
+        self.joins_menu.clear()
+
+        if not self.current_browse_sid:
+            return
+
+        # Use document_id (sys_id) for lookup - this is the reliable key
+        document_id = self.current_browse_sid
+
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+            except:
+                pass
+
+        if not shelfmark:
+            return
+
+        # Get joins from JoinsManager using document_id (offline-first)
+        connected = None
+        if self.joins_mgr:
+            connected = self.joins_mgr.get_connected_fragments_by_id(document_id)
+
+        # Fall back to shelfmark-based lookup if no results with document_id
+        if (not connected or connected.get('total_fragments', 0) <= 1) and self.joins_mgr:
+            connected = self.joins_mgr.get_connected_fragments(shelfmark)
+
+        if not connected or connected.get('total_fragments', 0) <= 1:
+            # No joins - add info action
+            action = self.joins_menu.addAction(tr("No joined fragments"))
+            action.setEnabled(False)
+            self.btn_b_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
+            return
+
+        # Has joins - update button style and add fragment actions
+        self.btn_b_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+
+        # Add header
+        header_action = self.joins_menu.addAction(
+            tr("{} connected fragments").format(connected.get('total_fragments', 0))
+        )
+        header_action.setEnabled(False)
+        self.joins_menu.addSeparator()
+
+        # Build set of directly connected fragments
+        joins_list = connected.get('joins', [])
+        fragment_details = connected.get('fragment_details', [])
+        direct_fragments = set()
+        for join in joins_list:
+            frag_a = join.get('fragment_a', '') if isinstance(join, dict) else getattr(join, 'fragment_a', '')
+            frag_b = join.get('fragment_b', '') if isinstance(join, dict) else getattr(join, 'fragment_b', '')
+            if frag_a.upper() == shelfmark.upper():
+                direct_fragments.add(frag_b.upper())
+            elif frag_b.upper() == shelfmark.upper():
+                direct_fragments.add(frag_a.upper())
+
+        # Build map of shelfmark -> document_id from fragment_details for title lookup
+        shelfmark_to_docid = {}
+        for fd in fragment_details:
+            shelf = fd.get('shelfmark', '') if isinstance(fd, dict) else getattr(fd, 'shelfmark', '')
+            doc_id = fd.get('document_id') if isinstance(fd, dict) else getattr(fd, 'document_id', None)
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        # Add each connected fragment
+        for frag in connected.get('fragments', []):
+            is_direct = frag.upper() in direct_fragments
+
+            # Get title for display
+            title_preview = ""
+            frag_doc_id = shelfmark_to_docid.get(frag.upper())
+
+            # Fallback: use _shelf_to_sys map from csv_bank
+            if not frag_doc_id and self._shelf_to_sys:
+                norm = self._normalize_shelfmark(frag) if hasattr(self, '_normalize_shelfmark') else None
+                if norm:
+                    frag_doc_id = self._shelf_to_sys.get(norm)
+
+            if frag_doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(frag_doc_id)
+                    if title:
+                        words = title.split()[:4]
+                        title_preview = ' '.join(words)
+                        if len(title.split()) > 4:
+                            title_preview += "..."
+                except:
+                    pass
+
+            if frag.upper() == shelfmark.upper():
+                # Current fragment - mark but don't make clickable
+                label = f"• {frag}"
+                if title_preview:
+                    label += f" - {title_preview}"
+                label += f" ({tr('current')})"
+                action = self.joins_menu.addAction(label)
+                action.setEnabled(False)
+            else:
+                label = f"→ {frag}"
+                if title_preview:
+                    label += f" - {title_preview}"
+                if is_direct:
+                    label += f" ({tr('direct')})"
+                action = self.joins_menu.addAction(label)
+                action.setData(frag)
+                action.triggered.connect(lambda checked, f=frag: self._navigate_to_joined_fragment(f))
+
+        # Add separator and "View All" action
+        self.joins_menu.addSeparator()
+        view_all = self.joins_menu.addAction(tr("View all joins..."))
+        view_all.triggered.connect(self._browse_view_joins)
+
+    def _on_joins_menu_show(self):
+        """Called when joins menu is about to show - trigger sync and update."""
+        # Trigger a background sync to get latest joins from server
+        if self.joins_mgr:
+            import threading
+            def sync_and_update():
+                self.joins_mgr.sync_with_server()
+            threading.Thread(target=sync_and_update, daemon=True).start()
+        # Update menu with current data
+        self._update_joins_dropdown()
+
+    def _navigate_to_joined_fragment(self, shelfmark: str):
+        """Navigate to a joined fragment in browse tab."""
+        self.browse_shelf_input.setText(shelfmark)
+        self._set_last_browse_field("shelf")
+        self.browse_load()
 
     # === Search Results Context Menu ===
 
@@ -5175,6 +5647,20 @@ class GenizahGUI(QMainWindow):
         self.btn_b_view_comments.setStyleSheet("background-color: #f39c12; color: white; border-radius: 4px;")
         community_bar.addWidget(self.btn_b_view_comments)
 
+        # Joins button with dropdown - show connected fragments
+        self.btn_b_joins = QToolButton()
+        self.btn_b_joins.setText("🔗")
+        self.btn_b_joins.setToolTip(tr("View joined fragments"))
+        self.btn_b_joins.setEnabled(False)
+        self.btn_b_joins.setFixedSize(40, 32)
+        self.btn_b_joins.setStyleSheet("background-color: #3498db; color: white; border-radius: 4px;")
+        self.btn_b_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.btn_b_joins.clicked.connect(self._browse_view_joins)
+        self.joins_menu = QMenu(self)
+        self.joins_menu.aboutToShow.connect(self._on_joins_menu_show)
+        self.btn_b_joins.setMenu(self.joins_menu)
+        community_bar.addWidget(self.btn_b_joins)
+
         community_bar.addStretch()
         text_layout.addLayout(community_bar)
 
@@ -5463,7 +5949,11 @@ class GenizahGUI(QMainWindow):
         self.btn_b_edit.setEnabled(True)
         self.btn_b_comment.setEnabled(True)
         self.btn_b_view_corrections.setEnabled(True)
+        self.btn_b_joins.setEnabled(True)
         self.browse_version_combo.setEnabled(True)
+
+        # Update joins dropdown menu
+        self._update_joins_dropdown()
 
         # Check for comments and corrections to update UI
         self._check_document_community_status()
@@ -7768,8 +8258,51 @@ class GenizahGUI(QMainWindow):
 
         splitter.addWidget(comments_panel)
 
+        # --- Joins Panel ---
+        joins_panel = QWidget()
+        joins_layout = QVBoxLayout(joins_panel)
+        joins_layout.setContentsMargins(5, 5, 5, 5)
+
+        joins_header = QHBoxLayout()
+        joins_header.addWidget(QLabel(f"<b>{tr('Joins')}</b>"))
+        joins_header.addStretch()
+        btn_refresh_joins = QPushButton("↻")
+        btn_refresh_joins.setFixedSize(24, 24)
+        btn_refresh_joins.setToolTip(tr("Refresh joins"))
+        btn_refresh_joins.clicked.connect(self._refresh_joins_panel)
+        joins_header.addWidget(btn_refresh_joins)
+        joins_layout.addLayout(joins_header)
+
+        # Sub-tabs for My Joins vs All Joins
+        joins_tabs = QTabWidget()
+        joins_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # My Joins list
+        self.my_joins_list = QListWidget()
+        self.my_joins_list.setAlternatingRowColors(True)
+        self.my_joins_list.itemDoubleClicked.connect(self._on_join_clicked)
+        self.my_joins_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.my_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.my_joins_list))
+        joins_tabs.addTab(self.my_joins_list, tr("My Joins"))
+
+        # All Joins list
+        self.all_joins_list = QListWidget()
+        self.all_joins_list.setAlternatingRowColors(True)
+        self.all_joins_list.itemDoubleClicked.connect(self._on_join_clicked)
+        self.all_joins_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.all_joins_list))
+        joins_tabs.addTab(self.all_joins_list, tr("All Joins"))
+
+        joins_layout.addWidget(joins_tabs)
+
+        btn_browse_joins = QPushButton(tr("Browse Joins..."))
+        btn_browse_joins.clicked.connect(self._show_joins_feed_dialog)
+        joins_layout.addWidget(btn_browse_joins)
+
+        splitter.addWidget(joins_panel)
+
         # Set equal sizes for all panels
-        splitter.setSizes([300, 300, 300])
+        splitter.setSizes([250, 250, 250, 250])
 
         main_layout.addWidget(splitter)
 
@@ -7817,6 +8350,12 @@ class GenizahGUI(QMainWindow):
             print("[DEBUG] _refresh_comments_panel completed", flush=True)
         except Exception as e:
             print(f"Error in _refresh_comments_panel: {e}", flush=True)
+        try:
+            print("[DEBUG] Calling _refresh_joins_panel...", flush=True)
+            self._refresh_joins_panel(use_cache_first, skip_api_calls=skip_api_calls)
+            print("[DEBUG] _refresh_joins_panel completed", flush=True)
+        except Exception as e:
+            print(f"Error in _refresh_joins_panel: {e}", flush=True)
         print("[DEBUG] _refresh_community_panels finished", flush=True)
 
     def _update_community_header(self):
@@ -8364,6 +8903,207 @@ class GenizahGUI(QMainWindow):
             if doc_id:
                 # doc_id is actually a system ID, not a shelfmark
                 self._open_document_result_dialog(sys_id=doc_id, page_num=page_num)
+
+    # ========== Joins Panel Methods ==========
+
+    def _refresh_joins_panel(self, use_cache_first=True, skip_api_calls=False):
+        """Refresh the joins list panels (My Joins + All Joins)."""
+        print("[DEBUG] _refresh_joins_panel started", flush=True)
+        self.my_joins_list.clear()
+        self.all_joins_list.clear()
+
+        # My Joins (only if logged in)
+        if self.corrections_client.is_logged_in():
+            cached_my = self.corrections_client.get_cached_data('my_joins') if use_cache_first else None
+            if cached_my:
+                print(f"[DEBUG] Using cached my joins: {len(cached_my)} items", flush=True)
+                self._populate_joins_list(cached_my, self.my_joins_list)
+
+            if not skip_api_calls:
+                try:
+                    joins, total = self.corrections_client.get_my_joins(limit=20)
+                    print(f"[DEBUG] Got {len(joins)} my joins, total={total}", flush=True)
+                    cache_data = [{
+                        'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
+                        'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
+                        'relationship_type': j.relationship_type, 'notes': j.notes,
+                        'created_by_username': j.created_by_username
+                    } for j in joins]
+                    self.corrections_client.set_cached_data('my_joins', cache_data)
+                    self.my_joins_list.clear()
+                    self._populate_joins_list(cache_data, self.my_joins_list)
+                except Exception as e:
+                    print(f"[DEBUG] Error fetching my joins: {e}", flush=True)
+                    if not cached_my:
+                        item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                        self.my_joins_list.addItem(item)
+            elif not cached_my:
+                item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+                self.my_joins_list.addItem(item)
+        else:
+            item = QListWidgetItem(f"ℹ️ {tr('Login to see your joins')}")
+            self.my_joins_list.addItem(item)
+
+        # All Joins (user-created only)
+        cached_all = self.corrections_client.get_cached_data('all_joins') if use_cache_first else None
+        if cached_all:
+            self._populate_joins_list(cached_all, self.all_joins_list, show_author=True)
+
+        if not skip_api_calls:
+            try:
+                joins, total = self.corrections_client.search_joins(source='user', limit=20)
+                print(f"[DEBUG] Got {len(joins)} all joins, total={total}", flush=True)
+                cache_data = [{
+                    'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
+                    'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
+                    'relationship_type': j.relationship_type, 'notes': j.notes,
+                    'created_by_username': j.created_by_username
+                } for j in joins]
+                self.corrections_client.set_cached_data('all_joins', cache_data)
+                self.all_joins_list.clear()
+                self._populate_joins_list(cache_data, self.all_joins_list, show_author=True)
+            except Exception as e:
+                print(f"[DEBUG] Error fetching all joins: {e}", flush=True)
+                if not cached_all:
+                    item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
+                    self.all_joins_list.addItem(item)
+        elif not cached_all:
+            item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
+            self.all_joins_list.addItem(item)
+
+        print("[DEBUG] Joins panel refresh completed", flush=True)
+
+    def _populate_joins_list(self, joins_data, target_list, show_author=False):
+        """Populate joins list from data."""
+        if not joins_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No joins yet')}")
+            target_list.addItem(item)
+            return
+
+        rel_labels = {
+            'physical_join': tr('Physical join'),
+            'same_composition': tr('Same composition')
+        }
+
+        for join in joins_data:
+            frag_a = join.get('fragment_a', '')
+            frag_b = join.get('fragment_b', '')
+            rel_type = join.get('relationship_type', '')
+            author = join.get('created_by_username') or ''
+
+            rel_display = rel_labels.get(rel_type, '')
+
+            display_text = f"🔗 {frag_a} ↔ {frag_b}"
+            if rel_display:
+                display_text += f"\n   {rel_display}"
+            if show_author and author:
+                display_text += f"\n   by {author}"
+
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, join)
+            target_list.addItem(item)
+
+    def _joins_context_menu(self, pos, list_widget):
+        """Show context menu for joins list."""
+        item = list_widget.itemAt(pos)
+        if not item:
+            return
+
+        join_data = item.data(Qt.ItemDataRole.UserRole)
+        if not join_data:
+            return
+
+        menu = QMenu(self)
+
+        # Open Fragment A
+        frag_a = join_data.get('fragment_a', '')
+        doc_id_a = join_data.get('document_id_a')
+        if frag_a:
+            action_a = menu.addAction(f"📄 {tr('Open')} {frag_a}")
+            action_a.triggered.connect(lambda: self._open_join_fragment(frag_a, doc_id_a))
+
+        # Open Fragment B
+        frag_b = join_data.get('fragment_b', '')
+        doc_id_b = join_data.get('document_id_b')
+        if frag_b:
+            action_b = menu.addAction(f"📄 {tr('Open')} {frag_b}")
+            action_b.triggered.connect(lambda: self._open_join_fragment(frag_b, doc_id_b))
+
+        menu.addSeparator()
+
+        # Copy shelfmarks
+        copy_action = menu.addAction("📋 " + tr("Copy shelfmarks"))
+        copy_action.triggered.connect(lambda: self._copy_join_shelfmarks(frag_a, frag_b))
+
+        # Delete (for own joins only or admin)
+        is_my_list = (list_widget == self.my_joins_list)
+        is_admin = (self.corrections_client.is_logged_in() and
+                   self.corrections_client.current_user and
+                   self.corrections_client.current_user.role == 'admin')
+
+        if is_my_list or is_admin:
+            menu.addSeparator()
+            delete_action = menu.addAction("🗑️ " + tr("Delete join"))
+            delete_action.triggered.connect(lambda: self._delete_join_from_list(join_data.get('id'), is_my_list))
+
+        menu.exec(list_widget.mapToGlobal(pos))
+
+    def _on_join_clicked(self, item):
+        """Handle join item double-click - open Fragment A."""
+        join_data = item.data(Qt.ItemDataRole.UserRole)
+        if join_data:
+            frag_a = join_data.get('fragment_a', '')
+            doc_id_a = join_data.get('document_id_a')
+            self._open_join_fragment(frag_a, doc_id_a)
+
+    def _open_join_fragment(self, shelfmark, doc_id=None):
+        """Open a fragment from a join - navigate to browse tab."""
+        if doc_id:
+            self._open_document_result_dialog(sys_id=doc_id)
+        elif shelfmark:
+            # Use shelfmark for browse
+            self.browse_shelf_input.setText(shelfmark)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+            self.tabs.setCurrentWidget(self.browse_tab)
+
+    def _copy_join_shelfmarks(self, frag_a, frag_b):
+        """Copy join shelfmarks to clipboard."""
+        from PyQt6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(f"{frag_a} ↔ {frag_b}")
+
+    def _delete_join_from_list(self, join_id, is_my_list):
+        """Delete a join from the community panel."""
+        if not join_id:
+            return
+
+        reply = QMessageBox.question(
+            self, tr("Confirm Delete"),
+            tr("Are you sure you want to delete this join?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.corrections_client.delete_join(join_id)
+            if success:
+                QMessageBox.information(self, tr("Success"), tr("Join deleted"))
+                self._refresh_joins_panel(use_cache_first=False)
+            else:
+                QMessageBox.critical(self, tr("Error"), tr("Failed to delete: {}").format(msg))
+
+    def _show_joins_feed_dialog(self):
+        """Show the full joins feed dialog."""
+        from corrections_ui import JoinsFeedDialog
+
+        def browse_shelfmark(shelfmark):
+            self.browse_shelf_input.setText(shelfmark)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+            self.tabs.setCurrentWidget(self.browse_tab)
+
+        dialog = JoinsFeedDialog(self, self.corrections_client, on_browse=browse_shelfmark)
+        dialog.exec()
 
     def create_settings_tab(self):
         panel = QWidget(); layout = QVBoxLayout()

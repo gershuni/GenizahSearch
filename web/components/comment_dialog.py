@@ -87,12 +87,13 @@ def create_comment_dialog(
                             def load_recent():
                                 recent_container.clear()
                                 if state.lists_mgr:
-                                    recent_items = state.lists_mgr.data.get('recent_items', [])
+                                    # Use get_items_in_list to get proper item dicts
+                                    recent_items = state.lists_mgr.get_items_in_list('recent')
                                     if recent_items:
                                         with recent_container:
                                             for item in recent_items[:20]:
                                                 doc_id = item.get('sys_id', '')
-                                                item_shelfmark = item.get('shelfmark', doc_id)
+                                                item_shelfmark = item.get('shelfmark') or item.get('shelfmark_override') or doc_id
 
                                                 def make_add(sm=item_shelfmark, did=doc_id):
                                                     def add():

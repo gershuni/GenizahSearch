@@ -11,9 +11,10 @@ from ..models.correction import Correction, CorrectionStatus
 from ..models.comment import Comment
 from ..models.user import User
 from ..models.document_metadata import DocumentMetadata
+from ..models.fragment_join import FragmentJoin
 from ..schemas.discovery import (
     DiscoveryCreate, DiscoveryUpdate, ResponseCreate,
-    AuthorInfo, DiscoveryStats, FeedItem
+    AuthorInfo, DiscoveryStats, FeedItem, ClusterJoinInfo
 )
 
 
@@ -287,6 +288,12 @@ class DiscoveryService:
             Correction.created_at >= thirty_days_ago
         ).scalar() or 0
 
+        # User-created joins (source='user', active only)
+        user_joins = db.query(FragmentJoin).filter(
+            FragmentJoin.source == 'user',
+            FragmentJoin.is_active == True
+        ).count()
+
         return DiscoveryStats(
             total_discoveries=total_discoveries,
             total_questions=total_questions,
@@ -296,7 +303,8 @@ class DiscoveryService:
             words_corrected=words_corrected,
             documents_edited=documents_edited,
             total_comments=total_comments,
-            active_contributors=active_contributors
+            active_contributors=active_contributors,
+            user_joins=user_joins
         )
 
     # ============================================
@@ -451,6 +459,118 @@ class DiscoveryService:
                     response_count=c.reply_count or 0,
                     is_featured=c.is_pinned
                 ))
+
+        # Get user-created joins and group by connected clusters
+        if item_type in (None, "all", "join"):
+            join_query = db.query(FragmentJoin).filter(
+                FragmentJoin.source == 'user',  # Only user-created joins in feed
+                FragmentJoin.is_active == True  # Exclude soft-deleted joins
+            )
+
+            if date_filter:
+                join_query = join_query.filter(FragmentJoin.created_at >= date_filter)
+
+            all_joins = join_query.all()
+
+            if all_joins:
+                # Build connected components using Union-Find
+                parent = {}
+
+                def find(x):
+                    if x not in parent:
+                        parent[x] = x
+                    if parent[x] != x:
+                        parent[x] = find(parent[x])
+                    return parent[x]
+
+                def union(x, y):
+                    px, py = find(x), find(y)
+                    if px != py:
+                        parent[px] = py
+
+                # Build clusters from joins
+                for j in all_joins:
+                    union(j.fragment_a, j.fragment_b)
+
+                # Group joins by cluster root
+                clusters = {}  # root -> list of joins
+                for j in all_joins:
+                    root = find(j.fragment_a)
+                    if root not in clusters:
+                        clusters[root] = []
+                    clusters[root].append(j)
+
+                # Create one FeedItem per cluster
+                for root, cluster_joins in clusters.items():
+                    # Get all fragments in this cluster
+                    cluster_fragments = set()
+                    for j in cluster_joins:
+                        cluster_fragments.add(j.fragment_a)
+                        cluster_fragments.add(j.fragment_b)
+                    cluster_fragments = sorted(list(cluster_fragments))
+
+                    # Find the most recent join for the created_at timestamp
+                    most_recent_join = max(cluster_joins, key=lambda j: j.created_at)
+
+                    # Collect all unique authors
+                    authors = set()
+                    for j in cluster_joins:
+                        if j.creator:
+                            authors.add(j.creator.username)
+
+                    # Build cluster join info list
+                    cluster_join_infos = [
+                        ClusterJoinInfo(
+                            id=j.id,
+                            fragment_a=j.fragment_a,
+                            fragment_b=j.fragment_b,
+                            document_id_a=j.document_id_a,
+                            document_id_b=j.document_id_b,
+                            relationship_type=j.relationship_type,
+                            notes=j.notes,
+                            created_by_username=j.creator.username if j.creator else None,
+                            created_at=j.created_at
+                        )
+                        for j in sorted(cluster_joins, key=lambda j: j.created_at, reverse=True)
+                    ]
+
+                    # Create title showing all fragments
+                    if len(cluster_fragments) <= 4:
+                        title = " ↔ ".join(cluster_fragments)
+                    else:
+                        title = f"{cluster_fragments[0]} + {len(cluster_fragments) - 1} more"
+
+                    # Content preview shows join count
+                    content = f"{len(cluster_joins)} {'צירוף' if len(cluster_joins) == 1 else 'צירופים'} • {len(cluster_fragments)} קטעים"
+
+                    # Use the first join's author as the main author (most recent)
+                    main_author = most_recent_join.creator
+
+                    # Create cluster ID from sorted join IDs
+                    cluster_id = "cluster_" + "_".join(str(j.id) for j in sorted(cluster_joins, key=lambda j: j.id))
+
+                    feed_items.append(FeedItem(
+                        id=cluster_id,
+                        item_type="join",
+                        title=title,
+                        content_preview=content,
+                        author=AuthorInfo.from_user(main_author, False) if main_author else AuthorInfo(username="unknown"),
+                        document_id=most_recent_join.document_id_a,
+                        shelfmark=most_recent_join.fragment_a,
+                        created_at=most_recent_join.created_at,
+                        response_count=len(cluster_joins),  # Use response_count for join count
+                        is_featured=False,
+                        # Single join fields (use first join for backward compatibility)
+                        fragment_a=cluster_joins[0].fragment_a if len(cluster_joins) == 1 else None,
+                        fragment_b=cluster_joins[0].fragment_b if len(cluster_joins) == 1 else None,
+                        document_id_a=cluster_joins[0].document_id_a if len(cluster_joins) == 1 else None,
+                        document_id_b=cluster_joins[0].document_id_b if len(cluster_joins) == 1 else None,
+                        relationship_type=cluster_joins[0].relationship_type if len(cluster_joins) == 1 else None,
+                        join_source='user',
+                        # Cluster fields
+                        cluster_fragments=cluster_fragments,
+                        cluster_joins=cluster_join_infos
+                    ))
 
         # Sort: pinned first, then by date
         feed_items.sort(key=lambda x: (not x.is_pinned, x.created_at), reverse=True)
