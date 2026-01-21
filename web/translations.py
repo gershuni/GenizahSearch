@@ -919,3 +919,40 @@ def tr(text: str) -> str:
 def get_dir() -> str:
     """Get text direction for current language."""
     return 'rtl' if is_rtl() else 'ltr'
+
+# =========================================================================
+# Accessibility Page
+# =========================================================================
+TRANSLATIONS.update({
+    "Accessibility Statement": "הצהרת נגישות",
+    "Conformance Status": "סטטוס תאימות",
+    "Measures to Support Accessibility": "אמצעים לתמיכה בנגישות",
+    "Known Limitations": "מגבלות ידועות",
+    "Feedback and Contact": "משוב ויצירת קשר",
+    "Last Updated": "עודכן לאחרונה",
+    "The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.": "הנחיות נגישות תכנים באינטרנט (WCAG) מגדירות דרישות למעצבים ומפתחים לשיפור הנגישות לאנשים עם מוגבלות. הן מגדירות שלוש רמות תאימות: רמה A, רמה AA ורמה AAA.",
+    "Genizah Search Pro is committed to ensuring digital accessibility for people with disabilities.": "Genizah Search Pro מחויבת להבטיח נגישות דיגיטלית לאנשים עם מוגבלות.",
+    "We are continually improving the user experience for everyone, and applying the relevant accessibility standards.": "אנו משפרים ללא הרף את חווית המשתמש לכולם, ומיישמים את תקני הנגישות הרלוונטיים.",
+    "Genizah Search Pro is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.": "Genizah Search Pro תואמת חלקית לתקן WCAG 2.0 רמה AA ולתקן הישראלי 5568.",
+    '"Partially conformant" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.': '"תואמת חלקית" משמעו שחלקים מהתוכן אינם תואמים באופן מלא לתקן הנגישות, בעיקר בשל אופיים של תמונות כתבי היד ההיסטוריים.',
+    "We have taken the following measures to ensure accessibility:": "נקטנו באמצעים הבאים להבטחת נגישות:",
+    "Keyboard Navigation": "ניווט מקלדת",
+    "The site is fully navigable using a keyboard.": "האתר ניתן לניווט מלא באמצעות מקלדת.",
+    "Focus Visibility": "נראות פוקוס",
+    "Focus indicators are clearly visible on all interactive elements.": "מחווני פוקוס נראים בבירור על כל האלמנטים האינטראקטיביים.",
+    "Text Alternatives": "חלופות טקסט",
+    "Controls and images have appropriate alternative text or labels.": "לפקדים ולתמונות יש טקסט חלופי או תוויות מתאימות.",
+    "Contrast": "ניגודיות",
+    "Colors have been chosen to meet contrast requirements.": "הצבעים נבחרו כדי לעמוד בדרישות הניגודיות.",
+    "Zoom Support": "תמיכה בזום",
+    "The site supports standard browser zoom up to 200% without loss of functionality.": "האתר תומך בזום דפדפן סטנדרטי עד 200% ללא אובדן פונקציונליות.",
+    "Semantic Structure": "מבנה סמנטי",
+    "We use semantic HTML headings and landmarks to aid screen reader navigation.": "אנו משתמשים בכותרות וציוני דרך סמנטיים ב-HTML כדי לסייע בניווט קוראי מסך.",
+    "Despite our best efforts, there may be some limitations:": "למרות מאמצינו הטובים ביותר, ייתכנו מספר מגבלות:",
+    "Manuscript Images": "תמונות כתבי יד",
+    "Scanned historical manuscripts are images of text and cannot be read directly by screen readers. We provide machine-generated transcriptions where available to assist with access.": "כתבי יד היסטוריים סרוקים הם תמונות של טקסט ואינם ניתנים לקריאה ישירה על ידי קוראי מסך. אנו מספקים תעתיקים שנוצרו על ידי מכונה היכן שזמין כדי לסייע בגישה.",
+    "Generated Transcriptions": "תעתיקים שנוצרו",
+    "The OCR (Optical Character Recognition) text may contain errors and might not perfectly reflect the manuscript content.": "טקסט ה-OCR (זיהוי תווים אופטי) עשוי להכיל שגיאות וייתכן שלא ישקף באופן מושלם את תוכן כתב היד.",
+    "We welcome your feedback on the accessibility of Genizah Search Pro. Please let us know if you encounter accessibility barriers:": "אנו מברכים על המשוב שלך לגבי הנגישות של Genizah Search Pro. אנא הודע לנו אם נתקלת בחסמי נגישות:",
+    "We try to respond to feedback within 5 business days.": "אנו משתדלים להגיב למשוב תוך 5 ימי עסקים.",
+})

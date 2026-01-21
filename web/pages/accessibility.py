@@ -19,56 +19,56 @@ def create_accessibility_page():
 
         # Introduction
         with ui.card().classes('w-full p-6'):
-            ui.markdown('''
-            **Genizah Search Pro** is committed to ensuring digital accessibility for people with disabilities.
-            We are continually improving the user experience for everyone, and applying the relevant accessibility standards.
+            ui.markdown(f'''
+            **{tr('Genizah Search Pro is committed to ensuring digital accessibility for people with disabilities.')}**
+            {tr('We are continually improving the user experience for everyone, and applying the relevant accessibility standards.')}
             ''').style('font-size: 1.1em;')
 
         # Conformance Status
         with ui.card().classes('w-full p-6'):
             h2(tr('Conformance Status'), classes='text-xl font-bold mb-4', style='color: var(--primary-700);')
-            ui.markdown('''
-            The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.
+            ui.markdown(f'''
+            {tr('The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.')}
 
-            **Genizah Search Pro** is partially conformant with **WCAG 2.0 Level AA** and **Israeli Standard 5568**.
+            **{tr('Genizah Search Pro is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.')}**
 
-            "Partially conformant" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.
+            {tr('"Partially conformant" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.')}
             ''')
 
         # Measures Taken
         with ui.card().classes('w-full p-6'):
             h2(tr('Measures to Support Accessibility'), classes='text-xl font-bold mb-4', style='color: var(--primary-700);')
-            ui.markdown('''
-            We have taken the following measures to ensure accessibility:
+            ui.markdown(f'''
+            {tr('We have taken the following measures to ensure accessibility:')}
 
-            *   **Keyboard Navigation**: The site is fully navigable using a keyboard.
-            *   **Focus Visibility**: Focus indicators are clearly visible on all interactive elements.
-            *   **Text Alternatives**: Controls and images have appropriate alternative text or labels.
-            *   **Contrast**: Colors have been chosen to meet contrast requirements.
-            *   **Zoom Support**: The site supports standard browser zoom up to 200% without loss of functionality.
-            *   **Semantic Structure**: We use semantic HTML headings and landmarks to aid screen reader navigation.
+            *   **{tr('Keyboard Navigation')}**: {tr('The site is fully navigable using a keyboard.')}
+            *   **{tr('Focus Visibility')}**: {tr('Focus indicators are clearly visible on all interactive elements.')}
+            *   **{tr('Text Alternatives')}**: {tr('Controls and images have appropriate alternative text or labels.')}
+            *   **{tr('Contrast')}**: {tr('Colors have been chosen to meet contrast requirements.')}
+            *   **{tr('Zoom Support')}**: {tr('The site supports standard browser zoom up to 200% without loss of functionality.')}
+            *   **{tr('Semantic Structure')}**: {tr('We use semantic HTML headings and landmarks to aid screen reader navigation.')}
             ''')
 
         # Limitations
         with ui.card().classes('w-full p-6'):
             h2(tr('Known Limitations'), classes='text-xl font-bold mb-4', style='color: var(--primary-700);')
-            ui.markdown('''
-            Despite our best efforts, there may be some limitations:
+            ui.markdown(f'''
+            {tr('Despite our best efforts, there may be some limitations:')}
 
-            1.  **Manuscript Images**: Scanned historical manuscripts are images of text and cannot be read directly by screen readers. We provide machine-generated transcriptions where available to assist with access.
-            2.  **Generated Transcriptions**: The OCR (Optical Character Recognition) text may contain errors and might not perfectly reflect the manuscript content.
+            1.  **{tr('Manuscript Images')}**: {tr('Scanned historical manuscripts are images of text and cannot be read directly by screen readers. We provide machine-generated transcriptions where available to assist with access.')}
+            2.  **{tr('Generated Transcriptions')}**: {tr('The OCR (Optical Character Recognition) text may contain errors and might not perfectly reflect the manuscript content.')}
             ''')
 
         # Feedback & Contact
         with ui.card().classes('w-full p-6 border-l-4').style('border-left-color: var(--primary-600);'):
             h2(tr('Feedback and Contact'), classes='text-xl font-bold mb-4', style='color: var(--primary-700);')
-            ui.markdown('''
-            We welcome your feedback on the accessibility of Genizah Search Pro. Please let us know if you encounter accessibility barriers:
+            ui.markdown(f'''
+            {tr('We welcome your feedback on the accessibility of Genizah Search Pro. Please let us know if you encounter accessibility barriers:')}
 
-            *   **Email**: `gershuni [at] gmail [dot] com`
+            *   **{tr('Email')}**: `gershuni [at] gmail [dot] com`
 
-            We try to respond to feedback within 5 business days.
+            {tr('We try to respond to feedback within 5 business days.')}
             ''')
 
         # Footer Date
-        ui.label(f"{tr('Last Updated')}: February 2025").classes('text-sm text-gray-500 mt-8')
+        ui.label(f"{tr('Last Updated')}: {tr('February 2025') if tr('February 2025') != 'February 2025' else 'פברואר 2025' if is_rtl() else 'February 2025'}").classes('text-sm text-gray-500 mt-8')

@@ -202,6 +202,21 @@ COMMON_STYLES = '''
         color: var(--text-primary) !important;
     }
 
+    /* Dark Theme Menu Fixes */
+    [data-theme="dark"] .q-menu {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--border-light) !important;
+    }
+
+    [data-theme="dark"] .q-item {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-item:hover {
+        background: var(--bg-hover) !important;
+    }
+
     [data-theme="dark"] .highlight-match {
         background: linear-gradient(120deg, #854d0e 0%, #a16207 100%) !important;
         color: white !important;
@@ -836,9 +851,6 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
 
-    # Skip link for accessibility
-    ui.link(tr('Skip to main content'), '#main-content').classes('skip-link')
-
     # Header
     with ui.header().classes('q-py-none').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
@@ -881,16 +893,23 @@ def create_layout():
                     create_auth_buttons()
 
                 # Help Button (hidden on mobile via CSS)
-                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
+                ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
-    # Left Sidebar (Drawer)
+    # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
     drawer_open = app.storage.user.get('drawer_open', True)
-    left_drawer = ui.left_drawer(value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    # Determine side based on direction
+    # In RTL, 'left' side is physically on the Right.
+    # To put it on the physical Left in RTL, we need side='right'.
+    drawer_side = 'right' if is_rtl() else 'left'
+
+    # Create main drawer
+    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
     def toggle_drawer():
         """Toggle drawer and save state."""
-        left_drawer.toggle()
+        main_drawer.toggle()
         app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
 
     async def nav_to(path):
@@ -899,13 +918,13 @@ def create_layout():
         width = await ui.run_javascript('window.innerWidth')
         if width < 768:
             app.storage.user['drawer_open'] = False
-            left_drawer.hide()
+            main_drawer.hide()
         ui.navigate.to(path)
 
     # Connect menu button to toggle function
     menu_btn.on('click', toggle_drawer)
 
-    with left_drawer:
+    with main_drawer:
         with ui.column().classes('h-full'):
             # Navigation Section
             with ui.column().classes('flex-grow py-4'):
@@ -984,30 +1003,6 @@ def create_layout():
     # Add ID for skip link target
     content_col.props('id=main-content')
     return content_col
-
-
-def show_help_dialog():
-    """Show help dialog with keyboard shortcuts and tips."""
-    with ui.dialog() as dialog, ui.card().classes('p-6 max-w-lg'):
-        ui.label(tr('Keyboard Shortcuts')).classes('text-xl font-bold mb-4')
-
-        shortcuts = [
-            ('/', tr('Focus search')),
-            ('Ctrl+Enter', tr('Execute search')),
-            ('Esc', tr('Close dialogs')),
-            ('Arrow keys', tr('Navigate results')),
-            ('Enter', tr('Open selected result')),
-        ]
-
-        with ui.column().classes('gap-2'):
-            for key, desc in shortcuts:
-                with ui.row().classes('items-center gap-4'):
-                    ui.label(key).classes('font-mono bg-gray-100 px-2 py-1 rounded text-sm')
-                    ui.label(desc).classes('text-gray-600')
-
-        ui.button(tr('Close'), on_click=dialog.close).classes('mt-4 btn-primary')
-
-    dialog.open()
 
 
 # ============================================================================
