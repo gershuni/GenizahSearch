@@ -1337,7 +1337,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             tr('Search for Parallels'),
                             icon='search',
                             on_click=search_for_parallels
-                        ).props('flat dense').style(
+                        ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
                         ).tooltip(tr('Search for Parallels'))
@@ -1347,7 +1347,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata'),
                             icon='info',
                             on_click=toggle_metadata
-                        ).props('flat dense').style(
+                        ).props(f'flat dense aria-label="{tr("Show Metadata")}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
                         ).tooltip(tr('Show Metadata'))
@@ -1356,7 +1356,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             icon='star_border',
                             on_click=add_manuscript_to_list
-                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Favorites'))
+                        ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').style('color: #ffffff !important;').tooltip(tr('Add to Favorites'))
 
                     # Next Shelfmark Button
                     ui.button(
@@ -1585,7 +1585,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='chevron_left',
                                 on_click=lambda: load_page(direction=-1)
-                            ).props(f'flat round dense {"disabled" if prev_disabled else ""}').classes(
+                            ).props(f'flat round dense {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
 
@@ -1616,7 +1616,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='chevron_right',
                                 on_click=lambda: load_page(direction=1)
-                            ).props(f'flat round dense {"disabled" if next_disabled else ""}').classes(
+                            ).props(f'flat round dense {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
 
@@ -1625,13 +1625,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
                                 icon='view_agenda' if not state.view_all else 'view_day',
                                 on_click=toggle_view_all
-                            ).props('flat dense color=green')
+                            ).props(f'flat dense color=green aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
 
                             # Add page to list (star button)
                             ui.button(
                                 icon='star_border',
                                 on_click=add_page_to_list
-                            ).props('flat round dense').classes('text-green-700').tooltip(tr('Add to Favorites'))
+                            ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').classes('text-green-700').tooltip(tr('Add to Favorites'))
 
                             # Image toggle button - placeholder, will be connected later
                             image_toggle_btn = None
@@ -1713,24 +1713,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ):
                                 ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
                                 with ui.row().classes('gap-1'):
-                                    ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                    ui.button(icon='remove', on_click=zoom_out).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').tooltip(tr('Zoom out'))
                                     ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
-                                    ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                    ui.button(icon='add', on_click=zoom_in).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').tooltip(tr('Zoom in'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='rotate_left', on_click=rotate_left).props('flat round size=sm text-color=white').tooltip(tr('Rotate Left'))
+                                    ui.button(icon='rotate_left', on_click=rotate_left).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
                                     
                                     # Rotation Slider
                                     slider_refs['rotate'] = ui.slider(
                                         min=0, max=360, step=1, value=state.rotation,
                                         on_change=handle_rotation_slider
-                                    ).props('dark dense').classes('w-32 mx-2').style('transition: none;').on(
+                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2').style('transition: none;').on(
                                         'update:model-value', 
                                         'if(window.manuscriptViewer) window.manuscriptViewer.update(window.manuscriptViewer.state.scale, $event)'
                                     )
                                     
-                                    ui.button(icon='rotate_right', on_click=rotate_right).props('flat round size=sm text-color=white').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='restart_alt', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset View'))
+                                    ui.button(icon='restart_alt', on_click=zoom_reset).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
 
                             # Image display area - using div instead of scroll_area for drag support

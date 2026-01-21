@@ -104,6 +104,26 @@ COMMON_STYLES = '''
         --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
     }
 
+    /* ========================================================================
+       Accessibility Focus Styles (P0-C)
+       ======================================================================== */
+
+    :focus-visible {
+        outline: 2px solid var(--primary-600) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* Ensure visible focus on buttons and links */
+    button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex="0"]:focus-visible {
+        outline: 2px solid var(--primary-600) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* Adjust for dark theme */
+    [data-theme="dark"] :focus-visible {
+        outline-color: var(--primary-400) !important;
+    }
+
     /* Parchment Theme - Academic & Warm */
     [data-theme="parchment"] {
         --bg-primary: #fffbf5;
@@ -787,6 +807,23 @@ COMMON_STYLES = '''
             transform: translateX(-100%) !important;
         }
     }
+
+    /* Accessibility: Skip Link */
+    .skip-link {
+        position: absolute;
+        top: -40px;
+        left: 0;
+        background: var(--primary-600);
+        color: white;
+        padding: 8px;
+        z-index: 10000;
+        transition: top 0.2s;
+        text-decoration: none;
+        font-weight: bold;
+    }
+    .skip-link:focus {
+        top: 0;
+    }
 </style>
 '''
 
@@ -799,12 +836,15 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
 
+    # Skip link for accessibility
+    ui.link(tr('Skip to main content'), '#main-content').classes('skip-link')
+
     # Header
     with ui.header().classes('q-py-none').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                menu_btn = ui.button(icon='menu').props('flat round text-color=white')
+                menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
@@ -914,7 +954,9 @@ def create_layout():
                     ui.navigate.reload()
 
                 lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').on('click', toggle_lang):
+                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').props(
+                    'role=button tabindex=0'
+                ).on('click', toggle_lang).on('keydown.enter', toggle_lang).on('keydown.space', toggle_lang):
                     ui.icon('translate').classes('text-lg')
                     ui.label(lang_btn_text).classes('text-sm font-medium')
 
@@ -933,8 +975,15 @@ def create_layout():
                 # Version Info
                 ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
 
+                # Accessibility Link
+                with ui.row().classes('w-full justify-center mt-2'):
+                    ui.link(tr('Accessibility Statement'), '/accessibility').classes('text-xs opacity-70 hover:opacity-100').style('text-decoration: none; color: inherit;')
+
     # Content Area
-    return ui.column().classes('main-content w-full items-stretch flex-grow')
+    content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
+    # Add ID for skip link target
+    content_col.props('id=main-content')
+    return content_col
 
 
 def show_help_dialog():
@@ -970,6 +1019,7 @@ def apply_theme_immediately():
     current_theme = app.storage.user.get('theme', 'light')
     current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
+    dir_attr = "rtl" if current_lang == "he" else "ltr"
 
     # Use immediate inline script that runs before any rendering
     return f'''<style>
@@ -991,13 +1041,18 @@ def apply_theme_immediately():
         (function() {{
             var theme = "{current_theme}";
             var lang = "{current_lang}";
+            var dir = "{dir_attr}";
+
             // Apply to html immediately (before DOM ready)
             document.documentElement.setAttribute("data-theme", theme);
             document.documentElement.lang = lang;
+            document.documentElement.dir = dir;
+
             // Apply theme function
             var applyTheme = function() {{
                 document.documentElement.setAttribute("data-theme", theme);
                 document.documentElement.lang = lang;
+                document.documentElement.dir = dir;
                 if (document.body) {{
                     document.body.setAttribute("data-theme", theme);
                 }}
@@ -1133,6 +1188,17 @@ async def profile_page_route():
     with content:
         from web.pages.profile import create_profile_page
         await create_profile_page()
+
+@ui.page('/accessibility')
+def accessibility_page_route():
+    app.storage.user['current_page'] = '/accessibility'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.accessibility import create_accessibility_page
+        create_accessibility_page()
 
 # ============================================================================
 # Startup Logic
