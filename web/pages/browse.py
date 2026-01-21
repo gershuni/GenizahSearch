@@ -1173,11 +1173,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=add_page_to_list
                             ).props('flat round dense').classes('text-green-700').tooltip(tr('Add to Favorites'))
 
-                            # Image toggle button (shown if image available)
+                            # Image toggle button - placeholder, will be connected later
+                            image_toggle_btn = None
                             if has_image:
-                                ui.button(
-                                    icon='image',
-                                    on_click=lambda: toggle_image_panel()
+                                image_toggle_btn = ui.button(
+                                    icon='image'
                                 ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
 
                             # Edit, Comment, Notes, and Joins buttons
@@ -1232,6 +1232,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             image_panel_ref['container'].style('display: block;')
                         else:
                             image_panel_ref['container'].style('display: none;')
+
+                # Connect toggle button click handler
+                if image_toggle_btn:
+                    image_toggle_btn.on('click', toggle_image_panel)
 
                 # Main container with flex row
                 with ui.element('div').classes('viewer-panels').style(
