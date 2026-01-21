@@ -1076,49 +1076,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 img_url = None
                 fallback_url = None
                 has_image = False
-                image_source = None  # 'nli' or 'oxford'
 
-                # Detect if this is an Oxford manuscript using CodicologicalManager
-                # Only use Oxford endpoint if we have a confirmed mapping
-                is_oxford = False
-                oxford_part_id = None
-
-                # Check CodicologicalManager mapping - this is the only reliable way
-                # Don't use shelfmark pattern alone as it may match but have no images
-                try:
-                    from web.state import state
-                    if page.sys_id and state.meta_mgr and hasattr(state.meta_mgr, 'codico_mgr'):
-                        codico = state.meta_mgr.codico_mgr
-                        if codico and getattr(codico, '_loaded', False):
-                            oxford_part_id = codico.get_part_for_folio(page.sys_id)
-                            if oxford_part_id:
-                                # Verify there are actually images for this part
-                                part_images = codico.get_part_images(oxford_part_id)
-                                if part_images:
-                                    is_oxford = True
-                except Exception as e:
-                    print(f"[browse] Oxford detection error: {e}")
-                    is_oxford = False
-
-                if is_oxford and page.sys_id:
-                    # Use Oxford image endpoint
+                # Try to get image - prefer system ID (fetches valid FL IDs from NLI)
+                if page.sys_id:
                     has_image = True
-                    img_url = f"/api/oxford_image/{page.sys_id}"
-                    fallback_url = None
-                    image_source = 'oxford'
-                elif page.sys_id:
-                    has_image = True
-                    # Use NLI system ID endpoint - dynamically fetches correct FL IDs from NLI
+                    # Use system ID endpoint - dynamically fetches correct FL IDs from NLI
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}"
                     fallback_url = None
-                    image_source = 'nli'
                 elif fl_id:
                     digits = re.sub(r"\D", "", str(fl_id))
                     if digits:
                         has_image = True
                         img_url = f"/api/nli_image/{digits}"
                         fallback_url = None
-                        image_source = 'nli'
 
                 # Main text area
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
