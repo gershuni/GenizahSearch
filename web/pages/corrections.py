@@ -188,16 +188,92 @@ async def create_corrections_page():
                         if title:
                             ui.label(title).classes('text-sm').style('color: var(--text-tertiary);')
 
+                        corr_status = corr.get('status', 'draft')
+
                         # Expandable text sections
                         if corr.get('original_text'):
                             with ui.expansion(tr('Original'), icon='article').classes('w-full').props('dense'):
                                 ui.label(corr['original_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
 
-                        if corr.get('corrected_text'):
+                        if corr_status == 'draft' or corr.get('corrected_text'):
                             with ui.expansion(tr('Corrected'), icon='edit').classes('w-full').props('dense'):
-                                ui.label(corr['corrected_text']).classes('font-mono text-sm whitespace-pre-wrap').style('direction: rtl; text-align: right;')
+                                if corr_status == 'draft':
+                                    saved_state = {
+                                        'corrected_text': corr.get('corrected_text', ''),
+                                        'notes': corr.get('notes') or ''
+                                    }
 
-                        if corr.get('notes'):
+                                    def has_unsaved_changes() -> bool:
+                                        return (
+                                            corrected_area.value != saved_state['corrected_text']
+                                            or notes_area.value != saved_state['notes']
+                                        )
+
+                                    def set_border_saved(is_saved: bool) -> None:
+                                        border_color = 'green' if is_saved else 'orange'
+                                        editor_container.style(f'border-color: {border_color};')
+
+                                    with ui.column().classes('w-full gap-3'):
+                                        editor_container = ui.column().classes('w-full p-3 rounded border-2')
+                                        editor_container.style('border-color: green;')
+                                        with editor_container:
+                                            corrected_area = ui.textarea(
+                                                value=saved_state['corrected_text']
+                                            ).classes('w-full font-mono text-sm whitespace-pre-wrap').props('borderless autogrow').style(
+                                                'direction: rtl; text-align: right;'
+                                            )
+
+                                        ui.label(tr('Notes')).classes('text-sm font-medium')
+                                        notes_area = ui.textarea(value=saved_state['notes']).classes('w-full').props('outlined rows=3').style(
+                                            'direction: rtl; text-align: right;'
+                                        )
+
+                                        def handle_input_change() -> None:
+                                            set_border_saved(not has_unsaved_changes())
+
+                                        corrected_area.on('input', lambda _: handle_input_change())
+                                        notes_area.on('input', lambda _: handle_input_change())
+
+                                        async def save_changes():
+                                            result = await api_call("PUT", f"/corrections/{corr['id']}", {
+                                                "corrected_text": corrected_area.value,
+                                                "notes": notes_area.value or None
+                                            })
+                                            if "error" in result:
+                                                ui.notify(result["error"], type='negative')
+                                                return False
+
+                                            saved_state['corrected_text'] = corrected_area.value
+                                            saved_state['notes'] = notes_area.value
+                                            set_border_saved(True)
+                                            ui.notify(tr('Correction updated'), type='positive')
+                                            return True
+
+                                        async def submit_changes():
+                                            if has_unsaved_changes():
+                                                saved = await save_changes()
+                                                if not saved:
+                                                    return
+
+                                            result = await api_call("POST", f"/corrections/{corr['id']}/submit", {
+                                                "notes": notes_area.value or None
+                                            })
+                                            if "error" in result:
+                                                ui.notify(result["error"], type='negative')
+                                                return
+
+                                            ui.notify(tr('Correction submitted'), type='positive')
+                                            await refresh_page()
+
+                                        with ui.row().classes('w-full justify-end gap-2'):
+                                            ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
+                                            ui.button(tr('Submit'), icon='send', on_click=submit_changes).props('color=secondary')
+                                else:
+                                    ui.label(corr.get('corrected_text', '')).classes('font-mono text-sm whitespace-pre-wrap').style(
+                                        'direction: rtl; text-align: right;'
+                                    )
+
+                        if corr.get('notes') and corr_status != 'draft':
                             ui.label(f"{tr('Notes')}: {corr['notes']}").classes('text-sm').style('color: var(--text-secondary);')
 
                     # Right side - votes, date and actions
@@ -250,14 +326,6 @@ async def create_corrections_page():
 
                             ui.button(icon='visibility', on_click=view_in_browse).props('flat round dense').tooltip(tr('View in Browse'))
 
-                            # Edit button - for drafts
-                            corr_status = corr.get('status', 'draft')
-                            if corr_status == 'draft':
-                                async def edit_correction(c=corr):
-                                    await open_edit_dialog(c)
-
-                                ui.button(icon='edit', on_click=edit_correction).props('flat round dense').tooltip(tr('Edit'))
-
                             # Delete button
                             user_role = GlobalAuthState.get_role()
                             can_delete = corr_status == 'draft' or user_role == 'admin'
@@ -278,61 +346,6 @@ async def create_corrections_page():
                                     confirm_dialog.open()
 
                                 ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
-
-        async def open_edit_dialog(corr: dict):
-            """Open dialog to edit a correction."""
-            dialog = ui.dialog().props('maximized persistent')
-
-            with dialog, ui.card().classes('w-full h-full').style('display: flex; flex-direction: column;'):
-                doc_id = corr.get('document_id') or corr.get('system_id', '')
-                page_num = corr.get('page_number', 1)
-                shelfmark, title = get_shelfmark_for_id(doc_id)
-
-                # Header
-                with ui.row().classes('w-full items-center justify-between p-4 border-b'):
-                    with ui.column().classes('gap-1'):
-                        ui.label(tr('Edit your version')).classes('text-xl font-bold')
-                        ui.label(f"{shelfmark} • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
-
-                    ui.button(icon='close', on_click=dialog.close).props('flat round')
-
-                # Content
-                with ui.column().classes('flex-1 p-4 gap-4 overflow-auto'):
-                    if corr.get('original_text'):
-                        ui.label(tr('Original Text')).classes('font-medium')
-                        ui.label(corr['original_text']).classes('font-mono text-sm p-3 rounded').style(
-                            'background: var(--surface-secondary); direction: rtl; text-align: right;'
-                        )
-
-                    ui.label(tr('Corrected Text')).classes('font-medium')
-                    text_area = ui.textarea(value=corr.get('corrected_text', '')).classes('w-full').props('outlined rows=10').style(
-                        'direction: rtl; text-align: right;'
-                    )
-
-                    ui.label(tr('Notes')).classes('font-medium')
-                    notes_area = ui.textarea(value=corr.get('notes', '')).classes('w-full').props('outlined rows=3').style(
-                        'direction: rtl; text-align: right;'
-                    )
-
-                # Footer
-                with ui.row().classes('w-full justify-end gap-2 p-4 border-t'):
-                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-
-                    async def save_changes():
-                        result = await api_call("PUT", f"/corrections/{corr['id']}", {
-                            "corrected_text": text_area.value,
-                            "notes": notes_area.value or None
-                        })
-                        if "error" in result:
-                            ui.notify(result["error"], type='negative')
-                        else:
-                            ui.notify(tr('Correction updated'), type='positive')
-                            dialog.close()
-                            await refresh_page()
-
-                    ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
-
-            dialog.open()
 
         async def create_my_comments_view():
             """View user's own comments."""
