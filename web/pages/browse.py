@@ -1102,12 +1102,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         img_url = f"/api/nli_image/{digits}"
                         fallback_url = None
 
-                # Main text area
-                with ui.card().classes('w-full').style('min-height: 60vh;'):
-                    # Header with folio, source, navigation, and image toggle
-                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
-                        'background: var(--bg-tertiary);'
-                    ):
+                # Header bar with folio info, navigation, controls
+                with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
+                    with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-4'):
                             # Folio/Page info
                             folio = extract_folio_number(page.full_header)
@@ -1176,23 +1173,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=add_page_to_list
                             ).props('flat round dense').classes('text-green-700').tooltip(tr('Add to Favorites'))
 
-                            # Image toggle button (only if image available)
+                            # Image indicator (shown if image available)
                             if has_image:
-                                show_image = {'value': False}
-                                image_container = None
-
-                                def toggle_image():
-                                    show_image['value'] = not show_image['value']
-                                    if image_container:
-                                        if show_image['value']:
-                                            image_container.classes(remove='hidden')
-                                        else:
-                                            image_container.classes(add='hidden')
-
-                                ui.button(
-                                    icon='image',
-                                    on_click=toggle_image
-                                ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
+                                ui.icon('image').classes('text-green-600').tooltip(tr('Image available'))
 
                             # Edit, Comment, Notes, and Joins buttons
                             if page.text:
@@ -1234,98 +1217,104 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         on_navigate=navigate_to_shelfmark
                                     )
 
-                    # Main text content - use container for version switching
-                    text_container = ui.column().classes('w-full')
-                    current_text = {'value': page.text}  # Mutable container for current text
+                # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
+                # Use responsive flex row - stacks vertically on mobile
+                panel_width = 'w-1/2' if has_image else 'w-full'
 
-                    def render_text_content(text: str):
-                        """Render text content with optional highlighting."""
-                        text_container.clear()
-                        with text_container:
-                            with ui.scroll_area().classes('w-full').style('height: 50vh; padding: 24px;'):
-                                if text:
-                                    if state.highlight_terms:
-                                        display_text = highlight_text(text)
-                                        ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                with ui.row().classes('w-full gap-4 viewer-panels').style('min-height: 60vh;'):
+
+                    # === LEFT PANEL: Image (only if available) ===
+                    if has_image:
+                        with ui.card().classes('w-1/2 image-panel').style('min-height: 60vh;'):
+                            # Image header with zoom controls
+                            with ui.row().classes('w-full items-center justify-between p-3').style(
+                                'background: #1a1a1a; border-radius: 8px 8px 0 0;'
+                            ):
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+                                with ui.row().classes('gap-1'):
+                                    ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
+                                    ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                    ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
+
+                            # Image display area
+                            with ui.scroll_area().classes('w-full').style(
+                                'background: #1a1a1a; height: calc(60vh - 60px);'
+                            ):
+                                with ui.element('div').style(
+                                    'display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px;'
+                                ):
+                                    safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                    safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+
+                                    img_html = f'''
+                                    <img
+                                        src="{safe_img_url}"
+                                        class="zoomable-image"
+                                        style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 55vh; object-fit: contain;"
+                                        loading="lazy"
+                                        onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                    />
+                                    '''
+                                    ui.html(img_html, sanitize=False)
+
+                    # === RIGHT PANEL: Transcription ===
+                    with ui.card().classes(f'{panel_width} transcription-panel-wrapper').style('min-height: 60vh;'):
+                        # Text content container
+                        text_container = ui.column().classes('w-full h-full')
+                        current_text = {'value': page.text}
+
+                        def render_text_content(text: str):
+                            """Render text content with optional highlighting."""
+                            text_container.clear()
+                            with text_container:
+                                with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
+                                    if text:
+                                        if state.highlight_terms:
+                                            display_text = highlight_text(text)
+                                            ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                                        else:
+                                            ui.label(text).style(
+                                                'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                                'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                            )
                                     else:
-                                        ui.label(text).style(
-                                            'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                            'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
-                                        )
-                                else:
-                                    with ui.column().classes('items-center justify-center h-full'):
-                                        ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                                        ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
-                        # Force UI update
-                        text_container.update()
+                                        with ui.column().classes('items-center justify-center h-full'):
+                                            ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                                            ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+                            text_container.update()
 
-                    def handle_version_change(new_text: str, version_info: dict):
-                        """Handle version selection - update displayed text."""
-                        current_text['value'] = new_text
-                        render_text_content(new_text)
-                        source = version_info.get('source', 'unknown')
-                        author = version_info.get('author', '')
-                        if source == 'user' and author:
-                            ui.notify(f"{tr('Showing version by')} {author}", type='info')
-                        elif source in ('V0.7', 'V0.8'):
-                            ui.notify(f"{tr('Showing')} {source}", type='info')
+                        def handle_version_change(new_text: str, version_info: dict):
+                            """Handle version selection - update displayed text."""
+                            current_text['value'] = new_text
+                            render_text_content(new_text)
+                            source = version_info.get('source', 'unknown')
+                            author = version_info.get('author', '')
+                            if source == 'user' and author:
+                                ui.notify(f"{tr('Showing version by')} {author}", type='info')
+                            elif source in ('V0.7', 'V0.8'):
+                                ui.notify(f"{tr('Showing')} {source}", type='info')
 
-                    # Version selector with callback
-                    if page.text:
-                        with ui.row().classes('items-center'):
-                            create_version_selector(
-                                document_id=page.sys_id,
-                                page_number=page.p_num,
-                                original_text=page.text,
-                                on_version_change=handle_version_change
-                            )
+                        # Version selector
+                        if page.text:
+                            with ui.row().classes('items-center p-2 border-b'):
+                                create_version_selector(
+                                    document_id=page.sys_id,
+                                    page_number=page.p_num,
+                                    original_text=page.text,
+                                    on_version_change=handle_version_change
+                                )
 
-                    # Initial render
-                    render_text_content(page.text if page.text else None)
+                        # Initial render
+                        render_text_content(page.text if page.text else None)
 
-                # Comments section - below text
+                # Comments section - below panels
                 from web.components import create_notes_panel
                 create_notes_panel(
                     document_id=page.sys_id,
                     page_number=page.p_num,
                     shelfmark=page.shelfmark or page.sys_id
                 )
-
-                # Image panel - BELOW text, collapsible, only if available
-                if has_image:
-                    image_container = ui.card().classes('w-full mt-4 hidden')
-                    with image_container:
-                        with ui.column().classes('w-full'):
-                            # Image header with controls
-                            with ui.row().classes('w-full items-center justify-between p-3 border-b').style(
-                                'background: #1a1a1a;'
-                            ):
-                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
-
-                                with ui.row().classes('gap-2'):
-                                    ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
-                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
-                                    ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
-                                    ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
-
-                            # Image display
-                            with ui.element('div').style(
-                                'background: #1a1a1a; display: flex; align-items: center; justify-content: center; '
-                                'min-height: 400px; max-height: 70vh; overflow: auto;'
-                            ):
-                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                                safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
-
-                                img_html = f'''
-                                <img
-                                    src="{safe_img_url}"
-                                    class="zoomable-image"
-                                    style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 70vh; object-fit: contain;"
-                                    loading="lazy"
-                                    onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
-                                />
-                                '''
-                                ui.html(img_html, sanitize=False)
 
     def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""
