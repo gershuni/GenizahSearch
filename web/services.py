@@ -59,6 +59,8 @@ class BrowsePage:
     thumb_url: Optional[str] = None
     image_url: Optional[str] = None
     internal_index: int = 0
+    attribution: str = ''  # Image credit/attribution
+    is_oxford: bool = False  # Whether this is an Oxford manuscript
 
 @dataclass
 class DocumentPage:
@@ -166,7 +168,8 @@ class GenizahService:
             )
             if not result: return None
 
-            shelfmark, title = state.meta_mgr.get_meta_for_id(result.get('sys_id', sys_id))
+            actual_sys_id = result.get('sys_id', sys_id)
+            shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
 
             fl_id = None
             try:
@@ -178,6 +181,25 @@ class GenizahService:
             thumb_url = get_thumbnail_url(fl_id) if fl_id else None
             image_url = get_full_image_url(fl_id) if fl_id else None
 
+            # Determine attribution from cache or shelfmark pattern
+            attribution = ''
+            is_oxford = False
+            
+            # Check if Oxford manuscript by shelfmark pattern
+            shelfmark_lower = (shelfmark or '').lower()
+            if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
+                is_oxford = True
+                attribution = 'From the collections of the Bodleian Libraries, Oxford'
+            else:
+                # Try to get from NLI metadata cache
+                if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                    cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                    attribution = cached_meta.get('attribution', '')
+                
+                # Default attribution for NLI
+                if not attribution:
+                    attribution = 'הספרייה הלאומית / National Library of Israel'
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -185,13 +207,15 @@ class GenizahService:
                 full_header=result.get('full_header', ''),
                 total_pages=result.get('total_pages', 0),
                 current_idx=result.get('current_idx', 0),
-                sys_id=result.get('sys_id', sys_id),
+                sys_id=actual_sys_id,
                 fl_id=fl_id,
                 shelfmark=shelfmark or '',
                 title=title or '',
                 thumb_url=thumb_url,
                 image_url=image_url,
-                internal_index=result.get('internal_index', 0)
+                internal_index=result.get('internal_index', 0),
+                attribution=attribution,
+                is_oxford=is_oxford
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -204,7 +228,8 @@ class GenizahService:
             result = state.searcher.get_browse_page_by_fl(fl_id, sys_id=sys_id)
             if not result: return None
 
-            shelfmark, title = state.meta_mgr.get_meta_for_id(result.get('sys_id', ''))
+            actual_sys_id = result.get('sys_id', '')
+            shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
 
             fl_id_parsed = None
             try:
@@ -216,6 +241,25 @@ class GenizahService:
             thumb_url = get_thumbnail_url(fl_id_parsed) if fl_id_parsed else None
             image_url = get_full_image_url(fl_id_parsed) if fl_id_parsed else None
 
+            # Determine attribution from cache or shelfmark pattern
+            attribution = ''
+            is_oxford = False
+            
+            # Check if Oxford manuscript by shelfmark pattern
+            shelfmark_lower = (shelfmark or '').lower()
+            if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
+                is_oxford = True
+                attribution = 'From the collections of the Bodleian Libraries, Oxford'
+            else:
+                # Try to get from NLI metadata cache
+                if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                    cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                    attribution = cached_meta.get('attribution', '')
+                
+                # Default attribution for NLI
+                if not attribution:
+                    attribution = 'הספרייה הלאומית / National Library of Israel'
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -223,13 +267,15 @@ class GenizahService:
                 full_header=result.get('full_header', ''),
                 total_pages=result.get('total_pages', 0),
                 current_idx=result.get('current_idx', 0),
-                sys_id=result.get('sys_id', ''),
+                sys_id=actual_sys_id,
                 fl_id=fl_id_parsed,
                 shelfmark=shelfmark or '',
                 title=title or '',
                 thumb_url=thumb_url,
                 image_url=image_url,
-                internal_index=result.get('internal_index', 0)
+                internal_index=result.get('internal_index', 0),
+                attribution=attribution,
+                is_oxford=is_oxford
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")

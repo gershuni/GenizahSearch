@@ -1470,7 +1470,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Image display area - using div instead of scroll_area for drag support
                             with ui.element('div').classes('image-container w-full').style(
-                                'background: #1a1a1a; height: calc(60vh - 60px); overflow: hidden; position: relative;'
+                                'background: #1a1a1a; height: calc(60vh - 100px); overflow: hidden; position: relative;'
                             ):
                                 with ui.element('div').style(
                                     'display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;'
@@ -1492,6 +1492,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.html(img_html, sanitize=False)
                                     ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100);') 
 
+                            # === Image Credit/Attribution Footer ===
+                            if page.attribution:
+                                with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
+                                    'background: #2a2a2a; border-radius: 0 0 8px 8px; border-top: 1px solid #333;'
+                                ):
+                                    ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
+                                    credit_text = page.attribution
+                                    # Make it a link for Oxford
+                                    if page.is_oxford:
+                                        with ui.link(target='https://digital.bodleian.ox.ac.uk/', new_tab=True).style('text-decoration: none;'):
+                                            ui.label(credit_text).classes('text-xs').style(
+                                                'color: #aaa; font-style: italic;'
+                                            )
+                                    else:
+                                        # NLI - link to ktiv
+                                        with ui.link(target=f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}', new_tab=True).style('text-decoration: none;'):
+                                            ui.label(credit_text).classes('text-xs').style(
+                                                'color: #aaa; font-style: italic;'
+                                            )
 
                     # === RIGHT PANEL: Transcription ===
                     text_panel_flex = 'flex: 1 1 auto;' if has_image else 'flex: 1 1 100%;'
