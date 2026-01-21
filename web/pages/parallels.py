@@ -63,7 +63,7 @@ def create_parallels_page(initial_text: str = None):
                 # Left: Text Input
                 with ui.column().classes('flex-grow gap-4'):
                     # Changed to H2
-                    h2(tr('Source text'), classes='font-bold', style='color: var(--text-primary);')
+                    h2(tr('Source text'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                     text_input = ui.textarea(
                         placeholder=tr('Paste your Hebrew text here...'),
@@ -86,7 +86,7 @@ def create_parallels_page(initial_text: str = None):
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
                     # Changed to H2
-                    h2(tr('Options'), classes='font-bold', style='color: var(--text-primary);')
+                    h2(tr('Options'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                     # Mode
                     mode_select = ui.select(
@@ -264,7 +264,7 @@ def create_parallels_page(initial_text: str = None):
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('search_off').classes('text-5xl').style('color: var(--text-muted);')
             # Changed to H3
-            h3(tr('No parallels found'), classes='text-xl mt-4', style='color: var(--text-secondary);')
+            h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
     def render_results(results):

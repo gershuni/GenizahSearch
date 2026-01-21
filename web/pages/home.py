@@ -28,7 +28,7 @@ def create_page():
                 with ui.column().classes('gap-2'):
                     # Changed to H1
                     h1(tr('Welcome to Genizah Search Pro'),
-                       classes='text-3xl font-bold',
+                       classes='text-2xl font-bold',
                        style='color: var(--primary-800);')
 
                     ui.label(tr('Advanced research tools for Cairo Genizah manuscripts')).classes(
@@ -79,7 +79,7 @@ def create_page():
                         ui.icon('search').classes('text-4xl text-white')
                         with ui.column().classes('gap-1'):
                             # Changed to H3 inside card
-                            h3(tr('Text Search'), classes='text-xl font-bold text-white')
+                            h3(tr('Text Search'), classes='text-lg font-bold text-white')
                             ui.label(tr('Search in manuscripts')).classes('text-sm text-white/80')
 
                     with ui.column().classes('p-6 gap-4'):
@@ -104,7 +104,7 @@ def create_page():
                         ui.icon('compare_arrows').classes('text-4xl text-white')
                         with ui.column().classes('gap-1'):
                             # Changed to H3 inside card
-                            h3(tr('Find Parallels'), classes='text-xl font-bold text-white')
+                            h3(tr('Find Parallels'), classes='text-lg font-bold text-white')
                             ui.label(tr('Composition Search')).classes('text-sm text-white/80')
 
                     with ui.column().classes('p-6 gap-4'):
@@ -129,7 +129,7 @@ def create_page():
                         ui.icon('menu_book').classes('text-4xl text-white')
                         with ui.column().classes('gap-1'):
                             # Changed to H3 inside card
-                            h3(tr('Browse Manuscripts'), classes='text-xl font-bold text-white')
+                            h3(tr('Browse Manuscripts'), classes='text-lg font-bold text-white')
                             ui.label(tr('Browse by shelfmark')).classes('text-sm text-white/80')
 
                     with ui.column().classes('p-6 gap-4'):
@@ -155,7 +155,7 @@ def create_page():
                         ui.icon('star').classes('text-2xl').style('color: var(--primary-700);')
                     with ui.column().classes('gap-1'):
                         # Changed to H3
-                        h3(tr('Personal Lists'), classes='font-bold', style='color: var(--text-primary);')
+                        h3(tr('Personal Lists'), classes='text-lg font-bold', style='color: var(--text-primary);')
                         ui.label(tr('Organize and save manuscripts for easy access')).classes('text-sm').style(
                             'color: var(--text-muted);'
                         )
@@ -169,7 +169,7 @@ def create_page():
                         ui.icon('tune').classes('text-2xl text-blue-700')
                     with ui.column().classes('gap-1'):
                         # Changed to H3
-                        h3(tr('Lab Settings'), classes='font-bold', style='color: var(--text-primary);')
+                        h3(tr('Lab Settings'), classes='text-lg font-bold', style='color: var(--text-primary);')
                         ui.label(tr('Configure advanced search parameters')).classes('text-sm').style(
                             'color: var(--text-muted);'
                         )
@@ -183,7 +183,7 @@ def create_page():
                         ui.icon('help_center').classes('text-2xl text-amber-700')
                     with ui.column().classes('gap-1'):
                         # Changed to H3
-                        h3(tr('Help Center'), classes='font-bold', style='color: var(--text-primary);')
+                        h3(tr('Help Center'), classes='text-lg font-bold', style='color: var(--text-primary);')
                         ui.label(tr('Learn how to use Genizah Search')).classes('text-sm').style(
                             'color: var(--text-muted);'
                         )

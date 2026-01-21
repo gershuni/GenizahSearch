@@ -224,7 +224,7 @@ def create_settings_page():
             if lab_settings:
                 # Custom Variants Editor
                 # Changed to H3
-                h3(tr('Custom Variant Pairs'), classes='font-medium mb-2', style='color: var(--text-secondary);')
+                h3(tr('Custom Variant Pairs'), classes='text-lg font-medium mb-2', style='color: var(--text-secondary);')
                 ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-4').style('color: var(--text-muted);')
 
                 # Get existing custom variants
@@ -240,7 +240,7 @@ def create_settings_page():
                 # Variant Search Limits
                 ui.separator().classes('my-6')
                 # Changed to H3
-                h3(tr('Variant Search Limits'), classes='font-medium mb-4', style='color: var(--text-secondary);')
+                h3(tr('Variant Search Limits'), classes='text-lg font-medium mb-4', style='color: var(--text-secondary);')
 
                 with ui.grid(columns=2).classes('w-full gap-6'):
                     # Min word length
@@ -300,7 +300,7 @@ def create_settings_page():
                 # Common Variants Info
                 ui.separator().classes('my-6')
                 # Changed to H3
-                h3(tr('Common Built-in Variant Pairs'), classes='font-medium mb-4', style='color: var(--text-secondary);')
+                h3(tr('Common Built-in Variant Pairs'), classes='text-lg font-medium mb-4', style='color: var(--text-secondary);')
 
                 variant_pairs = [
                     ('ד ↔ ר', tr('Common HTR confusion')),

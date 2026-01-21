@@ -96,7 +96,7 @@ def create_help_page():
                 for title, desc, example in modes:
                     with ui.card().classes('p-4').style('background: var(--bg-tertiary);'):
                         # Changed to H3
-                        h3(title, classes='font-bold', style='color: var(--primary-700);')
+                        h3(title, classes='text-lg font-bold', style='color: var(--primary-700);')
                         label_text = desc
                         if is_hebrew:
                             ui.label(label_text).style('color: var(--text-secondary); direction: rtl; text-align: right;')
