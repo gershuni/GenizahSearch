@@ -17,6 +17,8 @@ import html as html_module
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
+from web.auth_state import GlobalAuthState, api_call
+from web.components.text_editor import get_local_edit, save_local_edit, delete_local_edit
 
 
 # ============================================================================
@@ -1123,6 +1125,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     fallback_url = None
 
 
+                local_edit = get_local_edit(page.sys_id, page.p_num) if page.text else None
+                editor_state = {
+                    'editing': False,
+                    'current_text': local_edit['text'] if local_edit else (page.text or ''),
+                    'current_notes': local_edit.get('notes', '') if local_edit else '',
+                    'saved_text': local_edit['text'] if local_edit else (page.text or ''),
+                    'saved_notes': local_edit.get('notes', '') if local_edit else '',
+                    'original_text': page.text or ''
+                }
+
                 # Header bar with folio info, navigation, controls
                 with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
                     with ui.row().classes('w-full items-center justify-between p-3'):
@@ -1203,7 +1215,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Edit, Comment, Notes, and Joins buttons
                             if page.text:
-                                from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button, create_joins_button
+                                from web.components import create_comment_button, create_version_selector, create_notes_button, create_joins_button
 
                                 # Refresh callback to reload page after edits/comments
                                 def refresh_page():
@@ -1214,14 +1226,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     state.shelfmark_query = target_shelfmark
                                     search_shelfmark()
 
-                                create_edit_button(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    original_text=page.text,
-                                    shelfmark=page.shelfmark or page.sys_id,
-                                    on_save=refresh_page,
-                                    image_url=img_url if has_image else None
-                                )
+                                def toggle_inline_editor():
+                                    if not editor_state['editing']:
+                                        local_draft = get_local_edit(page.sys_id, page.p_num)
+                                        editor_state['current_text'] = local_draft['text'] if local_draft else current_text['value']
+                                        editor_state['current_notes'] = local_draft.get('notes', '') if local_draft else ''
+                                        editor_state['saved_text'] = editor_state['current_text']
+                                        editor_state['saved_notes'] = editor_state['current_notes']
+                                        editor_state['original_text'] = current_text['value']
+
+                                    editor_state['editing'] = not editor_state['editing']
+                                    render_text_content(current_text['value'])
+
+                                with ui.row().classes('items-center gap-1'):
+                                    edit_btn = ui.button(
+                                        tr('Edit'),
+                                        icon='edit',
+                                        on_click=toggle_inline_editor
+                                    ).props('flat dense size=sm').classes('text-xs')
+
+                                    if local_edit:
+                                        ui.badge(tr('draft')).props('color=warning floating').classes('text-xs')
                                 create_comment_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
@@ -1314,26 +1339,139 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             """Render text content with optional highlighting."""
                             text_container.clear()
                             with text_container:
-                                with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
-                                    if text:
-                                        if state.highlight_terms:
-                                            display_text = highlight_text(text)
-                                            ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
-                                        else:
-                                            ui.label(text).style(
-                                                'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                                'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                if editor_state['editing']:
+                                    with ui.column().classes('w-full h-full'):
+                                        with ui.row().classes('w-full items-center justify-between px-4 py-3 border-b'):
+                                            ui.label(tr('Edit Transcription')).classes('text-sm font-medium')
+                                            ui.button(
+                                                tr('Close'),
+                                                icon='close',
+                                                on_click=toggle_inline_editor
+                                            ).props('flat dense size=sm')
+
+                                        def has_unsaved_changes() -> bool:
+                                            return (
+                                                editor_state['current_text'] != editor_state['saved_text']
+                                                or editor_state['current_notes'] != editor_state['saved_notes']
                                             )
-                                    else:
-                                        with ui.column().classes('items-center justify-center h-full'):
-                                            ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                                            ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+
+                                        def set_border_state(is_saved: bool) -> None:
+                                            border_color = 'green' if is_saved else 'orange'
+                                            editor_container.style(f'border: 2px solid {border_color};')
+
+                                        def handle_text_input() -> None:
+                                            editor_state['current_text'] = edit_textarea.value
+                                            set_border_state(not has_unsaved_changes())
+
+                                        def handle_notes_input() -> None:
+                                            editor_state['current_notes'] = notes_textarea.value
+                                            set_border_state(not has_unsaved_changes())
+
+                                        with ui.scroll_area().classes('w-full').style('height: calc(60vh - 140px); padding: 16px;'):
+                                            with ui.column().classes('w-full gap-3'):
+                                                editor_container = ui.column().classes('w-full rounded')
+                                                editor_container.style('border: 2px solid green; padding: 12px;')
+                                                with editor_container:
+                                                    edit_textarea = ui.textarea(
+                                                        value=editor_state['current_text']
+                                                    ).classes('w-full font-mono text-sm whitespace-pre-wrap').props('borderless autogrow').style(
+                                                        'direction: rtl; text-align: right;'
+                                                    )
+
+                                                ui.label(tr('Notes')).classes('text-xs font-medium')
+                                                notes_textarea = ui.textarea(
+                                                    value=editor_state['current_notes']
+                                                ).classes('w-full').props('outlined rows=3').style(
+                                                    'direction: rtl; text-align: right;'
+                                                )
+
+                                                edit_textarea.on('input', lambda _: handle_text_input())
+                                                notes_textarea.on('input', lambda _: handle_notes_input())
+
+                                        with ui.row().classes('w-full justify-end gap-2 px-4 pb-4'):
+                                            async def save_changes():
+                                                save_local_edit(
+                                                    page.sys_id,
+                                                    page.p_num,
+                                                    editor_state['current_text'],
+                                                    editor_state['original_text'],
+                                                    editor_state['current_notes']
+                                                )
+                                                editor_state['saved_text'] = editor_state['current_text']
+                                                editor_state['saved_notes'] = editor_state['current_notes']
+                                                set_border_state(True)
+                                                ui.notify(tr('Draft saved locally'), type='positive')
+
+                                            async def submit_changes():
+                                                if not GlobalAuthState.is_logged_in():
+                                                    ui.notify(tr('Please login first'), type='negative')
+                                                    return
+
+                                                if editor_state['current_text'] == editor_state['original_text']:
+                                                    ui.notify(tr('No changes to submit'), type='warning')
+                                                    return
+
+                                                result = await api_call("POST", "/corrections/", {
+                                                    "document_id": page.sys_id,
+                                                    "system_id": page.sys_id,
+                                                    "shelfmark": page.shelfmark or page.sys_id,
+                                                    "page_number": page.p_num,
+                                                    "original_text": editor_state['original_text'],
+                                                    "corrected_text": editor_state['current_text'],
+                                                    "correction_type": "text_correction",
+                                                    "notes": editor_state['current_notes'] or None
+                                                })
+
+                                                if "error" in result:
+                                                    ui.notify(result["error"], type='negative')
+                                                    return
+
+                                                delete_local_edit(page.sys_id, page.p_num)
+                                                editor_state['saved_text'] = editor_state['current_text']
+                                                editor_state['saved_notes'] = editor_state['current_notes']
+                                                set_border_state(True)
+                                                if GlobalAuthState.is_admin() or GlobalAuthState.is_editor():
+                                                    ui.notify(tr('Correction published successfully'), type='positive')
+                                                else:
+                                                    ui.notify(tr('Correction submitted for review'), type='positive')
+                                                refresh_page()
+
+                                            ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
+                                            ui.button(tr('Submit'), icon='send', on_click=submit_changes).props('color=secondary')
+                                else:
+                                    with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
+                                        if text:
+                                            if state.highlight_terms:
+                                                display_text = highlight_text(text)
+                                                ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                                            else:
+                                                ui.label(text).style(
+                                                    'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                                )
+                                        else:
+                                            with ui.column().classes('items-center justify-center h-full'):
+                                                ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                                                ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
                             text_container.update()
 
                         def handle_version_change(new_text: str, version_info: dict):
                             """Handle version selection - update displayed text."""
                             current_text['value'] = new_text
                             render_text_content(new_text)
+                            if not editor_state['editing']:
+                                local_draft = get_local_edit(page.sys_id, page.p_num)
+                                if local_draft:
+                                    editor_state['current_text'] = local_draft['text']
+                                    editor_state['current_notes'] = local_draft.get('notes', '')
+                                    editor_state['saved_text'] = local_draft['text']
+                                    editor_state['saved_notes'] = local_draft.get('notes', '')
+                                else:
+                                    editor_state['current_text'] = new_text
+                                    editor_state['current_notes'] = ''
+                                    editor_state['saved_text'] = new_text
+                                    editor_state['saved_notes'] = ''
+                                editor_state['original_text'] = new_text
                             source = version_info.get('source', 'unknown')
                             author = version_info.get('author', '')
                             if source == 'user' and author:
