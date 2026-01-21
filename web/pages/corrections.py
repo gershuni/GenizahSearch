@@ -10,6 +10,7 @@ from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call, create_login_dialog, do_logout
 from web.state import state
 from typing import Optional, Dict, Any, List
+from web.components.typography import h1, h2, h3
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -31,7 +32,8 @@ async def create_corrections_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('My Edits & Comments')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('My Edits & Comments'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('Manage your edits and comments')).style('color: var(--text-secondary);')
 
         # Main content container
@@ -51,7 +53,8 @@ async def create_corrections_page():
             with ui.card().classes('w-full p-6'):
                 with ui.column().classes('w-full items-center gap-4 py-8'):
                     ui.icon('login').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('Please login to view your edits')).classes('text-xl').style('color: var(--text-secondary);')
+                    # Changed to H2
+                    h2(tr('Please login to view your edits'), classes='text-xl', style='color: var(--text-secondary);')
 
                     login_dialog = create_login_dialog()
 
@@ -70,7 +73,8 @@ async def create_corrections_page():
                     with ui.row().classes('items-center gap-3'):
                         ui.icon('account_circle').classes('text-3xl').style('color: var(--primary-600);')
                         with ui.column().classes('gap-0'):
-                            ui.label(user.get('full_name', user.get('username', ''))).classes('font-bold')
+                            # Changed to H3
+                            h3(user.get('full_name', user.get('username', '')), classes='font-bold')
                             ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation_score', 0)}").classes('text-sm').style('color: var(--text-secondary);')
 
                     async def handle_logout():
@@ -132,7 +136,8 @@ async def create_corrections_page():
             if not corrections:
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('edit_note').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('No edits yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    # Changed to H3
+                    h3(tr('No edits yet'), classes='text-xl', style='color: var(--text-secondary);')
                     ui.label(tr('Edit transcriptions to help improve the corpus')).style('color: var(--text-tertiary);')
             else:
                 async def delete_correction(corr_id: int):
@@ -267,7 +272,8 @@ async def create_corrections_page():
 
                                 async def confirm_delete(cid=corr_id):
                                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
-                                        ui.label(tr('Delete Correction?')).classes('text-lg font-bold')
+                                        # Changed to H3
+                                        h3(tr('Delete Correction?'), classes='text-lg font-bold')
                                         ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
@@ -291,7 +297,8 @@ async def create_corrections_page():
                 # Header
                 with ui.row().classes('w-full items-center justify-between p-4 border-b'):
                     with ui.column().classes('gap-1'):
-                        ui.label(tr('Edit your version')).classes('text-xl font-bold')
+                        # Changed to H2
+                        h2(tr('Edit your version'), classes='text-xl font-bold')
                         ui.label(f"{shelfmark} • {tr('Image')} {page_num}").classes('text-sm').style('color: var(--text-secondary);')
 
                     ui.button(icon='close', on_click=dialog.close).props('flat round')
@@ -353,7 +360,8 @@ async def create_corrections_page():
                 # Might not have this endpoint yet - show empty state
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('No comments yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    # Changed to H3
+                    h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
                     ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
                 return
 
@@ -362,7 +370,8 @@ async def create_corrections_page():
             if not comments:
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
-                    ui.label(tr('No comments yet')).classes('text-xl').style('color: var(--text-secondary);')
+                    # Changed to H3
+                    h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
                     ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
             else:
                 for comment in comments:
@@ -427,7 +436,8 @@ async def create_corrections_page():
 
                             async def confirm_delete(cid=comment_id):
                                 with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
-                                    ui.label(tr('Delete Comment?')).classes('text-lg font-bold')
+                                    # Changed to H3
+                                    h3(tr('Delete Comment?'), classes='text-lg font-bold')
                                     ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
@@ -449,7 +459,8 @@ async def create_corrections_page():
             dialog = ui.dialog()
 
             with dialog, ui.card().classes('w-96 p-6'):
-                ui.label(tr('Edit Comment')).classes('text-xl font-bold mb-4')
+                # Changed to H3
+                h3(tr('Edit Comment'), classes='text-xl font-bold mb-4')
 
                 text_area = ui.textarea(value=comment.get('content', '')).classes('w-full').props('outlined rows=5').style(
                     'direction: rtl; text-align: right;'
@@ -497,7 +508,8 @@ async def create_corrections_page():
             if not pending:
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('check_circle').classes('text-6xl').style('color: var(--success);')
-                    ui.label(tr('No pending corrections')).classes('text-xl').style('color: var(--text-secondary);')
+                    # Changed to H3
+                    h3(tr('No pending corrections'), classes='text-xl', style='color: var(--text-secondary);')
             else:
                 ui.label(f"{len(pending)} {tr('corrections pending review')}").classes('text-lg font-medium mb-4')
 
@@ -598,7 +610,8 @@ async def create_corrections_page():
             users = result if isinstance(result, list) else result.get('items', [])
 
             with ui.column().classes('w-full'):
-                ui.label(tr('Top Contributors')).classes('text-xl font-bold mb-4')
+                # Changed to H3
+                h3(tr('Top Contributors'), classes='text-xl font-bold mb-4')
 
                 if not users:
                     ui.label(tr('No contributors yet')).style('color: var(--text-secondary);')

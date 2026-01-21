@@ -13,6 +13,7 @@ A comprehensive search interface with:
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl
+from web.components.typography import h1, h2, h3, h4
 from urllib.parse import quote
 import re
 import html
@@ -68,7 +69,8 @@ def create_search_page(initial_query: str = None):
 
                 # Search Input (Main)
                 with ui.column().classes('flex-grow min-w-80 gap-1'):
-                    ui.label(tr('Search Query')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    # Changed to H2 semantic label
+                    h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                     query_input = ui.input(
                         placeholder=tr('Enter Hebrew text to search'),
                         value=initial_query or ''
@@ -77,7 +79,8 @@ def create_search_page(initial_query: str = None):
 
                 # Mode Selector - Default to exact
                 with ui.column().classes('gap-1'):
-                    ui.label(tr('Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    # Changed to H3 semantic label
+                    h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                     mode_select = ui.select(
                         {
                             'exact': tr('Exact') + ' (=)',
@@ -94,7 +97,8 @@ def create_search_page(initial_query: str = None):
 
                 # Gap Control
                 with ui.column().classes('gap-1'):
-                    ui.label(tr('Gap')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    # Changed to H3 semantic label
+                    h3(tr('Gap'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                     gap_input = ui.number(value=0, min=0, max=10).classes('w-20').props('outlined dense')
                     ui.tooltip(tr('Gap description'))
 
@@ -114,7 +118,8 @@ def create_search_page(initial_query: str = None):
 
                         # Lab Mode Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Lab Mode')).classes('font-bold').style('color: var(--text-primary);')
+                            # Changed to H4
+                            h4(tr('Lab Mode'), classes='font-bold', style='color: var(--text-primary);')
                             lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
                             with ui.row().classes('gap-2 items-center'):
                                 deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
@@ -124,7 +129,8 @@ def create_search_page(initial_query: str = None):
 
                         # NOT Filter Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Exclude Words')).classes('font-bold').style('color: var(--text-primary);')
+                            # Changed to H4
+                            h4(tr('Exclude Words'), classes='font-bold', style='color: var(--text-primary);')
                             not_filter = ui.input(
                                 placeholder=tr('Words to exclude (space separated)')
                             ).classes('w-full').props('outlined dense').style('direction: rtl;')
@@ -132,7 +138,8 @@ def create_search_page(initial_query: str = None):
 
                         # Syntax Shortcuts Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Shortcuts')).classes('font-bold').style('color: var(--text-primary);')
+                            # Changed to H4
+                            h4(tr('Shortcuts'), classes='font-bold', style='color: var(--text-primary);')
                             with ui.row().classes('gap-2 flex-wrap'):
                                 shortcuts = [
                                     ('=', tr('Exact')),
@@ -199,7 +206,8 @@ def create_search_page(initial_query: str = None):
                 with filters_panel:
                     with ui.row().classes('w-full gap-2 items-center'):
                         ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
-                        ui.label(tr('Filter Results')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        # Changed to H4 semantic heading
+                        h4(tr('Filter Results'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
                     with ui.grid(columns=3).classes('w-full gap-2'):
                         filter_shelfmark = ui.input(
@@ -344,7 +352,8 @@ def create_search_page(initial_query: str = None):
 
         # Show list selection dialog
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add Selected to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3 semantic heading
+            h3(tr('Add Selected to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{len(selected_results)} {tr('items selected')}").style('color: var(--text-secondary);')
 
             if state.lists_mgr:
@@ -678,7 +687,8 @@ def create_search_page(initial_query: str = None):
                 ):
                     with ui.row().classes('items-center gap-3'):
                         ui.button(icon='close', on_click=dialog.close).props('flat round')
-                        ui.label(tr('Advanced View')).classes('text-xl font-bold')
+                        # Changed to H3
+                        h3(tr('Advanced View'), classes='text-xl font-bold')
 
                     # Navigation controls
                     with ui.row().classes('items-center gap-2'):
@@ -719,10 +729,12 @@ def create_search_page(initial_query: str = None):
             # Main Info Section
             with ui.card().classes('w-full p-6'):
                 with ui.column().classes('gap-3'):
-                    ui.label(shelfmark).classes('text-3xl font-bold').style('color: var(--primary-700);')
+                    # Changed to H1
+                    h1(shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
 
                     if title:
-                        ui.label(title).classes('text-lg').style('color: var(--text-secondary); direction: rtl;')
+                        # Changed to H2
+                        h2(title, classes='text-lg', style='color: var(--text-secondary); direction: rtl;')
 
                     # Badges
                     with ui.row().classes('gap-2 flex-wrap mt-2'):
@@ -733,7 +745,8 @@ def create_search_page(initial_query: str = None):
 
             # Metadata Section
             with ui.card().classes('w-full p-6'):
-                ui.label(tr('Metadata')).classes('text-xl font-bold mb-4')
+                # Changed to H3
+                h3(tr('Metadata'), classes='text-xl font-bold mb-4')
                 with ui.column().classes('gap-3'):
                     metadata_items = [
                         (tr('Shelfmark'), shelfmark),
@@ -750,7 +763,8 @@ def create_search_page(initial_query: str = None):
             # Snippet Section
             if snippet:
                 with ui.card().classes('w-full p-6'):
-                    ui.label(tr('Match Context')).classes('text-xl font-bold mb-4')
+                    # Changed to H3
+                    h3(tr('Match Context'), classes='text-xl font-bold mb-4')
                     snippet_html = format_snippet(snippet)
                     with ui.element('div').classes('p-4 rounded-lg').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
@@ -760,7 +774,8 @@ def create_search_page(initial_query: str = None):
             # Full Text Section
             if full_text:
                 with ui.card().classes('w-full p-6'):
-                    ui.label(tr('Full Text')).classes('text-xl font-bold mb-4')
+                    # Changed to H3
+                    h3(tr('Full Text'), classes='text-xl font-bold mb-4')
                     with ui.element('div').classes('p-4 rounded-lg max-h-96 overflow-auto').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2;'
                     ):
@@ -839,7 +854,8 @@ def create_search_page(initial_query: str = None):
         with viewer_container:
             # Header
             with ui.column().classes('w-full gap-2 mb-4'):
-                ui.label(shelfmark).classes('text-2xl font-bold').style('color: var(--primary-700);')
+                # Changed to H2
+                h2(shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
                 if title:
                     ui.label(title).style('color: var(--text-secondary); direction: rtl;')
 
@@ -986,7 +1002,8 @@ def create_search_page(initial_query: str = None):
             return
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
 
             if state.lists_mgr:

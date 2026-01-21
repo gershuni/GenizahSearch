@@ -8,6 +8,7 @@ General settings for search behavior, display preferences, and Lab Mode configur
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
+from web.components.typography import h1, h2, h3
 
 
 def create_settings_page():
@@ -18,14 +19,16 @@ def create_settings_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Settings')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('Settings'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('Configure search and display preferences')).style('color: var(--text-secondary);')
 
         # === Display Settings ===
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
                 ui.icon('palette').classes('text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Display Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Display Settings'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             with ui.grid(columns=2).classes('w-full gap-6'):
                 # Theme
@@ -67,7 +70,8 @@ def create_settings_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
                 ui.icon('search').classes('text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Search Settings')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Search Settings'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             with ui.grid(columns=2).classes('w-full gap-6'):
                 # Default search mode
@@ -118,7 +122,8 @@ def create_settings_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
                 ui.icon('science').classes('text-3xl').style('color: var(--accent-blue);')
-                ui.label(tr('Lab Mode Parameters')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Lab Mode Parameters'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             ui.markdown('''
             **Lab Mode** uses the Shmidman-Koppel-Porat algorithm for detecting parallel texts
@@ -205,7 +210,8 @@ def create_settings_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
                 ui.icon('spellcheck').classes('text-3xl').style('color: var(--primary-600);')
-                ui.label(tr('Variant Search Configuration')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Variant Search Configuration'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             # Get lab settings
             lab_settings = None
@@ -217,7 +223,8 @@ def create_settings_page():
 
             if lab_settings:
                 # Custom Variants Editor
-                ui.label(tr('Custom Variant Pairs')).classes('font-medium mb-2').style('color: var(--text-secondary);')
+                # Changed to H3
+                h3(tr('Custom Variant Pairs'), classes='font-medium mb-2', style='color: var(--text-secondary);')
                 ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-4').style('color: var(--text-muted);')
 
                 # Get existing custom variants
@@ -232,7 +239,8 @@ def create_settings_page():
 
                 # Variant Search Limits
                 ui.separator().classes('my-6')
-                ui.label(tr('Variant Search Limits')).classes('font-medium mb-4').style('color: var(--text-secondary);')
+                # Changed to H3
+                h3(tr('Variant Search Limits'), classes='font-medium mb-4', style='color: var(--text-secondary);')
 
                 with ui.grid(columns=2).classes('w-full gap-6'):
                     # Min word length
@@ -291,7 +299,8 @@ def create_settings_page():
 
                 # Common Variants Info
                 ui.separator().classes('my-6')
-                ui.label(tr('Common Built-in Variant Pairs')).classes('font-medium mb-4').style('color: var(--text-secondary);')
+                # Changed to H3
+                h3(tr('Common Built-in Variant Pairs'), classes='font-medium mb-4', style='color: var(--text-secondary);')
 
                 variant_pairs = [
                     ('ד ↔ ר', tr('Common HTR confusion')),
@@ -319,7 +328,8 @@ def create_settings_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-6'):
                 ui.icon('info').classes('text-3xl').style('color: var(--text-muted);')
-                ui.label(tr('System Status')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('System Status'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             with ui.column().classes('gap-4'):
                 # Main Index Status

@@ -9,6 +9,7 @@ from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
 from web.state import state
+from web.components.typography import h1, h2, h3
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -29,7 +30,8 @@ async def create_admin_page():
     if not GlobalAuthState.is_admin():
         with ui.column().classes('w-full max-w-3xl mx-auto gap-8 fade-in items-center py-12'):
             ui.icon('lock').classes('text-6xl').style('color: var(--text-muted);')
-            ui.label(tr('Access Denied')).classes('text-2xl font-bold').style('color: var(--text-primary);')
+            # Changed to H2
+            h2(tr('Access Denied'), classes='text-2xl font-bold', style='color: var(--text-primary);')
             ui.label(tr('You need admin privileges to access this page')).style('color: var(--text-secondary);')
             ui.button(tr('Go Home'), on_click=lambda: ui.navigate.to('/')).props('color=primary')
         return
@@ -39,7 +41,8 @@ async def create_admin_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Admin Panel')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('Admin Panel'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('User management and system administration')).style('color: var(--text-secondary);')
 
         # === Tabs ===
@@ -75,10 +78,12 @@ async def create_pending_corrections_view():
     if not pending:
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('check_circle').classes('text-6xl').style('color: var(--success);')
-            ui.label(tr('No pending corrections')).classes('text-xl').style('color: var(--text-secondary);')
+            # Changed to H3
+            h3(tr('No pending corrections'), classes='text-xl', style='color: var(--text-secondary);')
             ui.label(tr('All corrections have been reviewed')).style('color: var(--text-muted);')
     else:
-        ui.label(f"{len(pending)} {tr('corrections pending review')}").classes('text-lg font-medium mb-4')
+        # Changed to H3
+        h3(f"{len(pending)} {tr('corrections pending review')}", classes='text-lg font-medium mb-4')
 
         for corr in pending:
             await create_pending_correction_card(corr)
@@ -257,7 +262,8 @@ def create_user_row(user):
 
                 async def delete_user(uid=user.get('id'), uname=user.get('username')):
                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
-                        ui.label(tr('Delete User?')).classes('text-lg font-bold')
+                        # Changed to H3
+                        h3(tr('Delete User?'), classes='text-lg font-bold')
                         ui.label(f"{tr('Are you sure you want to delete')} {uname}?").classes('text-sm')
                         ui.label(tr('This action cannot be undone.')).classes('text-sm text-red-500')
                         with ui.row().classes('justify-end gap-2 mt-4'):
@@ -304,26 +310,30 @@ async def create_stats_view():
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('people').classes('text-4xl').style('color: var(--primary-600);')
-                ui.label(str(total_users)).classes('text-3xl font-bold')
+                # Changed to H3
+                h3(str(total_users), classes='text-3xl font-bold')
                 ui.label(tr('Total Users')).style('color: var(--text-secondary);')
 
         # Pending corrections stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('hourglass_empty').classes('text-4xl').style('color: var(--accent-amber);')
-                ui.label(str(pending_count)).classes('text-3xl font-bold')
+                # Changed to H3
+                h3(str(pending_count), classes='text-3xl font-bold')
                 ui.label(tr('Pending Corrections')).style('color: var(--text-secondary);')
 
         # Editors stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('edit').classes('text-4xl').style('color: var(--success);')
-                ui.label(str(editors)).classes('text-3xl font-bold')
+                # Changed to H3
+                h3(str(editors), classes='text-3xl font-bold')
                 ui.label(tr('Editors & Admins')).style('color: var(--text-secondary);')
 
         # Corrections stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('rate_review').classes('text-4xl').style('color: var(--info);')
-                ui.label(str(total_corrections)).classes('text-3xl font-bold')
+                # Changed to H3
+                h3(str(total_corrections), classes='text-3xl font-bold')
                 ui.label(tr('Total Corrections')).style('color: var(--text-secondary);')

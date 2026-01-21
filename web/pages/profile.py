@@ -8,6 +8,7 @@ Edit user profile details and change password.
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call, create_login_dialog
+from web.components.typography import h1, h2, h3
 
 
 async def create_profile_page():
@@ -17,7 +18,8 @@ async def create_profile_page():
     if not GlobalAuthState.is_logged_in():
         with ui.column().classes('w-full max-w-3xl mx-auto gap-8 fade-in items-center py-12'):
             ui.icon('account_circle').classes('text-6xl').style('color: var(--text-muted);')
-            ui.label(tr('Login Required')).classes('text-2xl font-bold').style('color: var(--text-primary);')
+            # Changed to H2
+            h2(tr('Login Required'), classes='text-2xl font-bold', style='color: var(--text-primary);')
             ui.label(tr('Please login to view your profile')).style('color: var(--text-secondary);')
 
             login_dialog = create_login_dialog()
@@ -31,12 +33,14 @@ async def create_profile_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('My Profile')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('My Profile'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('Edit your details and password')).style('color: var(--text-secondary);')
 
         # === Profile Details Card ===
         with ui.card().classes('w-full p-6'):
-            ui.label(tr('Profile Details')).classes('text-xl font-bold mb-4')
+            # Changed to H2
+            h2(tr('Profile Details'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-4'):
                 # Username (read-only)
@@ -95,7 +99,8 @@ async def create_profile_page():
 
         # === Change Password Card ===
         with ui.card().classes('w-full p-6'):
-            ui.label(tr('Change Password')).classes('text-xl font-bold mb-4')
+            # Changed to H2
+            h2(tr('Change Password'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-4'):
                 current_password_input = ui.input(
@@ -162,7 +167,8 @@ async def create_profile_page():
 
         # === Account Info Card ===
         with ui.card().classes('w-full p-6'):
-            ui.label(tr('Account Information')).classes('text-xl font-bold mb-4')
+            # Changed to H2
+            h2(tr('Account Information'), classes='text-xl font-bold mb-4')
 
             with ui.row().classes('w-full gap-8 flex-wrap'):
                 with ui.column().classes('gap-1'):

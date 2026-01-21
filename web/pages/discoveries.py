@@ -16,6 +16,7 @@ from web.auth_state import GlobalAuthState, api_call
 from web.state import state
 from typing import Optional
 from datetime import datetime
+from web.components.typography import h1, h2, h3
 
 
 def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
@@ -52,7 +53,8 @@ async def create_discoveries_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Discoveries Center')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('Discoveries Center'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('Community discoveries, questions, and contributions')).style('color: var(--text-secondary);')
 
         # === Statistics Cards ===
@@ -182,7 +184,8 @@ async def load_stats(container):
             with ui.card().classes('flex-1 p-4 min-w-36'):
                 with ui.column().classes('items-center gap-2'):
                     ui.icon(card['icon']).classes(f'text-3xl text-{card["color"]}-500')
-                    ui.label(str(card['value'])).classes('text-2xl font-bold')
+                    # Changed to H3
+                    h3(str(card['value']), classes='text-2xl font-bold')
                     ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
 
 
@@ -208,7 +211,8 @@ async def load_feed(item_type: Optional[str], period: Optional[str], on_refresh=
     if not items:
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('forum').classes('text-6xl').style('color: var(--text-tertiary);')
-            ui.label(tr('No discoveries yet')).classes('text-xl mt-4').style('color: var(--text-secondary);')
+            # Changed to H2
+            h2(tr('No discoveries yet'), classes='text-xl mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Be the first to share a discovery or ask a question!')).style('color: var(--text-tertiary);')
         return
 
@@ -451,7 +455,8 @@ def create_feed_item(item: dict, on_refresh=None):
                     corr_title = f"{tr('Correction in')} {corr_shelfmark}"
                     if corr_page:
                         corr_title += f" ({tr('Image')} {corr_page})"
-                    ui.label(corr_title).classes('font-bold text-lg')
+                    # Changed to H3
+                    h3(corr_title, classes='font-bold text-lg')
                 elif item_type == 'join':
                     # For joins: show cluster title
                     cluster_fragments = item.get('cluster_fragments', [])
@@ -479,7 +484,8 @@ def create_feed_item(item: dict, on_refresh=None):
                             ui.label(cluster_fragments[1]).classes('font-bold font-mono')
                         else:
                             # Fallback to title from backend
-                            ui.label(item.get('title', '')).classes('font-bold text-lg')
+                            # Changed to H3
+                            h3(item.get('title', ''), classes='font-bold text-lg')
 
                         # Show count badges
                         if num_joins > 1:
@@ -487,7 +493,8 @@ def create_feed_item(item: dict, on_refresh=None):
                         if cluster_fragments and len(cluster_fragments) > 2:
                             ui.badge(f"{len(cluster_fragments)} {tr('fragments')}").props('color=blue outline').classes('text-xs')
                 else:
-                    ui.label(item.get('title', '')).classes('font-bold text-lg')
+                    # Changed to H3
+                    h3(item.get('title', ''), classes='font-bold text-lg')
 
                 # Full content in expansion (no truncation)
                 content = item.get('content_preview', '')
@@ -581,7 +588,8 @@ def create_feed_item(item: dict, on_refresh=None):
                                                 async def delete_single_join(jid=cj_id):
                                                     confirm_dialog = ui.dialog()
                                                     with confirm_dialog, ui.card().classes('p-4'):
-                                                        ui.label(tr('Delete this join?')).classes('font-bold')
+                                                        # Changed to H3
+                                                        h3(tr('Delete this join?'), classes='font-bold')
                                                         ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
                                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
@@ -835,7 +843,8 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
         return ' '.join(words[:max_words]) + '...', title
 
     with dialog, ui.card().classes('w-full max-w-lg p-6'):
-        ui.label(tr('Edit Discovery')).classes('text-xl font-bold mb-4')
+        # Changed to H3
+        h3(tr('Edit Discovery'), classes='text-xl font-bold mb-4')
 
         title_input = ui.input(label=tr('Title'), value=item.get('title', '')).classes('w-full').props('outlined')
         content_input = ui.textarea(label=tr('Description'), value=item.get('content_preview', '')).classes('w-full').props('outlined rows=5').style('direction: rtl;')
@@ -1092,7 +1101,8 @@ async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
     dialog = ui.dialog()
 
     with dialog, ui.card().classes('p-4'):
-        ui.label(tr('Delete Discovery?')).classes('text-lg font-bold')
+        # Changed to H3
+        h3(tr('Delete Discovery?'), classes='text-lg font-bold')
         ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
 
         with ui.row().classes('justify-end gap-2 mt-4'):
@@ -1138,7 +1148,8 @@ def create_new_discovery_dialog(on_success=None):
     with dialog:
         with ui.card().classes('w-full max-w-lg p-6'):
             with ui.row().classes('w-full items-center justify-between mb-4'):
-                ui.label(tr('Share a Discovery')).classes('text-xl font-bold')
+                # Changed to H3
+                h3(tr('Share a Discovery'), classes='text-xl font-bold')
                 ui.button(icon='close', on_click=dialog.close).props('flat round')
 
             with ui.column().classes('w-full gap-4'):

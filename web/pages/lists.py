@@ -14,6 +14,7 @@ Features:
 from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
+from web.components.typography import h1, h2, h3
 from typing import Optional
 import time
 
@@ -43,7 +44,8 @@ def create_lists_page():
     def show_create_list_dialog():
         """Show dialog to create a new list."""
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[400px]'):
-            ui.label(tr('Create New List')).classes('text-xl font-bold mb-4')
+            # Changed to H3
+            h3(tr('Create New List'), classes='text-xl font-bold mb-4')
 
             list_name = ui.input(label=tr('List Name')).classes('w-full mb-4')
 
@@ -84,7 +86,8 @@ def create_lists_page():
     def show_delete_list_dialog(list_id: str, list_name: str):
         """Show confirmation dialog to delete a list."""
         with ui.dialog() as dialog, ui.card().classes('p-6'):
-            ui.label(tr('Delete List?')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Delete List?'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('text-gray-600 mb-4')
             ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
 
@@ -106,7 +109,8 @@ def create_lists_page():
     def show_edit_item_dialog(item_id: str, item_data: dict):
         """Show dialog to edit item notes and tags."""
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
-            ui.label(tr('Edit Item')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
             shelfmark = item_data.get('shelfmark', 'Unknown')
             ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
@@ -150,7 +154,8 @@ def create_lists_page():
         with lists_sidebar_container:
             # Header with Create button
             with ui.row().classes('w-full justify-between items-center mb-4 pb-2 border-b'):
-                ui.label(tr('My Lists')).classes('text-lg font-bold')
+                # Changed to H2
+                h2(tr('My Lists'), classes='text-lg font-bold')
                 ui.button(
                     icon='add',
                     on_click=show_create_list_dialog
@@ -240,7 +245,8 @@ def create_lists_page():
                 with ui.column().classes('gap-1'):
                     with ui.row().classes('items-center gap-3'):
                         ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 2rem;')
-                        ui.label(list_data.get('name', 'Unnamed')).classes('text-3xl font-bold')
+                        # Changed to H2
+                        h2(list_data.get('name', 'Unnamed'), classes='text-3xl font-bold')
 
                     is_system = list_data.get('is_system', False)
                     if is_system:
@@ -292,8 +298,8 @@ def create_lists_page():
                         with ui.row().classes('w-full justify-between items-start'):
                             # Main content
                             with ui.column().classes('flex-grow gap-2'):
-                                # Shelfmark
-                                ui.label(shelfmark).classes('text-lg font-bold text-primary')
+                                # Shelfmark - Changed to H3
+                                h3(shelfmark, classes='text-lg font-bold text-primary')
 
                                 # Title
                                 if title:
@@ -433,7 +439,8 @@ def create_lists_page():
     with ui.column().classes('w-full h-[calc(100vh-120px)]'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
-            ui.label(tr('Personal Lists')).classes('text-3xl font-bold text-green-800')
+            # Changed to H1
+            h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
             ui.button(
                 tr('Create List'),
                 icon='add',
