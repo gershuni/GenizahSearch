@@ -12,6 +12,7 @@ Features:
 
 from nicegui import ui, app
 from typing import Optional, List
+import json
 import re
 import html as html_module
 
@@ -38,6 +39,22 @@ function handleImageError(img, fallbackUrl) {
             parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
         }
     }
+}
+
+function updatePrefetchLinks(prevUrl, nextUrl) {
+    const head = document.head;
+    const existing = head.querySelectorAll('link[data-prefetch="manuscript-image"]');
+    existing.forEach((link) => link.remove());
+
+    const urls = [prevUrl, nextUrl].filter((url) => typeof url === 'string' && url.length > 0);
+    urls.forEach((url) => {
+        const link = document.createElement('link');
+        link.rel = 'prefetch';
+        link.as = 'image';
+        link.href = url;
+        link.dataset.prefetch = 'manuscript-image';
+        head.appendChild(link);
+    });
 }
 </script>
 <style>
@@ -835,18 +852,95 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return folio
         return ''
 
+    def build_image_urls(target_page: BrowsePage) -> tuple[Optional[str], Optional[str], bool]:
+        """Build primary and fallback image URLs for a page."""
+        if not target_page:
+            return None, None, False
+
+        fl_id = target_page.fl_id
+        if not fl_id and target_page.image_url:
+            match = re.search(r'FL(\d+)', target_page.image_url)
+            if match:
+                fl_id = match.group(1)
+
+        fl_digits = ""
+        if fl_id:
+            fl_digits = re.sub(r"\D", "", str(fl_id))
+
+        is_oxford = False
+        if target_page.shelfmark:
+            shelfmark_lower = target_page.shelfmark.lower()
+            if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
+                is_oxford = True
+
+        cache_bust = f"&_cb={target_page.p_num}" if target_page.p_num else ""
+        img_url = None
+        fallback_url = None
+        has_image = False
+
+        if is_oxford and target_page.sys_id:
+            has_image = True
+            page_idx = max(0, target_page.p_num - 1)
+            img_url = f"/api/oxford_image/{target_page.sys_id}?page={page_idx}{cache_bust}"
+            fallback_url = f"/api/nli_image_by_sysid/{target_page.sys_id}?page={page_idx}"
+        elif fl_digits:
+            has_image = True
+            img_url = f"/api/nli_image/{fl_digits}?t={target_page.p_num}"
+            if target_page.sys_id:
+                page_idx = max(0, target_page.p_num - 1)
+                fallback_url = f"/api/nli_image_by_sysid/{target_page.sys_id}?page={page_idx}"
+        elif target_page.sys_id:
+            page_idx = max(0, target_page.p_num - 1)
+            has_image = True
+            img_url = f"/api/nli_image_by_sysid/{target_page.sys_id}?page={page_idx}&t={target_page.p_num}"
+
+        return img_url, fallback_url, has_image
+
+    def get_prefetch_page(direction: int) -> Optional[BrowsePage]:
+        """Get the adjacent page for prefetch, including adjacent manuscript fallback."""
+        if not state.current_page or not state.sys_id:
+            return None
+
+        current_page = state.current_page
+
+        try:
+            if direction < 0:
+                if current_page.current_idx > 1:
+                    return service.get_browse_page(state.sys_id, p_num=current_page.p_num, direction=direction)
+                adjacent_sys_id = service.get_adjacent_shelfmark(state.sys_id, direction)
+                if adjacent_sys_id:
+                    return service.get_browse_page(adjacent_sys_id, p_num=1)
+            elif direction > 0:
+                if current_page.current_idx < current_page.total_pages:
+                    return service.get_browse_page(state.sys_id, p_num=current_page.p_num, direction=direction)
+                adjacent_sys_id = service.get_adjacent_shelfmark(state.sys_id, direction)
+                if adjacent_sys_id:
+                    return service.get_browse_page(adjacent_sys_id, p_num=1)
+        except Exception as e:
+            print(f"Prefetch lookup failed: {e}")
+
+        return None
+
+    def update_image_prefetch(prev_url: Optional[str], next_url: Optional[str]) -> None:
+        """Update image prefetch links in the document head."""
+        ui.run_javascript(
+            f"updatePrefetchLinks({json.dumps(prev_url)}, {json.dumps(next_url)});"
+        )
+
     def update_content():
         """Update the content display."""
         content_container.clear()
 
         with content_container:
             if state.is_loading:
+                update_image_prefetch(None, None)
                 with ui.row().classes('w-full justify-center py-16'):
                     ui.spinner(size='xl', color='green')
                     ui.label(tr('Loading...')).classes('ml-3 text-lg text-gray-600')
                 return
 
             if state.error and not state.current_page:
+                update_image_prefetch(None, None)
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
                     ui.label(state.error).classes('text-red-600 mt-4 text-lg')
@@ -854,6 +948,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return
 
             if not state.current_page:
+                update_image_prefetch(None, None)
                 # Show welcome/search prompt
                 with ui.column().classes('w-full items-center py-16'):
                     ui.icon('auto_stories', size='6rem').classes('text-green-400')
@@ -1023,6 +1118,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             # === Main Content ===
             if state.view_all:
+                update_image_prefetch(None, None)
                 # Show all pages
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
                     # Header
@@ -1066,61 +1162,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('No text available')).classes('text-gray-400 italic')
             else:
                 # Single page view
-                # Extract FL ID and check if we have an image
-                fl_id = page.fl_id
-                if not fl_id and page.image_url:
-                    match = re.search(r'FL(\d+)', page.image_url)
-                    if match:
-                        fl_id = match.group(1)
+                img_url, fallback_url, has_image = build_image_urls(page)
 
-                # Prepare image URLs
-                img_url = None
-                fallback_url = None
-                has_image = False
+                prefetch_prev_url = None
+                prefetch_next_url = None
+                if has_image:
+                    prev_page = get_prefetch_page(-1)
+                    if prev_page:
+                        prev_url, _, prev_has_image = build_image_urls(prev_page)
+                        if prev_has_image:
+                            prefetch_prev_url = prev_url
 
-                # Compute FL ID digits once (for proper fallback logic)
-                fl_digits = ""
-                if fl_id:
-                    fl_digits = re.sub(r"\D", "", str(fl_id))
+                    next_page = get_prefetch_page(1)
+                    if next_page:
+                        next_url, _, next_has_image = build_image_urls(next_page)
+                        if next_has_image:
+                            prefetch_next_url = next_url
 
-                # Detect Oxford manuscripts by shelfmark pattern
-                is_oxford = False
-                if page.shelfmark:
-                    shelfmark_lower = page.shelfmark.lower()
-                    # Oxford shelfmarks: "MS heb. f.21/21", "MS. Heb. a. 1", etc.
-                    if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
-                        is_oxford = True
-
-                # Choose image endpoint based on source
-                # Prioritize page-specific fl_id over sys_id for correct page images
-                # Add cache-buster to force image refresh on page navigation
-                cache_bust = f"&_cb={page.p_num}" if page.p_num else ""
-
-                if is_oxford and page.sys_id:
-                    has_image = True
-                    # Pass page index (0-based) for multi-page Oxford manuscripts
-                    page_idx = max(0, page.p_num - 1)
-                    img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
-                    fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"  # Fallback to NLI
-                elif fl_digits:
-                    # Use page-specific FL ID for correct image on each page
-                    # Add cache-buster to force browser reload on page change
-                    # Provide sys_id fallback since FL IDs in data may be stale
-                    has_image = True
-                    img_url = f"/api/nli_image/{fl_digits}?t={page.p_num}"
-                    if page.sys_id:
-                        page_idx = max(0, page.p_num - 1)
-                        fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"
-                    else:
-                        fallback_url = None
-                elif page.sys_id:
-                    # Fallback to sys_id endpoint when no FL ID available
-                    # Pass page index (0-based) for multi-page manuscripts
-                    page_idx = max(0, page.p_num - 1)
-                    has_image = True
-                    # Use simple query params format
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}&t={page.p_num}"
-                    fallback_url = None
+                update_image_prefetch(prefetch_prev_url, prefetch_next_url)
 
 
                 # Header bar with folio info, navigation, controls
