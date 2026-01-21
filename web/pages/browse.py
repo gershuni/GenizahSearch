@@ -467,7 +467,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             if results:
                 state.sys_id = results[0].sys_id
-                load_page()
+                state.current_page = None  # Reset to avoid using old page number
+                load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
                 state.error = tr('No manuscript found')
                 state.is_loading = False
@@ -1077,6 +1078,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 fallback_url = None
                 has_image = False
 
+                # Compute FL ID digits once (for proper fallback logic)
+                fl_digits = ""
+                if fl_id:
+                    fl_digits = re.sub(r"\D", "", str(fl_id))
+
                 # Detect Oxford manuscripts by shelfmark pattern
                 is_oxford = False
                 if page.shelfmark:
@@ -1086,21 +1092,36 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         is_oxford = True
 
                 # Choose image endpoint based on source
+                # Prioritize page-specific fl_id over sys_id for correct page images
+                # Add cache-buster to force image refresh on page navigation
+                cache_bust = f"&_cb={page.p_num}" if page.p_num else ""
+
                 if is_oxford and page.sys_id:
                     has_image = True
-                    img_url = f"/api/oxford_image/{page.sys_id}"
-                    fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}"  # Fallback to NLI
-                elif page.sys_id:
+                    # Pass page index (0-based) for multi-page Oxford manuscripts
+                    page_idx = max(0, page.p_num - 1)
+                    img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"  # Fallback to NLI
+                elif fl_digits:
+                    # Use page-specific FL ID for correct image on each page
+                    # Add cache-buster to force browser reload on page change
+                    # Provide sys_id fallback since FL IDs in data may be stale
                     has_image = True
-                    # Use NLI system ID endpoint - dynamically fetches correct FL IDs from NLI
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}"
-                    fallback_url = None
-                elif fl_id:
-                    digits = re.sub(r"\D", "", str(fl_id))
-                    if digits:
-                        has_image = True
-                        img_url = f"/api/nli_image/{digits}"
+                    img_url = f"/api/nli_image/{fl_digits}?t={page.p_num}"
+                    if page.sys_id:
+                        page_idx = max(0, page.p_num - 1)
+                        fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"
+                    else:
                         fallback_url = None
+                elif page.sys_id:
+                    # Fallback to sys_id endpoint when no FL ID available
+                    # Pass page index (0-based) for multi-page manuscripts
+                    page_idx = max(0, page.p_num - 1)
+                    has_image = True
+                    # Use simple query params format
+                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}&t={page.p_num}"
+                    fallback_url = None
+
 
                 # Header bar with folio info, navigation, controls
                 with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
@@ -1259,6 +1280,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
                                     ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
                                     ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
+
 
                             # Image display area
                             with ui.scroll_area().classes('w-full').style(

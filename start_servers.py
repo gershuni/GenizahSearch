@@ -2,23 +2,35 @@
 """
 Startup script for Genizah Search servers
 Launches both the backend API and web interface
+
+Controls:
+  Ctrl+C  - Stop all servers and exit
+  r       - Reboot all servers (restart)
 """
 import subprocess
 import sys
 import os
 import signal
 import time
+import threading
 from pathlib import Path
+
+# Windows-specific keyboard input
+if sys.platform == 'win32':
+    import msvcrt
 
 # Set working directory to script location
 os.chdir(Path(__file__).parent)
 
 # Store process references
 processes = []
+reboot_requested = threading.Event()
+shutdown_requested = threading.Event()
 
-def signal_handler(sig, frame):
-    """Handle Ctrl+C gracefully"""
-    print("\n\n🛑 Shutting down servers...")
+def stop_servers():
+    """Stop all running servers"""
+    global processes
+    print("\n🛑 Stopping servers...")
     for proc in processes:
         if proc.poll() is None:  # Process is still running
             proc.terminate()
@@ -31,7 +43,13 @@ def signal_handler(sig, frame):
         if proc.poll() is None:
             proc.kill()
 
+    processes = []
     print("✅ All servers stopped.")
+
+def signal_handler(sig, frame):
+    """Handle Ctrl+C gracefully"""
+    shutdown_requested.set()
+    stop_servers()
     sys.exit(0)
 
 # Register signal handler
@@ -39,6 +57,9 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def start_servers():
     """Start both backend and web servers"""
+    global processes
+    processes = []  # Reset for fresh start
+
     print("=" * 60)
     print("🚀 Starting Genizah Search Servers")
     print("=" * 60)
@@ -53,19 +74,22 @@ def start_servers():
     backend_cmd = [sys.executable, "-m", "backend.main"]
 
     try:
+        # Use CREATE_NEW_PROCESS_GROUP on Windows for better signal handling
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
         backend_proc = subprocess.Popen(
             backend_cmd,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=0,  # Unbuffered
+            creationflags=creationflags
         )
         processes.append(backend_proc)
         print("   ✓ Backend API starting...")
     except Exception as e:
         print(f"   ✗ Failed to start backend: {e}")
-        return
+        return False
 
     # Give backend time to start
     time.sleep(2)
@@ -76,13 +100,15 @@ def start_servers():
     web_cmd = [sys.executable, "web/main.py"]
 
     try:
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
         web_proc = subprocess.Popen(
             web_cmd,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=0,  # Unbuffered
+            creationflags=creationflags
         )
         processes.append(web_proc)
         print("   ✓ Web Interface starting...")
@@ -102,41 +128,86 @@ def start_servers():
     print()
     print("🌐 Web Interface:    http://localhost:8081")
     print()
-    print("Press Ctrl+C to stop both servers")
-    print("=" * 60)
+    print("─" * 60)
+    print("  Press 'r' to REBOOT servers  |  Ctrl+C to STOP and exit")
+    print("─" * 60)
     print()
 
-    # Monitor processes and show output
+    # Start output reader threads
+    import queue
+    output_queue = queue.Queue()
+
+    def read_output(proc, prefix):
+        """Read output from process in a thread"""
+        try:
+            for line in iter(proc.stdout.readline, ''):
+                if line:
+                    output_queue.put((prefix, line.rstrip()))
+                if proc.poll() is not None:
+                    break
+        except:
+            pass
+
+    # Start reader threads
+    for i, proc in enumerate(processes):
+        prefix = "[BACKEND]" if i == 0 else "[WEB]    "
+        t = threading.Thread(target=read_output, args=(proc, prefix), daemon=True)
+        t.start()
+
+    # Monitor processes and check for keyboard input
     try:
         while True:
+            # Check for keyboard input (Windows)
+            if sys.platform == 'win32' and msvcrt.kbhit():
+                key = msvcrt.getch().decode('utf-8', errors='ignore').lower()
+                if key == 'r':
+                    print("\n🔄 Reboot requested...")
+                    reboot_requested.set()
+                    return True  # Signal to reboot
+
             # Check if any process died
             for i, proc in enumerate(processes):
                 if proc.poll() is not None:
                     server_name = "Backend API" if i == 0 else "Web Interface"
                     print(f"\n⚠️  {server_name} stopped unexpectedly!")
-
-                    # Read any remaining output
-                    output = proc.stdout.read()
-                    if output:
-                        print(output)
-
-                    # Stop all servers
                     signal_handler(None, None)
 
-            # Read and display output from both processes
-            for i, proc in enumerate(processes):
-                try:
-                    line = proc.stdout.readline()
-                    if line:
-                        prefix = "[BACKEND]" if i == 0 else "[WEB]    "
-                        print(f"{prefix} {line.rstrip()}")
-                except:
-                    pass
+            # Display queued output (non-blocking)
+            try:
+                while True:
+                    prefix, line = output_queue.get_nowait()
+                    print(f"{prefix} {line}")
+            except queue.Empty:
+                pass
 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     except KeyboardInterrupt:
         signal_handler(None, None)
 
+    return False  # No reboot
+
+def flush_keyboard_buffer():
+    """Clear any pending keyboard input"""
+    if sys.platform == 'win32':
+        while msvcrt.kbhit():
+            msvcrt.getch()
+
+def main():
+    """Main entry point with reboot support"""
+    while True:
+        should_reboot = start_servers()
+        if should_reboot:
+            stop_servers()
+            reboot_requested.clear()
+            flush_keyboard_buffer()  # Clear any buffered keystrokes
+            print("\n" + "=" * 60)
+            print("🔄 REBOOTING SERVERS...")
+            print("=" * 60 + "\n")
+            time.sleep(1)
+            flush_keyboard_buffer()  # Clear again before restart
+        else:
+            break
+
 if __name__ == "__main__":
-    start_servers()
+    main()

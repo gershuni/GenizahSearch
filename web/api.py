@@ -41,29 +41,70 @@ def init_api_routes():
     app.include_router(versions.router, prefix="/api/v1", tags=["versions"])
     app.include_router(discoveries.router, prefix="/api/v1", tags=["discoveries"])
 
-    def fetch_fl_ids_from_nli(system_id: str) -> list:
-        """Fetch valid FL IDs from NLI MARC API (like desktop does)."""
-        url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+    def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
+        """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached for 5 min."""
+        import time as _time
+        CACHE_TTL = 300  # 5 minutes
+
+        # Check cache first
+        if system_id in _cache:
+            cache_age = _time.time() - _cache_time.get(system_id, 0)
+            if cache_age < CACHE_TTL:
+                return _cache[system_id]
+
+        # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
+        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=10, verify=False)
+            resp = requests.get(url, headers=headers, timeout=15, verify=False)
             if resp.status_code == 200:
-                # Simple regex approach - FL IDs appear in field 907 subfield d
-                # Format: <subfield code="d">FL156446080</subfield>
+                data = resp.json()
+                fl_ids = []
+
+                # Extract FL IDs from canvas images in order
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            service_id = service.get('@id', '')
+                            # Extract FL number (e.g. .../FL7734473/...)
+                            fl_match = re.search(r'FL(\d+)', service_id)
+                            if fl_match:
+                                fl_ids.append(fl_match.group(1))
+
+                if fl_ids:
+                    # Cache successful result
+                    _cache[system_id] = fl_ids
+                    _cache_time[system_id] = _time.time()
+                    print(f"Cached {len(fl_ids)} FL IDs for {system_id} from IIIF manifest")
+                    return fl_ids
+        except Exception as e:
+            print(f"Failed to fetch FL IDs from IIIF manifest for {system_id}: {e}")
+
+        # Fallback to MARC API (only has 1 FL ID typically)
+        try:
+            marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+            resp = requests.get(marc_url, headers=headers, timeout=10, verify=False)
+            if resp.status_code == 200:
                 fl_ids = re.findall(r'FL(\d+)', resp.text)
-                # Remove duplicates while preserving order
                 seen = set()
                 unique_fl_ids = []
                 for fl_id in fl_ids:
                     if fl_id not in seen:
                         seen.add(fl_id)
                         unique_fl_ids.append(fl_id)
-                print(f"Found FL IDs for {system_id}: {unique_fl_ids}")
+                if unique_fl_ids:
+                    _cache[system_id] = unique_fl_ids
+                    _cache_time[system_id] = _time.time()
+                    print(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                 return unique_fl_ids
         except Exception as e:
-            print(f"Failed to fetch FL IDs for {system_id}: {e}")
+            print(f"MARC fallback also failed for {system_id}: {e}")
+
         return []
 
     @app.get('/api/nli_image/{fl_id}')
@@ -112,13 +153,20 @@ def init_api_routes():
         return Response(content="Image not found", status_code=404)
 
     @app.get('/api/nli_image_by_sysid/{sys_id}')
-    def nli_image_by_sysid(sys_id: str):
+    def nli_image_by_sysid(sys_id: str, page: int = 0):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI MARC API.
         This is what the desktop does - it fetches the correct FL IDs from NLI.
+
+        Args:
+            sys_id: The system ID
+            page: Page index (0-based) to select which FL ID to use for multi-page manuscripts
         """
+        print(f"[DEBUG] nli_image_by_sysid called: sys_id={sys_id}, page={page}")
+
         # Fetch FL IDs from NLI
         fl_ids = fetch_fl_ids_from_nli(sys_id)
+        print(f"[DEBUG] FL IDs fetched: {fl_ids}")
         if not fl_ids:
             return Response(content="No FL IDs found for this document", status_code=404)
 
@@ -127,7 +175,21 @@ def init_api_routes():
             'Referer': 'https://www.nli.org.il/',
         }
 
-        # Try each FL ID until one works
+        # If page index specified, try that specific FL ID first
+        if 0 <= page < len(fl_ids):
+            fl_id = fl_ids[page]
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
+            try:
+                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                    return Response(
+                        content=resp.content,
+                        media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                    )
+            except Exception:
+                pass
+
+        # Fallback: try each FL ID until one works
         for fl_id in fl_ids:
             # Try IIIF
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"

@@ -186,20 +186,35 @@ def create_edit_text_dialog(
             # ============================================
             # MAIN CONTENT - Side by Side (Image + Text)
             # ============================================
-            with ui.element('div').classes('w-full p-4 gap-4').style(
-                'flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden;'
+            with ui.row().classes('w-full p-4 gap-4').style(
+                'height: 65vh; overflow: hidden;'
             ):
                 # LEFT SIDE - Manuscript Image (or Original Text if no image)
                 with ui.column().style('flex: 1; min-width: 0; height: 100%;'):
                     if image_url:
-                        with ui.row().classes('items-center gap-2 mb-2'):
-                            ui.icon('image', size='xs').classes('text-gray-400')
-                            ui.label(tr('Manuscript Image')).classes('font-bold text-sm text-gray-700')
+                        ui.label(tr('Manuscript Image')).classes('font-bold text-sm text-gray-700 mb-2')
 
                         with ui.card().classes('w-full').style(
-                            'background: #1a1a1a; flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;'
+                            'height: calc(65vh - 40px); background: #1a1a1a; border-radius: 8px; overflow: auto;'
                         ):
-                            ui.image(image_url).style('max-width: 100%; max-height: 100%; object-fit: contain;')
+                            with ui.element('div').style(
+                                'display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px;'
+                            ):
+                                # Use HTML img with error handling like browse page
+                                safe_url = image_url.replace("'", "\\'").replace('"', '\\"')
+                                # Build fallback URL for sys_id endpoint
+                                fallback_url = ""
+                                if "/api/nli_image/" in image_url:
+                                    # Extract sys_id from document_id for fallback
+                                    fallback_url = f"/api/nli_image_by_sysid/{document_id}?page={page_number - 1}"
+
+                                img_html = f'''
+                                <img src="{safe_url}"
+                                     style="max-width: 100%; max-height: 60vh; object-fit: contain;"
+                                     onerror="if(this.src !== '{fallback_url}' && '{fallback_url}') {{ this.src='{fallback_url}'; }} else {{ this.style.display='none'; this.parentElement.innerHTML='<div style=\\'text-align:center;color:#888;padding:20px;\\'>Image not available</div>'; }}"
+                                />
+                                '''
+                                ui.html(img_html, sanitize=False)
                     else:
                         # Fallback to original text if no image
                         with ui.row().classes('items-center gap-2 mb-2'):
@@ -208,17 +223,17 @@ def create_edit_text_dialog(
                             ui.label(f"({tr('read-only')})").classes('text-xs text-gray-400')
 
                         with ui.card().classes('w-full').style(
-                            'background: #f8f9fa; border: 1px solid #e9ecef; flex: 1; overflow: auto;'
+                            'height: calc(65vh - 40px); background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; overflow: auto;'
                         ):
                             ui.textarea(value=original_text).classes(
-                                'w-full h-full font-mono text-sm'
+                                'w-full font-mono text-sm'
                             ).props('readonly borderless').style(
                                 'direction: rtl; text-align: right; resize: none; '
-                                'background: transparent; color: #495057; height: 100%;'
+                                'background: transparent; color: #495057; min-height: 100%;'
                             )
 
                 # Divider
-                ui.element('div').style('width: 1px; background: #e0e0e0; align-self: stretch;')
+                ui.element('div').style('width: 1px; background: #e0e0e0;')
 
                 # RIGHT SIDE - Editable text
                 with ui.column().style('flex: 1; min-width: 0; height: 100%;'):
@@ -228,12 +243,12 @@ def create_edit_text_dialog(
                         unsaved_indicator = ui.label('').classes('text-xs text-orange-500')
 
                     with ui.card().classes('w-full').style(
-                        'border: 2px solid var(--q-primary); flex: 1; overflow: hidden;'
+                        'height: calc(65vh - 40px); border: 2px solid var(--q-primary); border-radius: 8px; overflow: hidden;'
                     ):
                         edited_textarea = ui.textarea(value=initial_text).classes(
                             'w-full h-full font-mono text-sm'
                         ).props('borderless autofocus').style(
-                            'direction: rtl; text-align: right; resize: none; height: 100%;'
+                            'direction: rtl; text-align: right; resize: none;'
                         )
 
             # ============================================
