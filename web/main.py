@@ -818,26 +818,14 @@ COMMON_STYLES = '''
 
     /* Mobile drawer - CSS only, hide on phones/tablets */
     @media (max-width: 768px) {
+        /* Standard LTR Left Drawer */
         .q-drawer--left:not(.q-drawer--on-top) {
             transform: translateX(-100%) !important;
         }
-    }
-
-    /* Accessibility: Skip Link */
-    .skip-link {
-        position: absolute;
-        top: -40px;
-        left: 0;
-        background: var(--primary-600);
-        color: white;
-        padding: 8px;
-        z-index: 10000;
-        transition: top 0.2s;
-        text-decoration: none;
-        font-weight: bold;
-    }
-    .skip-link:focus {
-        top: 0;
+        /* RTL "Right" Drawer (Physically Left) - Ensure it hides to the left */
+        [dir="rtl"] .q-drawer--right:not(.q-drawer--on-top) {
+            transform: translateX(-100%) !important;
+        }
     }
 </style>
 '''
@@ -852,10 +840,14 @@ def create_layout():
     current_page = app.storage.user.get('current_page', '/')
 
     # Header
+    # Force LTR structure even in RTL mode if requested (User preference: "Structure exactly like English")
+    # In RTL, flex-row flows R->L. We use flex-row-reverse to force L->R flow while keeping RTL text.
+    row_direction = 'flex-row-reverse' if is_rtl() else ''
+
     with ui.header().classes('q-py-none').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
+        with ui.row().classes(f'w-full h-full items-center justify-between px-6 app-header {row_direction}'):
             # Left: Menu + Logo
-            with ui.row().classes('items-center gap-4'):
+            with ui.row().classes(f'items-center gap-4 {row_direction}'):
                 menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
                 # Logo
@@ -871,9 +863,9 @@ def create_layout():
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
             # Right: Status + Actions + Auth
-            with ui.row().classes('items-center gap-2 sm:gap-4'):
+            with ui.row().classes(f'items-center gap-2 sm:gap-4 {row_direction}'):
                 # Status Indicator
-                with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
+                with ui.row().classes(f'items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator {row_direction}'):
                     status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
                     status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
@@ -942,10 +934,18 @@ def create_layout():
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
 
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
+                    # Apply row_direction to nav items to ensure Icon is always on the physical Left (English structure)
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""} {row_direction}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
                         if badge:
+                            # In LTR structure, badge is on right.
+                            # In RTL with flex-row-reverse: Icon (L), Label (C), Badge (R).
+                            # We need to ensure badge is pushed to the end.
+                            # 'ml-auto' (Margin Left Auto) pushes to Right in LTR.
+                            # In RTL mode, 'ml-auto' pushes to Left?
+                            # If we are in flex-row-reverse (L->R visual), ml-auto should push to Right?
+                            # Let's test standard behavior. Usually 'ml-auto' works for LTR.
                             ui.label(badge).classes('nav-item-badge')
 
                 ui.separator().classes('my-4 mx-6')
@@ -959,7 +959,7 @@ def create_layout():
 
                 for path, icon, label, badge in tool_items:
                     is_active = current_page == path
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""} {row_direction}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
 
@@ -973,7 +973,7 @@ def create_layout():
                     ui.navigate.reload()
 
                 lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').props(
+                with ui.row().classes(f'w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100 {row_direction}').props(
                     'role=button tabindex=0'
                 ).on('click', toggle_lang).on('keydown.enter', toggle_lang).on('keydown.space', toggle_lang):
                     ui.icon('translate').classes('text-lg')
