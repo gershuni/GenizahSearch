@@ -1077,10 +1077,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 fallback_url = None
                 has_image = False
 
-                # Try to get image - prefer system ID (fetches valid FL IDs from NLI)
-                if page.sys_id:
+                # Detect Oxford manuscripts by shelfmark pattern
+                is_oxford = False
+                if page.shelfmark:
+                    shelfmark_lower = page.shelfmark.lower()
+                    # Oxford shelfmarks: "MS heb. f.21/21", "MS. Heb. a. 1", etc.
+                    if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
+                        is_oxford = True
+
+                # Choose image endpoint based on source
+                if is_oxford and page.sys_id:
                     has_image = True
-                    # Use system ID endpoint - dynamically fetches correct FL IDs from NLI
+                    img_url = f"/api/oxford_image/{page.sys_id}"
+                    fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}"  # Fallback to NLI
+                elif page.sys_id:
+                    has_image = True
+                    # Use NLI system ID endpoint - dynamically fetches correct FL IDs from NLI
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}"
                     fallback_url = None
                 elif fl_id:
