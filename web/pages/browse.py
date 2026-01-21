@@ -1093,7 +1093,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 # Choose image endpoint based on source
                 # Prioritize page-specific fl_id over sys_id for correct page images
-                last_image_identity = app.storage.user.get('last_image_identity')
+                last_image_url = app.storage.user.get('last_image_url')
                 cache_bust_token = None
 
                 def apply_cache_bust(url: str) -> str:
@@ -1106,19 +1106,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     has_image = True
                     # Pass page index (0-based) for multi-page Oxford manuscripts
                     page_idx = max(0, page.p_num - 1)
-                    image_identity = f"oxford:{page.sys_id}"
-                    if image_identity != last_image_identity:
+                    base_img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}"
+                    if base_img_url == last_image_url:
                         cache_bust_token = page.p_num or 1
-                    img_url = apply_cache_bust(f"/api/oxford_image/{page.sys_id}?page={page_idx}")
+                    img_url = apply_cache_bust(base_img_url)
                     fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"  # Fallback to NLI
                 elif fl_digits:
                     # Use page-specific FL ID for correct image on each page
                     # Provide sys_id fallback since FL IDs in data may be stale
                     has_image = True
-                    image_identity = f"nli:{fl_digits}"
-                    if image_identity != last_image_identity:
+                    base_img_url = f"/api/nli_image/{fl_digits}"
+                    if base_img_url == last_image_url:
                         cache_bust_token = page.p_num or 1
-                    img_url = apply_cache_bust(f"/api/nli_image/{fl_digits}")
+                    img_url = apply_cache_bust(base_img_url)
                     if page.sys_id:
                         page_idx = max(0, page.p_num - 1)
                         fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"
@@ -1130,13 +1130,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     page_idx = max(0, page.p_num - 1)
                     has_image = True
                     # Use simple query params format
-                    image_identity = f"nli_sysid:{page.sys_id}"
-                    if image_identity != last_image_identity:
+                    base_img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"
+                    if base_img_url == last_image_url:
                         cache_bust_token = page.p_num or 1
-                    img_url = apply_cache_bust(f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}")
+                    img_url = apply_cache_bust(base_img_url)
                     fallback_url = None
-                if has_image and 'image_identity' in locals():
-                    app.storage.user['last_image_identity'] = image_identity
+                if has_image and 'base_img_url' in locals():
+                    app.storage.user['last_image_url'] = base_img_url
 
 
                 # Header bar with folio info, navigation, controls
