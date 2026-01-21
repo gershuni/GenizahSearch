@@ -1079,19 +1079,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 has_image = False
                 image_source = None  # 'nli' or 'oxford'
 
-                # Detect if this is an Oxford manuscript
+                # Detect if this is an Oxford manuscript using CodicologicalManager
+                # Only use Oxford endpoint if we have a confirmed mapping
                 is_oxford = False
-                if page.shelfmark:
-                    # Oxford shelfmarks start with "MS. Heb" or "heb." or similar patterns
-                    shelfmark_lower = page.shelfmark.lower()
-                    if shelfmark_lower.startswith('ms. heb') or shelfmark_lower.startswith('heb.') or 'bodleian' in shelfmark_lower:
-                        is_oxford = True
+                oxford_part_id = None
 
-                # Also check via CodicologicalManager if available and loaded
-                if not is_oxford and page.sys_id and state.meta_mgr and hasattr(state.meta_mgr, 'codico_mgr'):
+                # Check CodicologicalManager mapping - this is the only reliable way
+                # Don't use shelfmark pattern alone as it may match but have no images
+                if page.sys_id and state.meta_mgr and hasattr(state.meta_mgr, 'codico_mgr'):
                     codico = state.meta_mgr.codico_mgr
-                    if codico and getattr(codico, '_loaded', False) and codico.get_part_for_folio(page.sys_id):
-                        is_oxford = True
+                    if codico and getattr(codico, '_loaded', False):
+                        oxford_part_id = codico.get_part_for_folio(page.sys_id)
+                        if oxford_part_id:
+                            # Verify there are actually images for this part
+                            part_images = codico.get_part_images(oxford_part_id)
+                            if part_images:
+                                is_oxford = True
 
                 if is_oxford and page.sys_id:
                     # Use Oxford image endpoint
