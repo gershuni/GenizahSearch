@@ -16,7 +16,8 @@ class SemanticHeading(ui.html):
 
         # Build initial HTML
         content = self._build_html(text)
-        super().__init__(content)
+        # We construct safe HTML manually, so we disable auto-sanitization to preserve our tags
+        super().__init__(content, sanitize=False)
 
         # Make the wrapper transparent to layout
         self.style('display: contents')
