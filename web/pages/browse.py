@@ -1173,9 +1173,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=add_page_to_list
                             ).props('flat round dense').classes('text-green-700').tooltip(tr('Add to Favorites'))
 
-                            # Image indicator (shown if image available)
+                            # Image toggle button (shown if image available)
                             if has_image:
-                                ui.icon('image').classes('text-green-600').tooltip(tr('Image available'))
+                                ui.button(
+                                    icon='image',
+                                    on_click=lambda: toggle_image_panel()
+                                ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
 
                             # Edit, Comment, Notes, and Joins buttons
                             if page.text:
@@ -1218,14 +1221,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
-                # Use responsive flex row - stacks vertically on mobile
-                panel_width = 'w-1/2' if has_image else 'w-full'
+                # State for image panel visibility
+                show_image_panel = {'value': has_image}  # Start visible if image available
+                image_panel_ref = {'container': None}
 
-                with ui.row().classes('w-full gap-4 viewer-panels').style('min-height: 60vh;'):
+                def toggle_image_panel():
+                    show_image_panel['value'] = not show_image_panel['value']
+                    if image_panel_ref['container']:
+                        if show_image_panel['value']:
+                            image_panel_ref['container'].style('display: block;')
+                        else:
+                            image_panel_ref['container'].style('display: none;')
+
+                # Main container with flex row
+                with ui.element('div').classes('viewer-panels').style(
+                    'display: flex; flex-direction: row; gap: 16px; min-height: 60vh; width: 100%;'
+                ):
 
                     # === LEFT PANEL: Image (only if available) ===
                     if has_image:
-                        with ui.card().classes('w-1/2 image-panel').style('min-height: 60vh;'):
+                        image_panel_ref['container'] = ui.card().style(
+                            'flex: 0 0 50%; min-height: 60vh; display: block;'
+                        )
+                        with image_panel_ref['container']:
                             # Image header with zoom controls
                             with ui.row().classes('w-full items-center justify-between p-3').style(
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
@@ -1259,7 +1277,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.html(img_html, sanitize=False)
 
                     # === RIGHT PANEL: Transcription ===
-                    with ui.card().classes(f'{panel_width} transcription-panel-wrapper').style('min-height: 60vh;'):
+                    text_panel_flex = 'flex: 1 1 auto;' if has_image else 'flex: 1 1 100%;'
+                    with ui.card().style(f'{text_panel_flex} min-height: 60vh;'):
                         # Text content container
                         text_container = ui.column().classes('w-full h-full')
                         current_text = {'value': page.text}
