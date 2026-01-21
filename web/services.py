@@ -61,6 +61,11 @@ class BrowsePage:
     internal_index: int = 0
     attribution: str = ''  # Image credit/attribution
     is_oxford: bool = False  # Whether this is an Oxford manuscript
+    is_cambridge: bool = False # Whether this is a Cambridge manuscript
+    external_url: Optional[str] = None # URL to external viewer (Bodleian/CUDL)
+    oxford_part_id: Optional[str] = None # Oxford Part ID (e.g. "MS. Heb. d. 29/2")
+    oxford_part_display: str = '' # Display name for part (e.g. "heb. d. 29 part 2")
+    oxford_part_metadata: Dict[str, str] = field(default_factory=dict) # Oxford Part metadata
 
 @dataclass
 class DocumentPage:
@@ -200,6 +205,64 @@ class GenizahService:
                 if not attribution:
                     attribution = 'הספרייה הלאומית / National Library of Israel'
 
+            # Logic for External Links (Oxford/Cambridge)
+            external_url = None
+            is_cambridge = False
+            oxford_part_id = None
+            oxford_part_display = ''
+            oxford_part_metadata = {}
+
+            # 1. Oxford
+            if is_oxford and actual_sys_id:
+                # Use CodicologicalManager to find the Part for this folio
+                # accessing via state.meta_mgr.codico_mgr ideally, or if exposed on meta_mgr
+                if hasattr(state.meta_mgr, 'get_part_for_folio'):
+                    part_id = state.meta_mgr.get_part_for_folio(actual_sys_id)
+                    if part_id:
+                        oxford_part_id = part_id
+                        # Get display name
+                        if hasattr(state.meta_mgr.codico_mgr, 'get_part_display_name'):
+                            oxford_part_display = state.meta_mgr.codico_mgr.get_part_display_name(part_id)
+                        
+                        # Get metadata
+                        part_meta = state.meta_mgr.get_part_metadata(part_id)
+                        if part_meta:
+                            # Filter only what we need for display
+                            for key in ['title', 'contents', 'provenance']:
+                                if part_meta.get(key):
+                                    oxford_part_metadata[key] = part_meta[key]
+                            
+                            # Use direct_link as external_url
+                            if part_meta.get('direct_link'):
+                                external_url = part_meta.get('direct_link')
+
+            # 2. Cambridge
+            # Check MARC data for CUDL link if not already handled
+            if not external_url:
+                # We need to fetch MARC to check for 856 link if not cached
+                # The meta_mgr.nli_cache might have it if it was fetched previously
+                # But for now, let's rely on what we might have or fetch it if crucial
+                # For basic browsing, we might skip heavy fetching unless necessary.
+                # However, get_browse_page usually relies on search index data.
+                # Let's see if we can get it from 'result' or re-fetch.
+                # state.meta_mgr.get_meta_for_id returns (shelfmark, title).
+                # We need more. Let's try to get it from cache or fetch.
+                marc_data = {}
+                if hasattr(state.meta_mgr, 'nli_cache') and actual_sys_id in state.meta_mgr.nli_cache:
+                     marc_data = state.meta_mgr.nli_cache[actual_sys_id].get('marc', {})
+                
+                # If we didn't mock/cache it fully, we might miss it. 
+                # In GenizahSearch desktop, it lazily fetches. 
+                # Here, let's check if we can get `external_iiif_link` from cached meta.
+                
+                # If we don't have it, we might simply check if shelfmark implies Cambridge (T-S ...) 
+                # AND we want to call the API.
+                # But cleaner is:
+                ext_link = marc_data.get('external_iiif_link')
+                if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
+                    is_cambridge = True
+                    external_url = ext_link
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -215,7 +278,12 @@ class GenizahService:
                 image_url=image_url,
                 internal_index=result.get('internal_index', 0),
                 attribution=attribution,
-                is_oxford=is_oxford
+                is_oxford=is_oxford,
+                is_cambridge=is_cambridge,
+                external_url=external_url,
+                oxford_part_id=oxford_part_id,
+                oxford_part_display=oxford_part_display,
+                oxford_part_metadata=oxford_part_metadata
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -260,6 +328,41 @@ class GenizahService:
                 if not attribution:
                     attribution = 'הספרייה הלאומית / National Library of Israel'
 
+            # Logic for External Links (Oxford/Cambridge) - Duplicate logic for by_fl
+            external_url = None
+            is_cambridge = False
+            oxford_part_id = None
+            oxford_part_display = ''
+            oxford_part_metadata = {}
+
+            # 1. Oxford
+            if is_oxford and actual_sys_id:
+                if hasattr(state.meta_mgr, 'get_part_for_folio'):
+                    part_id = state.meta_mgr.get_part_for_folio(actual_sys_id)
+                    if part_id:
+                        oxford_part_id = part_id
+                        if hasattr(state.meta_mgr.codico_mgr, 'get_part_display_name'):
+                            oxford_part_display = state.meta_mgr.codico_mgr.get_part_display_name(part_id)
+                        
+                        part_meta = state.meta_mgr.get_part_metadata(part_id)
+                        if part_meta:
+                            for key in ['title', 'contents', 'provenance']:
+                                if part_meta.get(key):
+                                    oxford_part_metadata[key] = part_meta[key]
+                            if part_meta.get('direct_link'):
+                                external_url = part_meta.get('direct_link')
+
+            # 2. Cambridge
+            if not external_url:
+                marc_data = {}
+                if hasattr(state.meta_mgr, 'nli_cache') and actual_sys_id in state.meta_mgr.nli_cache:
+                     marc_data = state.meta_mgr.nli_cache[actual_sys_id].get('marc', {})
+                
+                ext_link = marc_data.get('external_iiif_link')
+                if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
+                    is_cambridge = True
+                    external_url = ext_link
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -275,7 +378,12 @@ class GenizahService:
                 image_url=image_url,
                 internal_index=result.get('internal_index', 0),
                 attribution=attribution,
-                is_oxford=is_oxford
+                is_oxford=is_oxford,
+                is_cambridge=is_cambridge,
+                external_url=external_url,
+                oxford_part_id=oxford_part_id,
+                oxford_part_display=oxford_part_display,
+                oxford_part_metadata=oxford_part_metadata
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")

@@ -732,17 +732,22 @@ def create_feed_item(item: dict, on_refresh=None):
                             responses_container = ui.column().classes('w-full gap-2')
 
                             async def load_responses(container=responses_container, nid=numeric_id):
-                                container.clear()
-                                with container:
-                                    result = await api_call("GET", f"/discoveries/{nid}/responses")
-                                    if "error" not in result:
-                                        responses = result.get('items', [])
-                                        if responses:
-                                            ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
-                                            for resp in responses:
-                                                create_response_item(resp)
-                                        else:
-                                            ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
+                                try:
+                                    if container.client.has_been_deleted: return
+                                    container.clear()
+                                    with container:
+                                        result = await api_call("GET", f"/discoveries/{nid}/responses")
+                                        if container.client.has_been_deleted: return
+                                        if "error" not in result:
+                                            responses = result.get('items', [])
+                                            if responses:
+                                                ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
+                                                for resp in responses:
+                                                    create_response_item(resp)
+                                            else:
+                                                ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
+                                except Exception:
+                                    pass
 
                                     # Reply form
                                     if GlobalAuthState.is_logged_in():

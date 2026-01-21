@@ -76,8 +76,8 @@ class CorrectionService:
             existing.corrected_text = data.corrected_text
             existing.notes = data.notes
             existing.correction_type = CorrectionType(data.correction_type.value)
-            # Reset to draft if it was rejected
-            if existing.status == CorrectionStatus.REJECTED:
+            # Reset to draft if it was rejected or approved (re-opening for edit)
+            if existing.status in [CorrectionStatus.REJECTED, CorrectionStatus.APPROVED]:
                 existing.status = CorrectionStatus.DRAFT
             db.commit()
             db.refresh(existing)

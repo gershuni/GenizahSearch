@@ -17,6 +17,7 @@ import html as html_module
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
+from web.auth_state import GlobalAuthState, api_call
 
 
 # ============================================================================
@@ -568,6 +569,15 @@ class BrowseState:
         self.page_input_value: int = 1
         self.view_all: bool = False
         self.full_manuscript: List[DocumentPage] = []
+        # Edit state
+        self.edit_mode: bool = False
+        self.edit_text: str = ""
+        self.edit_notes: str = ""
+        self.original_edit_text: str = ""  # Text when editing started
+        self.draft_saved: bool = False
+        self.draft_id: Optional[str] = None
+        self.edit_loading: bool = False
+        self.error_message: Optional[str] = None
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -960,6 +970,212 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             }}
         ''')
 
+    async def handle_submit_correction():
+        """Submit the correction to the backend."""
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login first'), type='negative')
+            return
+
+        if state.edit_text == state.original_edit_text and not state.edit_notes:
+            ui.notify(tr('No changes to submit'), type='warning')
+            return
+
+        # Show loading in panel instead of notification
+        state.edit_loading = True
+        state.error_message = None # Clear previous errors
+        update_content()
+
+        try:
+            if state.draft_id:
+                # 1. Update existing draft first
+                update_res = await api_call("PUT", f"/corrections/{state.draft_id}", {
+                    "corrected_text": state.edit_text,
+                    "notes": state.edit_notes,
+                    "original_text": state.original_edit_text,
+                    "correction_type": "text_correction"
+                })
+                
+                if "error" in update_res:
+                    err_msg = update_res['error'].lower()
+                    if "approved status" in err_msg or "cannot edit" in err_msg:
+                         state.edit_loading = False
+                         state.error_message = f"Correction is already approved/submitted. Changes cannot be saved to this version. Please reload."
+                         state.draft_id = None # Detach
+                         update_content()
+                         return
+
+                    state.edit_loading = False
+                    state.error_message = f"Update failed: {update_res['error']}"
+                    update_content()
+                    return
+                    
+                # 2. Submit the draft
+                result = await api_call("POST", f"/corrections/{state.draft_id}/submit", {
+                    "notes": state.edit_notes
+                })
+            else:
+                # Create and auto-submit new correction
+                result = await api_call("POST", "/corrections/", {
+                    "document_id": state.current_page.sys_id,
+                    "system_id": state.current_page.sys_id,
+                    "shelfmark": state.current_page.shelfmark,
+                    "page_number": state.current_page.p_num,
+                    "original_text": state.original_edit_text,
+                    "corrected_text": state.edit_text,
+                    "correction_type": "text_correction",
+                    "notes": state.edit_notes if state.edit_notes else None
+                })
+
+            state.edit_loading = False
+            
+            if "error" in result:
+                state.error_message = result["error"]
+                update_content()
+            else:
+                state.edit_mode = False
+                state.draft_saved = False
+                state.draft_id = None
+                
+                # Notifications here might still fail if reload cancels them, 
+                # but let's try avoiding them or moving them after reload logic if possible.
+                # Actually, success notification is important.
+                # If we reload page immediately, notification might be lost or crash context.
+                # Let's try relying on reload to show updated state.
+                
+                # Reload page to see changes
+                load_page(direction=0)
+                
+                # Try explicit temporary notification via Javascript or similar if needed, 
+                # but standard ui.notify might fail if context is dead.
+                # We'll skip notify for now to be safe, visually the reload confirms it.
+        except Exception as e:
+            state.edit_loading = False
+            state.error_message = f"Error submitting: {str(e)}"
+            update_content()
+            # print traceback for debugging
+            print(f"Submit error: {e}")
+
+    async def handle_save_draft():
+        """Save draft locally (simulated for now, or use backend draft)."""
+        if not GlobalAuthState.is_logged_in():
+             ui.notify(tr('Please login to save drafts'), type='warning')
+             return
+
+        payload = {
+            "document_id": state.current_page.sys_id,
+            "system_id": state.current_page.sys_id,
+            "shelfmark": state.current_page.shelfmark,
+            "page_number": state.current_page.p_num,
+            "original_text": state.original_edit_text,
+            "corrected_text": state.edit_text,
+            "correction_type": "text_correction",
+            "notes": state.edit_notes if state.edit_notes else None
+        }
+
+        if state.draft_id:
+            # Update existing draft
+            result = await api_call("PUT", f"/corrections/{state.draft_id}", payload)
+        else:
+            # Create new draft using query param. Using 'true' (lowercase) is standard.
+            result = await api_call("POST", "/corrections/?save_as_draft=true", payload)
+        
+        if "error" in result:
+            ui.notify(result["error"], type='negative')
+        else:
+            # Verify status to ensure it wasn't auto-approved
+            status = result.get('status')
+            if status not in ('draft', 'needs_revision'):
+                ui.notify(tr('Error: Correction was submitted instead of saved as draft'), type='warning')
+                state.draft_id = None
+                state.draft_saved = False
+                return
+
+            state.draft_saved = True
+            state.draft_id = result.get('id')
+            ui.notify(tr('Draft saved'), type='positive')
+            update_content() # Update UI to show green border
+
+    async def toggle_edit_mode():
+        """Toggle edit mode with fetching existing corrections."""
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please login to edit'), type='warning')
+            return
+            
+        if state.edit_mode:
+            cancel_edit()
+        else:
+            # Enter edit mode - Show loading state
+            state.edit_loading = True
+            update_content()
+            
+            try:
+                # Fetch existing corrections to see if we should resume one
+                user = GlobalAuthState.get_user()
+                my_corrections = []
+                if user:
+                    user_id = user.get('id')
+                    try:
+                         # Fetch ALL corrections including drafts
+                         result = await api_call("GET", f"/corrections/document/{state.current_page.sys_id}?include_drafts=true")
+                         if isinstance(result, list):
+                             # Filter for my corrections on THIS page
+                             current_p_num = state.current_page.p_num
+                             my_corrections = [
+                                 c for c in result 
+                                 if (c.get('user_id') == user_id or c.get('author', {}).get('id') == user_id)
+                                 and c.get('page_number') == current_p_num
+                             ]
+                             # Sort by updated_at desc
+                             my_corrections.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+                    except Exception as e:
+                         print(f"Error fetching corrections: {e}")
+                
+                latest = my_corrections[0] if my_corrections else None
+                
+                state.edit_mode = True
+                
+                # Default to page text
+                base_text = state.current_page.text or ""
+                base_notes = ""
+                
+                # Determine state from latest correction
+                if latest:
+                    # Use the latest correction text as baseline for editing
+                    base_text = latest.get('corrected_text', base_text)
+                    base_notes = latest.get('notes', "") or ""
+                    req_status = latest.get('status')
+                    
+                    if req_status in ('draft', 'pending', 'needs_revision'):
+                        # Resume editing this correction
+                        state.draft_id = latest.get('id')
+                        state.draft_saved = True 
+                    else:
+                        # It's approved/rejected, start fresh but with this content
+                        state.draft_id = None
+                        state.draft_saved = False
+                else:
+                    state.draft_id = None
+                    state.draft_saved = False
+
+                state.edit_text = base_text
+                # Original manuscript text acts as the "original_text" reference
+                state.original_edit_text = state.current_page.text or ""
+                state.edit_notes = base_notes
+                
+                state.edit_loading = False
+                update_content()
+            except Exception as e:
+                state.edit_loading = False
+                update_content()
+                ui.notify(f"Error loading edit mode: {str(e)}", type='negative')
+
+    def cancel_edit():
+        """Cancel edit and revert to view mode."""
+        state.edit_mode = False
+        state.edit_text = ""
+        state.edit_notes = ""
+        update_content()
+
     def highlight_text(text: str) -> str:
         """Apply highlighting to search terms in text, safely escaping HTML."""
         if not text:
@@ -1066,6 +1282,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             'text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);'
                         )
 
+                        # Oxford Part Label (e.g. [part 6])
+                        if page.oxford_part_display:
+                            # Extract just the "part X" portion if possible, or show full
+                            # Logic: if shelfmark contains the first part, show only suffix.
+                            # But simple display is fine.
+                            # User requested: [part 6] immediately after shelfmark
+                            # Let's extract "part X" from "heb. d. 29 part 2"
+                            part_suffix = page.oxford_part_display
+                            if "part" in part_suffix:
+                                part_suffix = part_suffix.split("part")[-1].strip()
+                                part_label = f"[part {part_suffix}]"
+                            else:
+                                part_label = f"[{page.oxford_part_display}]"
+
+                            ui.label(part_label).classes(
+                                'text-lg font-bold'
+                            ).style(
+                                'color: #3b82f6 !important; ' # Blue color as seen in screenshot (approx)
+                                'text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);'
+                            )
+
                         # Title (truncated with tooltip)
                         if page.title:
                             words = page.title.split()
@@ -1171,17 +1408,42 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label('FL ID').classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 ui.label(f'FL{page.fl_id}').classes('text-sm font-mono').style('color: var(--text-primary);')
 
+                        # Oxford Metadata (Part Title, Contents, Provenance)
+                        if page.oxford_part_metadata:
+                            # Part Title
+                            if page.oxford_part_metadata.get('title'):
+                                with ui.column().classes('gap-1 col-span-2'):
+                                    ui.label(tr('Part Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(page.oxford_part_metadata['title']).classes('text-sm').style('color: var(--text-primary);')
+                            
+                            # Contents
+                            if page.oxford_part_metadata.get('contents'):
+                                with ui.column().classes('gap-1 col-span-2'):
+                                    ui.label(tr('Contents')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(page.oxford_part_metadata['contents']).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Provenance
+                            if page.oxford_part_metadata.get('provenance'):
+                                with ui.column().classes('gap-1 col-span-2'):
+                                    ui.label(tr('Provenance')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(page.oxford_part_metadata['provenance']).classes('text-sm').style('color: var(--text-primary);')
+
                     # External Links
                     ui.separator().classes('my-3')
                     ui.label(tr('External link')).classes('text-xs font-bold mb-2').style('color: var(--text-secondary);')
                     with ui.row().classes('gap-2 flex-wrap'):
                         # NLI Ktiv
+                        # NLI Ktiv
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
                         ui.link('NLI Ktiv', ktiv_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
-                        # Friedberg (if applicable)
-                        friedberg_url = f"https://fjms.genizah.org/{page.sys_id}"
-                        ui.link('Friedberg', friedberg_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                        # Oxford Bodleian
+                        if page.is_oxford and page.external_url:
+                            ui.link('Oxford Bodleian', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                        # Cambridge CUDL
+                        if page.is_cambridge and page.external_url:
+                            ui.link('Cambridge CUDL', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
                     # Export
                     ui.separator().classes('my-3')
@@ -1386,14 +1648,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     state.shelfmark_query = target_shelfmark
                                     search_shelfmark()
 
-                                create_edit_button(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    original_text=page.text,
-                                    shelfmark=page.shelfmark or page.sys_id,
-                                    on_save=refresh_page,
-                                    image_url=img_url if has_image else None
-                                )
+                                # Custom Edit Button
+                                ui.button(
+                                    tr('Edit'),
+                                    icon='edit',
+                                    on_click=toggle_edit_mode
+                                ).props('flat dense size=sm').classes('text-xs').tooltip(tr('Edit Transcription'))
                                 create_comment_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
@@ -1514,54 +1774,110 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # === RIGHT PANEL: Transcription ===
                     text_panel_flex = 'flex: 1 1 auto;' if has_image else 'flex: 1 1 100%;'
-                    with ui.card().style(f'{text_panel_flex} min-height: 60vh;'):
-                        # Text content container
-                        text_container = ui.column().classes('w-full h-full')
-                        current_text = {'value': page.text}
+                    
+                    # Style based on edit mode
+                    panel_style = f'{text_panel_flex} min-height: 60vh; display: flex; flex-direction: column;'
+                    if state.edit_mode:
+                        if state.draft_saved:
+                            panel_style += ' border: 3px solid #27ae60;'  # Green for Saved
+                        else:
+                             # Orange for Unsaved/Edit Mode
+                            panel_style += ' border: 3px solid #f39c12;'
 
-                        def render_text_content(text: str):
-                            """Render text content with optional highlighting."""
-                            text_container.clear()
-                            with text_container:
-                                with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
-                                    if text:
-                                        if state.highlight_terms:
-                                            display_text = highlight_text(text)
-                                            ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
-                                        else:
-                                            ui.label(text).style(
-                                                'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                                'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
-                                            )
+                    with ui.card().style(panel_style):
+                        if state.edit_mode:
+                            # === EDIT MODE ===
+                            # Edit Bar
+                            with ui.row().classes('w-full items-center justify-between p-2 bg-gray-100 border-b'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.label(tr('Edit Mode')).classes('font-bold text-gray-700')
+                                    if state.draft_saved:
+                                        ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
                                     else:
-                                        with ui.column().classes('items-center justify-center h-full'):
-                                            ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                                            ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
-                            text_container.update()
+                                        ui.label(tr('Unsaved changes')).classes('text-orange-600 text-sm')
+                                
+                                with ui.row().classes('gap-2'):
+                                    ui.button(tr('Cancel'), icon='close', on_click=cancel_edit).props('flat dense color=grey')
+                                    ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
+                                    ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props('unelevated dense color=green')
 
-                        def handle_version_change(new_text: str, version_info: dict):
-                            """Handle version selection - update displayed text."""
-                            current_text['value'] = new_text
-                            render_text_content(new_text)
-                            source = version_info.get('source', 'unknown')
-                            author = version_info.get('author', '')
-                            if source == 'user' and author:
-                                ui.notify(f"{tr('Showing version by')} {author}", type='info')
-                            elif source in ('V0.7', 'V0.8'):
-                                ui.notify(f"{tr('Showing')} {source}", type='info')
+                            # Error Message Display
+                            if state.error_message:
+                                ui.markdown(f"**Error:** {state.error_message}").classes('w-full p-2 text-red-600 bg-red-100 border-b border-red-200 text-sm')
 
-                        # Version selector
-                        if page.text:
-                            with ui.row().classes('items-center p-2 border-b'):
-                                create_version_selector(
-                                    document_id=page.sys_id,
-                                    page_number=page.p_num,
-                                    original_text=page.text,
-                                    on_version_change=handle_version_change
-                                )
+                            # Text Area
+                            textarea = ui.textarea(value=state.edit_text).classes('w-full h-full font-mono text-lg').props(
+                                'borderless autofocus input-style="height: 100%; min-height: 400px;"'
+                            ).style(
+                                'direction: rtl; text-align: right; resize: none; flex: 1; padding: 16px;'
+                            )
+                            # Bind value manually
+                            textarea.bind_value(state, 'edit_text')
 
-                        # Initial render
-                        render_text_content(page.text if page.text else None)
+                            def on_edit_input():
+                                if state.draft_saved:
+                                    state.draft_saved = False
+                                    update_content()
+                            
+                            textarea.on('input', on_edit_input)
+                            
+                            # Notes field (Expanded by default if notes exist)
+                            with ui.expansion(tr('Add Notes'), icon='note_add', value=bool(state.edit_notes)).classes('w-full border-t bg-gray-50'):
+                                ui.textarea(label=tr('Notes'), value=state.edit_notes).bind_value(state, 'edit_notes').classes('w-full p-2').props('outlined dense')
+                        elif state.edit_loading:
+                            # === LOADING EDIT MODE ===
+                            with ui.column().classes('w-full h-full items-center justify-center'):
+                                ui.spinner(size='lg', color='primary')
+                                ui.label(tr('Loading...')).classes('mt-2 text-gray-500 font-bold')
+                        else:
+                            # === VIEW MODE ===
+                            # Text content container
+                            text_container = ui.column().classes('w-full h-full')
+                            current_text = {'value': page.text}
+
+                            def render_text_content(text: str):
+                                """Render text content with optional highlighting."""
+                                text_container.clear()
+                                with text_container:
+                                    with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
+                                        if text:
+                                            if state.highlight_terms:
+                                                display_text = highlight_text(text)
+                                                ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
+                                            else:
+                                                ui.label(text).style(
+                                                    'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
+                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                                )
+                                        else:
+                                            with ui.column().classes('items-center justify-center h-full'):
+                                                ui.icon('text_snippet', size='4rem').classes('text-gray-300')
+                                                ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+                                text_container.update()
+
+                            def handle_version_change(new_text: str, version_info: dict):
+                                """Handle version selection - update displayed text."""
+                                current_text['value'] = new_text
+                                render_text_content(new_text)
+                                source = version_info.get('source', 'unknown')
+                                author = version_info.get('author', '')
+                                if source == 'user' and author:
+                                    ui.notify(f"{tr('Showing version by')} {author}", type='info')
+                                elif source in ('V0.7', 'V0.8'):
+                                    ui.notify(f"{tr('Showing')} {source}", type='info')
+
+                            # Version selector
+                            if page.text:
+                                with ui.row().classes('items-center p-2 border-b'):
+                                    create_version_selector(
+                                        document_id=page.sys_id,
+                                        page_number=page.p_num,
+                                        original_text=page.text,
+                                        on_version_change=handle_version_change
+                                    )
+
+                            # Initial render
+                            render_text_content(page.text if page.text else None)
 
                 # Comments section - below panels
                 from web.components import create_notes_panel
