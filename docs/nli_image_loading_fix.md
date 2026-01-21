@@ -225,4 +225,136 @@ Added reboot functionality to `start_servers.py`:
 
 2. **Cache Duration**: FL IDs are cached for 5 minutes. If NLI updates their data, it won't reflect immediately.
 
-3. **Oxford Manuscripts**: Use a separate system (CodicologicalManager) which maps sys_id to Oxford Part IDs.
+3. **Oxford Manuscripts**: Use a separate system (CodicologicalManager) which maps sys_id to Oxford Part IDs. See section below.
+
+## Oxford Manuscript Image Loading
+
+Oxford manuscripts from the Bodleian Library use a completely separate image loading system from NLI manuscripts.
+
+### Detection
+
+Oxford manuscripts are detected by their shelfmark pattern:
+
+```python
+is_oxford = False
+if page.shelfmark:
+    shelfmark_lower = page.shelfmark.lower()
+    # Oxford shelfmarks: "MS heb. f.21/21", "MS. Heb. a. 1", etc.
+    if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
+        is_oxford = True
+```
+
+### CodicologicalManager
+
+Oxford manuscripts are organized using the Neubauer catalog system, which groups folios into "Parts" (codicological units). The `CodicologicalManager` class in `genizah_core.py` manages this:
+
+```python
+class CodicologicalManager:
+    """
+    Manages codicological units (Parts) for Oxford manuscripts.
+    Maps between our folio-based system IDs and Oxford's Neubauer catalog Parts.
+
+    A "Part" is a codicological unit in the Neubauer catalog that may contain
+    multiple folios (and thus multiple system IDs in our system).
+    """
+
+    def __init__(self):
+        self.folio_to_part = {}       # sys_id → part_id (e.g., "MS. Heb. d. 29/2")
+        self.part_to_folios = {}      # part_id → [sys_ids] (ordered by folio number)
+        self.part_metadata = {}       # part_id → {title, contents, provenance, images, ...}
+```
+
+### Image Loading Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 Oxford Manuscript Detected                       │
+│            (shelfmark starts with "MS heb" or "MS. Heb")        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Primary URL: /api/oxford_image/{sys_id}?page={page_idx}      │
+│    Uses CodicologicalManager to map sys_id → Part ID            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. CodicologicalManager.get_folio_part_id(sys_id)               │
+│    Returns: Part ID (e.g., "MS. Heb. d. 29/2")                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. CodicologicalManager.get_part_images(part_id)                │
+│    Returns: List of image metadata with URLs                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Fetch image from hebrew.bodleian.ox.ac.uk                    │
+│    (Proxied through /api/oxford_image to handle CORS)           │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    Image fails to load (onerror)
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. Fallback URL: /api/nli_image_by_sysid/{sys_id}?page={idx}    │
+│    (Some Oxford manuscripts have NLI copies)                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### API Endpoint
+
+**`/api/oxford_image/{sys_id}?page={idx}`** (`web/api.py`):
+
+```python
+@app.get('/api/oxford_image/{sys_id}')
+def oxford_image(sys_id: str, page: int = 0):
+    """
+    Fetch Oxford image by System ID using CodicologicalManager.
+
+    Args:
+        sys_id: The system ID (folio ID)
+        page: Optional page index within the part (default 0 = first image)
+    """
+    codico = state.meta_mgr.codico_mgr
+
+    # Look up Part ID for this system ID
+    part_id = codico.get_folio_part_id(sys_id)
+
+    # Get images for this part
+    images = codico.get_part_images(part_id)
+
+    # Select correct image by page index
+    img_data = images[page]
+    img_url = img_data.get('full_url', '')
+
+    # Fetch from Bodleian with proper headers
+    headers = {
+        'User-Agent': 'Mozilla/5.0...',
+        'Referer': 'https://hebrew.bodleian.ox.ac.uk/',
+    }
+    resp = requests.get(img_url, headers=headers, timeout=30)
+    return Response(content=resp.content, media_type='image/jpeg')
+```
+
+### Oxford Database
+
+The Oxford codicological data is stored in a JSON database file (`Config.OXFORD_DB`), loaded at startup. This database contains:
+
+- Part IDs and their metadata (title, contents, provenance)
+- Folio-to-Part mappings
+- Image URLs for each Part
+
+### Key Differences from NLI
+
+| Aspect | NLI | Oxford |
+|--------|-----|--------|
+| Image source | iiif.nli.org.il / rosetta.nli.org.il | hebrew.bodleian.ox.ac.uk |
+| ID system | FL IDs (from IIIF manifest) | Part IDs (from Neubauer catalog) |
+| Mapping | sys_id → IIIF manifest → FL IDs | sys_id → Part ID → images |
+| Organization | Flat (FL IDs per page) | Hierarchical (Parts contain folios) |
+| Manager | None (direct API calls) | CodicologicalManager |
+| Local database | None (fetched from NLI) | OXFORD_DB JSON file |
