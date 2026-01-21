@@ -1198,7 +1198,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     page_number=page.p_num,
                                     original_text=page.text,
                                     shelfmark=page.shelfmark or page.sys_id,
-                                    on_save=refresh_page
+                                    on_save=refresh_page,
+                                    image_url=img_url if has_image else None
                                 )
                                 create_comment_button(
                                     document_id=page.sys_id,

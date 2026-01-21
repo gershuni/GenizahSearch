@@ -89,7 +89,8 @@ def create_edit_text_dialog(
     page_number: int,
     original_text: str,
     shelfmark: str = "",
-    on_save: Optional[Callable] = None
+    on_save: Optional[Callable] = None,
+    image_url: Optional[str] = None
 ):
     """
     Create an enhanced text editing dialog.
@@ -100,6 +101,7 @@ def create_edit_text_dialog(
         original_text: The original text to edit
         shelfmark: Display name for the document
         on_save: Optional callback when text is saved/submitted
+        image_url: Optional URL for manuscript image to display
 
     Returns:
         The dialog object
@@ -182,43 +184,56 @@ def create_edit_text_dialog(
                         ui.tooltip(tr('Keyboard shortcuts'))
 
             # ============================================
-            # MAIN CONTENT - Side by Side
+            # MAIN CONTENT - Side by Side (Image + Text)
             # ============================================
-            with ui.row().classes('w-full flex-grow p-4 gap-4').style('flex: 1; min-height: 0; overflow: hidden;'):
-                # LEFT SIDE - Original text (read-only)
-                with ui.column().classes('flex-1 h-full').style('min-width: 0;'):
-                    with ui.row().classes('items-center gap-2 mb-2'):
-                        ui.icon('lock', size='xs').classes('text-gray-400')
-                        ui.label(tr('Original Text')).classes('font-bold text-sm text-gray-700')
-                        ui.label(f"({tr('read-only')})").classes('text-xs text-gray-400')
+            with ui.element('div').classes('w-full p-4 gap-4').style(
+                'flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden;'
+            ):
+                # LEFT SIDE - Manuscript Image (or Original Text if no image)
+                with ui.column().style('flex: 1; min-width: 0; height: 100%;'):
+                    if image_url:
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            ui.icon('image', size='xs').classes('text-gray-400')
+                            ui.label(tr('Manuscript Image')).classes('font-bold text-sm text-gray-700')
 
-                    with ui.card().classes('w-full h-full').style(
-                        'background: #f8f9fa; border: 1px solid #e9ecef; overflow: hidden;'
-                    ):
-                        original_textarea = ui.textarea(value=original_text).classes(
-                            'w-full h-full font-mono text-sm'
-                        ).props('readonly borderless').style(
-                            'direction: rtl; text-align: right; resize: none; '
-                            'background: transparent; color: #495057;'
-                        )
+                        with ui.card().classes('w-full').style(
+                            'background: #1a1a1a; flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;'
+                        ):
+                            ui.image(image_url).style('max-width: 100%; max-height: 100%; object-fit: contain;')
+                    else:
+                        # Fallback to original text if no image
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            ui.icon('lock', size='xs').classes('text-gray-400')
+                            ui.label(tr('Original Text')).classes('font-bold text-sm text-gray-700')
+                            ui.label(f"({tr('read-only')})").classes('text-xs text-gray-400')
+
+                        with ui.card().classes('w-full').style(
+                            'background: #f8f9fa; border: 1px solid #e9ecef; flex: 1; overflow: auto;'
+                        ):
+                            ui.textarea(value=original_text).classes(
+                                'w-full h-full font-mono text-sm'
+                            ).props('readonly borderless').style(
+                                'direction: rtl; text-align: right; resize: none; '
+                                'background: transparent; color: #495057; height: 100%;'
+                            )
 
                 # Divider
-                ui.element('div').classes('w-px bg-gray-300 self-stretch')
+                ui.element('div').style('width: 1px; background: #e0e0e0; align-self: stretch;')
 
                 # RIGHT SIDE - Editable text
-                with ui.column().classes('flex-1 h-full').style('min-width: 0;'):
+                with ui.column().style('flex: 1; min-width: 0; height: 100%;'):
                     with ui.row().classes('items-center gap-2 mb-2'):
                         ui.icon('edit', size='xs').classes('text-primary')
                         ui.label(tr('Your Correction')).classes('font-bold text-sm text-primary')
                         unsaved_indicator = ui.label('').classes('text-xs text-orange-500')
 
-                    with ui.card().classes('w-full h-full').style(
-                        'border: 2px solid var(--q-primary); overflow: hidden;'
+                    with ui.card().classes('w-full').style(
+                        'border: 2px solid var(--q-primary); flex: 1; overflow: hidden;'
                     ):
                         edited_textarea = ui.textarea(value=initial_text).classes(
                             'w-full h-full font-mono text-sm'
                         ).props('borderless autofocus').style(
-                            'direction: rtl; text-align: right; resize: none;'
+                            'direction: rtl; text-align: right; resize: none; height: 100%;'
                         )
 
             # ============================================
@@ -399,7 +414,8 @@ def create_edit_button(
     original_text: str,
     shelfmark: str = "",
     on_save: Optional[Callable] = None,
-    size: str = "sm"
+    size: str = "sm",
+    image_url: Optional[str] = None
 ):
     """
     Create an edit text button that opens the edit dialog.
@@ -411,6 +427,7 @@ def create_edit_button(
         shelfmark: Display name for the document
         on_save: Optional callback when text is saved/submitted
         size: Button size (sm, md, lg)
+        image_url: Optional URL for manuscript image
 
     Returns:
         The button element
@@ -424,7 +441,8 @@ def create_edit_button(
             page_number=page_number,
             original_text=original_text,
             shelfmark=shelfmark,
-            on_save=on_save
+            on_save=on_save,
+            image_url=image_url
         )
         dialog.open()
 
