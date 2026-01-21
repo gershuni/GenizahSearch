@@ -30,6 +30,11 @@ function handleImageError(img, fallbackUrl) {
     if (fallbackUrl && img.src !== fallbackUrl) {
         console.log('Primary image failed, trying fallback:', fallbackUrl);
         img.src = fallbackUrl;
+        // Initialize viewer after fallback loads
+        img.onload = function() {
+            console.log('Fallback image loaded, initializing viewer');
+            if (window.manuscriptViewer) window.manuscriptViewer.init();
+        };
     } else {
         console.log('All image sources failed for:', img.src);
         img.style.display = 'none';
@@ -57,7 +62,7 @@ function handleImageError(img, fallbackUrl) {
         display: flex;
         align-items: center;
         justify-content: center;
-        overflow: auto;
+        overflow: hidden; /* Hide scrollbars for custom drag */
         background: linear-gradient(45deg, #1a1a1a 25%, #222 25%, #222 50%, #1a1a1a 50%, #1a1a1a 75%, #222 75%);
         background-size: 20px 20px;
     }
@@ -404,12 +409,146 @@ function handleImageError(img, fallbackUrl) {
         z-index: 9999 !important;
         border-radius: 0 !important;
         margin: 0 !important;
+        background: #000;
     }
 
     .fullscreen-mode .image-container {
         height: 100vh !important;
+        width: 100vw !important;
+    }
+    
+    /* Zoomable Image Class */
+    .zoomable-image {
+        transform-origin: center center;
+        transition: transform 0.1s ease-out;
+        will-change: transform;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        user-select: none;
     }
 </style>
+<script>
+    // Global viewer state management
+    window.manuscriptViewer = {
+        el: null,
+        container: null,
+        state: {
+            scale: 1,
+            rotation: 0,
+            x: 0,
+            y: 0,
+            isDragging: false,
+            startX: 0,
+            startY: 0
+        },
+
+        init: function() {
+            this.el = document.querySelector('.zoomable-image');
+            this.container = document.querySelector('.image-container');
+            
+            if (!this.el) {
+                console.log('manuscriptViewer: image not found');
+                return;
+            }
+            if (!this.container) {
+                console.log('manuscriptViewer: container not found');
+                return;
+            }
+            
+            console.log('manuscriptViewer: initializing drag on image');
+            
+            // Attach mousedown directly to the IMAGE element
+            this.el.onmousedown = this.onMouseDown.bind(this);
+            window.onmousemove = this.onMouseMove.bind(this);
+            window.onmouseup = this.onMouseUp.bind(this);
+            this.el.ondragstart = (e) => e.preventDefault();
+            
+            // Mouse wheel zoom - attach to image
+            this.el.onwheel = this.onWheel.bind(this);
+            
+            // Set initial cursor on the image
+            this.el.style.cursor = 'grab';
+        },
+        
+        onWheel: function(e) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.25 : 0.25;
+            this.state.scale = Math.max(0.25, Math.min(4, this.state.scale + delta));
+            this.applyTransform();
+            // Update zoom label
+            const zoomLabel = document.querySelector('.zoom-level-label');
+            if (zoomLabel) {
+                zoomLabel.textContent = Math.round(this.state.scale * 100) + '%';
+            }
+        },
+        
+        update: function(scale, rotation) {
+            this.state.scale = scale;
+            this.state.rotation = rotation;
+            this.applyTransform();
+        },
+        
+        setTransform: function(x, y, scale, rotation) {
+            this.state.x = x;
+            this.state.y = y;
+            this.state.scale = scale;
+            this.state.rotation = rotation;
+            this.applyTransform();
+        },
+
+        onMouseDown: function(e) {
+            if (e.button !== 0) return; // Only left click
+            e.preventDefault();
+            e.stopPropagation();
+            this.state.isDragging = true;
+            this.state.startX = e.clientX - this.state.x;
+            this.state.startY = e.clientY - this.state.y;
+            this.el.style.cursor = 'grabbing';
+            console.log('manuscriptViewer: drag started');
+        },
+
+        onMouseMove: function(e) {
+            if (!this.state.isDragging) return;
+            e.preventDefault();
+            
+            this.state.x = e.clientX - this.state.startX;
+            this.state.y = e.clientY - this.state.startY;
+            
+            requestAnimationFrame(() => this.applyTransform());
+        },
+
+        onMouseUp: function() {
+            if (this.state.isDragging) {
+                console.log('manuscriptViewer: drag ended');
+            }
+            this.state.isDragging = false;
+            if (this.el) this.el.style.cursor = 'grab';
+        },
+
+        applyTransform: function() {
+            if (!this.el) {
+                 this.el = document.querySelector('.zoomable-image');
+                 if (!this.el) return;
+            }
+            // Translate is applied first (screen coordinates), then rotate/scale
+            this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+        },
+        
+        reset: function() {
+            this.state.x = 0;
+            this.state.y = 0;
+            this.state.rotation = 0;
+            this.state.scale = 1;
+            this.applyTransform();
+        }
+    };
+    
+    // Auto-init when DOM loads or changes
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => window.manuscriptViewer.init(), 500);
+    });
+</script>
 '''
 
 
@@ -423,6 +562,7 @@ class BrowseState:
         self.is_loading: bool = False
         self.error: Optional[str] = None
         self.zoom_level: float = 1.0
+        self.rotation: int = 0
         self.is_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None
         self.page_input_value: int = 1
@@ -444,6 +584,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     image_element = None
     viewer_container = None
     initial_fl_id_value = initial_fl_id
+    slider_refs = {}  # References for UI controls to allow updates from code
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
@@ -747,40 +888,71 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def zoom_in():
         """Increase zoom level."""
         state.zoom_level = min(state.zoom_level + 0.25, 4.0)
-        update_image_zoom()
+        update_image_transform()
 
     def zoom_out():
         """Decrease zoom level."""
         state.zoom_level = max(state.zoom_level - 0.25, 0.25)
-        update_image_zoom()
+        update_image_transform()
 
     def zoom_reset():
         """Reset zoom to 100%."""
         state.zoom_level = 1.0
-        update_image_zoom()
+        state.rotation = 0  # Also reset rotation
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = 0
+        ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.reset();')
+        update_image_transform()
 
     def fit_width():
         """Fit image to container width."""
         state.zoom_level = 1.0
-        update_image_zoom()
+        update_image_transform()
 
     def fit_height():
         """Fit image to container height."""
         state.zoom_level = 0.9
-        update_image_zoom()
+        update_image_transform()
+
+    def rotate_left():
+        """Rotate image 90 degrees counter-clockwise."""
+        state.rotation = (state.rotation - 90) % 360
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = state.rotation
+        update_image_transform()
+
+    def rotate_right():
+        """Rotate image 90 degrees clockwise."""
+        state.rotation = (state.rotation + 90) % 360
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = state.rotation
+        update_image_transform()
+
+    def rotate_reset():
+        """Reset rotation to 0."""
+        state.rotation = 0
+        if slider_refs.get('rotate'):
+            slider_refs['rotate'].value = 0
+        update_image_transform()
+
+    def handle_rotation_slider(e):
+        """Handle rotation slider change."""
+        if e.value is not None:
+             state.rotation = int(e.value)
+             update_image_transform()
 
     def toggle_fullscreen():
         """Toggle fullscreen mode."""
         state.is_fullscreen = not state.is_fullscreen
         update_content()
 
-    def update_image_zoom():
-        """Update the image zoom transform via JavaScript."""
+    def update_image_transform():
+        """Update the image transform (zoom/rotate) via JavaScript."""
         zoom_percent = int(state.zoom_level * 100)
+        # Update Python state on client side
         ui.run_javascript(f'''
-            const img = document.querySelector('.zoomable-image');
-            if (img) {{
-                img.style.transform = 'scale({state.zoom_level})';
+            if (window.manuscriptViewer) {{
+                window.manuscriptViewer.update({state.zoom_level}, {state.rotation});
             }}
             const zoomLabel = document.querySelector('.zoom-level-label');
             if (zoomLabel) {{
@@ -1279,15 +1451,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='remove', on_click=zoom_out).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
                                     ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
                                     ui.button(icon='add', on_click=zoom_in).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
-                                    ui.button(icon='fit_screen', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='rotate_left', on_click=rotate_left).props('flat round size=sm text-color=white').tooltip(tr('Rotate Left'))
+                                    
+                                    # Rotation Slider
+                                    slider_refs['rotate'] = ui.slider(
+                                        min=0, max=360, step=1, value=state.rotation,
+                                        on_change=handle_rotation_slider
+                                    ).props('dark dense').classes('w-32 mx-2').style('transition: none;').on(
+                                        'update:model-value', 
+                                        'if(window.manuscriptViewer) window.manuscriptViewer.update(window.manuscriptViewer.state.scale, $event)'
+                                    )
+                                    
+                                    ui.button(icon='rotate_right', on_click=rotate_right).props('flat round size=sm text-color=white').tooltip(tr('Rotate Right'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='restart_alt', on_click=zoom_reset).props('flat round size=sm text-color=white').tooltip(tr('Reset View'))
 
 
-                            # Image display area
-                            with ui.scroll_area().classes('w-full').style(
-                                'background: #1a1a1a; height: calc(60vh - 60px);'
+                            # Image display area - using div instead of scroll_area for drag support
+                            with ui.element('div').classes('image-container w-full').style(
+                                'background: #1a1a1a; height: calc(60vh - 60px); overflow: hidden; position: relative;'
                             ):
                                 with ui.element('div').style(
-                                    'display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px;'
+                                    'display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;'
                                 ):
                                     safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                     safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
@@ -1296,12 +1482,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     <img
                                         src="{safe_img_url}"
                                         class="zoomable-image"
-                                        style="transform: scale({state.zoom_level}); transform-origin: center; max-width: 100%; max-height: 55vh; object-fit: contain;"
+                                        style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
                                         loading="lazy"
+                                        draggable="false"
+                                        onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
                                         onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)
+                                    ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100);') 
+
 
                     # === RIGHT PANEL: Transcription ===
                     text_panel_flex = 'flex: 1 1 auto;' if has_image else 'flex: 1 1 100%;'
