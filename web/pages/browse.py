@@ -18,6 +18,7 @@ import html as html_module
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState, api_call
+from web.components.typography import h1, h2, h3
 
 
 # ============================================================================
@@ -825,7 +826,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             return
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Item')}: {state.current_page.shelfmark}").style('color: var(--text-secondary);')
 
             lists = app_state.lists_mgr.data.get('lists', {})
@@ -868,7 +870,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             note_text += f" (FL{fl_id})"
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Item')}: {state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}").style('color: var(--text-secondary);')
 
             lists = app_state.lists_mgr.data.get('lists', {})
@@ -1274,13 +1277,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4'):
-                        # Shelfmark
-                        ui.label(page.shelfmark or f"ID: {page.sys_id}").classes(
-                            'text-xl font-bold'
-                        ).style(
-                            'color: #ffffff !important; '
-                            'text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);'
-                        )
+                        # Shelfmark - H2
+                        h2(page.shelfmark or f"ID: {page.sys_id}", classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
 
                         # Oxford Part Label (e.g. [part 6])
                         if page.oxford_part_display:
@@ -1373,7 +1371,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if show_metadata['value']:
                 with ui.card().classes('w-full p-4 mb-3').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
                     with ui.row().classes('w-full items-center justify-between mb-3'):
-                        ui.label(tr('Metadata')).classes('text-lg font-bold').style('color: var(--text-primary);')
+                        # Changed to H3
+                        h3(tr('Metadata'), classes='text-lg font-bold', style='color: var(--text-primary);')
                         ui.button(
                             icon='close',
                             on_click=toggle_metadata
@@ -1430,7 +1429,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # External Links
                     ui.separator().classes('my-3')
-                    ui.label(tr('External link')).classes('text-xs font-bold mb-2').style('color: var(--text-secondary);')
+                    # Changed to H3 (or small title)
+                    h3(tr('External link'), classes='text-xs font-bold mb-2', style='color: var(--text-secondary);')
                     with ui.row().classes('gap-2 flex-wrap'):
                         # NLI Ktiv
                         # NLI Ktiv
@@ -1447,7 +1447,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Export
                     ui.separator().classes('my-3')
-                    ui.label(tr('Export')).classes('text-xs font-bold mb-2').style('color: var(--text-secondary);')
+                    # Changed to H3 (or small title)
+                    h3(tr('Export'), classes='text-xs font-bold mb-2', style='color: var(--text-secondary);')
                     with ui.row().classes('gap-2'):
                         ui.button(
                             tr('Export Word'),
@@ -1462,7 +1463,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Header
                     with ui.row().classes('w-full items-center justify-between p-4 border-b').style('background: var(--bg-tertiary);'):
                         with ui.row().classes('items-center gap-2'):
-                            ui.label(tr('Full Manuscript View')).classes('font-bold text-lg')
+                            # Changed to H2
+                            h2(tr('Full Manuscript View'), classes='font-bold text-lg')
                             ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('text-gray-600 ml-2')
 
                         # Back to single page button
@@ -1481,7 +1483,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Page header
                             with ui.row().classes('w-full items-center gap-2 mb-2'):
-                                ui.label(f"{tr('Page')} {doc_page.p_num}").classes('font-bold text-green-700')
+                                # Changed to H3
+                                h3(f"{tr('Page')} {doc_page.p_num}", classes='font-bold text-green-700')
                                 if doc_page.full_header:
                                     ui.label(doc_page.full_header).classes('text-xs text-gray-500 font-mono')
 
@@ -1564,9 +1567,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Folio/Page info
                             folio = extract_folio_number(page.full_header)
                             if folio:
-                                ui.label(f"{tr('Folio')} {folio}").classes('font-bold text-lg')
+                                # Changed to H2
+                                h2(f"{tr('Folio')} {folio}", classes='font-bold text-lg')
                             else:
-                                ui.label(f"{tr('Page')} {page.p_num}").classes('font-bold text-lg')
+                                # Changed to H2
+                                h2(f"{tr('Page')} {page.p_num}", classes='font-bold text-lg')
 
                             # Source badge - default to V0.8 unless explicitly V0.7
                             source_class = get_source_badge_class(page.full_header)
@@ -1895,9 +1900,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # === Main Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
         # Page title
-        ui.label(tr('Browse Manuscripts')).classes(
-            'text-3xl font-bold mb-6 text-center text-green-800'
-        )
+        # Changed to H1
+        h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800')
 
         # Shelfmark Search Box - Simple and Working
         with ui.card().classes('w-full p-4 mb-6').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);'):

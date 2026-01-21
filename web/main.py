@@ -968,6 +968,7 @@ def show_help_dialog():
 def apply_theme_immediately():
     """Add script to apply theme before page renders to prevent flash."""
     current_theme = app.storage.user.get('theme', 'light')
+    current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
     # Use immediate inline script that runs before any rendering
@@ -989,11 +990,14 @@ def apply_theme_immediately():
     <script>
         (function() {{
             var theme = "{current_theme}";
+            var lang = "{current_lang}";
             // Apply to html immediately (before DOM ready)
             document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.lang = lang;
             // Apply theme function
             var applyTheme = function() {{
                 document.documentElement.setAttribute("data-theme", theme);
+                document.documentElement.lang = lang;
                 if (document.body) {{
                     document.body.setAttribute("data-theme", theme);
                 }}

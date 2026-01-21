@@ -7,6 +7,7 @@ Comprehensive documentation and tutorials for researchers.
 
 from nicegui import ui
 from web.translations import tr, get_language
+from web.components.typography import h1, h2, h3
 
 
 def create_help_page():
@@ -19,14 +20,16 @@ def create_help_page():
 
         # === Page Header ===
         with ui.column().classes('gap-2 mb-4'):
-            ui.label(tr('Help Center')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+            # Changed to H1
+            h1(tr('Help Center'), classes='text-3xl font-bold', style='color: var(--text-primary);')
             ui.label(tr('Learn how to use Genizah Search effectively')).style('color: var(--text-secondary);')
 
         # === Quick Start ===
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('rocket_launch').classes('text-2xl').style('color: var(--primary-600);')
-                ui.label(tr('Quick Start')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Quick Start'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -63,7 +66,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('search').classes('text-2xl').style('color: var(--primary-600);')
-                ui.label(tr('Search Modes')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Search Modes'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 modes = [
@@ -91,7 +95,8 @@ def create_help_page():
             with ui.column().classes('gap-4'):
                 for title, desc, example in modes:
                     with ui.card().classes('p-4').style('background: var(--bg-tertiary);'):
-                        ui.label(title).classes('font-bold').style('color: var(--primary-700);')
+                        # Changed to H3
+                        h3(title, classes='text-lg font-bold', style='color: var(--primary-700);')
                         label_text = desc
                         if is_hebrew:
                             ui.label(label_text).style('color: var(--text-secondary); direction: rtl; text-align: right;')
@@ -108,7 +113,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('menu_book').classes('text-2xl').style('color: var(--primary-600);')
-                ui.label(tr('Browse Manuscripts')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Browse Manuscripts'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -159,7 +165,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('compare_arrows').classes('text-2xl').style('color: var(--accent-amber);')
-                ui.label(tr('Parallels Search')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Parallels Search'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -226,7 +233,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('star').classes('text-2xl').style('color: var(--accent-amber);')
-                ui.label(tr('Personal Lists')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Personal Lists'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -277,7 +285,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('download').classes('text-2xl').style('color: var(--primary-600);')
-                ui.label(tr('Export')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Export'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -322,7 +331,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('source').classes('text-2xl').style('color: var(--text-muted);')
-                ui.label(tr('Data Sources')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Data Sources'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''
@@ -373,7 +383,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('keyboard').classes('text-2xl').style('color: var(--text-muted);')
-                ui.label(tr('Keyboard Shortcuts')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Keyboard Shortcuts'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 shortcuts = [
@@ -409,7 +420,8 @@ def create_help_page():
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('items-center gap-3 mb-4'):
                 ui.icon('feedback').classes('text-2xl').style('color: var(--primary-600);')
-                ui.label(tr('Feedback')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2
+                h2(tr('Feedback'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
             if is_hebrew:
                 ui.markdown('''

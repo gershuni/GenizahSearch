@@ -14,6 +14,7 @@ from web.translations import tr
 from urllib.parse import unquote
 import re
 import html
+from web.components.typography import h1, h2, h3, h4
 
 
 def create_parallels_page(initial_text: str = None):
@@ -51,7 +52,8 @@ def create_parallels_page(initial_text: str = None):
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                ui.label(tr('Find Parallels')).classes('text-3xl font-bold').style('color: var(--text-primary);')
+                # Changed to H1
+                h1(tr('Find Parallels'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('Discover parallel texts in the Genizah corpus')).style('color: var(--text-secondary);')
 
         # === Input Section ===
@@ -60,7 +62,8 @@ def create_parallels_page(initial_text: str = None):
 
                 # Left: Text Input
                 with ui.column().classes('flex-grow gap-4'):
-                    ui.label(tr('Source text')).classes('font-bold').style('color: var(--text-primary);')
+                    # Changed to H2
+                    h2(tr('Source text'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                     text_input = ui.textarea(
                         placeholder=tr('Paste your Hebrew text here...'),
@@ -82,7 +85,8 @@ def create_parallels_page(initial_text: str = None):
 
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
-                    ui.label(tr('Options')).classes('font-bold').style('color: var(--text-primary);')
+                    # Changed to H2
+                    h2(tr('Options'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                     # Mode
                     mode_select = ui.select(
@@ -97,7 +101,8 @@ def create_parallels_page(initial_text: str = None):
 
                     # Chunk Size
                     with ui.column().classes('gap-1'):
-                        ui.label(tr('Chunk size')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        # Changed to H3
+                        h3(tr('Chunk size'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
@@ -135,7 +140,8 @@ def create_parallels_page(initial_text: str = None):
         # === Results Section ===
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('w-full items-center justify-between mb-4'):
-                results_header = ui.label(tr('Results')).classes('text-xl font-bold').style('color: var(--text-primary);')
+                # Changed to H2 (stored in variable but it's a UI element)
+                results_header = h2(tr('Results'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                 with ui.row().classes('gap-2'):
                     # Sort options
@@ -257,7 +263,8 @@ def create_parallels_page(initial_text: str = None):
     def show_empty_state():
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('search_off').classes('text-5xl').style('color: var(--text-muted);')
-            ui.label(tr('No parallels found')).classes('text-xl mt-4').style('color: var(--text-secondary);')
+            # Changed to H3
+            h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
     def render_results(results):
@@ -349,7 +356,8 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('gap-1 flex-grow'):
                     with ui.row().classes('items-center gap-3'):
                         ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
-                        ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
+                        # Changed to H3
+                        h3(shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
                         ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
 
                     if title:
@@ -478,7 +486,8 @@ def create_parallels_page(initial_text: str = None):
                 pass
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96 max-w-2xl'):
-            ui.label(tr('Metadata')).classes('text-xl font-bold mb-4')
+            # Changed to H3
+            h3(tr('Metadata'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-3'):
                 metadata_items = [
@@ -505,7 +514,8 @@ def create_parallels_page(initial_text: str = None):
             return
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
 
             if state.lists_mgr:
@@ -519,7 +529,7 @@ def create_parallels_page(initial_text: str = None):
                     selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
                     note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
 
-                    def add_to_list():
+                    def do_add():
                         if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
                             ui.notify(tr('Added to list'), type='positive')
                             dialog.close()
@@ -647,7 +657,8 @@ def create_parallels_page(initial_text: str = None):
             return
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            ui.label(tr('Add to List')).classes('text-xl font-bold mb-2')
+            # Changed to H3
+            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
             ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
 
             if state.lists_mgr:
@@ -667,7 +678,7 @@ def create_parallels_page(initial_text: str = None):
 
                     with ui.row().classes('w-full justify-end gap-2 mt-6'):
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
+                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
                 else:
                     ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
                     ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
