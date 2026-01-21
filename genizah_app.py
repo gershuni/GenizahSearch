@@ -36,7 +36,7 @@ from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontM
 
 from version import APP_VERSION
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
@@ -1108,6 +1108,8 @@ class ZoomableScrollArea(QGraphicsView):
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
     _thumbnail_ready = pyqtSignal(QPixmap, int)  # pixmap, page_index
+    _memory_cache = OrderedDict()
+    _memory_cache_limit = 16
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1116,6 +1118,10 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.prefetch_enabled = False
+        self.prefetch_radius = 2
+        self._prefetch_threads = {}
+        self._prefetch_inflight = set()
         self.external_provider = None
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
@@ -1314,15 +1320,85 @@ class ManuscriptViewerWidget(QWidget):
         if base_url.endswith('.jpg'): return base_url
         return f"{base_url}/full/600,/0/default.jpg"
 
-    def _preload(self, index):
-        if index < 0 or index >= len(self.active_list): return
-        url = self.active_list[index]['url']
-        final = self._resolve_url(url)
+    def get_first_image_url(self, meta):
+        if not meta:
+            return None
+        images_ext = meta.get('images_ext') or []
+        images_nli = meta.get('images_nli') or []
+        if images_ext:
+            return self._resolve_url(images_ext[0].get('url'))
+        if images_nli:
+            return self._resolve_url(images_nli[0].get('url'))
+        fl_ids = meta.get('fl_ids') if meta else []
+        if isinstance(fl_ids, str):
+            fl_ids = [fl_ids]
+        if fl_ids:
+            return self._fallback_url_for_fl_id(fl_ids[0])
+        return None
 
-        # Spawn thread without connecting signals (just for cache)
-        # Store ref to prevent GC
-        self.preload_worker = ImageLoaderThread(final)
-        self.preload_worker.start()
+    def _fallback_url_for_fl_id(self, fl_id):
+        digits = re.sub(r"\D", "", str(fl_id or ""))
+        if not digits:
+            return None
+        return f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
+
+    def _get_cached_image(self, url):
+        if not url:
+            return None
+        image = self._memory_cache.get(url)
+        if image:
+            self._memory_cache.move_to_end(url)
+        return image
+
+    def _store_cached_image(self, url, image):
+        if not url or image is None or image.isNull():
+            return
+        self._memory_cache[url] = image
+        self._memory_cache.move_to_end(url)
+        while len(self._memory_cache) > self._memory_cache_limit:
+            self._memory_cache.popitem(last=False)
+
+    def _cleanup_prefetch(self, url):
+        self._prefetch_inflight.discard(url)
+        thread = self._prefetch_threads.pop(url, None)
+        if thread and thread.isRunning():
+            thread.wait(100)
+
+    def _start_prefetch(self, url):
+        if not url or not self.prefetch_enabled:
+            return
+        if self._get_cached_image(url) is not None:
+            return
+        if url in self._prefetch_inflight:
+            return
+        self._prefetch_inflight.add(url)
+        thread = ImageLoaderThread(url)
+        thread.image_loaded.connect(lambda image, u=url: self._on_prefetch_loaded(image, u))
+        thread.load_failed.connect(lambda u=url: self._cleanup_prefetch(u))
+        thread.start()
+        self._prefetch_threads[url] = thread
+
+    def _on_prefetch_loaded(self, image, url):
+        self._store_cached_image(url, image)
+        self._cleanup_prefetch(url)
+
+    def prefetch_urls(self, urls):
+        if not self.prefetch_enabled:
+            return
+        for url in urls:
+            self._start_prefetch(url)
+
+    def prefetch_indices(self, indices):
+        if not self.prefetch_enabled or not self.active_list:
+            return
+        urls = []
+        for index in indices:
+            if index < 0 or index >= len(self.active_list):
+                continue
+            url = self._resolve_url(self.active_list[index].get('url'))
+            if url:
+                urls.append(url)
+        self.prefetch_urls(urls)
 
     def _on_thumbnail_ready(self, pix, page_idx):
         """Handle thumbnail loaded signal - only display if still on same page."""
@@ -1375,19 +1451,34 @@ class ManuscriptViewerWidget(QWidget):
             # Use short timeout to avoid blocking UI - thread will finish in background
             self.loader_thread.wait(500)
 
+        final_url = self._resolve_url(base_url)
+        cached_image = self._get_cached_image(final_url)
+        if cached_image is not None:
+            self.display_image(cached_image)
+            self.scroll_area.set_status_message("")
+            if self.prefetch_enabled:
+                offsets = range(1, self.prefetch_radius + 1)
+                indices = [self.current_idx - o for o in offsets] + [self.current_idx + o for o in offsets]
+                self.prefetch_indices(indices)
+            return
+
         # Load thumbnail asynchronously if available (for quick display)
         if thumb_url:
             self._load_thumbnail_async(thumb_url)
 
-        final_url = self._resolve_url(base_url)
-
         self.loader_thread = ImageLoaderThread(final_url)
-        self.loader_thread.image_loaded.connect(self.display_image)
+        self.loader_thread.image_loaded.connect(lambda image, url=final_url: self._on_image_loaded(image, url))
         self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
         self.loader_thread.start()
 
-        # Preload next image
-        self._preload(index + 1)
+        if self.prefetch_enabled:
+            offsets = range(1, self.prefetch_radius + 1)
+            indices = [self.current_idx - o for o in offsets] + [self.current_idx + o for o in offsets]
+            self.prefetch_indices(indices)
+
+    def _on_image_loaded(self, image, url):
+        self._store_cached_image(url, image)
+        self.display_image(image)
 
     def display_image(self, image):
         pix = QPixmap.fromImage(image)
@@ -1999,6 +2090,7 @@ class ResultDialog(QDialog):
         self.current_meta_request = 0
         self.extended_info_visible = False
         self.external_url = None
+        self._prefetch_meta_workers = {}
 
         # External Viewer State
         self.ext_data = None
@@ -2243,6 +2335,7 @@ class ResultDialog(QDialog):
 
         # New: Reusable Viewer Widget
         self.ms_viewer = ManuscriptViewerWidget()
+        self.ms_viewer.prefetch_enabled = True
 
         ext_layout.addWidget(self.lbl_ext_attr)
         ext_layout.addWidget(self.txt_ext_meta)
@@ -3138,15 +3231,19 @@ class ResultDialog(QDialog):
 
         # Preload next result
         self._preload_next_result(idx + 1)
+        self._prefetch_adjacent_results(idx)
+
+    def _resolve_result_sys_id(self, res):
+        meta = res.get('display', {})
+        parsed = self.meta_mgr.parse_full_id_components(res.get('raw_header', ''))
+        return parsed['sys_id'] or meta.get('id')
 
     def _preload_next_result(self, next_idx):
         if next_idx >= len(self.all_results): return
         res = self.all_results[next_idx]
 
         # Extract SID logic from load_result
-        meta = res.get('display', {})
-        parsed = self.meta_mgr.parse_full_id_components(res.get('raw_header', ''))
-        sid = parsed['sys_id'] or meta.get('id')
+        sid = self._resolve_result_sys_id(res)
 
         if not sid: return
 
@@ -3154,6 +3251,35 @@ class ResultDialog(QDialog):
         # We don't connect signals, just run it
         self.preload_meta_worker = EnrichMetadataThread(self.meta_mgr, sid)
         self.preload_meta_worker.start()
+
+    def _prefetch_adjacent_results(self, idx):
+        self._prefetch_result_image(idx - 1)
+        self._prefetch_result_image(idx + 1)
+
+    def _prefetch_result_image(self, idx):
+        if idx < 0 or idx >= len(self.all_results):
+            return
+        res = self.all_results[idx]
+        sid = self._resolve_result_sys_id(res)
+        if not sid:
+            return
+        cached_meta = self.meta_mgr.nli_cache.get(sid)
+        if cached_meta:
+            url = self.ms_viewer.get_first_image_url(cached_meta)
+            if url:
+                self.ms_viewer.prefetch_urls([url])
+            return
+        worker = EnrichMetadataThread(self.meta_mgr, sid)
+        worker.finished_signal.connect(lambda _sid, meta, target_sid=sid: self._on_prefetch_meta_loaded(target_sid, meta))
+        self._prefetch_meta_workers[sid] = worker
+        worker.start()
+
+    def _on_prefetch_meta_loaded(self, sid, meta):
+        if meta:
+            url = self.ms_viewer.get_first_image_url(meta)
+            if url:
+                self.ms_viewer.prefetch_urls([url])
+        self._prefetch_meta_workers.pop(sid, None)
 
     def load_by_shelfmark(self, shelfmark: str, page_num: int = 1):
         """Load a document by shelfmark within the same dialog."""
@@ -3835,6 +3961,7 @@ class GenizahGUI(QMainWindow):
         self.meta_progress_current = 0
         self.browse_thumb_url = None
         self.browse_img_thread = None
+        self._browse_prefetch_workers = {}
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
         self.comp_thread = None 
@@ -5723,6 +5850,7 @@ class GenizahGUI(QMainWindow):
         
         # Right: Image Viewer
         self.browse_viewer = ManuscriptViewerWidget()
+        self.browse_viewer.prefetch_enabled = True
 
         self.browse_splitter.addWidget(self.browse_lists_panel)
         self.browse_splitter.addWidget(text_widget)
@@ -13677,6 +13805,8 @@ class GenizahGUI(QMainWindow):
             )
             self.browse_viewer.set_page(idx)
         # -------------------------------
+        if getattr(self, 'browse_viewer', None) and self.browse_viewer.prefetch_enabled:
+            self._prefetch_browse_adjacent_manuscripts()
 
         if self.current_browse_sid in self.meta_mgr.nli_cache:
             self.fetch_browse_thumbnail(self.current_browse_sid)
@@ -13687,6 +13817,99 @@ class GenizahGUI(QMainWindow):
                 self.browse_thumb_resolved.emit(self.current_browse_sid, "") 
             threading.Thread(target=worker, daemon=True).start()
         
+    def _get_adjacent_browse_target(self, direction):
+        current = self.current_browse_sid
+        if not current or not self.searcher or not self.meta_mgr:
+            return None
+        if self.current_browse_part_id and self.current_browse_part_folios:
+            new_idx = self.current_browse_part_folio_idx + direction
+            if 0 <= new_idx < len(self.current_browse_part_folios):
+                return {
+                    'sid': self.current_browse_part_folios[new_idx],
+                    'part_id': self.current_browse_part_id,
+                    'folio_idx': new_idx,
+                }
+            current_part = self.current_browse_part_id
+            adjacent_part = self.meta_mgr.codico_mgr.get_adjacent_part(current_part, direction)
+            if not adjacent_part:
+                return None
+            folios = self.meta_mgr.get_folios_for_part(adjacent_part) or []
+            if not folios:
+                return None
+            target_idx = 0 if direction > 0 else len(folios) - 1
+            return {
+                'sid': folios[target_idx],
+                'part_id': adjacent_part,
+                'folio_idx': target_idx,
+            }
+
+        new_sid = self.searcher.get_adjacent_sys_id_by_file_order(current, direction)
+        if not new_sid:
+            return None
+        new_part = self.meta_mgr.get_part_for_folio(new_sid)
+        if new_part:
+            folios = self.meta_mgr.get_folios_for_part(new_part) or []
+            if folios:
+                target_idx = folios.index(new_sid) if new_sid in folios else 0
+            else:
+                target_idx = 0
+            return {
+                'sid': new_sid,
+                'part_id': new_part,
+                'folio_idx': target_idx,
+            }
+        return {'sid': new_sid}
+
+    def _prefetch_browse_adjacent_manuscripts(self):
+        for direction in (-1, 1):
+            target = self._get_adjacent_browse_target(direction)
+            if not target:
+                continue
+            self._prefetch_browse_target_image(target)
+
+    def _prefetch_browse_target_image(self, target):
+        if not target or not getattr(self, 'browse_viewer', None):
+            return
+        sid = target.get('sid')
+        part_id = target.get('part_id')
+        if part_id:
+            part_images = self.meta_mgr.get_part_images(part_id)
+            if part_images:
+                images_ext = [{
+                    'label': img.get('label', ''),
+                    'url': img.get('full_url', ''),
+                    'thumb_url': img.get('thumb_url', ''),
+                    'folio_num': img.get('folio_num'),
+                } for img in part_images]
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+                folio_num = _get_folio_number_from_shelfmark(shelfmark)
+                image_idx = _get_folio_image_index({'images_ext': images_ext}, folio_num, side_offset=0)
+                if 0 <= image_idx < len(images_ext):
+                    url = self.browse_viewer._resolve_url(images_ext[image_idx].get('url'))
+                    if url:
+                        self.browse_viewer.prefetch_urls([url])
+                    return
+
+        cached_meta = self.meta_mgr.nli_cache.get(sid) if sid else None
+        if cached_meta:
+            url = self.browse_viewer.get_first_image_url(cached_meta)
+            if url:
+                self.browse_viewer.prefetch_urls([url])
+            return
+
+        if sid:
+            worker = EnrichMetadataThread(self.meta_mgr, sid)
+            worker.finished_signal.connect(lambda _sid, meta, target_sid=sid: self._on_browse_prefetch_meta_loaded(target_sid, meta))
+            self._browse_prefetch_workers[sid] = worker
+            worker.start()
+
+    def _on_browse_prefetch_meta_loaded(self, sid, meta):
+        if meta:
+            url = self.browse_viewer.get_first_image_url(meta)
+            if url:
+                self.browse_viewer.prefetch_urls([url])
+        self._browse_prefetch_workers.pop(sid, None)
+
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
