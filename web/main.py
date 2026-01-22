@@ -818,23 +818,42 @@ COMMON_STYLES = '''
 
     /* Mobile drawer - CSS only, hide on phones/tablets */
     @media (max-width: 768px) {
-        /* Standard LTR Left Drawer */
         .q-drawer--left:not(.q-drawer--on-top) {
-            transform: translateX(-100%) !important;
-        }
-        /* RTL "Right" Drawer (Physically Left) - Ensure it hides to the left */
-        [dir="rtl"] .q-drawer--right:not(.q-drawer--on-top) {
             transform: translateX(-100%) !important;
         }
     }
 
-    /* RTL Layout Fix for "Right" (Left) Drawer */
-    @media (min-width: 769px) {
-        [dir="rtl"] .fix-rtl-layout {
-            margin-left: 280px !important;
-            margin-right: -280px !important;
-            width: auto !important;
-        }
+    /* Force RTL text direction for Hebrew Input/Text only - KEEP LAYOUT LTR */
+
+    /* Ensure Inputs in Hebrew mode are RTL */
+    .hebrew-mode input,
+    .hebrew-mode textarea,
+    .hebrew-mode .q-field__native,
+    .hebrew-mode .q-field__input {
+        direction: rtl !important;
+        text-align: right !important;
+    }
+
+    /* Content Text (Markdown, Paragraphs, Headings) should be RTL in Hebrew */
+    .hebrew-mode .q-markdown,
+    .hebrew-mode p,
+    .hebrew-mode .text-body1,
+    .hebrew-mode .text-body2,
+    .hebrew-mode h1,
+    .hebrew-mode h2,
+    .hebrew-mode h3,
+    .hebrew-mode h4,
+    .hebrew-mode h5,
+    .hebrew-mode h6 {
+        direction: rtl;
+        text-align: right;
+    }
+
+    /* Specific overrides for content that must be RTL */
+    .hebrew-mode .result-snippet,
+    .hebrew-mode .hebrew-text {
+        direction: rtl;
+        text-align: right;
     }
 </style>
 '''
@@ -848,15 +867,14 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
 
-    # Header
-    # Force LTR structure even in RTL mode if requested (User preference: "Structure exactly like English")
-    # In RTL, flex-row flows R->L. We use flex-row-reverse to force L->R flow while keeping RTL text.
-    row_direction = 'flex-row-reverse' if is_rtl() else ''
+    # Global LTR Layout (User Request: "Exact English Copy")
+    # We do NOT use RTL layout mode. All alignment is LTR.
+    # We only inject RTL direction into text content.
 
     with ui.header().classes('q-py-none').style('height: 64px;'):
-        with ui.row().classes(f'w-full h-full items-center justify-between px-6 app-header {row_direction}'):
+        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
-            with ui.row().classes(f'items-center gap-4 {row_direction}'):
+            with ui.row().classes('items-center gap-4'):
                 menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
                 # Logo
@@ -872,9 +890,9 @@ def create_layout():
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
             # Right: Status + Actions + Auth
-            with ui.row().classes(f'items-center gap-2 sm:gap-4 {row_direction}'):
+            with ui.row().classes('items-center gap-2 sm:gap-4'):
                 # Status Indicator
-                with ui.row().classes(f'items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator {row_direction}'):
+                with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
                     status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
                     status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
@@ -900,35 +918,18 @@ def create_layout():
     # Use stored state, default to True (open) on desktop
     drawer_open = app.storage.user.get('drawer_open', True)
 
-    # Determine side based on direction
-    # In RTL, 'left' side is physically on the Right.
-    # To put it on the physical Left in RTL, we need side='right'.
-    drawer_side = 'right' if is_rtl() else 'left'
+    # Standard Left Drawer (LTR Style)
+    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
-    # Create main drawer
-    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
-
-    # Content Area - defined early to allow toggle_drawer access
+    # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
     # Add ID for skip link target
     content_col.props('id=main-content')
 
-    # Apply RTL Fix if drawer is open initially and we are in RTL mode
-    if is_rtl() and drawer_open:
-        content_col.classes('fix-rtl-layout')
-
     def toggle_drawer():
         """Toggle drawer and save state."""
         main_drawer.toggle()
-        new_state = not app.storage.user.get('drawer_open', True)
-        app.storage.user['drawer_open'] = new_state
-
-        # Update RTL fix class if needed
-        if is_rtl():
-            if new_state:
-                content_col.classes(add='fix-rtl-layout')
-            else:
-                content_col.classes(remove='fix-rtl-layout')
+        app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
 
     async def nav_to(path):
         """Navigate and close drawer on mobile only."""
@@ -937,7 +938,6 @@ def create_layout():
         if width < 768:
             app.storage.user['drawer_open'] = False
             main_drawer.hide()
-            # No need to remove fix-rtl-layout here because mobile query handles it via CSS media query
         ui.navigate.to(path)
 
     # Connect menu button to toggle function
@@ -961,18 +961,10 @@ def create_layout():
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
 
-                    # Apply row_direction to nav items to ensure Icon is always on the physical Left (English structure)
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""} {row_direction}').on('click', lambda p=path: nav_to(p)):
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
                         if badge:
-                            # In LTR structure, badge is on right.
-                            # In RTL with flex-row-reverse: Icon (L), Label (C), Badge (R).
-                            # We need to ensure badge is pushed to the end.
-                            # 'ml-auto' (Margin Left Auto) pushes to Right in LTR.
-                            # In RTL mode, 'ml-auto' pushes to Left?
-                            # If we are in flex-row-reverse (L->R visual), ml-auto should push to Right?
-                            # Let's test standard behavior. Usually 'ml-auto' works for LTR.
                             ui.label(badge).classes('nav-item-badge')
 
                 ui.separator().classes('my-4 mx-6')
@@ -986,7 +978,7 @@ def create_layout():
 
                 for path, icon, label, badge in tool_items:
                     is_active = current_page == path
-                    with ui.row().classes(f'nav-item {"active" if is_active else ""} {row_direction}').on('click', lambda p=path: nav_to(p)):
+                    with ui.row().classes(f'nav-item {"active" if is_active else ""}').on('click', lambda p=path: nav_to(p)):
                         ui.icon(icon).classes('nav-item-icon')
                         ui.label(label)
 
@@ -1000,7 +992,7 @@ def create_layout():
                     ui.navigate.reload()
 
                 lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                with ui.row().classes(f'w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100 {row_direction}').props(
+                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').props(
                     'role=button tabindex=0'
                 ).on('click', toggle_lang).on('keydown.enter', toggle_lang).on('keydown.space', toggle_lang):
                     ui.icon('translate').classes('text-lg')
@@ -1037,7 +1029,13 @@ def apply_theme_immediately():
     current_theme = app.storage.user.get('theme', 'light')
     current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
-    dir_attr = "rtl" if current_lang == "he" else "ltr"
+
+    # Force LTR Layout Globally (as per user request: "Interface exactly as English")
+    # We only set dir="ltr" globally.
+    dir_attr = "ltr"
+
+    # Add Hebrew-specific class if needed
+    body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
 
     # Use immediate inline script that runs before any rendering
     return f'''<style>
@@ -1073,6 +1071,11 @@ def apply_theme_immediately():
                 document.documentElement.dir = dir;
                 if (document.body) {{
                     document.body.setAttribute("data-theme", theme);
+                    if (lang === 'he') {{
+                        document.body.classList.add("hebrew-mode");
+                    }} else {{
+                        document.body.classList.remove("hebrew-mode");
+                    }}
                 }}
             }};
             // Execute immediately
