@@ -391,9 +391,9 @@ def create_parallels_page(initial_text: str = None):
         ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
         preview = (ms_text_clean[:80] + '...') if len(ms_text_clean) > 80 else ms_text_clean
 
-        with ui.expansion().classes('w-full').style('border-bottom: 1px solid var(--border-light);'):
+        with ui.expansion().classes('w-full').style('border-bottom: 1px solid var(--border-light);') as expansion:
             # Compact header (always visible)
-            with ui.expansion().add_slot('header'):
+            with expansion.add_slot('header'):
                 with ui.row().classes('w-full items-center gap-3 py-2 px-4'):
                     ui.label(f"#{idx + 1}").classes('text-xs px-2 py-0.5 rounded').style(
                         'background: var(--bg-tertiary); color: var(--text-muted);'
