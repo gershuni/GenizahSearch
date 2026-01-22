@@ -28,6 +28,7 @@ def create_parallels_page(initial_text: str = None):
             self.progress = 0
             self.status = ""
             self.results = []
+            self.finished_animation_shown = False
 
     p_state = ParallelsState()
 
@@ -175,9 +176,10 @@ def create_parallels_page(initial_text: str = None):
         else:
             run_btn.enable()
             cancel_btn.style('display: none;')
-            if p_state.progress >= 1.0:
+            if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
                 progress_bar.value = 1.0
                 status_label.text = tr('Done')
+                p_state.finished_animation_shown = True
                 ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
 
     ui.timer(0.1, update_ui)
@@ -203,6 +205,7 @@ def create_parallels_page(initial_text: str = None):
         p_state.is_running = True
         p_state.is_cancelled = False
         p_state.progress = 0
+        p_state.finished_animation_shown = False
         p_state.status = tr('Initializing search...')
         p_state.results = []
         results_container.clear()
