@@ -104,6 +104,26 @@ COMMON_STYLES = '''
         --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
     }
 
+    /* ========================================================================
+       Accessibility Focus Styles (P0-C)
+       ======================================================================== */
+
+    :focus-visible {
+        outline: 2px solid var(--primary-600) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* Ensure visible focus on buttons and links */
+    button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex="0"]:focus-visible {
+        outline: 2px solid var(--primary-600) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* Adjust for dark theme */
+    [data-theme="dark"] :focus-visible {
+        outline-color: var(--primary-400) !important;
+    }
+
     /* Parchment Theme - Academic & Warm */
     [data-theme="parchment"] {
         --bg-primary: #fffbf5;
@@ -180,6 +200,21 @@ COMMON_STYLES = '''
     [data-theme="dark"] .q-card {
         background: var(--bg-card) !important;
         color: var(--text-primary) !important;
+    }
+
+    /* Dark Theme Menu Fixes */
+    [data-theme="dark"] .q-menu {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--border-light) !important;
+    }
+
+    [data-theme="dark"] .q-item {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-item:hover {
+        background: var(--bg-hover) !important;
     }
 
     [data-theme="dark"] .highlight-match {
@@ -787,6 +822,48 @@ COMMON_STYLES = '''
             transform: translateX(-100%) !important;
         }
     }
+
+    /* Force RTL text direction for Hebrew Input/Text only - KEEP LAYOUT LTR */
+
+    /* Ensure Inputs in Hebrew mode are RTL */
+    .hebrew-mode input,
+    .hebrew-mode textarea,
+    .hebrew-mode .q-field__native,
+    .hebrew-mode .q-field__input {
+        direction: rtl !important;
+        text-align: right !important;
+    }
+
+    /* Content Text (Markdown, Paragraphs, Headings) should be RTL in Hebrew */
+    .hebrew-mode .q-markdown,
+    .hebrew-mode p,
+    .hebrew-mode .text-body1,
+    .hebrew-mode .text-body2,
+    .hebrew-mode h1,
+    .hebrew-mode h2,
+    .hebrew-mode h3,
+    .hebrew-mode h4,
+    .hebrew-mode h5,
+    .hebrew-mode h6,
+    .hebrew-mode .q-item__label,
+    .hebrew-mode .q-field__label {
+        direction: rtl !important;
+        text-align: right !important;
+        width: 100%; /* Ensure headings take full width to allow right alignment */
+    }
+
+    /* Ensure main content container aligns text children to right by default in Hebrew */
+    /* This catches loose text and inline-block elements */
+    .hebrew-mode .main-content {
+        text-align: right;
+    }
+
+    /* Specific overrides for content that must be RTL */
+    .hebrew-mode .result-snippet,
+    .hebrew-mode .hebrew-text {
+        direction: rtl;
+        text-align: right;
+    }
 </style>
 '''
 
@@ -799,12 +876,15 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
 
-    # Header
+    # Global LTR Layout (User Request: "Exact English Copy")
+    # We do NOT use RTL layout mode. All alignment is LTR.
+    # We only inject RTL direction into text content.
+
     with ui.header().classes('q-py-none').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             # Left: Menu + Logo
             with ui.row().classes('items-center gap-4'):
-                menu_btn = ui.button(icon='menu').props('flat round text-color=white')
+                menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
                 # Logo
                 with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
@@ -841,16 +921,23 @@ def create_layout():
                     create_auth_buttons()
 
                 # Help Button (hidden on mobile via CSS)
-                ui.button(icon='help_outline', on_click=lambda: show_help_dialog()).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
+                ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
-    # Left Sidebar (Drawer)
+    # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
     drawer_open = app.storage.user.get('drawer_open', True)
-    left_drawer = ui.left_drawer(value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    # Standard Left Drawer (LTR Style)
+    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    # Content Area
+    content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
+    # Add ID for skip link target
+    content_col.props('id=main-content')
 
     def toggle_drawer():
         """Toggle drawer and save state."""
-        left_drawer.toggle()
+        main_drawer.toggle()
         app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
 
     async def nav_to(path):
@@ -859,13 +946,13 @@ def create_layout():
         width = await ui.run_javascript('window.innerWidth')
         if width < 768:
             app.storage.user['drawer_open'] = False
-            left_drawer.hide()
+            main_drawer.hide()
         ui.navigate.to(path)
 
     # Connect menu button to toggle function
     menu_btn.on('click', toggle_drawer)
 
-    with left_drawer:
+    with main_drawer:
         with ui.column().classes('h-full'):
             # Navigation Section
             with ui.column().classes('flex-grow py-4'):
@@ -914,7 +1001,9 @@ def create_layout():
                     ui.navigate.reload()
 
                 lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').on('click', toggle_lang):
+                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').props(
+                    'role=button tabindex=0'
+                ).on('click', toggle_lang).on('keydown.enter', toggle_lang).on('keydown.space', toggle_lang):
                     ui.icon('translate').classes('text-lg')
                     ui.label(lang_btn_text).classes('text-sm font-medium')
 
@@ -933,32 +1022,11 @@ def create_layout():
                 # Version Info
                 ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
 
-    # Content Area
-    return ui.column().classes('main-content w-full items-stretch flex-grow')
+                # Accessibility Link
+                with ui.row().classes('w-full justify-center mt-2'):
+                    ui.link(tr('Accessibility Statement'), '/accessibility').classes('text-xs opacity-70 hover:opacity-100').style('text-decoration: none; color: inherit;')
 
-
-def show_help_dialog():
-    """Show help dialog with keyboard shortcuts and tips."""
-    with ui.dialog() as dialog, ui.card().classes('p-6 max-w-lg'):
-        ui.label(tr('Keyboard Shortcuts')).classes('text-xl font-bold mb-4')
-
-        shortcuts = [
-            ('/', tr('Focus search')),
-            ('Ctrl+Enter', tr('Execute search')),
-            ('Esc', tr('Close dialogs')),
-            ('Arrow keys', tr('Navigate results')),
-            ('Enter', tr('Open selected result')),
-        ]
-
-        with ui.column().classes('gap-2'):
-            for key, desc in shortcuts:
-                with ui.row().classes('items-center gap-4'):
-                    ui.label(key).classes('font-mono bg-gray-100 px-2 py-1 rounded text-sm')
-                    ui.label(desc).classes('text-gray-600')
-
-        ui.button(tr('Close'), on_click=dialog.close).classes('mt-4 btn-primary')
-
-    dialog.open()
+    return content_col
 
 
 # ============================================================================
@@ -970,6 +1038,13 @@ def apply_theme_immediately():
     current_theme = app.storage.user.get('theme', 'light')
     current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
+
+    # Force LTR Layout Globally (as per user request: "Interface exactly as English")
+    # We only set dir="ltr" globally.
+    dir_attr = "ltr"
+
+    # Add Hebrew-specific class if needed
+    body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
 
     # Use immediate inline script that runs before any rendering
     return f'''<style>
@@ -991,15 +1066,25 @@ def apply_theme_immediately():
         (function() {{
             var theme = "{current_theme}";
             var lang = "{current_lang}";
+            var dir = "{dir_attr}";
+
             // Apply to html immediately (before DOM ready)
             document.documentElement.setAttribute("data-theme", theme);
             document.documentElement.lang = lang;
+            document.documentElement.dir = dir;
+
             // Apply theme function
             var applyTheme = function() {{
                 document.documentElement.setAttribute("data-theme", theme);
                 document.documentElement.lang = lang;
+                document.documentElement.dir = dir;
                 if (document.body) {{
                     document.body.setAttribute("data-theme", theme);
+                    if (lang === 'he') {{
+                        document.body.classList.add("hebrew-mode");
+                    }} else {{
+                        document.body.classList.remove("hebrew-mode");
+                    }}
                 }}
             }};
             // Execute immediately
@@ -1133,6 +1218,17 @@ async def profile_page_route():
     with content:
         from web.pages.profile import create_profile_page
         await create_profile_page()
+
+@ui.page('/accessibility')
+def accessibility_page_route():
+    app.storage.user['current_page'] = '/accessibility'
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.accessibility import create_accessibility_page
+        create_accessibility_page()
 
 # ============================================================================
 # Startup Logic

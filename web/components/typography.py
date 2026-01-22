@@ -19,8 +19,10 @@ class SemanticHeading(ui.html):
         # We construct safe HTML manually, so we disable auto-sanitization to preserve our tags
         super().__init__(content, sanitize=False)
 
-        # Make the wrapper transparent to layout
-        self.style('display: contents')
+        # We DO NOT use display: contents here because it prevents styling (like text-align)
+        # from working correctly on the element itself.
+        # Instead, we let the wrapper div exist, and ensure it fills width if needed.
+        self.classes('w-full')
 
     def _build_html(self, text):
         return f'<{self.tag_name} class="{self.heading_classes}" style="{self.heading_style}">{html.escape(text)}</{self.tag_name}>'

@@ -69,9 +69,9 @@ def create_page():
         with ui.row().classes('w-full gap-6 flex-wrap'):
 
             # Search Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').on(
-                'click', lambda: ui.navigate.to('/search')
-            ):
+            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/search')).on('keydown.enter', lambda: ui.navigate.to('/search')).on('keydown.space', lambda: ui.navigate.to('/search')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-6 items-center gap-4').style(
                         'background: linear-gradient(135deg, var(--primary-600), var(--primary-700));'
@@ -91,12 +91,12 @@ def create_page():
                             for mode in ['Exact', 'Variants', 'Fuzzy', 'Regex']:
                                 ui.badge(tr(mode)).props('outline').classes('text-xs')
 
-                        ui.button(tr('Start Search'), icon='arrow_forward').classes('btn-primary mt-2')
+                        ui.button(tr('Start Search'), icon='arrow_forward').classes('btn-primary mt-2').props('tabindex=-1')
 
             # Parallels Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').on(
-                'click', lambda: ui.navigate.to('/parallels')
-            ):
+            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/parallels')).on('keydown.enter', lambda: ui.navigate.to('/parallels')).on('keydown.space', lambda: ui.navigate.to('/parallels')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-6 items-center gap-4').style(
                         'background: linear-gradient(135deg, #3b82f6, #1d4ed8);'
@@ -116,12 +116,12 @@ def create_page():
                             ui.badge(tr('Lab Mode')).props('outline color=blue').classes('text-xs')
                             ui.badge(tr('Chunk Analysis')).props('outline color=blue').classes('text-xs')
 
-                        ui.button(tr('Find Parallels'), icon='arrow_forward').props('color=blue').classes('mt-2')
+                        ui.button(tr('Find Parallels'), icon='arrow_forward').props('color=blue tabindex=-1').classes('mt-2')
 
             # Browse Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').on(
-                'click', lambda: ui.navigate.to('/browse')
-            ):
+            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/browse')).on('keydown.enter', lambda: ui.navigate.to('/browse')).on('keydown.space', lambda: ui.navigate.to('/browse')):
                 with ui.column().classes('w-full'):
                     with ui.row().classes('w-full p-6 items-center gap-4').style(
                         'background: linear-gradient(135deg, #f59e0b, #d97706);'
@@ -141,15 +141,15 @@ def create_page():
                             ui.badge(tr('Transcriptions')).props('outline color=amber').classes('text-xs')
                             ui.badge(tr('Images')).props('outline color=amber').classes('text-xs')
 
-                        ui.button(tr('Browse'), icon='arrow_forward').props('color=amber').classes('mt-2')
+                        ui.button(tr('Browse'), icon='arrow_forward').props('color=amber tabindex=-1').classes('mt-2')
 
         # === Secondary Actions Row ===
         with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):
 
             # Personal Lists
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').on(
-                'click', lambda: ui.navigate.to('/lists')
-            ):
+            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/lists')).on('keydown.enter', lambda: ui.navigate.to('/lists')).on('keydown.space', lambda: ui.navigate.to('/lists')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: var(--primary-100);'):
                         ui.icon('star').classes('text-2xl').style('color: var(--primary-700);')
@@ -161,9 +161,9 @@ def create_page():
                         )
 
             # Lab Settings
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').on(
-                'click', lambda: ui.navigate.to('/settings')
-            ):
+            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/settings')).on('keydown.enter', lambda: ui.navigate.to('/settings')).on('keydown.space', lambda: ui.navigate.to('/settings')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: #dbeafe;'):
                         ui.icon('tune').classes('text-2xl text-blue-700')
@@ -175,9 +175,9 @@ def create_page():
                         )
 
             # Help Center
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').on(
-                'click', lambda: ui.navigate.to('/help')
-            ):
+            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/help')).on('keydown.enter', lambda: ui.navigate.to('/help')).on('keydown.space', lambda: ui.navigate.to('/help')):
                 with ui.row().classes('items-center gap-4'):
                     with ui.element('div').classes('p-3 rounded-xl').style('background: #fef3c7;'):
                         ui.icon('help_center').classes('text-2xl text-amber-700')
@@ -233,9 +233,9 @@ def create_page():
                                     if not title and title_temp:
                                         title = title_temp
 
-                                with ui.card().classes('p-4 min-w-48 cursor-pointer hover:shadow-md transition-all').on(
-                                    'click', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
-                                ):
+                                with ui.card().classes('p-4 min-w-48 cursor-pointer hover:shadow-md transition-all').props(
+                                    'role=button tabindex=0'
+                                ).on('click', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')).on('keydown.enter', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')).on('keydown.space', lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')):
                                     ui.label(shelfmark).classes('font-semibold truncate').style(
                                         'color: var(--primary-700); max-width: 180px;'
                                     )
