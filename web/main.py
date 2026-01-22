@@ -827,6 +827,15 @@ COMMON_STYLES = '''
             transform: translateX(-100%) !important;
         }
     }
+
+    /* RTL Layout Fix for "Right" (Left) Drawer */
+    @media (min-width: 769px) {
+        [dir="rtl"] .fix-rtl-layout {
+            margin-left: 280px !important;
+            margin-right: -280px !important;
+            width: auto !important;
+        }
+    }
 </style>
 '''
 
@@ -899,10 +908,27 @@ def create_layout():
     # Create main drawer
     main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
+    # Content Area - defined early to allow toggle_drawer access
+    content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
+    # Add ID for skip link target
+    content_col.props('id=main-content')
+
+    # Apply RTL Fix if drawer is open initially and we are in RTL mode
+    if is_rtl() and drawer_open:
+        content_col.classes('fix-rtl-layout')
+
     def toggle_drawer():
         """Toggle drawer and save state."""
         main_drawer.toggle()
-        app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
+        new_state = not app.storage.user.get('drawer_open', True)
+        app.storage.user['drawer_open'] = new_state
+
+        # Update RTL fix class if needed
+        if is_rtl():
+            if new_state:
+                content_col.classes(add='fix-rtl-layout')
+            else:
+                content_col.classes(remove='fix-rtl-layout')
 
     async def nav_to(path):
         """Navigate and close drawer on mobile only."""
@@ -911,6 +937,7 @@ def create_layout():
         if width < 768:
             app.storage.user['drawer_open'] = False
             main_drawer.hide()
+            # No need to remove fix-rtl-layout here because mobile query handles it via CSS media query
         ui.navigate.to(path)
 
     # Connect menu button to toggle function
@@ -998,10 +1025,6 @@ def create_layout():
                 with ui.row().classes('w-full justify-center mt-2'):
                     ui.link(tr('Accessibility Statement'), '/accessibility').classes('text-xs opacity-70 hover:opacity-100').style('text-decoration: none; color: inherit;')
 
-    # Content Area
-    content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
-    # Add ID for skip link target
-    content_col.props('id=main-content')
     return content_col
 
 
