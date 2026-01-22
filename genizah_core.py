@@ -2550,7 +2550,7 @@ class MetadataManager:
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=10, verify=False)
+            resp = session.get(url, headers=headers, timeout=10, verify=True)
             if resp.status_code == 200:
                 data = resp.json()
 

@@ -58,7 +58,7 @@ def init_api_routes():
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=15, verify=False)
+            resp = requests.get(url, headers=headers, timeout=15, verify=True)
             if resp.status_code == 200:
                 data = resp.json()
                 fl_ids = []
@@ -88,7 +88,7 @@ def init_api_routes():
         # Fallback to MARC API (only has 1 FL ID typically)
         try:
             marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-            resp = requests.get(marc_url, headers=headers, timeout=10, verify=False)
+            resp = requests.get(marc_url, headers=headers, timeout=10, verify=True)
             if resp.status_code == 200:
                 fl_ids = re.findall(r'FL(\d+)', resp.text)
                 seen = set()
@@ -125,7 +125,7 @@ def init_api_routes():
         # Try IIIF first (works for valid FL IDs, returns real images)
         iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
         try:
-            resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+            resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # Verify it's not a tiny placeholder (real images are > 5KB)
                 if len(resp.content) > 5000:
@@ -139,7 +139,7 @@ def init_api_routes():
         # Fallback to Rosetta - but filter out the "no image" placeholder
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
         try:
-            resp = requests.get(rosetta_url, headers=headers, timeout=15, verify=False)
+            resp = requests.get(rosetta_url, headers=headers, timeout=15, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # The "no image" placeholder is ~1615 bytes, real images are larger
                 if len(resp.content) > 2000:
@@ -180,7 +180,7 @@ def init_api_routes():
             fl_id = fl_ids[page]
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
             try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
                     return Response(
                         content=resp.content,
@@ -194,7 +194,7 @@ def init_api_routes():
             # Try IIIF
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
             try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=False)
+                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
                     return Response(
                         content=resp.content,
@@ -338,8 +338,8 @@ def init_api_routes():
         }
 
         try:
-            # Fetch the image with timeout (verify=False for NLI SSL issues)
-            resp = requests.get(url, headers=headers, timeout=15, verify=False)
+            # Fetch the image with timeout
+            resp = requests.get(url, headers=headers, timeout=15, verify=True)
             if resp.status_code == 200:
                 return Response(
                     content=resp.content,
