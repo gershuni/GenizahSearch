@@ -844,8 +844,17 @@ COMMON_STYLES = '''
     .hebrew-mode h3,
     .hebrew-mode h4,
     .hebrew-mode h5,
-    .hebrew-mode h6 {
-        direction: rtl;
+    .hebrew-mode h6,
+    .hebrew-mode .q-item__label,
+    .hebrew-mode .q-field__label {
+        direction: rtl !important;
+        text-align: right !important;
+        width: 100%; /* Ensure headings take full width to allow right alignment */
+    }
+
+    /* Ensure main content container aligns text children to right by default in Hebrew */
+    /* This catches loose text and inline-block elements */
+    .hebrew-mode .main-content {
         text-align: right;
     }
 
