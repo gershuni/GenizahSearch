@@ -14,7 +14,7 @@ import sys
 # This ensures the portable path is used
 os.makedirs(os.path.join(os.path.dirname(__file__), "Genizah_Index"), exist_ok=True)
 
-from genizah_core import Indexer, MetadataManager, LabEngine, Config
+from genizah_core import Indexer, MetadataManager, VariantManager, LabEngine, Config
 
 def progress_callback(current, total, message=""):
     """Print progress to console."""
@@ -56,7 +56,9 @@ def build_lab_index():
     print("=" * 60)
     print()
 
-    lab_engine = LabEngine()
+    meta_mgr = MetadataManager()
+    var_mgr = VariantManager()
+    lab_engine = LabEngine(meta_mgr, var_mgr)
 
     try:
         lab_engine.rebuild_lab_index(progress_callback=progress_callback)
