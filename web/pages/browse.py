@@ -27,23 +27,77 @@ from web.components.typography import h1, h2, h3
 
 VIEWER_STYLES = '''
 <script>
-// Global function for handling image errors with fallback
-function handleImageError(img, fallbackUrl) {
-    if (fallbackUrl && img.src !== fallbackUrl) {
-        console.log('Primary image failed, trying fallback:', fallbackUrl);
-        img.src = fallbackUrl;
-        // Initialize viewer after fallback loads
-        img.onload = function() {
-            console.log('Fallback image loaded, initializing viewer');
-            if (window.manuscriptViewer) window.manuscriptViewer.init();
-        };
-    } else {
-        console.log('All image sources failed for:', img.src);
-        img.style.display = 'none';
-        const parent = img.parentElement;
-        if (parent) {
-            parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
+// NLI IIIF base URL for direct browser access
+const NLI_IIIF_BASE = 'https://iiif.nli.org.il/IIIFv21';
+
+// Cache for FL IDs fetched from IIIF manifests
+const flIdCache = {};
+
+// Fetch FL IDs from IIIF manifest (client-side, bypasses server blocking)
+async function fetchFlIdsFromManifest(sysId) {
+    if (flIdCache[sysId]) {
+        return flIdCache[sysId];
+    }
+
+    const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
+    try {
+        const resp = await fetch(manifestUrl);
+        if (!resp.ok) return [];
+
+        const data = await resp.json();
+        const flIds = [];
+
+        if (data.sequences && data.sequences[0] && data.sequences[0].canvases) {
+            for (const canvas of data.sequences[0].canvases) {
+                const images = canvas.images || [];
+                if (images[0] && images[0].resource && images[0].resource.service) {
+                    const serviceId = images[0].resource.service['@id'] || '';
+                    const match = serviceId.match(/FL(\d+)/);
+                    if (match) {
+                        flIds.push(match[1]);
+                    }
+                }
+            }
         }
+
+        if (flIds.length > 0) {
+            flIdCache[sysId] = flIds;
+            console.log(`Cached ${flIds.length} FL IDs for ${sysId} from IIIF manifest`);
+        }
+        return flIds;
+    } catch (e) {
+        console.error(`Failed to fetch IIIF manifest for ${sysId}:`, e);
+        return [];
+    }
+}
+
+// Global function for handling image errors with fallback
+async function handleImageError(img, sysId, pageIdx) {
+    // If we have a sysId, try to fetch FL IDs from the IIIF manifest
+    if (sysId && !img.dataset.triedManifest) {
+        img.dataset.triedManifest = 'true';
+        console.log(`Primary image failed, fetching manifest for sysId: ${sysId}, page: ${pageIdx}`);
+
+        const flIds = await fetchFlIdsFromManifest(sysId);
+        if (flIds.length > 0) {
+            const idx = Math.min(pageIdx || 0, flIds.length - 1);
+            const newUrl = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/max/0/default.jpg`;
+            console.log(`Trying FL ID from manifest: ${flIds[idx]}`);
+            img.src = newUrl;
+            img.onload = function() {
+                console.log('Manifest-based image loaded, initializing viewer');
+                if (window.manuscriptViewer) window.manuscriptViewer.init();
+            };
+            return;
+        }
+    }
+
+    // All fallbacks exhausted
+    console.log('All image sources failed for:', img.src);
+    img.style.display = 'none';
+    const parent = img.parentElement;
+    if (parent) {
+        parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
     }
 }
 </script>
@@ -1533,30 +1587,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Add cache-buster to force image refresh on page navigation
                 cache_bust = f"&_cb={page.p_num}" if page.p_num else ""
 
+                # Page index (0-based) for multi-page manuscripts
+                page_idx = max(0, page.p_num - 1)
+
+                # NLI IIIF base URL for direct browser access (bypasses server blocking)
+                NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+
                 if is_oxford and page.sys_id:
                     has_image = True
-                    # Pass page index (0-based) for multi-page Oxford manuscripts
-                    page_idx = max(0, page.p_num - 1)
+                    # Oxford images still need proxy (different blocking rules)
                     img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
-                    fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"  # Fallback to NLI
-                elif fl_digits:
-                    # Use page-specific FL ID for correct image on each page
-                    # Add cache-buster to force browser reload on page change
-                    # Provide sys_id fallback since FL IDs in data may be stale
-                    has_image = True
-                    img_url = f"/api/nli_image/{fl_digits}?t={page.p_num}"
-                    if page.sys_id:
-                        page_idx = max(0, page.p_num - 1)
-                        fallback_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}"
+                    # For fallback, use direct NLI URL if we have FL ID
+                    if fl_digits:
+                        fallback_url = f"{NLI_IIIF_BASE}/FL{fl_digits}/full/max/0/default.jpg"
                     else:
                         fallback_url = None
-                elif page.sys_id:
-                    # Fallback to sys_id endpoint when no FL ID available
-                    # Pass page index (0-based) for multi-page manuscripts
-                    page_idx = max(0, page.p_num - 1)
+                elif fl_digits:
+                    # Use DIRECT NLI URL (browser fetches directly, bypasses server blocking)
                     has_image = True
-                    # Use simple query params format
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}&t={page.p_num}"
+                    img_url = f"{NLI_IIIF_BASE}/FL{fl_digits}/full/max/0/default.jpg"
+                    # Fallback will be handled by JavaScript fetching IIIF manifest
+                    fallback_url = None
+                elif page.sys_id:
+                    # No FL ID - JavaScript will fetch from IIIF manifest
+                    # Start with a placeholder that will trigger onerror
+                    has_image = True
+                    img_url = f"{NLI_IIIF_BASE}/FL0/full/max/0/default.jpg"  # Will fail, triggering manifest fetch
                     fallback_url = None
 
 
@@ -1741,7 +1797,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;'
                                 ):
                                     safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                                    safe_fallback = fallback_url.replace("'", "\\'").replace('"', '\\"') if fallback_url else ''
+                                    safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
 
                                     img_html = f'''
                                     <img
@@ -1751,7 +1807,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         loading="lazy"
                                         draggable="false"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
-                                        onerror="handleImageError(this, {f"'{safe_fallback}'" if safe_fallback else 'null'})"
+                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx})"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)

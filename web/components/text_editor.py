@@ -200,18 +200,57 @@ def create_edit_text_dialog(
                             with ui.element('div').style(
                                 'display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px;'
                             ):
-                                # Use HTML img with error handling like browse page
-                                safe_url = image_url.replace("'", "\\'").replace('"', '\\"')
-                                # Build fallback URL for sys_id endpoint
-                                fallback_url = ""
-                                if "/api/nli_image/" in image_url:
-                                    # Extract sys_id from document_id for fallback
-                                    fallback_url = f"/api/nli_image_by_sysid/{document_id}?page={page_number - 1}"
+                                # Convert proxy URL to direct NLI URL if needed
+                                import re
+                                NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+                                direct_url = image_url
 
+                                # If it's our proxy URL, convert to direct NLI URL
+                                if "/api/nli_image/" in image_url:
+                                    fl_match = re.search(r'/api/nli_image/(\d+)', image_url)
+                                    if fl_match:
+                                        direct_url = f"{NLI_IIIF_BASE}/FL{fl_match.group(1)}/full/max/0/default.jpg"
+
+                                safe_url = direct_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_doc_id = (document_id or '').replace("'", "\\'").replace('"', '\\"')
+                                page_idx = page_number - 1 if page_number else 0
+
+                                # Use JavaScript fallback that fetches IIIF manifest client-side
                                 img_html = f'''
+                                <script>
+                                // Editor image fallback - fetch FL IDs from IIIF manifest
+                                async function editorImageFallback(img, sysId, pageIdx) {{
+                                    if (!sysId || img.dataset.triedManifest) {{
+                                        img.style.display='none';
+                                        img.parentElement.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Image not available</div>';
+                                        return;
+                                    }}
+                                    img.dataset.triedManifest = 'true';
+                                    try {{
+                                        const resp = await fetch(`https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS${{sysId}}-1/manifest`);
+                                        if (!resp.ok) throw new Error('Manifest not found');
+                                        const data = await resp.json();
+                                        const flIds = [];
+                                        if (data.sequences && data.sequences[0]) {{
+                                            for (const canvas of data.sequences[0].canvases || []) {{
+                                                const svc = canvas.images?.[0]?.resource?.service?.['@id'] || '';
+                                                const m = svc.match(/FL(\\d+)/);
+                                                if (m) flIds.push(m[1]);
+                                            }}
+                                        }}
+                                        if (flIds.length > 0) {{
+                                            const idx = Math.min(pageIdx || 0, flIds.length - 1);
+                                            img.src = `https://iiif.nli.org.il/IIIFv21/FL${{flIds[idx]}}/full/max/0/default.jpg`;
+                                            return;
+                                        }}
+                                    }} catch(e) {{ console.error('Manifest fetch failed:', e); }}
+                                    img.style.display='none';
+                                    img.parentElement.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Image not available</div>';
+                                }}
+                                </script>
                                 <img src="{safe_url}"
                                      style="max-width: 100%; max-height: 60vh; object-fit: contain;"
-                                     onerror="if(this.src !== '{fallback_url}' && '{fallback_url}') {{ this.src='{fallback_url}'; }} else {{ this.style.display='none'; this.parentElement.innerHTML='<div style=\\'text-align:center;color:#888;padding:20px;\\'>Image not available</div>'; }}"
+                                     onerror="editorImageFallback(this, '{safe_doc_id}', {page_idx})"
                                 />
                                 '''
                                 ui.html(img_html, sanitize=False)

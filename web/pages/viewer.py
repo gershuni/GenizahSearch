@@ -206,8 +206,9 @@ def load_result(container, result):
                     digits = re.sub(r"\D", "", str(fl_id))
 
                     with ui.scroll_area().classes('w-full h-full flex items-center justify-center bg-gray-900'):
-                        # Simple NLI image endpoint - just pass FL ID
-                        img_url = f"/api/nli_image/{digits}"
+                        # Direct NLI IIIF URL (browser fetches directly, bypasses server blocking)
+                        NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+                        img_url = f"{NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
                         ui.image(img_url).props('fit=contain').classes('h-[80vh] w-auto max-w-none').style(
                             'max-height: 80vh; object-fit: contain;'
                         )
