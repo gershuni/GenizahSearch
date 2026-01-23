@@ -199,12 +199,12 @@ class CorrectionsClient:
         Initialize the corrections client.
 
         Args:
-            base_url: API base URL (default: http://localhost:8000/api/v1)
+            base_url: API base URL (default: https://genizahsearch.com/api/v1)
             config_path: Path to store credentials
         """
         self.base_url = base_url or os.environ.get(
             'CORRECTIONS_API_URL',
-            'http://localhost:8000/api/v1'
+            'https://genizahsearch.com/api/v1'
         )
         self.config_path = config_path or Path.home() / '.genizah_corrections'
         self.config_path.mkdir(exist_ok=True)

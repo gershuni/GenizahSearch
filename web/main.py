@@ -1278,11 +1278,15 @@ if __name__ in {'__main__', '__mp_main__'}:
     print(f"  Starting on port {APP_PORT}...")
     print(f"{'='*60}\n")
 
+    # Production settings via environment variables
+    reload_enabled = os.environ.get('NICEGUI_RELOAD', 'true').lower() == 'true'
+    show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
+
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
-        reload=True,
-        show=True,
+        reload=reload_enabled,
+        show=show_browser,
         favicon='📜',
         storage_secret='genizah-secret-v5',
     )
