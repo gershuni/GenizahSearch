@@ -9489,53 +9489,27 @@ class GenizahGUI(QMainWindow):
         if self.is_searching: self.stop_search()
         else: self.start_search()
 
-    def _detect_query_prefix(self, query: str) -> tuple:
-        """
-        Detect search mode prefix in query and return (mode_override, clean_query).
-
-        Prefixes:
-          ???  -> variants_maximum
-          ??   -> variants_extended
-          ?    -> variants
-          =    -> literal
-          ~    -> fuzzy
-          /    -> Regex
-          $    -> Title
-          #    -> Shelfmark
-
-        Returns (None, query) if no prefix found.
-        """
-        # Order matters: check longer prefixes first
-        prefix_map = [
-            ('???', 'variants_maximum', 3),
-            ('??', 'variants_extended', 2),
-            ('?', 'variants', 1),
-            ('=', 'literal', 0),
-            ('~', 'fuzzy', 4),
-            ('/', 'Regex', 5),
-            ('$', 'Title', 6),
-            ('#', 'Shelfmark', 7),
-        ]
-
-        for prefix, mode, combo_idx in prefix_map:
-            if query.startswith(prefix):
-                clean_query = query[len(prefix):].lstrip()
-                if clean_query:  # Only if there's actual query after prefix
-                    return (mode, combo_idx, clean_query)
-
-        return (None, None, query)
-
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
 
-        # Detect query prefix (?, ??, ???, ~, /)
-        mode_override, combo_idx, clean_query = self._detect_query_prefix(query)
+        # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
+        mode_override, clean_query = self.searcher.parse_query_syntax(query)
 
         if mode_override:
-            # Update combo to reflect detected mode
-            self.mode_combo.setCurrentIndex(combo_idx)
-            query = clean_query
+            # Map mode string back to combo index
+            # modes list must match the order in init_ui or be derived dynamically
+            modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+            # Handle 'exact' vs 'literal' naming difference if present
+            core_mode = mode_override
+            if core_mode == 'exact': core_mode = 'literal'
+
+            try:
+                combo_idx = modes.index(core_mode)
+                self.mode_combo.setCurrentIndex(combo_idx)
+                query = clean_query
+            except ValueError:
+                pass # Mode not found in UI list
 
         mode_idx = self.mode_combo.currentIndex()
         modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']

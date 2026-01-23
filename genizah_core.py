@@ -3772,7 +3772,34 @@ class SearchEngine:
 
         return best_page['text'], best_page['head'], best_page['src'], best_page['uid']
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None):
+    def parse_query_syntax(self, query):
+        """
+        Parses search syntax prefix from query string.
+        Returns (mode, clean_query). If no prefix, returns (None, query).
+        """
+        if not query: return None, ""
+
+        # Order matters: check longer prefixes first
+        prefix_map = [
+            ('???', 'variants_maximum'),
+            ('??', 'variants_extended'),
+            ('?', 'variants'),
+            ('=', 'exact'),
+            ('~', 'fuzzy'),
+            ('/', 'Regex'),
+            ('$', 'Title'),
+            ('#', 'Shelfmark'),
+        ]
+
+        for prefix, mode in prefix_map:
+            if query.startswith(prefix):
+                clean = query[len(prefix):].lstrip()
+                if clean:
+                    return mode, clean
+
+        return None, query
+
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None):
         if not self.searcher: return []
 
         # --- Metadata Search Modes ---
@@ -3897,7 +3924,27 @@ class SearchEngine:
                 LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}")
         deduped = self._deduplicate(results)
-        LOGGER.info(f"[DEBUG] Results after dedup: {len(deduped)}")
+
+        # --- Apply Exclusion Filter (NOT Filter) ---
+        if exclude_words and deduped:
+            filtered = []
+            for r in deduped:
+                # Combine text fields for checking
+                # We check snippet and full_text to be safe
+                text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
+
+                # Check if ANY excluded word is present
+                should_exclude = False
+                for w in exclude_words:
+                    if w.lower() in text_content:
+                        should_exclude = True
+                        break
+
+                if not should_exclude:
+                    filtered.append(r)
+            deduped = filtered
+
+        LOGGER.info(f"[DEBUG] Results after dedup & filtering: {len(deduped)}")
         return deduped
 
     def _deduplicate(self, results):
