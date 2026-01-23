@@ -358,3 +358,117 @@ The Oxford codicological data is stored in a JSON database file (`Config.OXFORD_
 | Organization | Flat (FL IDs per page) | Hierarchical (Parts contain folios) |
 | Manager | None (direct API calls) | CodicologicalManager |
 | Local database | None (fetched from NLI) | OXFORD_DB JSON file |
+
+---
+
+## Production Deployment: Direct Browser Loading (January 2026)
+
+### Problem: Server IP Blocking
+
+When deploying to AWS EC2, we discovered that **NLI blocks image requests from datacenter IPs**. The original architecture proxied images through our server:
+
+```
+Browser → Our Server (AWS) → NLI  ❌ BLOCKED (403/503)
+```
+
+NLI's Cloudflare protection returns:
+- `403 Forbidden` - unauthorized access
+- `503 Service Unavailable` - rate limiting
+- Error message: "Error, no permissions, please contact administrator"
+
+This worked on localhost because the developer's machine could reach NLI, but failed in production.
+
+### Solution: Direct Browser Loading
+
+Changed architecture so the **browser fetches images directly from NLI**:
+
+```
+Browser → NLI directly  ✅ WORKS
+```
+
+#### Implementation Changes
+
+**1. Direct IIIF URLs (`web/pages/browse.py`)**
+
+Instead of:
+```python
+img_url = f"/api/nli_image/{fl_digits}?t={page.p_num}"
+```
+
+Now uses:
+```python
+NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+img_url = f"{NLI_IIIF_BASE}/FL{fl_digits}/full/max/0/default.jpg"
+```
+
+**2. Client-Side Fallback (JavaScript)**
+
+When the primary FL ID is stale, JavaScript fetches the IIIF manifest directly from the browser:
+
+```javascript
+async function handleImageError(img, sysId, pageIdx) {
+    // Fetch IIIF manifest client-side (browser → NLI)
+    const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
+    const resp = await fetch(manifestUrl);
+    const data = await resp.json();
+
+    // Extract FL IDs from manifest
+    const flIds = data.sequences[0].canvases.map(canvas => {
+        const serviceId = canvas.images[0].resource.service['@id'];
+        return serviceId.match(/FL(\d+)/)[1];
+    });
+
+    // Retry with correct FL ID
+    img.src = `${NLI_IIIF_BASE}/FL${flIds[pageIdx]}/full/max/0/default.jpg`;
+}
+```
+
+**3. Image Tag with Fallback**
+
+```html
+<img src="https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
+     onerror="handleImageError(this, '{sys_id}', {page_idx})"
+/>
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `web/pages/browse.py` | Direct NLI URLs, client-side JS fallback |
+| `web/pages/viewer.py` | Direct NLI URLs |
+| `web/components/text_editor.py` | Direct NLI URLs, client-side JS fallback |
+
+### Architecture Comparison
+
+| Aspect | Original (Localhost) | Production (AWS) |
+|--------|---------------------|------------------|
+| Image fetch | Server proxy | Direct browser |
+| NLI access | Server → NLI | Browser → NLI |
+| Fallback | Server fetches manifest | Browser fetches manifest |
+| Caching | Server-side (5 min) | Browser-side (JS cache) |
+
+### Why This Works
+
+1. **Browser requests look legitimate**: Real User-Agent, cookies, normal headers
+2. **No datacenter IP detection**: Request comes from user's ISP, not AWS
+3. **CORS allowed**: NLI's IIIF endpoints allow cross-origin requests for images
+4. **IIIF manifest accessible**: The manifest JSON is also accessible from browsers
+
+### Server Proxy Endpoints (Deprecated for NLI)
+
+The following endpoints still exist but are **not used for NLI in production**:
+
+- `/api/nli_image/{fl_id}` - Blocked by NLI from AWS
+- `/api/nli_image_by_sysid/{sys_id}` - Blocked by NLI from AWS
+
+They may still work for local development or if NLI changes their policy.
+
+### Oxford Images
+
+Oxford images (`/api/oxford_image/`) still use server proxy because:
+1. Oxford may have different blocking rules
+2. The CodicologicalManager lookup happens server-side
+3. Not yet tested if Oxford blocks AWS IPs
+
+If Oxford blocking occurs, a similar client-side approach would be needed.
