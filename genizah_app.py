@@ -5074,6 +5074,11 @@ class GenizahGUI(QMainWindow):
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
 
+        # Exclude Words Filter (New)
+        self.exclude_input = QLineEdit(); self.exclude_input.setPlaceholderText(tr("Exclude Words"))
+        self.exclude_input.setToolTip(tr("Results containing these words will be filtered out"))
+        self.exclude_input.setFixedWidth(120)
+
         # Gear button for search settings
         self.btn_search_settings = QPushButton("⚙")
         self.btn_search_settings.setFixedWidth(30)
@@ -5102,6 +5107,8 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.mode_combo)
         row2.addWidget(QLabel(tr("Gap:")))
         row2.addWidget(self.gap_input)
+        row2.addWidget(QLabel(tr("Exclude:")))
+        row2.addWidget(self.exclude_input)
         row2.addWidget(self.btn_search_settings)
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
@@ -9516,6 +9523,10 @@ class GenizahGUI(QMainWindow):
         mode = modes[mode_idx]
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
+        # Get Excluded Words
+        exclude_text = self.exclude_input.text().strip()
+        exclude_words = exclude_text.split() if exclude_text else []
+
         self.last_search_query = query
 
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
@@ -9546,7 +9557,7 @@ class GenizahGUI(QMainWindow):
 
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
-            self.search_thread = SearchThread(self.searcher, query, mode, gap)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
@@ -9569,10 +9580,7 @@ class GenizahGUI(QMainWindow):
 
     def render_asterisks_to_html(self, text):
         if not text: return ""
-        # Escape HTML chars
-        t = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        # Convert *word* to highlighted span
-        t = re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', t)
+        t = SearchEngine.format_snippet(text, style='html_inline')
         return f"<div dir='rtl'>{t}</div>"
 
     def check_scroll_load(self, value):
