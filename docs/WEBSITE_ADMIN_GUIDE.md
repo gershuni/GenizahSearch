@@ -11,6 +11,7 @@
 |------|-----------|
 | **Website URL** | https://genizahsearch.com |
 | **API Documentation** | https://genizahsearch.com/api/docs |
+| **Server Management** | https://admin.genizahsearch.com (Cockpit) |
 | **Server Access** | `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com` |
 | **Cloudflare Dashboard** | https://dash.cloudflare.com |
 
@@ -274,6 +275,49 @@ cd /home/ubuntu/GenizahSearch && ./deploy.sh
 # Create admin user
 cd /home/ubuntu/GenizahSearch && source venv/bin/activate && python create_admin.py email password "Name"
 ```
+
+---
+
+## Server Management with Cockpit (Easy Mode)
+
+Cockpit is a web-based tool that lets you manage the server through your browser - no command line needed!
+
+### How to Access
+1. Go to: **https://admin.genizahsearch.com**
+2. Login with username: `ubuntu`
+3. Use the password you set (see below if you haven't set one)
+
+### First Time Setup
+Set a password for Cockpit login:
+```bash
+ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo passwd ubuntu"
+```
+Enter a password when prompted (you'll type it twice).
+
+### What Each Section Does
+
+| Section | What It's For | When to Use |
+|---------|---------------|-------------|
+| **Overview** | See CPU, memory, disk at a glance | Check if server is healthy |
+| **Services** | Start/stop/restart programs | Restart website if broken |
+| **Logs** | See what's happening | Troubleshoot problems |
+| **Storage** | Check disk space | Make sure disk isn't full |
+| **Terminal** | Run commands in browser | When you can't use SSH |
+
+### Most Common Task: Restart the Website
+
+1. Go to **Services**
+2. Search for `genizah`
+3. Click on `genizah-backend`
+4. Click the **Restart** button (circular arrow)
+5. Repeat for `genizah-web`
+
+### What to Ignore
+You can safely ignore these sections - they're for advanced users:
+- Networking
+- Accounts
+- Software Updates (ask before updating)
+- podman/Containers
 
 ---
 

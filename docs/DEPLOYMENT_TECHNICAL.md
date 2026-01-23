@@ -5,6 +5,30 @@
 
 ---
 
+## Deployment Summary
+
+This production deployment was set up in January 2026. Key decisions:
+
+- **Domain**: Registered via Cloudflare (includes DNS, SSL, DDoS protection)
+- **Transcriptions data**: Downloaded from Zenodo (https://zenodo.org/records/17734473)
+- **Search indexes**: Built on-server using `build_index.py` (~1 hour build time)
+- **Database**: PostgreSQL for user data; Tantivy for manuscript search
+- **Management**: Cockpit web UI at admin.genizahsearch.com
+
+### Data Sources
+| File | Source | Size |
+|------|--------|------|
+| Transcriptions.txt (V0.8) | Zenodo | 1.4 GB |
+| Genizah_OLD.txt (V0.7) | Optional, local upload | ~1 GB |
+
+### Index Sizes (built from Transcriptions.txt)
+| Index | Size | Purpose |
+|-------|------|---------|
+| tantivy_db | 3.3 GB | Main manuscript search |
+| lab_index | 3.0 GB | Parallels/lab features |
+
+---
+
 ## Infrastructure Overview
 
 ### Server Details
@@ -23,6 +47,13 @@
 | Registrar | Cloudflare |
 | DNS | Cloudflare (Proxied) |
 | SSL | Let's Encrypt + Cloudflare |
+
+### Cloudflare DNS Records
+| Type | Name | Target | Proxy |
+|------|------|--------|-------|
+| A | genizahsearch.com | 44.247.206.248 | Proxied |
+| CNAME | www | genizahsearch.com | Proxied |
+| CNAME | admin | genizahsearch.com | Proxied |
 
 ### Application Stack
 | Component | Technology | Port |
@@ -380,8 +411,55 @@ tar -czvf /home/ubuntu/backups/indexes_$(date +%Y%m%d).tar.gz /home/ubuntu/Geniz
 
 ---
 
+## Cockpit Server Management
+
+Cockpit provides a web-based UI for server management.
+
+### Access
+- URL: https://admin.genizahsearch.com
+- User: `ubuntu`
+- Auth: Password (set via `sudo passwd ubuntu`)
+
+### Nginx Configuration (`/etc/nginx/sites-available/cockpit`)
+```nginx
+server {
+    listen 443 ssl;
+    server_name admin.genizahsearch.com;
+
+    ssl_certificate /etc/letsencrypt/live/genizahsearch.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/genizahsearch.com/privkey.pem;
+
+    location / {
+        proxy_pass https://127.0.0.1:9090;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_ssl_verify off;
+    }
+}
+```
+
+### Service Management
+```bash
+# Cockpit is socket-activated
+sudo systemctl status cockpit.socket
+sudo systemctl restart cockpit.socket
+```
+
+---
+
+## Pending / Optional Tasks
+
+- [ ] Upload V0.7 transcriptions (Genizah_OLD.txt) for historical comparison
+- [ ] Set Cloudflare SSL mode to "Full (strict)" for additional security
+- [ ] Configure automated database backups (cron job)
+- [ ] Set up monitoring alerts (optional: UptimeRobot, Healthchecks.io)
+
+---
+
 ## Contact & Resources
 
 - GitHub Repository: https://github.com/gershuni/GenizahSearch
 - API Documentation: https://genizahsearch.com/api/docs
+- Server Management: https://admin.genizahsearch.com
 - Cloudflare Dashboard: https://dash.cloudflare.com
