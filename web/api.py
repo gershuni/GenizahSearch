@@ -1,5 +1,6 @@
 from nicegui import app
 from fastapi import Response
+from fastapi.responses import RedirectResponse
 from web.state import state
 import requests
 import re
@@ -152,21 +153,30 @@ def init_api_routes():
 
         return Response(content="Image not found", status_code=404)
 
+    # Image cache: (sys_id, page) -> (content, content_type, timestamp)
+    _image_cache = {}
+    _IMAGE_CACHE_TTL = 600  # 10 minutes
+
     @app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI MARC API.
-        This is what the desktop does - it fetches the correct FL IDs from NLI.
-
-        Args:
-            sys_id: The system ID
-            page: Page index (0-based) to select which FL ID to use for multi-page manuscripts
         """
-        print(f"[DEBUG] nli_image_by_sysid called: sys_id={sys_id}, page={page}")
+        import time as _time
+        cache_key = (sys_id, page)
 
-        # Fetch FL IDs from NLI
+        # Check image cache first
+        if cache_key in _image_cache:
+            content, content_type, cached_at = _image_cache[cache_key]
+            if _time.time() - cached_at < _IMAGE_CACHE_TTL:
+                return Response(
+                    content=content,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=600"}
+                )
+
+        # Fetch FL IDs from NLI (this function has its own cache)
         fl_ids = fetch_fl_ids_from_nli(sys_id)
-        print(f"[DEBUG] FL IDs fetched: {fl_ids}")
         if not fl_ids:
             return Response(content="No FL IDs found for this document", status_code=404)
 
@@ -182,39 +192,65 @@ def init_api_routes():
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                    content_type = resp.headers.get('Content-Type', 'image/jpeg')
+                    # Cache the image
+                    _image_cache[cache_key] = (resp.content, content_type, _time.time())
                     return Response(
                         content=resp.content,
-                        media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                        media_type=content_type,
+                        headers={"Cache-Control": "public, max-age=600"}
                     )
             except Exception:
                 pass
 
         # Fallback: try each FL ID until one works
         for fl_id in fl_ids:
-            # Try IIIF
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                    content_type = resp.headers.get('Content-Type', 'image/jpeg')
+                    _image_cache[cache_key] = (resp.content, content_type, _time.time())
                     return Response(
                         content=resp.content,
-                        media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                        media_type=content_type,
+                        headers={"Cache-Control": "public, max-age=600"}
                     )
             except Exception:
                 pass
 
         return Response(content="Image not found", status_code=404)
 
+    # Oxford image cache: (sys_id, page) -> (content, content_type, timestamp)
+    _oxford_image_cache = {}
+
+    def _extract_folio_number(shelfmark: str) -> int:
+        """Extract folio number from Oxford shelfmark like 'MS heb. f.21/21' -> 21"""
+        # Pattern: MS heb. X.YY/ZZ where ZZ is the folio number
+        match = re.search(r'/(\d+)', shelfmark)
+        if match:
+            return int(match.group(1))
+        return 0
+
     @app.get('/api/oxford_image/{sys_id}')
     def oxford_image(sys_id: str, page: int = 0):
         """
         Fetch Oxford image by System ID using CodicologicalManager.
-        Uses the same logic as the desktop app.
-
-        Args:
-            sys_id: The system ID (folio ID)
-            page: Optional page index within the part (default 0 = first image)
+        Automatically finds the correct folio image based on shelfmark.
         """
+        import time as _time
+        cache_key = (sys_id, page)
+
+        # Check image cache first
+        if cache_key in _oxford_image_cache:
+            content, content_type, cached_at = _oxford_image_cache[cache_key]
+            if _time.time() - cached_at < _IMAGE_CACHE_TTL:
+                return Response(
+                    content=content,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=600"}
+                )
+
         if not state.meta_mgr or not state.meta_mgr.codico_mgr:
             return Response(content="Oxford manager not initialized", status_code=503)
 
@@ -224,37 +260,65 @@ def init_api_routes():
 
         # Get the Part ID for this system ID
         part_id = codico.get_part_for_folio(sys_id)
-        if not part_id:
-            # Try to find by shelfmark
-            meta = state.meta_mgr.get_cached_meta(sys_id)
-            if meta:
-                shelfmark = meta.get('shelfmark', '')
-                # Try to resolve the part from shelfmark
-                part_id, is_part = codico.parse_part_identifier(shelfmark)
-                if not is_part:
-                    part_id = None
+
+        # Get shelfmark for folio number extraction
+        shelfmark = ''
+        shelfmark_tuple = state.meta_mgr.get_meta_for_id(sys_id)
+        if shelfmark_tuple and shelfmark_tuple[0]:
+            shelfmark = shelfmark_tuple[0]
+
+        if not part_id and shelfmark:
+            # Try to find part by shelfmark
+            part_id, is_part = codico.parse_part_identifier(shelfmark)
+            if not is_part:
+                part_id = None
 
         if not part_id:
-            print(f"No Oxford Part found for sys_id: {sys_id}")
             return Response(content="No Oxford Part found for this document", status_code=404)
 
         # Get images for this part
         images = codico.get_part_images(part_id)
         if not images:
-            print(f"No images for Oxford Part: {part_id}")
             return Response(content="No images available for this Part", status_code=404)
 
-        # Get the requested image (default to first)
-        if page < 0 or page >= len(images):
-            page = 0
+        # Extract folio number from shelfmark and find the matching image
+        folio_num = _extract_folio_number(shelfmark)
+        img_data = None
+        img_url = ''
 
-        img_data = images[page]
-        img_url = img_data.get('full_url', '')
+        if folio_num > 0:
+            # Find all images matching this folio number (both 'a' and 'b' sides)
+            folio_images = [img for img in images if img.get('folio_num') == folio_num]
+
+            if folio_images:
+                # Use page param to select: 0 = first (recto/a), 1 = second (verso/b)
+                idx = min(page, len(folio_images) - 1)
+                img_data = folio_images[idx]
+            else:
+                # If image not in database but folio is in range, generate URL dynamically
+                metadata = codico.part_metadata.get(part_id, {})
+                folio_range = metadata.get('folio_range', [])
+                if len(folio_range) >= 2 and folio_range[0] <= folio_num <= folio_range[1]:
+                    # Generate URL based on part_id pattern
+                    # MS. Heb. f. 21/1 -> MS_HEB_f_21_18a.jpg or MS_HEB_f_21_18b.jpg
+                    match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)', part_id, re.IGNORECASE)
+                    if match:
+                        letter, volume = match.groups()
+                        # page 0 = recto (a), page 1 = verso (b)
+                        side = 'b' if page == 1 else 'a'
+                        img_url = f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio_num}{side}.jpg"
+
+        # Fallback to page index if folio not found and no dynamic URL
+        if not img_data and not img_url:
+            if page < 0 or page >= len(images):
+                page = 0
+            img_data = images[page]
+
+        if not img_url and img_data:
+            img_url = img_data.get('full_url', '')
 
         if not img_url:
             return Response(content="No image URL available", status_code=404)
-
-        print(f"Fetching Oxford image: {img_url}")
 
         # Fetch the image from Oxford
         headers = {
@@ -265,16 +329,73 @@ def init_api_routes():
         try:
             resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
+                content_type = resp.headers.get('Content-Type', 'image/jpeg')
+                # Cache the image
+                _oxford_image_cache[cache_key] = (resp.content, content_type, _time.time())
                 return Response(
                     content=resp.content,
-                    media_type=resp.headers.get('Content-Type', 'image/jpeg')
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=600"}
                 )
             else:
-                print(f"Oxford image fetch failed: {resp.status_code}")
                 return Response(content=f"Failed to fetch image: {resp.status_code}", status_code=resp.status_code)
         except Exception as e:
-            print(f"Oxford image fetch error: {e}")
             return Response(content=f"Error fetching image: {e}", status_code=500)
+
+    @app.get('/api/oxford_image_url/{sys_id}')
+    def oxford_image_url(sys_id: str, page: int = 0):
+        """
+        Get the direct Oxford URL for an image (no proxy).
+        Returns JSON with the URL that the browser can fetch directly.
+        """
+        if not state.meta_mgr or not state.meta_mgr.codico_mgr:
+            return {"error": "Oxford manager not initialized", "url": None}
+
+        codico = state.meta_mgr.codico_mgr
+        if not getattr(codico, '_loaded', False):
+            return {"error": "Oxford database still loading", "url": None}
+
+        # Get shelfmark for folio number extraction
+        shelfmark = ''
+        shelfmark_tuple = state.meta_mgr.get_meta_for_id(sys_id)
+        if shelfmark_tuple and shelfmark_tuple[0]:
+            shelfmark = shelfmark_tuple[0]
+
+        part_id = codico.get_part_for_folio(sys_id)
+        if not part_id and shelfmark:
+            part_id, is_part = codico.parse_part_identifier(shelfmark)
+            if not is_part:
+                part_id = None
+
+        if not part_id:
+            return {"error": "No Oxford Part found", "url": None}
+
+        images = codico.get_part_images(part_id)
+        folio_num = _extract_folio_number(shelfmark)
+        img_url = None
+
+        if folio_num > 0:
+            # Find images for this folio
+            folio_images = [img for img in images if img.get('folio_num') == folio_num]
+            if folio_images:
+                idx = min(page, len(folio_images) - 1)
+                img_url = folio_images[idx].get('full_url', '')
+            else:
+                # Generate dynamically if not in database
+                metadata = codico.part_metadata.get(part_id, {})
+                folio_range = metadata.get('folio_range', [])
+                if len(folio_range) >= 2 and folio_range[0] <= folio_num <= folio_range[1]:
+                    match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)', part_id, re.IGNORECASE)
+                    if match:
+                        letter, volume = match.groups()
+                        side = 'b' if page == 1 else 'a'
+                        img_url = f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio_num}{side}.jpg"
+
+        if not img_url and images:
+            idx = min(page, len(images) - 1)
+            img_url = images[idx].get('full_url', '')
+
+        return {"url": img_url, "folio": folio_num, "page": page, "part_id": part_id}
 
     @app.get('/api/oxford_images/{sys_id}')
     def oxford_images_list(sys_id: str):
@@ -308,6 +429,73 @@ def init_api_routes():
                 }
                 for i, img in enumerate(images)
             ]
+        }
+
+    @app.get('/api/oxford_debug')
+    def oxford_debug():
+        """
+        Debug endpoint to check Oxford mapping status.
+        """
+        if not state.meta_mgr:
+            return {"error": "MetadataManager not initialized"}
+
+        codico = state.meta_mgr.codico_mgr
+        if not codico:
+            return {"error": "CodicologicalManager not initialized"}
+
+        csv_bank_count = len(state.meta_mgr.csv_bank)
+        oxford_part_count = sum(1 for v in state.meta_mgr.csv_bank.values() if v.get('oxford_part_id'))
+
+        return {
+            "codico_loaded": getattr(codico, '_loaded', False),
+            "csv_bank_entries": csv_bank_count,
+            "entries_with_oxford_part_id": oxford_part_count,
+            "folio_to_part_mappings": len(codico.folio_to_part),
+            "part_metadata_count": len(codico.part_metadata),
+            "sample_mappings": list(codico.folio_to_part.items())[:5] if codico.folio_to_part else [],
+        }
+
+    @app.get('/api/browse_debug/{sys_id}')
+    def browse_debug(sys_id: str):
+        """
+        Debug endpoint to check browse data for a specific sys_id.
+        """
+        if not state.meta_mgr:
+            return {"error": "MetadataManager not initialized"}
+        if not state.searcher:
+            return {"error": "SearchEngine not initialized"}
+
+        # Get shelfmark from csv_bank
+        csv_entry = state.meta_mgr.csv_bank.get(sys_id, {})
+        shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
+
+        # Get browse_map data
+        browse_map = state.searcher._load_browse_map() if hasattr(state.searcher, '_load_browse_map') else {}
+        browse_entries = browse_map.get(sys_id, [])
+
+        # Extract FL IDs from browse entries
+        import re
+        fl_ids = []
+        for entry in browse_entries:
+            full_header = entry.get('full_header', '')
+            match = re.search(r'FL(\d+)', full_header)
+            if match:
+                fl_ids.append(match.group(1))
+
+        # Check Oxford mapping
+        part_id = None
+        if state.meta_mgr.codico_mgr:
+            part_id = state.meta_mgr.codico_mgr.get_part_for_folio(sys_id)
+
+        return {
+            "sys_id": sys_id,
+            "csv_entry": csv_entry,
+            "shelfmark": shelfmark,
+            "title": title,
+            "browse_entries_count": len(browse_entries),
+            "fl_ids_found": fl_ids[:5],  # First 5
+            "oxford_part_id": part_id,
+            "is_oxford_shelfmark": shelfmark.lower().startswith('ms heb') or shelfmark.lower().startswith('ms. heb') if shelfmark else False,
         }
 
     @app.get('/api/proxy_image')

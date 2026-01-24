@@ -117,6 +117,27 @@ def apply_find_highlight(text_browser, query):
         selections.append(selection)
     text_browser.setExtraSelections(selections)
 
+def _generate_oxford_dynamic_url(oxford_part_id, folio_num, side='a'):
+    """Generate dynamic Oxford image URL for a folio not in the database.
+
+    Args:
+        oxford_part_id: Part ID like "MS. Heb. f. 21/1"
+        folio_num: Folio number (e.g., 21)
+        side: 'a' for recto, 'b' for verso
+
+    Returns URL string or None if generation not possible.
+    """
+    if not oxford_part_id:
+        return None
+
+    match = re.match(r'^MS\.?\s*Heb\.?\s*([a-z])\.?\s*(\d+)', oxford_part_id, re.IGNORECASE)
+    if not match:
+        return None
+
+    letter, volume = match.groups()
+    return f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio_num}{side}.jpg"
+
+
 def _get_initial_image_index(meta, page_num):
     if page_num is None:
         return 0
@@ -1228,8 +1249,9 @@ class ManuscriptViewerWidget(QWidget):
         self.combo_source.setVisible(False)
         return True
 
-    def load_images(self, meta, initial_idx=0):
+    def load_images(self, meta, initial_idx=0, target_folio=None):
         self.external_provider = self._detect_external_provider(meta)
+        self._current_meta = meta  # Store for dynamic image generation
 
         # Attribution
         attr = meta.get('attribution')
@@ -1240,8 +1262,30 @@ class ManuscriptViewerWidget(QWidget):
             self.lbl_attribution.setVisible(False)
 
         # meta contains 'images_nli' and 'images_ext'
-        self.images_nli = meta.get('images_nli', [])
-        self.images_ext = meta.get('images_ext', [])
+        # Make copies to avoid modifying the cached meta
+        self.images_nli = list(meta.get('images_nli', []))
+        self.images_ext = list(meta.get('images_ext', []))
+
+        # For Oxford: check if target_folio is missing and add dynamic images
+        if target_folio is not None and self.images_ext:
+            folio_in_list = any(img.get('folio_num') == target_folio for img in self.images_ext)
+            if not folio_in_list:
+                oxford_part_id = meta.get('oxford_part_id', '')
+                oxford_part_meta = meta.get('oxford_part_metadata', {})
+                folio_range = oxford_part_meta.get('folio_range', [])
+                if oxford_part_id and len(folio_range) >= 2 and folio_range[0] <= target_folio <= folio_range[1]:
+                    # Generate dynamic URLs for this folio
+                    for side in ['a', 'b']:
+                        url = _generate_oxford_dynamic_url(oxford_part_id, target_folio, side)
+                        if url:
+                            self.images_ext.append({
+                                'label': f'{target_folio}{side}',
+                                'url': url,
+                                'folio_num': target_folio,
+                                '_dynamic': True
+                            })
+                    # Update initial_idx to point to the new recto image
+                    initial_idx = len(self.images_ext) - 2  # Index of recto (a)
 
         # Determine default source
         self.combo_source.blockSignals(True)
@@ -3401,7 +3445,7 @@ class ResultDialog(QDialog):
                 folio_num if folio_num is not None else self.current_p_num,
                 side_offset=side_offset
             )
-            self.ms_viewer.load_images(meta, initial_idx)
+            self.ms_viewer.load_images(meta, initial_idx, target_folio=folio_num)
         else:
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
@@ -3552,17 +3596,22 @@ class ResultDialog(QDialog):
             self.fetch_image(self.current_sys_id, meta)
 
     def sync_external_view(self):
-        # Determine index
         meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
+        if not meta:
+            return
         shelfmark = meta.get('shelfmark') or self.meta_mgr.get_meta_for_id(self.current_sys_id)[0]
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
         side_offset = 1 if (self.current_internal_idx or 0) % 2 == 1 else 0
-        idx = _get_folio_image_index(
-            meta,
-            folio_num if folio_num is not None else self.current_p_num,
-            side_offset=side_offset
-        )
-        self.ms_viewer.set_page(idx)
+
+        # Use viewer's images (may include dynamic images added by load_images)
+        viewer_images = getattr(self.ms_viewer, 'images_ext', None)
+        if viewer_images:
+            idx = _get_folio_image_index(
+                {'images_ext': viewer_images},
+                folio_num if folio_num is not None else self.current_p_num,
+                side_offset=side_offset
+            )
+            self.ms_viewer.set_page(idx)
 
     def on_metadata_loaded(self, request_id, meta):
         if request_id != self.current_meta_request:
@@ -5935,8 +5984,9 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setText(label_text)
 
         # 2. Populate Image Viewer (using new logic)
-        idx = _get_initial_image_index(meta, self.current_browse_p)
-        self.browse_viewer.load_images(meta, idx)
+        folio_num = _get_folio_number_from_shelfmark(shelf)
+        idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
+        self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -13484,6 +13534,7 @@ class GenizahGUI(QMainWindow):
 
         # Load images from Part directly (Oxford images)
         part_images = self.meta_mgr.get_part_images(part_id)
+        part_meta = self.meta_mgr.get_part_metadata(part_id)
         if part_images:
             # Convert Part images to format expected by viewer (include thumb_url)
             images_ext = [{
@@ -13492,17 +13543,18 @@ class GenizahGUI(QMainWindow):
                 'thumb_url': img.get('thumb_url', ''),
                 'folio_num': img.get('folio_num')
             } for img in part_images]
-            self.browse_viewer.load_images({
-                'images_nli': [],
-                'images_ext': images_ext,
-                'oxford_part_id': part_id,  # For provider detection
-                'attribution': "From the collections of the Bodleian Libraries, Oxford",
-            })
-            # Position at the correct image for the selected folio
+            # Get target folio number first
             shelf_for_folio, _ = self.meta_mgr.get_meta_for_id(target_sid)
             folio_num = _get_folio_number_from_shelfmark(shelf_for_folio)
             image_idx = _get_initial_image_index({'images_ext': images_ext}, folio_num)
-            self.browse_viewer.set_page(image_idx)
+            # Load images with target_folio for dynamic generation if needed
+            self.browse_viewer.load_images({
+                'images_nli': [],
+                'images_ext': images_ext,
+                'oxford_part_id': part_id,
+                'oxford_part_metadata': part_meta,  # Include for dynamic image generation
+                'attribution': "From the collections of the Bodleian Libraries, Oxford",
+            }, initial_idx=image_idx, target_folio=folio_num)
 
         # Load text for the selected folio
         self.browse_load_page()
@@ -13665,17 +13717,28 @@ class GenizahGUI(QMainWindow):
         # This tells the large image viewer on the right to jump to the correct index
         if hasattr(self, 'browse_viewer') and self.browse_viewer.isVisible():
             meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
-            if not meta.get('images_ext') and getattr(self.browse_viewer, 'images_ext', None):
-                meta = {'images_ext': self.browse_viewer.images_ext}
             shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
             side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
-            idx = _get_folio_image_index(
-                meta,
-                folio_num if folio_num is not None else self.current_browse_p,
-                side_offset=side_offset
-            )
-            self.browse_viewer.set_page(idx)
+
+            # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
+            viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+            folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
+
+            if not folio_in_viewer and folio_num is not None and meta:
+                # Check if this is Oxford with folio_range that includes this folio
+                oxford_part_meta = meta.get('oxford_part_metadata', {})
+                folio_range = oxford_part_meta.get('folio_range', [])
+                if meta.get('oxford_part_id') and len(folio_range) >= 2 and folio_range[0] <= folio_num <= folio_range[1]:
+                    # Need dynamic images - call load_images
+                    idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
+                    self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
+                elif viewer_images:
+                    idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                    self.browse_viewer.set_page(idx)
+            elif viewer_images:
+                idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                self.browse_viewer.set_page(idx)
         # -------------------------------
 
         if self.current_browse_sid in self.meta_mgr.nli_cache:
@@ -14145,12 +14208,25 @@ class GenizahGUI(QMainWindow):
         """Update image viewer to show the current folio's images within a Part."""
         if not self.current_browse_part_id:
             return
+        meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
         shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
-        meta = {'images_ext': getattr(self.browse_viewer, 'images_ext', [])}
         side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
-        image_idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
-        if self.browse_viewer.active_list:
+
+        # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
+        viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+        folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
+
+        if not folio_in_viewer and folio_num is not None and meta:
+            oxford_part_meta = meta.get('oxford_part_metadata', {})
+            folio_range = oxford_part_meta.get('folio_range', [])
+            if meta.get('oxford_part_id') and len(folio_range) >= 2 and folio_range[0] <= folio_num <= folio_range[1]:
+                image_idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
+                self.browse_viewer.load_images(meta, image_idx, target_folio=folio_num)
+                return
+
+        if viewer_images and self.browse_viewer.active_list:
+            image_idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num, side_offset=side_offset)
             self.browse_viewer.set_page(image_idx)
     
 def resource_path(relative_path):

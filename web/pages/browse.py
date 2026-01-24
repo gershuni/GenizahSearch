@@ -36,18 +36,25 @@ const flIdCache = {};
 // Fetch FL IDs from IIIF manifest (client-side, bypasses server blocking)
 async function fetchFlIdsFromManifest(sysId) {
     if (flIdCache[sysId]) {
+        console.log(`[Manifest] Cache hit for ${sysId}`);
         return flIdCache[sysId];
     }
 
     const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
+    console.log(`[Manifest] Fetching ${manifestUrl}`);
     try {
         const resp = await fetch(manifestUrl);
-        if (!resp.ok) return [];
+        console.log(`[Manifest] Response status: ${resp.status} for ${sysId}`);
+        if (!resp.ok) {
+            console.log(`[Manifest] Failed (${resp.status}) for ${sysId}`);
+            return [];
+        }
 
         const data = await resp.json();
         const flIds = [];
 
         if (data.sequences && data.sequences[0] && data.sequences[0].canvases) {
+            console.log(`[Manifest] Found ${data.sequences[0].canvases.length} canvases for ${sysId}`);
             for (const canvas of data.sequences[0].canvases) {
                 const images = canvas.images || [];
                 if (images[0] && images[0].resource && images[0].resource.service) {
@@ -58,25 +65,52 @@ async function fetchFlIdsFromManifest(sysId) {
                     }
                 }
             }
+        } else {
+            console.log(`[Manifest] No canvases found in manifest for ${sysId}`);
         }
 
         if (flIds.length > 0) {
             flIdCache[sysId] = flIds;
-            console.log(`Cached ${flIds.length} FL IDs for ${sysId} from IIIF manifest`);
+            console.log(`[Manifest] Cached ${flIds.length} FL IDs for ${sysId}`);
+        } else {
+            console.log(`[Manifest] No FL IDs extracted for ${sysId}`);
         }
         return flIds;
     } catch (e) {
-        console.error(`Failed to fetch IIIF manifest for ${sysId}:`, e);
+        console.error(`[Manifest] Error fetching for ${sysId}:`, e);
         return [];
     }
 }
 
 // Global function for handling image errors with fallback
-async function handleImageError(img, sysId, pageIdx) {
-    // If we have a sysId, try to fetch FL IDs from the IIIF manifest
+async function handleImageError(img, sysId, pageIdx, isOxford = false) {
+    const currentSrc = img.src || '';
+    const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
+    console.log(`[handleImageError] src=${currentSrc}, sysId=${sysId}, pageIdx=${pageIdx}, isOxford=${isOxford}, isOxfordApiUrl=${isOxfordApiUrl}`);
+
+    // Try 1: If Oxford and the CURRENT src is NOT already the Oxford API, try the server proxy
+    // This handles the case where direct NLI URL failed for an Oxford manuscript
+    if (isOxford && sysId && !isOxfordApiUrl && !img.dataset.triedOxford) {
+        img.dataset.triedOxford = 'true';
+        const oxfordUrl = `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
+        console.log(`Trying Oxford API: ${oxfordUrl}`);
+        img.src = oxfordUrl;
+        img.onload = function() {
+            console.log('Oxford API image loaded');
+            if (window.manuscriptViewer) window.manuscriptViewer.init();
+        };
+        return;
+    }
+
+    // If Oxford API already failed, mark it as tried
+    if (isOxfordApiUrl) {
+        img.dataset.triedOxford = 'true';
+    }
+
+    // Try 2: Fetch FL IDs from NLI IIIF manifest
     if (sysId && !img.dataset.triedManifest) {
         img.dataset.triedManifest = 'true';
-        console.log(`Primary image failed, fetching manifest for sysId: ${sysId}, page: ${pageIdx}`);
+        console.log(`Trying NLI manifest for sysId: ${sysId}, page: ${pageIdx}`);
 
         const flIds = await fetchFlIdsFromManifest(sysId);
         if (flIds.length > 0) {
@@ -92,8 +126,21 @@ async function handleImageError(img, sysId, pageIdx) {
         }
     }
 
+    // Try 3: Use server-side NLI proxy (handles collections that block browser requests)
+    if (sysId && !img.dataset.triedServerProxy) {
+        img.dataset.triedServerProxy = 'true';
+        const proxyUrl = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
+        console.log(`Trying server-side NLI proxy: ${proxyUrl}`);
+        img.src = proxyUrl;
+        img.onload = function() {
+            console.log('Server proxy image loaded');
+            if (window.manuscriptViewer) window.manuscriptViewer.init();
+        };
+        return;
+    }
+
     // All fallbacks exhausted
-    console.log('All image sources failed for:', img.src);
+    console.log('All image sources failed for:', currentSrc);
     img.style.display = 'none';
     const parent = img.parentElement;
     if (parent) {
@@ -1574,13 +1621,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if fl_id:
                     fl_digits = re.sub(r"\D", "", str(fl_id))
 
-                # Detect Oxford manuscripts by shelfmark pattern
-                is_oxford = False
-                if page.shelfmark:
+                # Use pre-computed is_oxford from BrowsePage (computed in services.py)
+                # Also check shelfmark pattern as fallback
+                is_oxford = page.is_oxford
+                if not is_oxford and page.shelfmark:
                     shelfmark_lower = page.shelfmark.lower()
                     # Oxford shelfmarks: "MS heb. f.21/21", "MS. Heb. a. 1", etc.
                     if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
                         is_oxford = True
+
 
                 # Choose image endpoint based on source
                 # Prioritize page-specific fl_id over sys_id for correct page images
@@ -1595,24 +1644,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 if is_oxford and page.sys_id:
                     has_image = True
-                    # Oxford images still need proxy (different blocking rules)
+                    # Oxford images - use proxy with proper page parameter
+                    # The API will fetch the correct recto/verso based on page_idx
                     img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
-                    # For fallback, use direct NLI URL if we have FL ID
-                    if fl_digits:
-                        fallback_url = f"{NLI_IIIF_BASE}/FL{fl_digits}/full/max/0/default.jpg"
-                    else:
-                        fallback_url = None
-                elif fl_digits:
-                    # Use DIRECT NLI URL (browser fetches directly, bypasses server blocking)
-                    has_image = True
-                    img_url = f"{NLI_IIIF_BASE}/FL{fl_digits}/full/max/0/default.jpg"
-                    # Fallback will be handled by JavaScript fetching IIIF manifest
                     fallback_url = None
                 elif page.sys_id:
-                    # No FL ID - JavaScript will fetch from IIIF manifest
-                    # Start with a placeholder that will trigger onerror
+                    # Use server-side NLI proxy for ALL NLI items
+                    # This works reliably for all collections (Cambridge, Russian, etc.)
+                    # Direct browser requests to NLI are blocked for some collections
                     has_image = True
-                    img_url = f"{NLI_IIIF_BASE}/FL0/full/max/0/default.jpg"  # Will fail, triggering manifest fetch
+                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust}"
                     fallback_url = None
 
 
@@ -1799,6 +1840,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                     safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
 
+                                    is_oxford_js = 'true' if is_oxford else 'false'
                                     img_html = f'''
                                     <img
                                         src="{safe_img_url}"
@@ -1807,7 +1849,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         loading="lazy"
                                         draggable="false"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
-                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx})"
+                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)
