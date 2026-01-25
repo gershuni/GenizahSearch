@@ -2075,7 +2075,7 @@ class ResultDialog(QDialog):
         meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop); meta_col.setSpacing(4)
         
         self.lbl_shelf = QLabel(); self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)); self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setWordWrap(True); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         # Controls Row
         info_row = QHBoxLayout()
@@ -5614,7 +5614,6 @@ class GenizahGUI(QMainWindow):
 
         # Row 2: Metadata Display (Compact)
         self.browse_info_lbl = QLabel(tr("Enter ID to browse."))
-        self.browse_info_lbl.setWordWrap(True)
         self.browse_info_lbl.setStyleSheet("font-size: 12px;")
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
@@ -6327,7 +6326,7 @@ class GenizahGUI(QMainWindow):
 
             info_text = f"<b>{shelf_with_part}</b> - View All"
             if oxford_title:
-                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+                info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
             self.browse_info_lbl.setText(info_text)
 
         # Disable paging buttons since we are showing everything
@@ -13540,9 +13539,9 @@ class GenizahGUI(QMainWindow):
 
         info_text = f"<b>{shelf_with_part}</b>"
         if part_title:
-            info_text += f"<br/><span style='font-size: 11px;'>{part_title}</span>"
+            info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(part_title)}</span>"
         if csv_title and csv_title != part_title:
-            info_text += f"<br/>{csv_title}"
+            info_text += f"<br/>{_truncate_title(csv_title)}"
 
         self.browse_info_lbl.setText(info_text)
 
@@ -13697,13 +13696,13 @@ class GenizahGUI(QMainWindow):
 
             info_text = f"<b>{shelf_with_part}</b>"
             if oxford_title:
-                info_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+                info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
             if title and title != oxford_title:
-                info_text += f"<br/>{title}"
+                info_text += f"<br/>{_truncate_title(title)}"
         else:
             info_text = f"<b>{shelf}</b>"
             if title:
-                info_text += f"<br/>{title}"
+                info_text += f"<br/>{_truncate_title(title)}"
 
         self.browse_info_lbl.setText(info_text)
         if shelf:
