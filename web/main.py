@@ -40,7 +40,7 @@ app.add_static_files('/static', STATIC_DIR)
 
 META_TAGS = '''
 <!-- Meta Tags -->
-<meta name="description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר. חיפוש טקסט מלא, צפייה בכתבי יד, איתור מקבילות ועוד.">
+<meta name="description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, high-resolution manuscript viewer, and parallel text detection.">
 <meta name="keywords" content="גניזה, גניזת קהיר, כתבי יד, מחקר, Cairo Genizah, manuscripts, research">
 <meta name="author" content="Genizah Search Pro">
 <meta name="theme-color" content="#059669">
@@ -48,8 +48,8 @@ META_TAGS = '''
 <!-- Open Graph / Facebook / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://GenizahSearch.com/">
-<meta property="og:title" content="Genizah Search Pro | חיפוש גניזת קהיר">
-<meta property="og:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר. חיפוש טקסט מלא, צפייה בכתבי יד, איתור מקבילות ועוד.">
+<meta property="og:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
+<meta property="og:description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, high-resolution manuscript viewer, and parallel text detection.">
 <meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
 <meta property="og:locale" content="he_IL">
 <meta property="og:site_name" content="Genizah Search Pro">
@@ -57,8 +57,8 @@ META_TAGS = '''
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://GenizahSearch.com/">
-<meta name="twitter:title" content="Genizah Search Pro | חיפוש גניזת קהיר">
-<meta name="twitter:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר">
+<meta name="twitter:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
+<meta name="twitter:description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, manuscript viewer, and parallel detection.">
 <meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
 
 <!-- Canonical URL -->
