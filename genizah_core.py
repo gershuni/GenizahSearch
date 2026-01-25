@@ -75,7 +75,7 @@ def natural_sort_key(text):
 
 
 try:
-    import google.generativeai as genai
+    from google import genai
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
@@ -1402,6 +1402,7 @@ class AIManager:
         self.model_name = "gemini-3-flash-preview"
         self.api_key = ""
         self.chat = None
+        self._genai_client = None
 
         # Ensure dir exists
         if not os.path.exists(Config.INDEX_DIR):
@@ -1460,15 +1461,16 @@ class AIManager:
         if not self.api_key: return "Error: Missing API Key."
 
         if self.provider == "Google Gemini":
-            if not HAS_GENAI: return "Error: 'google-generativeai' library missing."
+            if not HAS_GENAI: return "Error: 'google-genai' library missing."
             try:
-                genai.configure(api_key=self.api_key)
-                model = genai.GenerativeModel(self.model_name)
-
-                self.chat = model.start_chat(history=[
-                    {"role": "user", "parts": [self._get_sys_inst()]},
-                    {"role": "model", "parts": ["Understood. I will provide JSON output with robust Hebrew regex."]}
-                ])
+                self._genai_client = genai.Client(api_key=self.api_key)
+                self.chat = self._genai_client.chats.create(
+                    model=self.model_name,
+                    history=[
+                        {"role": "user", "parts": [{"text": self._get_sys_inst()}]},
+                        {"role": "model", "parts": [{"text": "Understood. I will provide JSON output with robust Hebrew regex."}]}
+                    ]
+                )
                 return None
             except Exception as e:
                 return str(e)
