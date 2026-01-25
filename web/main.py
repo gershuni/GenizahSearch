@@ -23,7 +23,7 @@ from web.translations import tr, is_rtl, get_dir, set_language, get_language
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, Config
 
 # App configuration
-APP_TITLE = "Genizah Search Pro | חיפוש גניזה"
+APP_TITLE = "Genizah Search Pro | חיפוש גניזת קהיר"
 APP_VERSION = "5.0"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
@@ -48,7 +48,7 @@ META_TAGS = '''
 <!-- Open Graph / Facebook / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://GenizahSearch.com/">
-<meta property="og:title" content="Genizah Search Pro | חיפוש גניזה">
+<meta property="og:title" content="Genizah Search Pro | חיפוש גניזת קהיר">
 <meta property="og:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר. חיפוש טקסט מלא, צפייה בכתבי יד, איתור מקבילות ועוד.">
 <meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
 <meta property="og:locale" content="he_IL">
@@ -57,7 +57,7 @@ META_TAGS = '''
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://GenizahSearch.com/">
-<meta name="twitter:title" content="Genizah Search Pro | חיפוש גניזה">
+<meta name="twitter:title" content="Genizah Search Pro | חיפוש גניזת קהיר">
 <meta name="twitter:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר">
 <meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
 
