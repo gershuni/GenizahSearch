@@ -15,15 +15,8 @@ import sys
 import re
 
 # Files to update (relative to script directory)
+# Currently only web files - desktop/docs can be added later after approval
 FILES_TO_UPDATE = [
-    "version.py",
-    "genizah_app.py",
-    "genizah_translations.py",
-    "README.md",
-    "Help.html",
-    "CHANGELOG.md",
-    "ACCESSIBILITY_REPORT.md",
-    "CODE_AUDIT_REPORT.md",
     "web/main.py",
     "web/api.py",
     "web/components/__init__.py",
@@ -54,10 +47,10 @@ def get_script_dir():
 
 
 def detect_current_name():
-    """Detect current app name from version.py."""
-    version_file = os.path.join(get_script_dir(), "version.py")
+    """Detect current app name from web/main.py."""
+    main_file = os.path.join(get_script_dir(), "web/main.py")
     try:
-        with open(version_file, 'r', encoding='utf-8') as f:
+        with open(main_file, 'r', encoding='utf-8') as f:
             content = f.read()
         for name in KNOWN_NAMES:
             if name in content:

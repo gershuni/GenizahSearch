@@ -1,8 +1,8 @@
-# Dicta Genizah Search 5.0
+# Genizah Search Pro 5.0
 
 **From Research Suite to Collaborative Platform**
 
-Dicta Genizah Search has evolved again. Version 5.0 introduces the **Web Platform** and **Community Features**, transforming the software into a collaborative research environment for the Cairo Genizah.
+Genizah Search Pro has evolved again. Version 5.0 introduces the **Web Platform** and **Community Features**, transforming the software into a collaborative research environment for the Cairo Genizah.
 
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) - Search, browse, and collaborate from any browser
 
@@ -12,7 +12,7 @@ Dicta Genizah Search has evolved again. Version 5.0 introduces the **Web Platfor
 
 ### Web Platform
 
-Access Dicta Genizah Search from any device with a web browser.
+Access Genizah Search Pro from any device with a web browser.
 
 * **Public Web Application:** Full-featured interface accessible anywhere
 * **Mobile Responsive:** Optimized for tablets and phones
@@ -84,7 +84,7 @@ Parallel detection based on **Shmidman, Koppel, and Porat (2016)**.
 
 ### Web (Recommended)
 
-Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Genizah Search immediately.
+Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Search Pro immediately.
 
 ### Desktop Installation
 
@@ -109,7 +109,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Dicta Genizah Search 5.0
+# Genizah Search Pro 5.0
 
 **מכלי מחקר לפלטפורמה שיתופית**
 
@@ -123,7 +123,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### פלטפורמת אינטרנט
 
-גישה ל-Dicta Genizah Search מכל מכשיר עם דפדפן.
+גישה ל-Genizah Search Pro מכל מכשיר עם דפדפן.
 
 * **אפליקציית אינטרנט ציבורית:** ממשק מלא נגיש מכל מקום
 * **תצוגה מותאמת לנייד:** אופטימיזציה לטאבלטים וטלפונים
@@ -195,7 +195,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### אינטרנט (מומלץ)
 
-בקרו ב-[genizahsearch.com](https://genizahsearch.com) כדי להתחיל להשתמש ב-Dicta Genizah Search מיד.
+בקרו ב-[genizahsearch.com](https://genizahsearch.com) כדי להתחיל להשתמש ב-Genizah Search Pro מיד.
 
 ### התקנה לשולחן העבודה
 

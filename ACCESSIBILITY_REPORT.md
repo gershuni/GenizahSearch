@@ -1,10 +1,10 @@
-# Accessibility Compliance Report - Dicta Genizah Search
+# Accessibility Compliance Report - Genizah Search Pro
 
 **Date:** February 2025
 **Target Standard:** Israeli Standard 5568 / WCAG 2.0 Level AA
 
 ## Executive Summary
-Dicta Genizah Search has undergone a targeted accessibility remediation to comply with Israeli regulations. The application now supports keyboard navigation, screen reader access via semantic structure and ARIA labels, and visual accessibility requirements.
+Genizah Search Pro has undergone a targeted accessibility remediation to comply with Israeli regulations. The application now supports keyboard navigation, screen reader access via semantic structure and ARIA labels, and visual accessibility requirements.
 
 ## 1. Compliance Status
 **Status:** Partially Conformant (Level AA)

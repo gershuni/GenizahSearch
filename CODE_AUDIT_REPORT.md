@@ -1,7 +1,7 @@
-# Codebase Audit Report: Dicta Genizah Search
+# Codebase Audit Report: Genizah Search Pro
 
 ## Executive Summary
-This report details the findings from a code analysis of the Dicta Genizah Search application, focusing on the differences and redundancies between the Desktop (PyQt6) and Web (NiceGUI) versions. The analysis revealed significant code duplication, feature drift, and architectural opportunities to centralize business logic.
+This report details the findings from a code analysis of the Genizah Search Pro application, focusing on the differences and redundancies between the Desktop (PyQt6) and Web (NiceGUI) versions. The analysis revealed significant code duplication, feature drift, and architectural opportunities to centralize business logic.
 
 **Status Update (Current Session):**
 All identified high and medium priority issues (Translations, Search Logic, Feature Drift) have been addressed and fixed.
