@@ -1784,6 +1784,7 @@ TRANSLATIONS = {
     "Pending Corrections": "תיקונים ממתינים",
     "All corrections have been reviewed": "כל התיקונים נבדקו",
     "Accessibility Statement": "הצהרת נגישות",
+    "Created by Hillel Gershuni": "נוצר על ידי הלל גרשוני",
     "Conformance Status": "סטטוס תאימות",
     "Measures to Support Accessibility": "אמצעים לתמיכה בנגישות",
     "Known Limitations": "מגבלות ידועות",

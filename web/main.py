@@ -1256,6 +1256,9 @@ def create_layout():
                 with ui.row().classes('w-full justify-center mt-2'):
                     ui.link(tr('Accessibility Statement'), '/accessibility').classes('text-xs opacity-70 hover:opacity-100').style('text-decoration: none; color: inherit;')
 
+                # Creator Credit
+                ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
+
     return content_col
 
 
