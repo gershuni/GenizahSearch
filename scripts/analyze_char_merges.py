@@ -38,13 +38,16 @@ def extract_hebrew_words(text: str) -> List[str]:
     words = re.findall(r'[\u0590-\u05FF]+', text)
     return [w for w in words if len(w) >= 2]  # מילים עם לפחות 2 אותיות
 
-def parse_v8_file(filepath: str) -> Dict[str, str]:
+def parse_v8_file(filepath: str) -> Dict[str, dict]:
     """
     פורסר לקובץ V0.8 (Transcriptions.txt)
     פורמט: ==> ID <==
+
+    מחזיר dict עם ID מנורמל כמפתח, וערך שכולל את הטקסט והשורה הראשונה
     """
     docs = {}
     current_id = None
+    current_raw_id = None
     current_text = []
 
     with open(filepath, 'r', encoding='utf-8-sig') as f:
@@ -53,23 +56,38 @@ def parse_v8_file(filepath: str) -> Dict[str, str]:
             if line.startswith('==>') and line.endswith('<=='):
                 # שומר מסמך קודם
                 if current_id and current_text:
-                    docs[current_id] = '\n'.join(current_text)
+                    full_text = '\n'.join(current_text)
+                    first_line = current_text[0] if current_text else ''
+                    docs[current_id] = {
+                        'text': full_text,
+                        'first_line': first_line,
+                        'raw_id': current_raw_id
+                    }
                 # מתחיל מסמך חדש
-                current_id = line[3:-3].strip()
+                current_raw_id = line[3:-3].strip()
+                current_id = normalize_doc_id(current_raw_id)
                 current_text = []
             elif current_id:
                 current_text.append(line)
 
         # מסמך אחרון
         if current_id and current_text:
-            docs[current_id] = '\n'.join(current_text)
+            full_text = '\n'.join(current_text)
+            first_line = current_text[0] if current_text else ''
+            docs[current_id] = {
+                'text': full_text,
+                'first_line': first_line,
+                'raw_id': current_raw_id
+            }
 
     return docs
 
-def parse_v7_file(filepath: str) -> Dict[str, str]:
+def parse_v7_file(filepath: str) -> Dict[str, dict]:
     """
     פורסר לקובץ V0.7 (AllGenizah_OLD.txt)
-    פורמט: ### ID או וריאציות אחרות
+    פורמט: ### Q:\ERC\...\IE..._P..._FL...—reco.xml - SHELFMARK - filename.tif
+
+    מחזיר dict עם ID מנורמל כמפתח, וערך שכולל את הטקסט והשורה הראשונה
     """
     docs = {}
     current_id = None
@@ -82,20 +100,50 @@ def parse_v7_file(filepath: str) -> Dict[str, str]:
             if line.startswith('###'):
                 # שומר מסמך קודם
                 if current_id and current_text:
-                    docs[current_id] = '\n'.join(current_text)
-                # מתחיל מסמך חדש - מחלץ ID
-                current_id = line[3:].strip()
-                # מנסה לנרמל את ה-ID לפורמט דומה ל-V0.8
-                current_id = normalize_doc_id(current_id)
+                    full_text = '\n'.join(current_text)
+                    first_line = current_text[0] if current_text else ''
+                    docs[current_id] = {
+                        'text': full_text,
+                        'first_line': first_line
+                    }
+                # מתחיל מסמך חדש - מחלץ ID מהנתיב
+                # פורמט: ### Q:\ERC\all_version_0.9\990000571730205171\IE47712399\IE47712399_P000028_FL47712624—reco.xml - SP RNL...
+                header = line[3:].strip()
+                current_id = extract_id_from_v7_header(header)
                 current_text = []
             elif current_id:
                 current_text.append(line)
 
         # מסמך אחרון
         if current_id and current_text:
-            docs[current_id] = '\n'.join(current_text)
+            full_text = '\n'.join(current_text)
+            first_line = current_text[0] if current_text else ''
+            docs[current_id] = {
+                'text': full_text,
+                'first_line': first_line
+            }
 
     return docs
+
+
+def extract_id_from_v7_header(header: str) -> str:
+    """
+    מחלץ ID מכותרת V0.7
+    דוגמה: Q:\ERC\all_version_0.9\990000571730205171\IE47712399\IE47712399_P000028_FL47712624—reco.xml - SP RNL...
+    מחזיר: 990000571730205171_IE47712399_P000028_FL47712624
+    """
+    # מחפש את הדפוס: IE..._P..._FL... (לפני —reco.xml או .xml)
+    match = re.search(r'(IE\d+[_-]P\d+[_-]FL\d+)', header, re.IGNORECASE)
+    if match:
+        ie_p_fl = match.group(1).replace('-', '_')
+        # מחפש גם את ה-sys_id (מספר ארוך לפני IE)
+        sys_match = re.search(r'(\d{12,18})', header)
+        if sys_match:
+            return f"{sys_match.group(1)}_{ie_p_fl}"
+        return ie_p_fl
+
+    # fallback - נרמול רגיל
+    return normalize_doc_id(header)
 
 def normalize_doc_id(doc_id: str) -> str:
     """
@@ -172,27 +220,67 @@ def find_char_substitutions(word1: str, word2: str) -> List[Tuple[str, str, str]
 
     return substitutions
 
-def analyze_documents(v7_docs: Dict[str, str], v8_docs: Dict[str, str],
-                      progress_callback=None) -> Dict[Tuple[str, str], List[dict]]:
+def first_line_similarity(line1: str, line2: str) -> float:
+    """
+    מחשב דמיון בין שתי שורות ראשונות
+    מחזיר ערך בין 0 ל-1
+    """
+    if not line1 or not line2:
+        return 0.0
+
+    words1 = extract_hebrew_words(line1)
+    words2 = extract_hebrew_words(line2)
+
+    if not words1 or not words2:
+        return 0.0
+
+    # חישוב דמיון Jaccard על מילים
+    set1 = set(words1)
+    set2 = set(words2)
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union
+
+
+def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
+                      progress_callback=None,
+                      min_similarity: float = 0.2) -> Dict[Tuple[str, str], List[dict]]:
     """
     משווה מסמכים ואוסף סטטיסטיקת חילופים
+    מתאים מסמכים לפי ID ומוודא דמיון בשורה הראשונה
     """
-    # מציאת מסמכים משותפים
-    v7_normalized = {normalize_doc_id(k): (k, v) for k, v in v7_docs.items()}
-    v8_normalized = {normalize_doc_id(k): (k, v) for k, v in v8_docs.items()}
-
-    common_ids = set(v7_normalized.keys()) & set(v8_normalized.keys())
-    print(f"נמצאו {len(common_ids)} מסמכים משותפים מתוך V0.7: {len(v7_docs)}, V0.8: {len(v8_docs)}")
+    # מציאת מסמכים משותפים לפי ID
+    common_ids = set(v7_docs.keys()) & set(v8_docs.keys())
+    print(f"נמצאו {len(common_ids)} מסמכים עם ID תואם מתוך V0.7: {len(v7_docs)}, V0.8: {len(v8_docs)}")
 
     # אוסף חילופים: (מקור, יעד) -> [רשימת הופעות]
     substitutions = defaultdict(list)
+    matched_count = 0
+    skipped_low_similarity = 0
 
     for idx, norm_id in enumerate(common_ids):
         if progress_callback and idx % 1000 == 0:
             progress_callback(idx, len(common_ids))
 
-        orig_id_v7, text_v7 = v7_normalized[norm_id]
-        orig_id_v8, text_v8 = v8_normalized[norm_id]
+        doc_v7 = v7_docs[norm_id]
+        doc_v8 = v8_docs[norm_id]
+
+        text_v7 = doc_v7['text']
+        text_v8 = doc_v8['text']
+        first_v7 = doc_v7.get('first_line', '')
+        first_v8 = doc_v8.get('first_line', '')
+
+        # בדיקת דמיון בשורה הראשונה
+        similarity = first_line_similarity(first_v7, first_v8)
+        if similarity < min_similarity:
+            skipped_low_similarity += 1
+            continue
+
+        matched_count += 1
 
         words_v7 = extract_hebrew_words(text_v7)
         words_v8 = extract_hebrew_words(text_v8)
@@ -212,6 +300,9 @@ def analyze_documents(v7_docs: Dict[str, str], v8_docs: Dict[str, str],
                             'word_v8': w8,
                             'type': sub_type
                         })
+
+    print(f"  מסמכים שעברו בדיקת דמיון: {matched_count}")
+    print(f"  מסמכים שדולגו (דמיון נמוך): {skipped_low_similarity}")
 
     return substitutions
 
@@ -449,6 +540,8 @@ def main():
                         help='נתיב לקובץ הפלט (xlsx או csv)')
     parser.add_argument('--min', type=int, default=2,
                         help='מספר הופעות מינימלי להכללה בדוח (ברירת מחדל: 2)')
+    parser.add_argument('--similarity', type=float, default=0.2,
+                        help='סף דמיון מינימלי בשורה הראשונה (0-1, ברירת מחדל: 0.2)')
     parser.add_argument('--summary-only', action='store_true',
                         help='רק סיכום לקונסול, בלי קובץ אקסל')
 
@@ -471,11 +564,13 @@ def main():
     v8_docs = parse_v8_file(args.v8)
     print(f"    נקראו {len(v8_docs)} מסמכים")
 
-    print("\nמנתח חילופים...")
+    print(f"\nמנתח חילופים (סף דמיון: {args.similarity})...")
     def progress(current, total):
         print(f"  התקדמות: {current}/{total} ({100*current//total}%)", end='\r')
 
-    substitutions = analyze_documents(v7_docs, v8_docs, progress_callback=progress)
+    substitutions = analyze_documents(v7_docs, v8_docs,
+                                      progress_callback=progress,
+                                      min_similarity=args.similarity)
     print(f"\nנמצאו {len(substitutions)} סוגי חילופים ייחודיים")
 
     # סיכום לקונסול
