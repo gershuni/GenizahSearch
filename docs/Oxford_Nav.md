@@ -49,6 +49,40 @@ Since the image is correct but text is wrong, the issue is in the `browse_map.pk
 3. Restart the application to rebuild the browse_map
 4. If issue persists, investigate the browse_map building code
 
+## Investigation Results (January 2025)
+
+### Data Verification
+All data sources checked and appear **CORRECT** on the development system:
+
+1. **`browse_map.pkl`** - sys_id `990053464170205171` correctly maps to f.21/16:
+   - Page 0: `uid=IE167964022_P000001_FL167964024`
+   - Page 1: `uid=IE167964022_P000002_FL167964025`
+
+2. **`libraries.csv`** - sys_id `990053464170205171` has correct shelfmark:
+   - `MS heb. f.21/16 | Ms. heb. f. 21.16 | The Bodleian Libraries...`
+
+3. **`Transcriptions.txt`** - Content for sys_id `990053464170205171` is correct Hebrew liturgical text
+
+4. **UIDs are distinct** - f.21/16 and f.2/16 have completely different UIDs:
+   - f.21/16: `IE167964022_P000001_FL167964024`
+   - f.2/16: `IE167937292_P000001_FL167937294`
+
+5. **File order is correct** - f.21/16 (`990053464170205171`) is immediately before f.21/17 (`990053464180205171`) in browse_map
+
+### Conclusion
+Unable to reproduce the bug with current data. Possible explanations:
+- User's local `browse_map.pkl` may have been corrupted or stale
+- Caching issue at runtime (nli_cache, browser cache)
+- Specific navigation sequence not simulated
+
+### Recommended Fix
+If issue recurs:
+1. Delete `%LOCALAPPDATA%\GenizahSearchPro\Index\browse_map.pkl`
+2. Delete `%LOCALAPPDATA%\GenizahSearchPro\Index\nli_cache.pkl`
+3. Restart the application to regenerate caches
+
+---
+
 ## Notes
 
 - This issue is **not related** to the Oxford image loading fixes
