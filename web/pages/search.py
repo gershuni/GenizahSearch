@@ -14,6 +14,7 @@ from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
+from genizah_core import SearchEngine
 from urllib.parse import quote
 import re
 import html
