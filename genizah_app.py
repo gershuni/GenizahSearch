@@ -3380,7 +3380,7 @@ class ResultDialog(QDialog):
         # 1. Update Text Labels
         shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
         self.lbl_shelf.setText(shelf)
-        self.lbl_title.setText(meta.get('title', ''))
+        self.lbl_title.setText(_truncate_title(meta.get('title', '')))
         self.lbl_meta_loading.setVisible(False)
 
         # 2. Trigger Image Fetch using the FRESH metadata
@@ -3579,7 +3579,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
 
-        self.lbl_title.setText(meta.get('title', ''))
+        self.lbl_title.setText(_truncate_title(meta.get('title', '')))
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
@@ -3810,6 +3810,16 @@ def _format_add_to_list_label(in_list=False):
 
 def _format_list_star(in_list=False):
     return "⭐" if in_list else "☆"
+
+
+def _truncate_title(text, max_chars=100):
+    """Truncate long title text with ellipsis."""
+    if not text:
+        return text
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "..."
+
 
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
@@ -6003,15 +6013,15 @@ class GenizahGUI(QMainWindow):
 
             label_text = f"<b>{shelf_with_part}</b>"
             if oxford_title:
-                label_text += f"<br/><span style='font-size: 11px;'>{oxford_title}</span>"
+                label_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
             if title and title != oxford_title:
-                label_text += f"<br/>{title}"
+                label_text += f"<br/>{_truncate_title(title)}"
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
         else:
             label_text = f"<b>{shelf or ''}</b>"
             if title:
-                label_text += f" | {title}"
+                label_text += f" | {_truncate_title(title)}"
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
 
