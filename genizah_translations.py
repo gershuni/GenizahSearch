@@ -1441,6 +1441,7 @@ TRANSLATIONS = {
     "Extended Variants": "וריאנטים מורחבים",
     "Number of words per search chunk in composition search": "מספר מילים לכל קטע חיפוש בחיפוש חיבורים",
     "Exclude Words": "מילים להחרגה",
+    "Exclude:": "החרג:",
     "Words to exclude (space separated)": "מילים להחרגה (מופרדות ברווח)",
     "Results containing these words will be filtered out": "תוצאות המכילות מילים אלה יסוננו",
     "Display settings": "הגדרות תצוגה",
