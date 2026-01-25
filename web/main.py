@@ -915,14 +915,15 @@ def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
 
     current_page = app.storage.user.get('current_page', '/')
+    is_hebrew = get_language() == 'he'
 
-    # Global LTR Layout (User Request: "Exact English Copy")
-    # We do NOT use RTL layout mode. All alignment is LTR.
-    # We only inject RTL direction into text content.
+    # Global RTL/LTR Layout
+    # If Hebrew, we set global dir="rtl" (via apply_theme_immediately)
+    # AND we manually adjust components that Quasar/NiceGUI might not flip automatically.
 
     with ui.header().classes('q-py-none').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
-            # Left: Menu + Logo
+            # Left (LTR) / Right (RTL): Menu + Logo
             with ui.row().classes('items-center gap-4'):
                 menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
@@ -938,7 +939,7 @@ def create_layout():
                 quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
                 quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
 
-            # Right: Status + Actions + Auth
+            # Right (LTR) / Left (RTL): Status + Actions + Auth
             with ui.row().classes('items-center gap-2 sm:gap-4'):
                 # Status Indicator
                 with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
@@ -964,13 +965,17 @@ def create_layout():
                 ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
 
     # Sidebar (Drawer)
-    # Use stored state, default to True (open) on desktop
-    drawer_open = app.storage.user.get('drawer_open', True)
+    # Drawer Side:
+    # In Quasar RTL: side="left" becomes visually Right ("Start" of content direction).
+    drawer_side = 'left'
 
-    # Standard Left Drawer (LTR Style)
-    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+    # We use 'show-if-above' to handle responsive state automatically (Open on Desktop, Closed on Mobile).
+    # We avoid passing 'value=True' explicitly to prevent forcing it open on mobile.
+    main_drawer = ui.drawer(side=drawer_side, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768 show-if-above')
 
     # Content Area
+    # If using RTL drawer, we might need to adjust margins if NiceGUI/Quasar doesn't auto-handle it?
+    # Quasar usually handles layout margins automatically based on drawer side.
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
     # Add ID for skip link target
     content_col.props('id=main-content')
@@ -1079,9 +1084,8 @@ def apply_theme_immediately():
     current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
-    # Force LTR Layout Globally (as per user request: "Interface exactly as English")
-    # We only set dir="ltr" globally.
-    dir_attr = "ltr"
+    # RTL/LTR Logic
+    dir_attr = "rtl" if current_lang == 'he' else "ltr"
 
     # Add Hebrew-specific class if needed
     body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
