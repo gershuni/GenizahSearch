@@ -19,20 +19,6 @@ import re
 import html
 
 
-def format_snippet(text):
-    """Format snippet with highlighted matches, safely escaping HTML."""
-    if not text:
-        return ""
-    # First escape HTML to prevent XSS
-    escaped = html.escape(text)
-    # Convert *word* to highlighted span (after escaping, markers are safe)
-    return re.sub(
-        r'\*(.*?)\*',
-        r'<span class="highlight-match">\1</span>',
-        escaped
-    )
-
-
 def create_search_page(initial_query: str = None):
     """Create the advanced search page."""
 
@@ -610,7 +596,7 @@ def create_search_page(initial_query: str = None):
 
             # Snippet
             if snippet:
-                snippet_html = format_snippet(snippet)
+                snippet_html = SearchEngine.format_snippet(snippet)
                 with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm').style(
                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
                 ):
@@ -744,7 +730,7 @@ def create_search_page(initial_query: str = None):
                 with ui.card().classes('w-full p-6'):
                     # Changed to H3
                     h3(tr('Match Context'), classes='text-xl font-bold mb-4')
-                    snippet_html = format_snippet(snippet)
+                    snippet_html = SearchEngine.format_snippet(snippet)
                     with ui.element('div').classes('p-4 rounded-lg').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
                     ):
@@ -855,7 +841,7 @@ def create_search_page(initial_query: str = None):
                 # Match tab
                 with ui.tab_panel('snippet'):
                     if snippet:
-                        snippet_html = format_snippet(snippet)
+                        snippet_html = SearchEngine.format_snippet(snippet)
                         with ui.element('div').classes('p-4 rounded-lg').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
                         ):

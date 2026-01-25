@@ -20,6 +20,7 @@ from typing import Mapping
 from functools import lru_cache
 import itertools
 import json
+import html
 
 from genizah_translations import TRANSLATIONS
 
@@ -3505,6 +3506,25 @@ class SearchEngine:
         self.index = None
         self.searcher = None
         self.reload_index()
+
+    @staticmethod
+    def format_snippet(text, style='html_class'):
+        """
+        Format snippet with highlighted matches, safely escaping HTML.
+        style: 'html_class' (Web: span class="highlight-match") or 'html_inline' (Desktop: span style="color:...")
+        """
+        if not text:
+            return ""
+
+        # First escape HTML to prevent XSS
+        escaped = html.escape(text)
+
+        # Convert *word* to highlighted span (after escaping, markers are safe)
+        if style == 'html_class':
+            return re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', escaped)
+        else:
+            # Desktop style (inline) - Red/Bold
+            return re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', escaped)
 
     def reload_index(self):
         db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
