@@ -3380,7 +3380,7 @@ class ResultDialog(QDialog):
         # 1. Update Text Labels
         shelf = self.meta_mgr.get_shelfmark_from_header(self.current_full_header) or meta.get('shelfmark', 'Unknown Shelf')
         self.lbl_shelf.setText(shelf)
-        self.lbl_title.setText(_truncate_title(meta.get('title', '')))
+        _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
         self.lbl_meta_loading.setVisible(False)
 
         # 2. Trigger Image Fetch using the FRESH metadata
@@ -3579,7 +3579,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
 
-        self.lbl_title.setText(_truncate_title(meta.get('title', '')))
+        _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
             library = marc.get('current_owner')
@@ -3813,12 +3813,19 @@ def _format_list_star(in_list=False):
 
 
 def _truncate_title(text, max_chars=100):
-    """Truncate long title text with ellipsis."""
+    """Truncate long title text with ellipsis. Returns (truncated_text, tooltip_or_None)."""
     if not text:
-        return text
+        return text, None
     if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rstrip() + "..."
+        return text, None
+    return text[:max_chars].rstrip() + "...", text
+
+
+def _set_label_with_tooltip(label, text, max_chars=100):
+    """Set label text with truncation and tooltip for full text."""
+    truncated, full = _truncate_title(text, max_chars)
+    label.setText(truncated or '')
+    label.setToolTip(full or '')
 
 
 class GenizahGUI(QMainWindow):
@@ -6011,20 +6018,29 @@ class GenizahGUI(QMainWindow):
                 shelf_with_part += ")"
 
             label_text = f"<b>{shelf_with_part}</b>"
+            tooltip_parts = []
             if oxford_title:
-                label_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
+                truncated, full = _truncate_title(oxford_title)
+                label_text += f"<br/><span style='font-size: 11px;'>{truncated}</span>"
+                if full: tooltip_parts.append(full)
             if title and title != oxford_title:
-                label_text += f"<br/>{_truncate_title(title)}"
+                truncated, full = _truncate_title(title)
+                label_text += f"<br/>{truncated}"
+                if full: tooltip_parts.append(full)
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
         else:
             label_text = f"<b>{shelf or ''}</b>"
+            tooltip_parts = []
             if title:
-                label_text += f" | {_truncate_title(title)}"
+                truncated, full = _truncate_title(title)
+                label_text += f" | {truncated}"
+                if full: tooltip_parts.append(full)
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
 
         self.browse_info_lbl.setText(label_text)
+        self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
 
         # 2. Populate Image Viewer (using new logic)
         folio_num = _get_folio_number_from_shelfmark(shelf)
@@ -6325,9 +6341,13 @@ class GenizahGUI(QMainWindow):
                 shelf_with_part += ")"
 
             info_text = f"<b>{shelf_with_part}</b> - View All"
+            tooltip_text = ''
             if oxford_title:
-                info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
+                truncated, full = _truncate_title(oxford_title)
+                info_text += f"<br/><span style='font-size: 11px;'>{truncated}</span>"
+                if full: tooltip_text = full
             self.browse_info_lbl.setText(info_text)
+            self.browse_info_lbl.setToolTip(tooltip_text)
 
         # Disable paging buttons since we are showing everything
         self.btn_b_prev.setEnabled(False)
@@ -13538,12 +13558,18 @@ class GenizahGUI(QMainWindow):
             shelf_with_part += ")"
 
         info_text = f"<b>{shelf_with_part}</b>"
+        tooltip_parts = []
         if part_title:
-            info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(part_title)}</span>"
+            truncated, full = _truncate_title(part_title)
+            info_text += f"<br/><span style='font-size: 11px;'>{truncated}</span>"
+            if full: tooltip_parts.append(full)
         if csv_title and csv_title != part_title:
-            info_text += f"<br/>{_truncate_title(csv_title)}"
+            truncated, full = _truncate_title(csv_title)
+            info_text += f"<br/>{truncated}"
+            if full: tooltip_parts.append(full)
 
         self.browse_info_lbl.setText(info_text)
+        self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
 
         # Disable controls until loaded
         self.btn_b_catalog.setEnabled(False)
@@ -13695,16 +13721,25 @@ class GenizahGUI(QMainWindow):
                 shelf_with_part += ")"
 
             info_text = f"<b>{shelf_with_part}</b>"
+            tooltip_parts = []
             if oxford_title:
-                info_text += f"<br/><span style='font-size: 11px;'>{_truncate_title(oxford_title)}</span>"
+                truncated, full = _truncate_title(oxford_title)
+                info_text += f"<br/><span style='font-size: 11px;'>{truncated}</span>"
+                if full: tooltip_parts.append(full)
             if title and title != oxford_title:
-                info_text += f"<br/>{_truncate_title(title)}"
+                truncated, full = _truncate_title(title)
+                info_text += f"<br/>{truncated}"
+                if full: tooltip_parts.append(full)
         else:
             info_text = f"<b>{shelf}</b>"
+            tooltip_parts = []
             if title:
-                info_text += f"<br/>{_truncate_title(title)}"
+                truncated, full = _truncate_title(title)
+                info_text += f"<br/>{truncated}"
+                if full: tooltip_parts.append(full)
 
         self.browse_info_lbl.setText(info_text)
+        self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
         if shelf:
             self.browse_shelf_input.setText(shelf)
 
