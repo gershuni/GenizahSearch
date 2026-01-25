@@ -680,6 +680,7 @@ class BrowseState:
         self.draft_id: Optional[str] = None
         self.edit_loading: bool = False
         self.error_message: Optional[str] = None
+        self.fullscreen_edit: bool = False  # Fullscreen edit mode
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -1015,7 +1016,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.rotation = 0  # Also reset rotation
         if slider_refs.get('rotate'):
             slider_refs['rotate'].value = 0
-        ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.reset();')
+        ui.run_javascript('''
+            if(window.manuscriptViewer) window.manuscriptViewer.reset();
+            if(window.fsEditViewer) {
+                window.fsEditViewer.state = { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0 };
+                window.fsEditViewer.applyTransform();
+            }
+        ''')
         update_image_transform()
 
     def fit_width():
@@ -1060,18 +1067,49 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.is_fullscreen = not state.is_fullscreen
         update_content()
 
+    def toggle_image_fullscreen():
+        """Toggle fullscreen mode for image only."""
+        ui.run_javascript('''
+            const imageCard = document.querySelector('.image-container')?.closest('.q-card');
+            if (imageCard) {
+                imageCard.classList.toggle('fullscreen-mode');
+                // Add ESC key handler to exit
+                const escHandler = (e) => {
+                    if (e.key === 'Escape' && imageCard.classList.contains('fullscreen-mode')) {
+                        imageCard.classList.remove('fullscreen-mode');
+                        document.removeEventListener('keydown', escHandler);
+                    }
+                };
+                if (imageCard.classList.contains('fullscreen-mode')) {
+                    document.addEventListener('keydown', escHandler);
+                }
+            }
+        ''')
+
+    def toggle_fullscreen_edit():
+        """Toggle fullscreen edit mode with side-by-side image and text."""
+        state.fullscreen_edit = not state.fullscreen_edit
+        update_content()
+
     def update_image_transform():
         """Update the image transform (zoom/rotate) via JavaScript."""
         zoom_percent = int(state.zoom_level * 100)
-        # Update Python state on client side
+        # Update Python state on client side - both regular and fullscreen viewers
         ui.run_javascript(f'''
+            // Update regular viewer
             if (window.manuscriptViewer) {{
                 window.manuscriptViewer.update({state.zoom_level}, {state.rotation});
             }}
-            const zoomLabel = document.querySelector('.zoom-level-label');
-            if (zoomLabel) {{
-                zoomLabel.textContent = '{zoom_percent}%';
+            // Update fullscreen edit viewer if active
+            if (window.fsEditViewer) {{
+                window.fsEditViewer.state.scale = {state.zoom_level};
+                window.fsEditViewer.state.rotation = {state.rotation};
+                window.fsEditViewer.applyTransform();
             }}
+            // Update all zoom labels
+            document.querySelectorAll('.zoom-level-label').forEach(label => {{
+                label.textContent = '{zoom_percent}%';
+            }});
         ''')
 
     async def handle_submit_correction():
@@ -1828,6 +1866,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='restart_alt', on_click=zoom_reset).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                    ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
 
 
                             # Image display area - using div instead of scroll_area for drag support
@@ -1900,6 +1940,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ui.label(tr('Unsaved changes')).classes('text-orange-600 text-sm')
                                 
                                 with ui.row().classes('gap-2'):
+                                    ui.button(icon='fullscreen', on_click=toggle_fullscreen_edit).props('flat round dense').tooltip(tr('Fullscreen Edit'))
                                     ui.button(tr('Cancel'), icon='close', on_click=cancel_edit).props('flat dense color=grey')
                                     ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
                                     ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props('unelevated dense color=green')
@@ -1908,11 +1949,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             if state.error_message:
                                 ui.markdown(f"**Error:** {state.error_message}").classes('w-full p-2 text-red-600 bg-red-100 border-b border-red-200 text-sm')
 
-                            # Text Area
-                            textarea = ui.textarea(value=state.edit_text).classes('w-full h-full font-mono text-lg').props(
-                                'borderless autofocus input-style="height: 100%; min-height: 400px;"'
+                            # Text Area - use readable Hebrew font
+                            textarea = ui.textarea(value=state.edit_text).classes('w-full h-full text-lg').props(
+                                'borderless autofocus input-style="height: 100%; min-height: 500px;"'
                             ).style(
-                                'direction: rtl; text-align: right; resize: none; flex: 1; padding: 16px;'
+                                'direction: rtl; text-align: right; resize: none; flex: 1; padding: 16px; '
+                                'font-family: "Noto Sans Hebrew", "Segoe UI", "Arial Hebrew", sans-serif; '
+                                'font-size: 1.2rem; line-height: 1.8; min-height: 500px;'
                             )
                             # Bind value manually
                             textarea.bind_value(state, 'edit_text')
@@ -1989,6 +2032,221 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     page_number=page.p_num,
                     shelfmark=page.shelfmark or page.sys_id
                 )
+
+                # === FULLSCREEN EDIT OVERLAY ===
+                if state.fullscreen_edit and state.edit_mode:
+                    with ui.element('div').classes('fullscreen-edit-overlay'):
+                        # Toolbar
+                        with ui.element('div').classes('fullscreen-edit-toolbar'):
+                            with ui.row().classes('items-center gap-4'):
+                                ui.label(tr('Fullscreen Edit')).classes('font-bold').style('color: var(--text-primary);')
+                                if page.shelfmark:
+                                    ui.label(f"• {page.shelfmark}").classes('text-sm').style('color: var(--text-secondary);')
+                                if state.draft_saved:
+                                    ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
+                                else:
+                                    ui.label(tr('Unsaved changes')).classes('text-orange-600 text-sm')
+
+                            with ui.row().classes('items-center gap-2'):
+                                # Save/Submit/Exit controls only
+                                ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
+                                ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props('unelevated dense color=green')
+                                ui.button(icon='fullscreen_exit', on_click=toggle_fullscreen_edit).props('flat round dense data-action="exit-fullscreen-edit"').tooltip(tr('Exit Fullscreen'))
+
+                        # Content area: Image + Splitter + Text
+                        with ui.element('div').classes('fullscreen-edit-content').props('id="fs-edit-content"'):
+                            # Image panel (left) with its own toolbar
+                            with ui.element('div').classes('fullscreen-edit-image-wrapper').props('id="fs-image-wrapper"'):
+                                # Image controls toolbar
+                                with ui.element('div').classes('fullscreen-image-toolbar'):
+                                    ui.button(icon='remove', on_click=zoom_out).props('flat round dense size=sm').tooltip(tr('Zoom out'))
+                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('text-xs zoom-level-label').style('color: #ccc; min-width: 40px; text-align: center;')
+                                    ui.button(icon='add', on_click=zoom_in).props('flat round dense size=sm').tooltip(tr('Zoom in'))
+                                    ui.separator().props('vertical').classes('mx-1 h-4')
+                                    ui.button(icon='rotate_left', on_click=rotate_left).props('flat round dense size=sm').tooltip(tr('Rotate left'))
+                                    ui.button(icon='rotate_right', on_click=rotate_right).props('flat round dense size=sm').tooltip(tr('Rotate right'))
+                                    ui.button(icon='restart_alt', on_click=zoom_reset).props('flat round dense size=sm').tooltip(tr('Reset view'))
+
+                                # Image display area
+                                with ui.element('div').classes('fullscreen-edit-image').props('id="fs-image-panel"'):
+                                    if has_image and img_url:
+                                        safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                        img_html = f'''
+                                        <img
+                                            src="{safe_img_url}"
+                                            class="zoomable-image"
+                                            id="fs-zoomable-image"
+                                            style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
+                                            loading="lazy"
+                                            draggable="false"
+                                        />
+                                        '''
+                                        ui.html(img_html, sanitize=False)
+                                    else:
+                                        with ui.column().classes('items-center justify-center h-full'):
+                                            ui.icon('image_not_supported', size='4rem').style('color: #666;')
+                                            ui.label(tr('No image available')).style('color: #888;')
+
+                            # Draggable splitter
+                            ui.element('div').classes('fullscreen-edit-splitter').props('id="fs-splitter"')
+
+                            # Text panel (right)
+                            with ui.element('div').classes('fullscreen-edit-text').props('id="fs-text-panel"'):
+                                fs_textarea = ui.textarea(value=state.edit_text).classes('w-full fullscreen-textarea').props(
+                                    'outlined autogrow id="fs-textarea"'
+                                ).style(
+                                    'direction: rtl; text-align: right; '
+                                    'font-family: "Noto Sans Hebrew", "Segoe UI", "Arial Hebrew", sans-serif; '
+                                    'font-size: 1.2rem; line-height: 1.8;'
+                                )
+                                fs_textarea.bind_value(state, 'edit_text')
+
+                                def on_fs_edit():
+                                    if state.draft_saved:
+                                        state.draft_saved = False
+                                fs_textarea.on('input', on_fs_edit)
+
+                                # JavaScript to force textarea height after render
+                                ui.run_javascript('''
+                                    setTimeout(() => {
+                                        const panel = document.getElementById('fs-text-panel');
+                                        const textarea = panel?.querySelector('textarea');
+                                        if (panel && textarea) {
+                                            const setHeight = () => {
+                                                const h = panel.clientHeight - 20;
+                                                textarea.style.height = h + 'px';
+                                                textarea.style.minHeight = h + 'px';
+                                                textarea.style.maxHeight = h + 'px';
+                                            };
+                                            setHeight();
+                                            // Also handle resize
+                                            new ResizeObserver(setHeight).observe(panel);
+                                            textarea.focus();
+                                        }
+                                    }, 50);
+                                ''')
+
+                        # JavaScript: ESC key, splitter drag, image pan/zoom
+                        ui.run_javascript('''
+                            (function() {
+                                const fsOverlay = document.querySelector('.fullscreen-edit-overlay');
+                                if (!fsOverlay) return;
+
+                                // ESC key to exit
+                                const escHandler = (e) => {
+                                    if (e.key === 'Escape') {
+                                        document.querySelector('[data-action="exit-fullscreen-edit"]')?.click();
+                                    }
+                                };
+                                document.addEventListener('keydown', escHandler);
+
+                                // Initialize image pan/zoom for fullscreen
+                                setTimeout(() => {
+                                    const fsImage = document.getElementById('fs-zoomable-image');
+                                    const fsImagePanel = document.getElementById('fs-image-panel');
+
+                                    if (fsImage && fsImagePanel) {
+                                        // Create dedicated viewer state for fullscreen
+                                        const fsViewer = {
+                                            el: fsImage,
+                                            state: { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0 },
+
+                                            applyTransform: function() {
+                                                this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+                                            },
+
+                                            onWheel: function(e) {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                const delta = e.deltaY > 0 ? -0.15 : 0.15;
+                                                this.state.scale = Math.max(0.25, Math.min(5, this.state.scale + delta));
+                                                this.applyTransform();
+                                                // Update zoom label in image toolbar
+                                                const label = document.querySelector('.fullscreen-image-toolbar .zoom-level-label');
+                                                if (label) label.textContent = Math.round(this.state.scale * 100) + '%';
+                                            },
+
+                                            onMouseDown: function(e) {
+                                                if (e.button !== 0) return;
+                                                e.preventDefault();
+                                                this.state.isDragging = true;
+                                                this.state.startX = e.clientX - this.state.x;
+                                                this.state.startY = e.clientY - this.state.y;
+                                                this.el.style.cursor = 'grabbing';
+                                            },
+
+                                            onMouseMove: function(e) {
+                                                if (!this.state.isDragging) return;
+                                                e.preventDefault();
+                                                this.state.x = e.clientX - this.state.startX;
+                                                this.state.y = e.clientY - this.state.startY;
+                                                this.applyTransform();
+                                            },
+
+                                            onMouseUp: function() {
+                                                this.state.isDragging = false;
+                                                this.el.style.cursor = 'grab';
+                                            }
+                                        };
+
+                                        // Bind events
+                                        fsImagePanel.addEventListener('wheel', (e) => fsViewer.onWheel(e), { passive: false });
+                                        fsImage.addEventListener('mousedown', (e) => fsViewer.onMouseDown(e));
+                                        document.addEventListener('mousemove', (e) => fsViewer.onMouseMove(e));
+                                        document.addEventListener('mouseup', () => fsViewer.onMouseUp());
+                                        fsImage.ondragstart = (e) => e.preventDefault();
+                                        fsImage.style.cursor = 'grab';
+
+                                        // Store reference for button controls
+                                        window.fsEditViewer = fsViewer;
+                                    }
+                                }, 100);
+
+                                // Splitter drag functionality
+                                const splitter = document.getElementById('fs-splitter');
+                                const imageWrapper = document.getElementById('fs-image-wrapper');
+                                const textPanel = document.getElementById('fs-text-panel');
+                                const content = document.getElementById('fs-edit-content');
+
+                                if (splitter && imageWrapper && textPanel && content) {
+                                    let isDragging = false;
+                                    let startX, startWidth;
+
+                                    splitter.addEventListener('mousedown', (e) => {
+                                        isDragging = true;
+                                        startX = e.clientX;
+                                        startWidth = imageWrapper.offsetWidth;
+                                        splitter.classList.add('dragging');
+                                        document.body.style.cursor = 'col-resize';
+                                        document.body.style.userSelect = 'none';
+                                        e.preventDefault();
+                                    });
+
+                                    document.addEventListener('mousemove', (e) => {
+                                        if (!isDragging) return;
+                                        const delta = e.clientX - startX;
+                                        const newWidth = Math.max(200, Math.min(startWidth + delta, content.offsetWidth - 250));
+                                        imageWrapper.style.flex = 'none';
+                                        imageWrapper.style.width = newWidth + 'px';
+                                    });
+
+                                    document.addEventListener('mouseup', () => {
+                                        if (isDragging) {
+                                            isDragging = false;
+                                            splitter.classList.remove('dragging');
+                                            document.body.style.cursor = '';
+                                            document.body.style.userSelect = '';
+                                            // Recalculate textarea height
+                                            const textarea = textPanel.querySelector('textarea');
+                                            if (textarea) {
+                                                const h = textPanel.clientHeight - 20;
+                                                textarea.style.height = h + 'px';
+                                            }
+                                        }
+                                    });
+                                }
+                            })();
+                        ''')
 
     def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""
@@ -2076,8 +2334,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.add_body_html('''
         <script>
             document.addEventListener('keydown', function(e) {
-                // Only if not focused on input
-                if (document.activeElement.tagName === 'INPUT') return;
+                // Ignore if focused on any text input element
+                const tag = document.activeElement.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
 
                 switch(e.key) {
                     case 'ArrowLeft':

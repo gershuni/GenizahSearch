@@ -10,6 +10,8 @@ Shows:
 """
 
 import asyncio
+import difflib
+import html
 from nicegui import ui, app, run
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
@@ -17,6 +19,43 @@ from web.state import state
 from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
+
+
+def highlight_diff(original: str, corrected: str) -> tuple[str, str]:
+    """
+    Return HTML strings with highlighted differences.
+    Deleted words shown in red with strikethrough, inserted words in green.
+    """
+    if not original and not corrected:
+        return '', ''
+    if not original:
+        return '', f'<span class="diff-inserted">{html.escape(corrected)}</span>'
+    if not corrected:
+        return f'<span class="diff-deleted">{html.escape(original)}</span>', ''
+
+    orig_words = original.split()
+    corr_words = corrected.split()
+    matcher = difflib.SequenceMatcher(None, orig_words, corr_words)
+
+    orig_html, corr_html = [], []
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op == 'equal':
+            # Escape HTML in equal parts
+            orig_html.extend(html.escape(w) for w in orig_words[i1:i2])
+            corr_html.extend(html.escape(w) for w in corr_words[j1:j2])
+        elif op == 'delete':
+            escaped = html.escape(" ".join(orig_words[i1:i2]))
+            orig_html.append(f'<span class="diff-deleted">{escaped}</span>')
+        elif op == 'insert':
+            escaped = html.escape(" ".join(corr_words[j1:j2]))
+            corr_html.append(f'<span class="diff-inserted">{escaped}</span>')
+        elif op == 'replace':
+            escaped_orig = html.escape(" ".join(orig_words[i1:i2]))
+            escaped_corr = html.escape(" ".join(corr_words[j1:j2]))
+            orig_html.append(f'<span class="diff-deleted">{escaped_orig}</span>')
+            corr_html.append(f'<span class="diff-inserted">{escaped_corr}</span>')
+
+    return ' '.join(orig_html), ' '.join(corr_html)
 
 
 def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
@@ -502,30 +541,34 @@ def create_feed_item(item: dict, on_refresh=None):
 
                 with ui.expansion(icon='expand_more').classes('w-full').props('dense'):
                     with ui.column().classes('w-full gap-4'):
-                        # For corrections: show original and corrected text side by side with highlighting
-                        if item_type == 'correction':
-                            original_text = item.get('original_text', '')
-                            corrected_text = item.get('corrected_text', '')
-                            if original_text or corrected_text:
-                                with ui.row().classes('w-full gap-4'):
-                                    if original_text:
-                                        with ui.column().classes('flex-1'):
-                                            ui.label(tr('Original')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
-                                            ui.label(original_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: var(--bg-tertiary); direction: rtl; text-align: right; border-left: 3px solid #ef5350; color: var(--text-primary);'
-                                            )
-                                    if corrected_text:
-                                        with ui.column().classes('flex-1'):
-                                            ui.label(tr('Corrected')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
-                                            ui.label(corrected_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: var(--bg-tertiary); direction: rtl; text-align: right; border-left: 3px solid #66bb6a; color: var(--text-primary);'
-                                            )
 
-                                # Show visual diff if texts differ
-                                if original_text and corrected_text and original_text != corrected_text:
-                                    with ui.row().classes('w-full items-center gap-2 mt-2'):
-                                        ui.icon('compare_arrows', size='sm').style('color: var(--text-tertiary);')
-                                        ui.label(tr('Change highlighted')).classes('text-xs').style('color: var(--text-tertiary);')
+                        # For corrections: show original and corrected text side by side
+                        if item_type == 'correction':
+                            # Get text content
+                            original_text = item.get('original_text') or ''
+                            corrected_text = item.get('corrected_text') or ''
+
+                            with ui.row().classes('w-full gap-4'):
+                                with ui.column().classes('flex-1'):
+                                    ui.label(tr('Original (V0.8)')).classes('font-medium text-xs text-gray-500')
+                                    if original_text:
+                                        with ui.element('div').classes('p-3 rounded text-sm').style(
+                                            'background: #fef2f2; border-left: 4px solid #ef5350; '
+                                            'direction: rtl; text-align: right; white-space: pre-wrap;'
+                                        ):
+                                            ui.label(original_text).style('color: #1f2937; line-height: 1.8;')
+                                    else:
+                                        ui.label(tr('(no original text)')).classes('text-sm p-2 italic text-gray-400')
+                                with ui.column().classes('flex-1'):
+                                    ui.label(tr('Corrected')).classes('font-medium text-xs text-gray-500')
+                                    if corrected_text:
+                                        with ui.element('div').classes('p-3 rounded text-sm').style(
+                                            'background: #f0fdf4; border-left: 4px solid #66bb6a; '
+                                            'direction: rtl; text-align: right; white-space: pre-wrap;'
+                                        ):
+                                            ui.label(corrected_text).style('color: #1f2937; line-height: 1.8;')
+                                    else:
+                                        ui.label(tr('(no corrected text)')).classes('text-sm p-2 italic text-gray-400')
                         elif item_type == 'join':
                             # For joins: show cluster details with individual joins
                             cluster_fragments = item.get('cluster_fragments', [])

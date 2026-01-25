@@ -904,6 +904,161 @@ COMMON_STYLES = '''
         direction: rtl;
         text-align: right;
     }
+
+    /* ========================================================================
+       Diff Highlighting for Corrections
+       ======================================================================== */
+
+    .diff-deleted {
+        background: #fecaca;
+        text-decoration: line-through;
+        padding: 2px 4px;
+        border-radius: 3px;
+        color: #991b1b;
+    }
+
+    .diff-inserted {
+        background: #bbf7d0;
+        padding: 2px 4px;
+        border-radius: 3px;
+        color: #166534;
+    }
+
+    [data-theme="dark"] .diff-deleted {
+        background: #7f1d1d;
+        color: #fecaca;
+    }
+
+    [data-theme="dark"] .diff-inserted {
+        background: #14532d;
+        color: #bbf7d0;
+    }
+
+    /* ========================================================================
+       Fullscreen Edit Mode Overlay
+       ======================================================================== */
+
+    .fullscreen-edit-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 9999;
+        background: var(--bg-primary);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .fullscreen-edit-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-light);
+        flex-shrink: 0;
+    }
+
+    .fullscreen-edit-content {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    .fullscreen-edit-image-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 200px;
+        overflow: hidden;
+    }
+
+    .fullscreen-image-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 6px 10px;
+        background: #111;
+        border-bottom: 1px solid #333;
+        flex-shrink: 0;
+    }
+
+    .fullscreen-image-toolbar .q-btn {
+        color: #aaa !important;
+    }
+
+    .fullscreen-image-toolbar .q-btn:hover {
+        color: #fff !important;
+    }
+
+    .fullscreen-edit-image {
+        flex: 1;
+        background: #1a1a1a;
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .fullscreen-edit-text {
+        flex: 1;
+        background: var(--bg-primary);
+        overflow: hidden;
+        padding: 10px;
+    }
+
+    .fullscreen-edit-text .q-textarea {
+        height: 100%;
+    }
+
+    .fullscreen-edit-text textarea {
+        resize: none !important;
+        overflow-y: auto !important;
+    }
+
+    /* Draggable splitter between image and text */
+    .fullscreen-edit-splitter {
+        width: 6px;
+        background: var(--border-light);
+        cursor: col-resize;
+        flex-shrink: 0;
+        transition: background 0.2s;
+    }
+
+    .fullscreen-edit-splitter:hover,
+    .fullscreen-edit-splitter.dragging {
+        background: var(--q-primary);
+    }
+
+    /* Fullscreen image should fill and allow pan/zoom */
+    .fullscreen-edit-image .zoomable-image {
+        max-width: none;
+        max-height: none;
+        transform-origin: center center;
+    }
+
+    @media (max-width: 768px) {
+        .fullscreen-edit-content {
+            flex-direction: column;
+        }
+        .fullscreen-edit-image,
+        .fullscreen-edit-text {
+            flex: 1;
+            max-height: 50vh;
+        }
+        .fullscreen-edit-text {
+            border-left: none;
+            border-top: 1px solid var(--border-light);
+        }
+        .fullscreen-edit-splitter {
+            width: 100%;
+            height: 6px;
+            cursor: row-resize;
+        }
+    }
 </style>
 '''
 
