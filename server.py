@@ -14,13 +14,14 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Optional, Tuple
 
 # Config
 PID_FILE = Path(__file__).parent / ".server.pid"
 PORT = 8081
 SERVER_MODULE = "web.main"
 
-def get_pid_on_port(port: int) -> int | None:
+def get_pid_on_port(port: int) -> Optional[int]:
     """Find PID listening on the given port."""
     try:
         result = subprocess.run(
@@ -35,7 +36,7 @@ def get_pid_on_port(port: int) -> int | None:
         pass
     return None
 
-def is_running() -> tuple[bool, int | None]:
+def is_running() -> Tuple[bool, Optional[int]]:
     """Check if server is running. Returns (is_running, pid)."""
     # First check PID file
     if PID_FILE.exists():
@@ -167,12 +168,45 @@ def status():
     else:
         print("Server is STOPPED")
 
+def show_menu():
+    """Show interactive menu."""
+    running, pid = is_running()
+    status_str = f"RUNNING (PID {pid})" if running else "STOPPED"
+
+    print(f"\n=== Genizah Search Server ===")
+    print(f"Status: {status_str}")
+    print(f"Port: {PORT}")
+    print()
+    print("1. Start server")
+    print("2. Stop server")
+    print("3. Restart server")
+    print("4. Exit")
+    print()
+
+    try:
+        choice = input("Choose option [1-4]: ").strip()
+        if choice == "1":
+            return "start"
+        elif choice == "2":
+            return "stop"
+        elif choice == "3":
+            return "restart"
+        elif choice == "4":
+            return None
+        else:
+            print("Invalid choice")
+            return None
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return None
+
 def main():
     if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-
-    command = sys.argv[1].lower()
+        command = show_menu()
+        if not command:
+            sys.exit(0)
+    else:
+        command = sys.argv[1].lower()
 
     if command == "start":
         success = start()

@@ -88,7 +88,7 @@ def create_lists_page():
         with ui.dialog() as dialog, ui.card().classes('p-6'):
             # Changed to H3
             h3(tr('Delete List?'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('text-gray-600 mb-4')
+            ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('mb-4').style('color: var(--text-secondary);')
             ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
 
             def delete_list():
@@ -113,7 +113,7 @@ def create_lists_page():
             h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
             shelfmark = item_data.get('shelfmark', 'Unknown')
-            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
+            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
 
             note_input = ui.textarea(
                 label=tr('Notes'),
@@ -167,7 +167,7 @@ def create_lists_page():
 
             lists = state.lists_mgr.data.get('lists', {})
             if not lists:
-                ui.label(tr('No lists yet. Create your first list!')).classes('text-gray-400 text-center mt-4')
+                ui.label(tr('No lists yet. Create your first list!')).classes('text-center mt-4').style('color: var(--text-muted);')
                 return
 
             # Render each list
@@ -180,7 +180,7 @@ def create_lists_page():
                     if is_selected:
                         card_class += ' bg-green-100 border-l-4 border-green-600'
                     else:
-                        card_class += ' hover:bg-gray-50'
+                        card_class += ' hover:shadow-sm'
 
                     with ui.card().classes(card_class).on('click', lambda lid=list_id: select_list(lid)):
                         with ui.row().classes('w-full items-center justify-between gap-2'):
@@ -194,7 +194,7 @@ def create_lists_page():
                                 count = len(state.lists_mgr.data.get('recent_items', []))
                             else:
                                 count = state.lists_mgr._get_list_item_count(list_id)
-                            ui.label(str(count)).classes('text-xs bg-gray-200 px-2 py-1 rounded-full')
+                            ui.label(str(count)).classes('text-xs px-2 py-1 rounded-full').style('background: var(--bg-tertiary); color: var(--text-secondary);')
 
                             # Delete button (only for non-system lists)
                             if not is_system:
@@ -222,8 +222,8 @@ def create_lists_page():
             if not page_state.selected_list_id:
                 # No list selected
                 with ui.column().classes('w-full h-full items-center justify-center'):
-                    ui.icon('playlist_add', size='6rem').classes('text-gray-300')
-                    ui.label(tr('Select a list to view its contents')).classes('text-gray-400 text-xl mt-4')
+                    ui.icon('playlist_add', size='6rem').style('color: var(--text-muted);')
+                    ui.label(tr('Select a list to view its contents')).classes('text-xl mt-4').style('color: var(--text-muted);')
                 return
 
             if not state.lists_mgr:
@@ -250,7 +250,7 @@ def create_lists_page():
 
                     is_system = list_data.get('is_system', False)
                     if is_system:
-                        ui.label(tr('System List')).classes('text-xs text-gray-500')
+                        ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
 
                 # Export button
                 with ui.row().classes('gap-2'):
@@ -266,14 +266,14 @@ def create_lists_page():
 
             if not items_data:
                 with ui.column().classes('w-full items-center justify-center py-16'):
-                    ui.icon('inbox', size='4rem').classes('text-gray-300')
-                    ui.label(tr('This list is empty')).classes('text-gray-400 text-lg mt-2')
+                    ui.icon('inbox', size='4rem').style('color: var(--text-muted);')
+                    ui.label(tr('This list is empty')).classes('text-lg mt-2').style('color: var(--text-muted);')
                     if not list_data.get('is_system'):
-                        ui.label(tr('Add items from search results')).classes('text-gray-400 text-sm')
+                        ui.label(tr('Add items from search results')).classes('text-sm').style('color: var(--text-muted);')
                 return
 
             # Items Grid/List
-            ui.label(f"{len(items_data)} {tr('items')}").classes('text-sm text-gray-500 mb-4')
+            ui.label(f"{len(items_data)} {tr('items')}").classes('text-sm mb-4').style('color: var(--text-tertiary);')
 
             # Track expanded items
             expanded_items = {}
@@ -303,12 +303,12 @@ def create_lists_page():
 
                                 # Title
                                 if title:
-                                    ui.label(title).classes('text-sm text-gray-600').style('direction: rtl;')
+                                    ui.label(title).classes('text-sm').style('direction: rtl; color: var(--text-secondary);')
 
                                 # Note
                                 if note:
-                                    with ui.card().classes('bg-yellow-50 p-2 mt-2'):
-                                        ui.label(note).classes('text-xs text-gray-700')
+                                    with ui.card().classes('p-2 mt-2').style('background: var(--bg-tertiary);'):
+                                        ui.label(note).classes('text-xs').style('color: var(--text-secondary);')
 
                                 # Tags
                                 if tags:
@@ -362,16 +362,16 @@ def create_lists_page():
                                         # Show snippet or full text
                                         max_chars = 200
                                         with ui.element('div').classes(
-                                            'bg-gray-50 p-3 rounded-lg border border-gray-200'
-                                        ).style('direction: rtl; text-align: right;'):
+                                            'p-3 rounded-lg'
+                                        ).style('direction: rtl; text-align: right; background: var(--bg-tertiary); border: 1px solid var(--border-light);'):
                                             if expanded_state['value'] or len(text_snippet) <= max_chars:
                                                 ui.label(text_snippet).classes(
-                                                    'text-sm text-gray-700 whitespace-pre-wrap'
-                                                ).style('line-height: 1.8;')
+                                                    'text-sm whitespace-pre-wrap'
+                                                ).style('line-height: 1.8; color: var(--text-primary);')
                                             else:
                                                 ui.label(text_snippet[:max_chars] + '...').classes(
-                                                    'text-sm text-gray-700'
-                                                ).style('line-height: 1.8;')
+                                                    'text-sm'
+                                                ).style('line-height: 1.8; color: var(--text-primary);')
 
                                             # Expand/collapse button
                                             if len(text_snippet) > max_chars:
@@ -389,8 +389,8 @@ def create_lists_page():
                                                     ).props('flat dense size=sm').classes('text-green-700')
                                     else:
                                         ui.label(tr('No text preview available')).classes(
-                                            'text-xs text-gray-400 italic'
-                                        )
+                                            'text-xs italic'
+                                        ).style('color: var(--text-muted);')
 
                             # Load snippet button (lazy load to avoid slow page)
                             load_btn_container = ui.row().classes('w-full')
@@ -407,7 +407,7 @@ def create_lists_page():
                                     tr('Show text preview'),
                                     icon='text_snippet',
                                     on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
-                                ).props('flat dense size=sm').classes('text-gray-500')
+                                ).props('flat dense size=sm').style('color: var(--text-tertiary);')
 
     def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""
@@ -448,7 +448,7 @@ def create_lists_page():
             ).classes('bg-primary text-white')
 
         # Description
-        ui.label(tr('Organize and save manuscripts for easy access')).classes('text-gray-600 mb-4')
+        ui.label(tr('Organize and save manuscripts for easy access')).classes('mb-4').style('color: var(--text-secondary);')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:

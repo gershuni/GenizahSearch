@@ -629,7 +629,7 @@ def create_search_page(initial_query: str = None):
 
                         if full_text:
                             ui.label(full_text).classes('text-sm whitespace-pre-wrap').style(
-                                'direction: rtl; text-align: right; line-height: 2;'
+                                'direction: rtl; text-align: right; line-height: 2; color: var(--text-primary);'
                             )
                         else:
                             ui.label(tr('Full text not available')).style('color: var(--text-muted);')
@@ -745,7 +745,7 @@ def create_search_page(initial_query: str = None):
                     with ui.element('div').classes('p-4 rounded-lg max-h-96 overflow-auto').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2;'
                     ):
-                        ui.label(full_text).classes('whitespace-pre-wrap')
+                        ui.label(full_text).classes('whitespace-pre-wrap').style('color: var(--text-primary);')
 
             # Actions Section
             with ui.card().classes('w-full p-6'):
@@ -863,7 +863,7 @@ def create_search_page(initial_query: str = None):
                     if full_text:
                         with ui.scroll_area().classes('w-full h-64'):
                             ui.label(full_text).classes('whitespace-pre-wrap').style(
-                                'direction: rtl; text-align: right; line-height: 2; font-size: 1rem;'
+                                'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
                             )
                     else:
                         ui.label(tr('Full text not available')).style('color: var(--text-muted);')

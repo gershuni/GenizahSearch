@@ -380,7 +380,7 @@ def create_login_dialog():
 
     dialog = ui.dialog().props('persistent')
 
-    with dialog, ui.card().classes('w-96 p-6'):
+    with dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
         with ui.tabs().classes('w-full') as tabs:
             login_tab = ui.tab(tr('Login'))
             register_tab = ui.tab(tr('Register'))
@@ -478,7 +478,7 @@ def create_auth_buttons():
 
             # User info with dropdown menu
             with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm'):
-                with ui.menu().classes('min-w-40'):
+                with ui.menu().classes('min-w-40').style('background: var(--bg-card); color: var(--text-primary);'):
                     ui.menu_item(f"Role: {role.title()}", auto_close=False).props('disable')
                     ui.separator()
                     if GlobalAuthState.is_admin():

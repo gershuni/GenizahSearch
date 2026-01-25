@@ -401,7 +401,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 confirm_dialog = ui.dialog()
                                 with confirm_dialog, ui.card().classes('p-4'):
                                     ui.label(tr('Delete this comment?')).classes('font-bold')
-                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
@@ -429,7 +429,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 confirm_dialog = ui.dialog()
                                 with confirm_dialog, ui.card().classes('p-4'):
                                     ui.label(tr('Delete this correction?')).classes('font-bold')
-                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
@@ -512,13 +512,13 @@ def create_feed_item(item: dict, on_refresh=None):
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Original')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
                                             ui.label(original_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: #ffebee; direction: rtl; text-align: right; border-left: 3px solid #ef5350;'
+                                                'background: var(--bg-tertiary); direction: rtl; text-align: right; border-left: 3px solid #ef5350; color: var(--text-primary);'
                                             )
                                     if corrected_text:
                                         with ui.column().classes('flex-1'):
                                             ui.label(tr('Corrected')).classes('font-medium text-xs').style('color: var(--text-tertiary);')
                                             ui.label(corrected_text).classes('text-sm whitespace-pre-wrap p-2 rounded').style(
-                                                'background: #e8f5e9; direction: rtl; text-align: right; border-left: 3px solid #66bb6a;'
+                                                'background: var(--bg-tertiary); direction: rtl; text-align: right; border-left: 3px solid #66bb6a; color: var(--text-primary);'
                                             )
 
                                 # Show visual diff if texts differ
@@ -555,7 +555,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                             if did:
                                                 ui.navigate.to(f'/browse?sys_id={did}')
 
-                                        with ui.card().classes('p-2 cursor-pointer hover:bg-gray-100').style('background: var(--surface-secondary);').on('click', nav_to_frag if frag_doc_id else None):
+                                        with ui.card().classes('p-2 cursor-pointer hover:shadow-sm').style('background: var(--surface-secondary);').on('click', nav_to_frag if frag_doc_id else None):
                                             with ui.row().classes('items-center gap-1'):
                                                 ui.icon('description', size='xs').style('color: var(--text-tertiary);')
                                                 ui.label(frag).classes('font-mono text-sm').style('color: var(--primary-600);' if frag_doc_id else 'color: var(--text-secondary);')
@@ -590,7 +590,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                                     with confirm_dialog, ui.card().classes('p-4'):
                                                         # Changed to H3
                                                         h3(tr('Delete this join?'), classes='font-bold')
-                                                        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                                        ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
@@ -624,7 +624,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                     ui.button(tr('View in browser'), icon='open_in_new', on_click=view_cluster_browse).props('outlined dense')
                         else:
                             # Full content for non-corrections
-                            ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-secondary); direction: rtl;')
+                            ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary); direction: rtl;')
 
                         # Show related manuscripts if any
                         if related_manuscripts and len(related_manuscripts) > 0:
@@ -816,7 +816,7 @@ def create_response_item(resp: dict):
         with ui.row().classes('w-full items-center justify-between mb-1'):
             ui.label(author_name).classes('text-xs font-medium')
             ui.label(format_date(resp.get('created_at', ''))).classes('text-xs').style('color: var(--text-tertiary);')
-        ui.label(resp.get('content', '')).classes('text-sm whitespace-pre-wrap').style('direction: rtl;')
+        ui.label(resp.get('content', '')).classes('text-sm whitespace-pre-wrap').style('direction: rtl; color: var(--text-primary);')
 
 
 async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
@@ -934,7 +934,7 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
                             ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
 
                         if not items:
-                            ui.label(tr('No items found')).classes('text-gray-500 p-4')
+                            ui.label(tr('No items found')).classes('p-4').style('color: var(--text-tertiary);')
                         else:
                             with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
                                 for itm in items:
@@ -957,7 +957,7 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
                                             doc_picker_dialog.close()
                                         return pick
 
-                                    with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_pick()):
+                                    with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:shadow-sm').on('click', make_pick()):
                                         display_text = shelfmark or doc_id
                                         if page and page > 1:
                                             display_text += f" • {tr('Image')} {page}"
@@ -1001,11 +1001,11 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
                                         show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                     return click
 
-                                with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_list_click()):
+                                with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:shadow-sm').on('click', make_list_click()):
                                     with ui.row().classes('items-center gap-2'):
                                         ui.icon('circle').style(f'color: {color}; font-size: 1rem;')
                                         ui.label(list_name).classes('font-medium flex-grow')
-                                        ui.badge(str(count)).classes('bg-gray-200')
+                                        ui.badge(str(count)).style('background: var(--bg-tertiary); color: var(--text-secondary);')
 
                 doc_picker_dialog.open()
 
@@ -1103,7 +1103,7 @@ async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
     with dialog, ui.card().classes('p-4'):
         # Changed to H3
         h3(tr('Delete Discovery?'), classes='text-lg font-bold')
-        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+        ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
 
         with ui.row().classes('justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -1268,7 +1268,7 @@ def create_new_discovery_dialog(on_success=None):
                                     ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
 
                                 if not items:
-                                    ui.label(tr('No items found')).classes('text-gray-500 p-4')
+                                    ui.label(tr('No items found')).classes('p-4').style('color: var(--text-tertiary);')
                                 else:
                                     with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
                                         for item in items:
@@ -1291,7 +1291,7 @@ def create_new_discovery_dialog(on_success=None):
                                                     doc_picker_dialog.close()
                                                 return pick
 
-                                            with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_pick()):
+                                            with ui.card().classes('w-full p-2 mb-2 cursor-pointer hover:shadow-sm').on('click', make_pick()):
                                                 display_text = shelfmark or doc_id
                                                 if page and page > 1:
                                                     display_text += f" • {tr('Image')} {page}"
@@ -1335,11 +1335,11 @@ def create_new_discovery_dialog(on_success=None):
                                                 show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                             return click
 
-                                        with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:bg-gray-100').on('click', make_list_click()):
+                                        with ui.card().classes('w-full p-3 mb-2 cursor-pointer hover:shadow-sm').on('click', make_list_click()):
                                             with ui.row().classes('items-center gap-2'):
                                                 ui.icon('circle').style(f'color: {color}; font-size: 1rem;')
                                                 ui.label(list_name).classes('font-medium flex-grow')
-                                                ui.badge(str(count)).classes('bg-gray-200')
+                                                ui.badge(str(count)).style('background: var(--bg-tertiary); color: var(--text-secondary);')
 
                         doc_picker_dialog.open()
 

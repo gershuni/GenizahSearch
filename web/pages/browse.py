@@ -1335,7 +1335,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if state.is_loading:
                 with ui.row().classes('w-full justify-center py-16'):
                     ui.spinner(size='xl', color='green')
-                    ui.label(tr('Loading...')).classes('ml-3 text-lg text-gray-600')
+                    ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
                 return
 
             if state.error and not state.current_page:
@@ -1350,10 +1350,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.column().classes('w-full items-center py-16'):
                     ui.icon('auto_stories', size='6rem').classes('text-green-400')
                     ui.label(tr('Enter a shelfmark to browse the manuscript')).classes(
-                        'text-gray-600 mt-6 text-xl rtl-text hebrew-text'
-                    )
+                        'mt-6 text-xl rtl-text hebrew-text'
+                    ).style('color: var(--text-secondary);')
                     with ui.column().classes('mt-8 text-center'):
-                        ui.label(tr('Examples')).classes('text-gray-500 text-sm mb-2')
+                        ui.label(tr('Examples')).classes('text-sm mb-2').style('color: var(--text-tertiary);')
                         with ui.row().classes('gap-2'):
                             for example in ['T-S 8J6.1', 'T-S 13J2.5', 'T-S AS 145.295']:
                                 ui.button(
@@ -1566,7 +1566,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         with ui.row().classes('items-center gap-2'):
                             # Changed to H2
                             h2(tr('Full Manuscript View'), classes='font-bold text-lg')
-                            ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('text-gray-600 ml-2')
+                            ui.label(f"({len(state.full_manuscript)} {tr('pages')})").classes('ml-2').style('color: var(--text-secondary);')
 
                         # Back to single page button
                         ui.button(
@@ -1587,7 +1587,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Changed to H3
                                 h3(f"{tr('Page')} {doc_page.p_num}", classes='font-bold text-green-700')
                                 if doc_page.full_header:
-                                    ui.label(doc_page.full_header).classes('text-xs text-gray-500 font-mono')
+                                    ui.label(doc_page.full_header).classes('text-xs font-mono').style('color: var(--text-tertiary);')
 
                             # Page text
                             if doc_page.text:
@@ -1601,7 +1601,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
                                     )
                             else:
-                                ui.label(tr('No text available')).classes('text-gray-400 italic')
+                                ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
             else:
                 # Single page view
                 # Extract FL ID and check if we have an image
@@ -1693,7 +1693,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 max=page.total_pages
                             ).classes('w-16').props('dense outlined')
 
-                            ui.label(f"/ {page.total_pages}").classes('text-gray-600 text-sm')
+                            ui.label(f"/ {page.total_pages}").classes('text-sm').style('color: var(--text-secondary);')
 
                             # Go button
                             def handle_go_click():
@@ -1893,7 +1893,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # Edit Bar
                             with ui.row().classes('w-full items-center justify-between p-2 bg-gray-100 border-b'):
                                 with ui.row().classes('items-center gap-2'):
-                                    ui.label(tr('Edit Mode')).classes('font-bold text-gray-700')
+                                    ui.label(tr('Edit Mode')).classes('font-bold').style('color: var(--text-primary);')
                                     if state.draft_saved:
                                         ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
                                     else:
@@ -1931,7 +1931,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # === LOADING EDIT MODE ===
                             with ui.column().classes('w-full h-full items-center justify-center'):
                                 ui.spinner(size='lg', color='primary')
-                                ui.label(tr('Loading...')).classes('mt-2 text-gray-500 font-bold')
+                                ui.label(tr('Loading...')).classes('mt-2 font-bold').style('color: var(--text-tertiary);')
                         else:
                             # === VIEW MODE ===
                             # Text content container
@@ -1954,8 +1954,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 )
                                         else:
                                             with ui.column().classes('items-center justify-center h-full'):
-                                                ui.icon('text_snippet', size='4rem').classes('text-gray-300')
-                                                ui.label(tr('No text available')).classes('text-gray-400 mt-4 text-xl')
+                                                ui.icon('text_snippet', size='4rem').style('color: var(--text-muted);')
+                                                ui.label(tr('No text available')).classes('mt-4 text-xl').style('color: var(--text-muted);')
                                 text_container.update()
 
                             def handle_version_change(new_text: str, version_info: dict):

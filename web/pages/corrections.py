@@ -274,7 +274,7 @@ async def create_corrections_page():
                                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
                                         # Changed to H3
                                         h3(tr('Delete Correction?'), classes='text-lg font-bold')
-                                        ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                        ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
                                             async def do_delete():
@@ -438,7 +438,7 @@ async def create_corrections_page():
                                 with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
                                     # Changed to H3
                                     h3(tr('Delete Comment?'), classes='text-lg font-bold')
-                                    ui.label(tr('This action cannot be undone.')).classes('text-sm text-gray-500')
+                                    ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
                                         async def do_delete():

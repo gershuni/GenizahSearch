@@ -222,6 +222,46 @@ COMMON_STYLES = '''
         color: white !important;
     }
 
+    /* Dark Theme Tabs Fixes */
+    [data-theme="dark"] .q-tabs,
+    [data-theme="dark"] .q-tab-panels {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-tab {
+        color: var(--text-secondary) !important;
+    }
+
+    [data-theme="dark"] .q-tab--active {
+        color: var(--primary-400) !important;
+    }
+
+    /* Dark Theme Dialog Fixes */
+    [data-theme="dark"] .q-dialog__inner {
+        background: transparent !important;
+    }
+
+    [data-theme="dark"] .q-dialog .q-card {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* Dark Theme Expansion Panel Fixes */
+    [data-theme="dark"] .q-expansion-item {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-expansion-item__content {
+        background: var(--bg-secondary) !important;
+    }
+
+    /* Dark Theme Badge and Chip Fixes */
+    [data-theme="dark"] .q-badge {
+        color: white !important;
+    }
+
     /* Parchment theme input fixes */
     [data-theme="parchment"] .q-field__native,
     [data-theme="parchment"] .q-field__input,
