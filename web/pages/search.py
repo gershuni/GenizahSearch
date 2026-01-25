@@ -445,26 +445,16 @@ def create_search_page(initial_query: str = None):
             ui.notify(tr("Engine not ready."), type='warning')
             return
 
-        # Parse syntax shortcuts
-        mode = mode_select.value
+        # Parse syntax shortcuts (Delegated to Core)
         clean_query = query
+        mode_override, parsed_query = state.searcher.parse_query_syntax(query)
 
-        syntax_map = [
-            ('???', 'variants_maximum'),
-            ('??', 'variants_extended'),
-            ('?', 'variants'),
-            ('=', 'exact'),
-            ('/', 'Regex'),
-            ('#', 'Shelfmark'),
-            ('$', 'Title'),
-        ]
-
-        for prefix, mode_val in syntax_map:
-            if query.startswith(prefix):
-                mode = mode_val
-                clean_query = query[len(prefix):]
-                mode_select.value = mode
-                break
+        if mode_override:
+            mode = mode_override
+            clean_query = parsed_query
+            mode_select.value = mode
+        else:
+            mode = mode_select.value
 
         # Reset UI
         search_state.is_running = True
@@ -493,24 +483,13 @@ def create_search_page(initial_query: str = None):
                         progress_callback=progress_cb
                     )
                 else:
-                    results = state.searcher.execute_search(
+                    return state.searcher.execute_search(
                         clean_query,
                         mode=mode,
                         gap=int(gap_input.value),
-                        progress_callback=progress_cb
+                        progress_callback=progress_cb,
+                        exclude_words=not_words
                     )
-
-                    # Apply NOT filter
-                    if not_words and results:
-                        filtered = []
-                        for r in results:
-                            text = r.get('snippet', '') + ' ' + r.get('full_text', '')
-                            text_lower = text.lower()
-                            if not any(w.lower() in text_lower for w in not_words):
-                                filtered.append(r)
-                        return filtered
-
-                    return results
             except Exception as e:
                 print(f"Search Error: {e}")
                 import traceback

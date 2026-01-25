@@ -28,14 +28,21 @@ class SearchThread(QThread):
     results_signal = pyqtSignal(list)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
-    def __init__(self, searcher, query, mode, gap):
+    def __init__(self, searcher, query, mode, gap, exclude_words=None):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
+        self.exclude_words = exclude_words
 
     def run(self):
         try:
             def cb(curr, total): self.progress_signal.emit(curr, total)
-            results = self.searcher.execute_search(self.query, self.mode, self.gap, progress_callback=cb)
+            results = self.searcher.execute_search(
+                self.query,
+                self.mode,
+                self.gap,
+                progress_callback=cb,
+                exclude_words=self.exclude_words
+            )
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
 
