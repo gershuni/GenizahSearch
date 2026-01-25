@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Parallels Search Page - Genizah Search Pro
+Parallels Search Page - Dicta Genizah Search
 
 Find parallel texts in the Genizah corpus using:
 - Shmidman-Koppel-Porat fingerprinting algorithm

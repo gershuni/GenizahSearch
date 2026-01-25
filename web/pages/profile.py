@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-User Profile Page - Genizah Search Pro
+User Profile Page - Dicta Genizah Search
 
 Edit user profile details and change password.
 """

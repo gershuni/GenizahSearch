@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-My Edits & Comments Page - Genizah Search Pro
+My Edits & Comments Page - Dicta Genizah Search
 
 User corrections and comments system: view, edit, and manage your contributions.
 """
