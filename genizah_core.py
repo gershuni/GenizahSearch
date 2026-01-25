@@ -1399,7 +1399,7 @@ class AIManager:
     """Manage AI configuration (Provider, Model, Key) and prompt sessions."""
     def __init__(self):
         self.provider = "Google Gemini"
-        self.model_name = "gemini-1.5-flash"
+        self.model_name = "gemini-3-flash-preview"
         self.api_key = ""
         self.chat = None
 
@@ -1420,7 +1420,7 @@ class AIManager:
                     else:
                         self.api_key = cfg.get('api_key', '')
                         self.provider = cfg.get('provider', 'Google Gemini')
-                        self.model_name = cfg.get('model_name', 'gemini-1.5-flash')
+                        self.model_name = cfg.get('model_name', 'gemini-3-flash-preview')
             except Exception as e:
                 LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
 

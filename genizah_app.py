@@ -9220,8 +9220,8 @@ class GenizahGUI(QMainWindow):
         self.combo_provider.setCurrentText(self.ai_mgr.provider if self.ai_mgr else "Google Gemini")
         self.combo_provider.currentTextChanged.connect(self._on_provider_changed)
 
-        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name if self.ai_mgr else "gemini-1.5-flash")
-        self.txt_model.setPlaceholderText(tr("Model:") + " (e.g. gemini-1.5-flash)")
+        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name if self.ai_mgr else "gemini-3-flash-preview")
+        self.txt_model.setPlaceholderText(tr("Model:") + " (e.g. gemini-3-flash-preview)")
 
         row1.addWidget(QLabel(tr("Provider:"))); row1.addWidget(self.combo_provider)
         row1.addWidget(QLabel(tr("Model:"))); row1.addWidget(self.txt_model)
