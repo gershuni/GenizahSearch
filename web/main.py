@@ -49,7 +49,7 @@ META_TAGS = '''
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://GenizahSearch.com/">
 <meta property="og:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta property="og:description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, high-resolution manuscript viewer, and parallel text detection.">
+<meta property="og:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
 <meta property="og:locale" content="he_IL">
 <meta property="og:site_name" content="Genizah Search Pro">
@@ -58,7 +58,7 @@ META_TAGS = '''
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://GenizahSearch.com/">
 <meta name="twitter:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta name="twitter:description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, manuscript viewer, and parallel detection.">
+<meta name="twitter:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
 
 <!-- Canonical URL -->
