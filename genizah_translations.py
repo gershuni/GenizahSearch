@@ -1823,7 +1823,7 @@ TRANSLATIONS = {
     "Download App": "הורד אפליקציה",
     "Get Genizah Search Pro": "הורדת Genizah Search Pro",
     "Desktop Application": "אפליקציית שולחן עבודה",
-    "Download for Windows": "הורד לווינדוס",
+    "Download for Windows": "הורד לחלונות",
     "Download for offline research": "הורד למחקר ללא אינטרנט",
     "Fast, powerful, works offline": "מהיר, רב עוצמה, עובד ללא אינטרנט",
     "More search options and filters": "אפשרויות חיפוש ומסננים נוספים",
