@@ -30,6 +30,41 @@ APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 # Initialize API routes (Image Proxy, Export)
 init_api_routes()
 
+# Serve static files for SEO images
+STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
+app.add_static_files('/static', STATIC_DIR)
+
+# ============================================================================
+# Website Metadata - SEO & Social Sharing
+# ============================================================================
+
+META_TAGS = '''
+<!-- Meta Tags -->
+<meta name="description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר. חיפוש טקסט מלא, צפייה בכתבי יד, איתור מקבילות ועוד.">
+<meta name="keywords" content="גניזה, גניזת קהיר, כתבי יד, מחקר, Cairo Genizah, manuscripts, research">
+<meta name="author" content="Genizah Search Pro">
+<meta name="theme-color" content="#059669">
+
+<!-- Open Graph / Facebook / WhatsApp / Slack -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://GenizahSearch.com/">
+<meta property="og:title" content="Genizah Search Pro | חיפוש גניזה">
+<meta property="og:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר. חיפוש טקסט מלא, צפייה בכתבי יד, איתור מקבילות ועוד.">
+<meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
+<meta property="og:locale" content="he_IL">
+<meta property="og:site_name" content="Genizah Search Pro">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:url" content="https://GenizahSearch.com/">
+<meta name="twitter:title" content="Genizah Search Pro | חיפוש גניזה">
+<meta name="twitter:description" content="פלטפורמת מחקר מתקדמת לחיפוש וניתוח כתבי יד מגניזת קהיר">
+<meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
+
+<!-- Canonical URL -->
+<link rel="canonical" href="https://GenizahSearch.com/">
+'''
+
 # ============================================================================
 # Modern Theme System - Professional Research UI
 # ============================================================================
@@ -1295,6 +1330,7 @@ def apply_theme_immediately():
 def dashboard_page():
     app.storage.user['current_page'] = '/'
     current_theme = app.storage.user.get('theme', 'light')
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1307,6 +1343,7 @@ def dashboard_page():
 @ui.page('/search')
 def search_page_route(q: str = None):
     app.storage.user['current_page'] = '/search'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1318,6 +1355,7 @@ def search_page_route(q: str = None):
 @ui.page('/parallels')
 def parallels_page_route(text: str = None):
     app.storage.user['current_page'] = '/parallels'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1329,6 +1367,7 @@ def parallels_page_route(text: str = None):
 @ui.page('/browse')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None):
     app.storage.user['current_page'] = '/browse'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1340,6 +1379,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
 @ui.page('/lists')
 def lists_page_route():
     app.storage.user['current_page'] = '/lists'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1351,6 +1391,7 @@ def lists_page_route():
 @ui.page('/settings')
 def settings_page_route():
     app.storage.user['current_page'] = '/settings'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1362,6 +1403,7 @@ def settings_page_route():
 @ui.page('/help')
 def help_page_route():
     app.storage.user['current_page'] = '/help'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1373,6 +1415,7 @@ def help_page_route():
 @ui.page('/corrections')
 async def corrections_page_route():
     app.storage.user['current_page'] = '/corrections'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1384,6 +1427,7 @@ async def corrections_page_route():
 @ui.page('/discoveries')
 async def discoveries_page_route():
     app.storage.user['current_page'] = '/discoveries'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1395,6 +1439,7 @@ async def discoveries_page_route():
 @ui.page('/admin')
 async def admin_page_route():
     app.storage.user['current_page'] = '/admin'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1406,6 +1451,7 @@ async def admin_page_route():
 @ui.page('/profile')
 async def profile_page_route():
     app.storage.user['current_page'] = '/profile'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1417,6 +1463,7 @@ async def profile_page_route():
 @ui.page('/accessibility')
 def accessibility_page_route():
     app.storage.user['current_page'] = '/accessibility'
+    ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1482,6 +1529,6 @@ if __name__ in {'__main__', '__mp_main__'}:
         port=APP_PORT,
         reload=reload_enabled,
         show=show_browser,
-        favicon='📜',
+        favicon='/static/favicon.ico',
         storage_secret='genizah-secret-v5',
     )
