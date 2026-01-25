@@ -1,0 +1,30 @@
+@echo off
+REM Build GenizahSearchPro desktop application
+REM Run from the project root directory with venv activated
+
+pyinstaller --noconfirm --noconsole --onedir --clean ^
+ --name "GenizahSearchPro" ^
+ --icon "icon.ico" ^
+ --hidden-import "tantivy" ^
+ --collect-all "tantivy" ^
+ --hidden-import "google.genai" ^
+ --collect-all "google.genai" ^
+ --add-data "icon.ico;." ^
+ --add-data "Help.html;." ^
+ --add-data "oxford_full_db.json;." ^
+ --add-data "libraries.csv;." ^
+ --add-data "bodleian_master_index.csv;." ^
+ --exclude-module "tkinter" ^
+ --exclude-module "matplotlib" ^
+ --exclude-module "scipy" ^
+ --exclude-module "pandas" ^
+ --exclude-module "numpy" ^
+ --exclude-module "notebook" ^
+ --exclude-module "ipython" ^
+ --exclude-module "jedi" ^
+ --exclude-module "curses" ^
+ --exclude-module "nicegui" ^
+ genizah_app.py
+
+echo.
+echo Build complete! Output in dist\GenizahSearchPro
