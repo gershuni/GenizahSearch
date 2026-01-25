@@ -4,27 +4,6 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [5.0.1] - 2026-01-25
-
-### User Experience
-- **Transcription Disclaimer Banner:** Dismissible banner on homepage informing users that texts are auto-generated and may contain errors, with suggestion to use variant search modes
-  - Bilingual (English/Hebrew) with RTL support
-  - Dismissal preference saved in browser storage
-
-### Developer Tools
-- **Server Management CLI (`server.py`):** Simple commands for local development
-  - `python server.py start|stop|restart|status`
-  - Tracks PID to avoid killing other Python processes
-
-### Bug Fixes
-- Fixed missing `SearchEngine` import in `web/pages/search.py` (bug from commit `a4899a9`)
-
-### Infrastructure
-- Production switched from branch `web-parallels-snippet-fix-7917465670133512409` to `master-main`
-- Updated `deploy.sh` to default to `master-main` branch
-
----
-
 ## [5.0.0] - 2026-01-19
 
 ### Major Release: Web Platform & Community Features
