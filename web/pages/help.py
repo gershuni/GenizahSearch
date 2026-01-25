@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Help Center - Genizah Search Pro
+Help Center - Dicta Genizah Search
 
 Comprehensive documentation and tutorials for researchers.
 """

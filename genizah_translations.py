@@ -3,7 +3,7 @@ from version import APP_VERSION
 
 TRANSLATIONS = {
     # --- General ---
-    f"Genizah Search Pro V{APP_VERSION}": f"Genizah Search Pro V{APP_VERSION}",
+    f"Dicta Genizah Search V{APP_VERSION}": f"Dicta Genizah Search V{APP_VERSION}",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
     "Fatal Error": "שגיאה קריטית",
     "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
@@ -548,7 +548,7 @@ TRANSLATIONS = {
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
+                <h2 style='margin-bottom:5px;'>Dicta Genizah Search {APP_VERSION}</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
             </div>
             <hr>
@@ -565,7 +565,7 @@ TRANSLATIONS = {
             <p>המאגר הבסיסי מופץ תחת רישיון Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>)</p>
 
             <h3>ציטוט</h3>
-            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Genizah Search Pro של הלל גרשוני.</p>
+            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Dicta Genizah Search של הלל גרשוני.</p>
         </div>
         """,
 
@@ -598,7 +598,7 @@ TRANSLATIONS = {
     "See Appendix for query information and excluded manuscripts.": "ראו נספח למידע על השאילתה וכתבי היד המוחרגים.",
 
     # --- Report Headers ---
-    "REPORT_CREDIT_TXT": """הופק באמצעות Genizah Search Pro
+    "REPORT_CREDIT_TXT": """הופק באמצעות Dicta Genizah Search
 מקור הנתונים: תעתיקי MiDRASH (שטוקל בן עזרא ואח', 2025)
 המאגר זמין בכתובת: https://doi.org/10.5281/zenodo.17734473
 ================================================================================
@@ -1204,7 +1204,7 @@ TRANSLATIONS = {
     "Help Center": "מרכז עזרה",
     "Genizah Search": "חיפוש גניזה",
     "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
-    "Welcome to Genizah Search Pro": "ברוכים הבאים ל-Genizah Search Pro",
+    "Welcome to Dicta Genizah Search": "ברוכים הבאים ל-Dicta Genizah Search",
     "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
     "Research Tools": "כלי מחקר",
     "Pages": "עמודים",
@@ -1258,7 +1258,7 @@ TRANSLATIONS = {
     "Active": "פעיל",
     "Not loaded": "לא נטען",
     "Documents": "מסמכים",
-    "Genizah Search Pro v5.0": "Genizah Search Pro v5.0",
+    "Dicta Genizah Search v5.0": "Dicta Genizah Search v5.0",
     "Data Source: MiDRASH Project (Friedberg Genizah Project)": "מקור נתונים: פרויקט MiDRASH (פרויקט הגניזה של פרידברג)",
     "Text Search": "חיפוש טקסט",
     "Search in manuscripts": "חיפוש בכתבי יד",
@@ -1792,9 +1792,9 @@ TRANSLATIONS = {
     "Feedback and Contact": "משוב ויצירת קשר",
     "Last Updated": "עודכן לאחרונה",
     "The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.": "הנחיות נגישות תכנים באינטרנט (WCAG) מגדירות דרישות למעצבים ומפתחים לשיפור הנגישות לאנשים עם מוגבלות. הן מגדירות שלוש רמות תאימות: רמה A, רמה AA ורמה AAA.",
-    "Genizah Search Pro is committed to ensuring digital accessibility for people with disabilities.": "Genizah Search Pro מחויבת להבטיח נגישות דיגיטלית לאנשים עם מוגבלות.",
+    "Dicta Genizah Search is committed to ensuring digital accessibility for people with disabilities.": "Dicta Genizah Search מחויבת להבטיח נגישות דיגיטלית לאנשים עם מוגבלות.",
     "We are continually improving the user experience for everyone, and applying the relevant accessibility standards.": "אנו משפרים ללא הרף את חווית המשתמש לכולם, ומיישמים את תקני הנגישות הרלוונטיים.",
-    "Genizah Search Pro is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.": "Genizah Search Pro תואמת חלקית לתקן WCAG 2.0 רמה AA ולתקן הישראלי 5568.",
+    "Dicta Genizah Search is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.": "Dicta Genizah Search תואמת חלקית לתקן WCAG 2.0 רמה AA ולתקן הישראלי 5568.",
     "\"Partially conformant\" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.": "\"תואמת חלקית\" משמעו שחלקים מהתוכן אינם תואמים באופן מלא לתקן הנגישות, בעיקר בשל אופיים של תמונות כתבי היד ההיסטוריים.",
     "We have taken the following measures to ensure accessibility:": "נקטנו באמצעים הבאים להבטחת נגישות:",
     "Keyboard Navigation": "ניווט מקלדת",
@@ -1814,14 +1814,14 @@ TRANSLATIONS = {
     "Scanned historical manuscripts are images of text and cannot be read directly by screen readers. We provide machine-generated transcriptions where available to assist with access.": "כתבי יד היסטוריים סרוקים הם תמונות של טקסט ואינם ניתנים לקריאה ישירה על ידי קוראי מסך. אנו מספקים תעתיקים שנוצרו על ידי מכונה היכן שזמין כדי לסייע בגישה.",
     "Generated Transcriptions": "תעתיקים שנוצרו",
     "The OCR (Optical Character Recognition) text may contain errors and might not perfectly reflect the manuscript content.": "טקסט ה-OCR (זיהוי תווים אופטי) עשוי להכיל שגיאות וייתכן שלא ישקף באופן מושלם את תוכן כתב היד.",
-    "We welcome your feedback on the accessibility of Genizah Search Pro. Please let us know if you encounter accessibility barriers:": "אנו מברכים על המשוב שלך לגבי הנגישות של Genizah Search Pro. אנא הודע לנו אם נתקלת בחסמי נגישות:",
+    "We welcome your feedback on the accessibility of Dicta Genizah Search. Please let us know if you encounter accessibility barriers:": "אנו מברכים על המשוב שלך לגבי הנגישות של Dicta Genizah Search. אנא הודע לנו אם נתקלת בחסמי נגישות:",
     "We try to respond to feedback within 5 business days.": "אנו משתדלים להגיב למשוב תוך 5 ימי עסקים.",
 
     # --- Download Page ---
     "Visit Website": "בקר באתר",
     "Visit our website": "בקר באתר שלנו",
     "Download App": "הורד אפליקציה",
-    "Get Genizah Search Pro": "הורדת Genizah Search Pro",
+    "Get Dicta Genizah Search": "הורדת Dicta Genizah Search",
     "Desktop Application": "אפליקציית שולחן עבודה",
     "Download for Windows": "הורד לחלונות",
     "Download for offline research": "הורד למחקר ללא אינטרנט",

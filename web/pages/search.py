@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Search Page - Genizah Search Pro
+Advanced Search Page - Dicta Genizah Search
 
 A comprehensive search interface with:
 - Multiple search modes (exact, variants, fuzzy, regex, shelfmark, title)

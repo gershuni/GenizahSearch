@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Genizah Search Pro will be documented in this file.
+All notable changes to Dicta Genizah Search will be documented in this file.
 
 ---
 
@@ -8,7 +8,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ### Major Release: Web Platform & Community Features
 
-Version 5.0 marks the launch of the **Genizah Search Pro Web Platform** and introduces comprehensive **Community Features**, transforming the software into a collaborative research environment.
+Version 5.0 marks the launch of the **Dicta Genizah Search Web Platform** and introduces comprehensive **Community Features**, transforming the software into a collaborative research environment.
 
 ---
 

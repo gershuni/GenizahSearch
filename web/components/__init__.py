@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Shared UI Components for Genizah Search Pro
+Shared UI Components for Dicta Genizah Search
 
 Provides reusable components for:
 - Text editing with local/submit options

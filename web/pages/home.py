@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Research Dashboard - Genizah Search Pro
+Research Dashboard - Dicta Genizah Search
 
 A professional research dashboard providing:
 - Quick access to all research tools
@@ -41,7 +41,7 @@ def create_page():
             with ui.row().classes('w-full items-center justify-between flex-wrap gap-6'):
                 with ui.column().classes('gap-2'):
                     # Changed to H1
-                    h1(tr('Welcome to Genizah Search Pro'),
+                    h1(tr('Welcome to Dicta Genizah Search'),
                        classes='text-2xl font-bold',
                        style='color: var(--primary-800);')
 

@@ -23,7 +23,7 @@ from web.translations import tr, is_rtl, get_dir, set_language, get_language
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, Config
 
 # App configuration
-APP_TITLE = "Genizah Search Pro | חיפוש גניזת קהיר"
+APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 APP_VERSION = "5.0"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
@@ -40,25 +40,25 @@ app.add_static_files('/static', STATIC_DIR)
 
 META_TAGS = '''
 <!-- Meta Tags -->
-<meta name="description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
-<meta name="keywords" content="Genizah Search Pro, חיפוש גניזה, גניזת קהיר, כתבי יד, גניזה קהירית, מחקר גניזה, Cairo Genizah, Genizah search, manuscripts, Jewish manuscripts">
-<meta name="author" content="Genizah Search Pro">
+<meta name="description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta name="keywords" content="Dicta Genizah Search, חיפוש גניזה, גניזת קהיר, כתבי יד, גניזה קהירית, מחקר גניזה, Cairo Genizah, Genizah search, manuscripts, Jewish manuscripts">
+<meta name="author" content="Dicta Genizah Search">
 <meta name="theme-color" content="#059669">
 
 <!-- Open Graph / Facebook / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://GenizahSearch.com/">
-<meta property="og:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta property="og:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta property="og:title" content="Dicta Genizah Search | Cairo Genizah Manuscript Research Platform">
+<meta property="og:description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
 <meta property="og:locale" content="he_IL">
-<meta property="og:site_name" content="Genizah Search Pro">
+<meta property="og:site_name" content="Dicta Genizah Search">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://GenizahSearch.com/">
-<meta name="twitter:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta name="twitter:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta name="twitter:title" content="Dicta Genizah Search | Cairo Genizah Manuscript Research Platform">
+<meta name="twitter:description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
 
 <!-- Canonical URL -->
@@ -1534,7 +1534,7 @@ app.on_startup(initialize_engine)
 
 if __name__ in {'__main__', '__mp_main__'}:
     print(f"\n{'='*60}")
-    print(f"  Genizah Search Pro v{APP_VERSION}")
+    print(f"  Dicta Genizah Search v{APP_VERSION}")
     print(f"  Starting on port {APP_PORT}...")
     print(f"{'='*60}\n")
 
