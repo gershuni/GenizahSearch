@@ -4071,11 +4071,38 @@ class GenizahGUI(QMainWindow):
         self.tabs.addTab(self.community_tab, tr("Community"))
         self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
-        # Corner widget with Version, Login button and Language toggle
+        # Corner widget with Website, Version, Login button and Language toggle
         corner_widget = QWidget()
         corner_layout = QHBoxLayout(corner_widget)
         corner_layout.setContentsMargins(5, 0, 5, 0)
         corner_layout.setSpacing(10)
+
+        # Website button (highlighted)
+        self.corner_website_btn = QPushButton("🌐 GenizahSearch.com")
+        self.corner_website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_website_btn.setToolTip(tr("Visit our website"))
+        self.corner_website_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://genizahsearch.com")))
+        self.corner_website_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8f4fc;
+                color: #1a73e8;
+                border: 1px solid #1a73e8;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #1a73e8;
+                color: white;
+            }
+        """)
+        corner_layout.addWidget(self.corner_website_btn)
+
+        # Separator
+        sep0 = QLabel("|")
+        sep0.setStyleSheet("color: gray;")
+        corner_layout.addWidget(sep0)
 
         # Version button
         self.corner_version_btn = QPushButton(f"v{APP_VERSION}")

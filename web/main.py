@@ -1211,6 +1211,7 @@ def create_layout():
                 ui.label(tr('TOOLS')).classes('nav-section-label')
 
                 tool_items = [
+                    ('/download', 'download', tr('Download App'), None),
                     ('/settings', 'settings', tr('Settings'), None),
                     ('/help', 'help_center', tr('Help Center'), None),
                 ]
@@ -1474,6 +1475,20 @@ def accessibility_page_route():
     with content:
         from web.pages.accessibility import create_accessibility_page
         create_accessibility_page()
+
+
+@ui.page('/download')
+def download_page_route():
+    app.storage.user['current_page'] = '/download'
+    ui.add_head_html(META_TAGS)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.download import create_download_page
+        create_download_page()
+
 
 # ============================================================================
 # Startup Logic

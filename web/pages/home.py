@@ -202,6 +202,19 @@ def create_page():
                             'color: var(--text-muted);'
                         )
 
+            # Desktop App
+            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/download')).on('keydown.enter', lambda: ui.navigate.to('/download')).on('keydown.space', lambda: ui.navigate.to('/download')):
+                with ui.row().classes('items-center gap-4'):
+                    with ui.element('div').classes('p-3 rounded-xl').style('background: #e0e7ff;'):
+                        ui.icon('download').classes('text-2xl text-indigo-700')
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Desktop App'), classes='text-lg font-bold', style='color: var(--text-primary);')
+                        ui.label(tr('Fast, powerful, works offline')).classes('text-sm').style(
+                            'color: var(--text-muted);'
+                        )
+
         # === Recent Activity Section ===
         with ui.card().classes('w-full p-6 mt-4'):
             with ui.row().classes('w-full items-center justify-between mb-4'):
