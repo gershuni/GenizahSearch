@@ -2071,7 +2071,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 with ui.element('div').classes('fullscreen-edit-image').props('id="fs-image-panel"'):
                                     if has_image and img_url:
                                         safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
-                                        img_html = f'<img src="{safe_img_url}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" loading="lazy" draggable="false" />'
+                                        safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                                        is_oxford_js = 'true' if is_oxford else 'false'
+                                        img_html = f'<img src="{safe_img_url}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" loading="lazy" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js})" />'
                                         ui.html(img_html, sanitize=False)
                                     else:
                                         with ui.column().classes('items-center justify-center h-full'):
