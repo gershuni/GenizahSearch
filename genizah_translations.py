@@ -1194,6 +1194,7 @@ TRANSLATIONS = {
     "recommended": "מומלץ",
     "results": "תוצאות",
     "NAVIGATION": "ניווט",
+    "Community": "קהילה",
     "TOOLS": "כלים",
     "Dashboard": "לוח בקרה",
     "Home": "בית",

@@ -1193,7 +1193,7 @@ def create_layout():
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
-                    ('/discoveries', 'lightbulb', tr('Discoveries'), None),
+                    ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
                 ]
 
