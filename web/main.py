@@ -40,8 +40,8 @@ app.add_static_files('/static', STATIC_DIR)
 
 META_TAGS = '''
 <!-- Meta Tags -->
-<meta name="description" content="Advanced research platform for Cairo Genizah manuscripts. Full-text search across 500,000+ fragments, high-resolution manuscript viewer, and parallel text detection.">
-<meta name="keywords" content="גניזה, גניזת קהיר, כתבי יד, מחקר, Cairo Genizah, manuscripts, research">
+<meta name="description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta name="keywords" content="Genizah Search Pro, חיפוש גניזה, גניזת קהיר, כתבי יד, גניזה קהירית, מחקר גניזה, Cairo Genizah, Genizah search, manuscripts, Jewish manuscripts">
 <meta name="author" content="Genizah Search Pro">
 <meta name="theme-color" content="#059669">
 
