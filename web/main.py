@@ -1287,13 +1287,12 @@ def create_layout():
     full_citation = 'Stoekl Ben Ezra et al. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments. https://doi.org/10.5281/zenodo.17734473'
     with ui.footer().classes('citation-footer'):
         with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
-            # Citation link (LTR, always on left)
-            with ui.row().classes('items-center gap-1').style('direction: ltr; order: 1;'):
-                ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('text-decoration: none;')
             # Copy button
-            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').style('order: 2;').tooltip(tr('Copy citation'))
-            # Hebrew label (RTL, always on right)
-            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80').style('order: 0;')
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
+            # Citation link (English, LTR)
+            ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('direction: ltr; text-decoration: none;')
+            # Hebrew label
+            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80')
 
     return content_col
 

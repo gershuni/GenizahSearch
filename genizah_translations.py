@@ -1417,7 +1417,7 @@ TRANSLATIONS = {
     "How does it work?": "איך זה עובד?",
     "found": "נמצאו",
     "Data Source": "מקור נתונים",
-    "Transcriptions provided by the MiDRASH Project": "תעתיקים מסופקים על ידי פרויקט \u200eMiDRASH\u200f",
+    "Transcriptions provided by the MiDRASH Project": "MiDRASH התעתיקים מסופקים על ידי פרויקט",
     "View Dataset on Zenodo": "צפה במאגר הנתונים ב-Zenodo",
     "Licensed under CC BY 4.0": "ברישיון CC BY 4.0",
     "When publishing material from this site, please cite:": "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
