@@ -289,8 +289,8 @@ def create_settings_page():
                 # Use slider instead of presets toggle
                 ui.separator().classes('my-4')
                 use_slider_val = getattr(lab_settings, 'variant_use_slider', False)
-                variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (?, ??, ???)'), value=use_slider_val).classes('mt-4')
-                ui.label(tr('When enabled, shows a slider in the search bar instead of ?, ??, ??? buttons')).classes('text-xs ml-12').style('color: var(--text-muted);')
+                variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (Basic, Extended, Maximum)'), value=use_slider_val).classes('mt-4')
+                ui.label(tr('When enabled, shows a slider in the search bar instead of preset buttons')).classes('text-xs ml-12').style('color: var(--text-muted);')
 
                 # Save Button
                 def save_variant_settings():

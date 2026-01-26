@@ -273,7 +273,7 @@ def create_search_page(initial_query: str = None):
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
         with progress_container:
-            progress_bar = ui.linear_progress(0).props('stripe animate').classes('w-full opacity-0').style('height: 6px;')
+            progress_bar = ui.linear_progress(0).props('stripe animate').classes('w-full opacity-0').style('height: 8px;')
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
         # === Main Content Area (Splitter) ===
