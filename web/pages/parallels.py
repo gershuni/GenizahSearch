@@ -118,14 +118,14 @@ def create_parallels_page(initial_text: str = None):
 
                         if not use_slider:
                             # Preset buttons (default) - toggle button group style
-                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden; height: 40px;'):
+                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
+                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
+                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
                         else:
                             # Slider (alternative mode)
@@ -143,14 +143,14 @@ def create_parallels_page(initial_text: str = None):
                         val = current_preset['value']
                         # Reset all buttons to default state
                         for btn in [btn_basic, btn_extended, btn_maximum]:
-                            btn.style('background: transparent; color: var(--text-secondary);')
+                            btn.style('background: transparent !important; color: var(--text-secondary) !important;')
                         # Highlight the active button
                         if val == 30:
-                            btn_basic.style('background: var(--primary-600); color: white;')
+                            btn_basic.style('background: var(--primary-600) !important; color: #ffffff !important;')
                         elif val == 70:
-                            btn_extended.style('background: var(--primary-600); color: white;')
+                            btn_extended.style('background: var(--primary-600) !important; color: #ffffff !important;')
                         elif val == 150:
-                            btn_maximum.style('background: var(--primary-600); color: white;')
+                            btn_maximum.style('background: var(--primary-600) !important; color: #ffffff !important;')
 
                     def set_preset(pairs_count):
                         """Set variant level from preset button."""

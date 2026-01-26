@@ -44,6 +44,13 @@ def create_search_page(initial_query: str = None):
         except Exception:
             pass
 
+    # Restore search settings from storage
+    saved_mode = app.storage.user.get('search_mode', 'exact')
+    saved_query = app.storage.user.get('search_query', '')
+    saved_preset = app.storage.user.get('search_preset', 70)
+    saved_max_changes = app.storage.user.get('search_max_changes', 2)
+    saved_gap = app.storage.user.get('search_gap', 0)
+
     # === UI Layout ===
     with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
 
@@ -60,11 +67,16 @@ def create_search_page(initial_query: str = None):
                     h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                     query_input = ui.input(
                         placeholder=tr('Enter Hebrew text to search'),
-                        value=initial_query or ''
+                        value=initial_query or saved_query
                     ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
                     query_input.on('keydown.enter', lambda: execute_search())
 
-                # Mode Selector - Default to exact
+                    # Save query on change
+                    def save_query():
+                        app.storage.user['search_query'] = query_input.value or ''
+                    query_input.on('blur', save_query)
+
+                # Mode Selector - Restore from storage
                 with ui.column().classes('gap-1'):
                     # Changed to H3 semantic label
                     h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
@@ -77,7 +89,7 @@ def create_search_page(initial_query: str = None):
                             'Shelfmark': tr('Shelfmark') + ' (#)',
                             'Title': tr('Title') + ' ($)',
                         },
-                        value='exact'  # Default to exact
+                        value=saved_mode
                     ).classes('w-40').props('outlined dense')
 
                 # Variant Level Controls (visible only in Variants mode)
@@ -87,8 +99,8 @@ def create_search_page(initial_query: str = None):
                     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
                         use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
-                    # Track current preset level
-                    current_preset = {'value': 70}  # Default: extended
+                    # Track current preset level - restore from storage
+                    current_preset = {'value': saved_preset}
 
                     # Create variables for elements (needed for callbacks)
                     btn_basic = btn_extended = btn_maximum = None
@@ -100,14 +112,14 @@ def create_search_page(initial_query: str = None):
 
                         if not use_slider:
                             # Preset buttons (default) - toggle button group style
-                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden; height: 40px;'):
+                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
+                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
+                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
+                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
                             variant_count_label_presets = ui.label('').classes('text-xs mt-1').style('color: var(--text-muted);')
                         else:
@@ -117,13 +129,14 @@ def create_search_page(initial_query: str = None):
                                 variant_slider_label = ui.label('70').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
                                 variant_count_label = ui.label('').classes('text-xs w-12').style('color: var(--text-muted);')
 
-                    # Max changes selector
+                    # Max changes selector - restore from storage
                     with ui.column().classes('gap-1'):
                         h3(tr('Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
                         ui.tooltip(tr('Max character changes per word'))
 
-                variant_controls_row.set_visibility(False)  # Hidden by default
+                # Show variant controls if mode was variants
+                variant_controls_row.set_visibility(saved_mode == 'variants')
 
                 def update_preset_buttons():
                     """Update preset button styles based on current selection."""
@@ -132,18 +145,19 @@ def create_search_page(initial_query: str = None):
                     val = current_preset['value']
                     # Reset all buttons to default state
                     for btn in [btn_basic, btn_extended, btn_maximum]:
-                        btn.style('background: transparent; color: var(--text-secondary);')
+                        btn.style('background: transparent !important; color: var(--text-secondary) !important;')
                     # Highlight the active button
                     if val == 30:
-                        btn_basic.style('background: var(--primary-600); color: white;')
+                        btn_basic.style('background: var(--primary-600) !important; color: #ffffff !important;')
                     elif val == 70:
-                        btn_extended.style('background: var(--primary-600); color: white;')
+                        btn_extended.style('background: var(--primary-600) !important; color: #ffffff !important;')
                     elif val == 150:
-                        btn_maximum.style('background: var(--primary-600); color: white;')
+                        btn_maximum.style('background: var(--primary-600) !important; color: #ffffff !important;')
 
                 def set_preset(pairs_count):
                     """Set variant level from preset button."""
                     current_preset['value'] = pairs_count
+                    app.storage.user['search_preset'] = pairs_count
                     if state.var_mgr:
                         state.var_mgr.set_variant_level(pairs_count)
                     update_preset_buttons()
@@ -155,6 +169,11 @@ def create_search_page(initial_query: str = None):
                     btn_maximum.on('click', lambda: set_preset(150))
                     # Initialize button styles
                     update_preset_buttons()
+
+                # Save max changes on change
+                def save_max_changes():
+                    app.storage.user['search_max_changes'] = int(max_changes_select.value)
+                max_changes_select.on('update:model-value', save_max_changes)
 
                 def update_variant_preview():
                     """Update variant count based on current query and level."""
@@ -203,15 +222,21 @@ def create_search_page(initial_query: str = None):
                 def on_mode_change():
                     is_variants = mode_select.value == 'variants'
                     variant_controls_row.set_visibility(is_variants)
+                    # Save mode to storage
+                    app.storage.user['search_mode'] = mode_select.value
 
                 mode_select.on('update:model-value', on_mode_change)
 
-                # Gap Control
+                # Gap Control - restore from storage
                 with ui.column().classes('gap-1'):
                     # Changed to H3 semantic label
                     h3(tr('Gap'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    gap_input = ui.number(value=0, min=0, max=10).classes('w-20').props('outlined dense')
+                    gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props('outlined dense')
                     ui.tooltip(tr('Gap description'))
+
+                    def save_gap():
+                        app.storage.user['search_gap'] = int(gap_input.value or 0)
+                    gap_input.on('blur', save_gap)
 
                 # Search Button
                 search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
