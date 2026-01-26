@@ -99,15 +99,17 @@ def create_search_page(initial_query: str = None):
                         h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
                         if not use_slider:
-                            # Preset buttons (default)
-                            with ui.row().classes('items-center gap-1'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
+                            # Preset buttons (default) - toggle button group style
+                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;'):
+                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
+                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
+                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
+                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
+                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
-                                variant_count_label_presets = ui.label('').classes('text-xs ml-2').style('color: var(--text-muted);')
+                            variant_count_label_presets = ui.label('').classes('text-xs mt-1').style('color: var(--text-muted);')
                         else:
                             # Slider (alternative mode)
                             with ui.row().classes('items-center gap-2'):
@@ -128,15 +130,16 @@ def create_search_page(initial_query: str = None):
                     if not btn_basic:
                         return
                     val = current_preset['value']
-                    btn_basic.classes(remove='btn-primary', add='btn-secondary' if val != 30 else 'btn-primary')
-                    btn_extended.classes(remove='btn-primary', add='btn-secondary' if val != 70 else 'btn-primary')
-                    btn_maximum.classes(remove='btn-primary', add='btn-secondary' if val != 150 else 'btn-primary')
+                    # Reset all buttons to default state
+                    for btn in [btn_basic, btn_extended, btn_maximum]:
+                        btn.style('background: transparent; color: var(--text-secondary);')
+                    # Highlight the active button
                     if val == 30:
-                        btn_basic.classes(add='btn-primary', remove='btn-secondary')
+                        btn_basic.style('background: var(--primary-600); color: white;')
                     elif val == 70:
-                        btn_extended.classes(add='btn-primary', remove='btn-secondary')
+                        btn_extended.style('background: var(--primary-600); color: white;')
                     elif val == 150:
-                        btn_maximum.classes(add='btn-primary', remove='btn-secondary')
+                        btn_maximum.style('background: var(--primary-600); color: white;')
 
                 def set_preset(pairs_count):
                     """Set variant level from preset button."""
@@ -245,8 +248,8 @@ def create_search_page(initial_query: str = None):
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
         with progress_container:
-            progress_bar = ui.linear_progress(0).props('stripe animate').classes('h-1 w-full opacity-0')
-            status_label = ui.label('').classes('text-xs px-6 py-1').style('color: var(--text-muted);')
+            progress_bar = ui.linear_progress(0).props('stripe animate').classes('w-full opacity-0').style('height: 6px;')
+            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
         # === Main Content Area (Splitter) ===
         with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:

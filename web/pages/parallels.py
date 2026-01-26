@@ -117,13 +117,15 @@ def create_parallels_page(initial_text: str = None):
                         h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
                         if not use_slider:
-                            # Preset buttons (default)
-                            with ui.row().classes('items-center gap-1'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
+                            # Preset buttons (default) - toggle button group style
+                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden;'):
+                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
+                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
+                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
+                                ui.element('div').style('width: 1px; height: 24px; background: var(--border-medium);')
+                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-9').props('flat no-caps').style('border-radius: 0; min-width: auto;')
                                 btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
                         else:
                             # Slider (alternative mode)
@@ -139,11 +141,16 @@ def create_parallels_page(initial_text: str = None):
                         if not btn_basic:
                             return
                         val = current_preset['value']
-                        for btn, v in [(btn_basic, 30), (btn_extended, 70), (btn_maximum, 150)]:
-                            if val == v:
-                                btn.classes(add='btn-primary', remove='btn-secondary')
-                            else:
-                                btn.classes(add='btn-secondary', remove='btn-primary')
+                        # Reset all buttons to default state
+                        for btn in [btn_basic, btn_extended, btn_maximum]:
+                            btn.style('background: transparent; color: var(--text-secondary);')
+                        # Highlight the active button
+                        if val == 30:
+                            btn_basic.style('background: var(--primary-600); color: white;')
+                        elif val == 70:
+                            btn_extended.style('background: var(--primary-600); color: white;')
+                        elif val == 150:
+                            btn_maximum.style('background: var(--primary-600); color: white;')
 
                     def set_preset(pairs_count):
                         """Set variant level from preset button."""
@@ -192,8 +199,8 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outline color=red').style('display: none;')
 
                     # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0')
-                    status_label = ui.label('').classes('text-xs text-center').style('color: var(--text-muted);')
+                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0').style('height: 6px;')
+                    status_label = ui.label('').classes('text-sm text-center font-medium').style('color: var(--text-secondary);')
 
         # === Filter Text (Collapsible) ===
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
