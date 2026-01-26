@@ -1,39 +1,0 @@
-/app/genizah_core.py:77: FutureWarning:
-
-All support for the `google.generativeai` package has ended. It will no longer be receiving
-updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
-See README for more details:
-
-https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
-
-  import google.generativeai as genai
-Database initialized at: sqlite:////app/data/genizah_users.db
-Corrections database initialized
-
-============================================================
-  Genizah Search Pro v5.0
-  Starting on port 8082...
-============================================================
-
-/app/genizah_core.py:77: FutureWarning:
-
-All support for the `google.generativeai` package has ended. It will no longer be receiving
-updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
-See README for more details:
-
-https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
-
-  import google.generativeai as genai
-Database initialized at: sqlite:////app/data/genizah_users.db
-Corrections database initialized
-
-============================================================
-  Genizah Search Pro v5.0
-  Starting on port 8082...
-============================================================
-
-NiceGUI ready to go on http://localhost:8082, http://172.17.0.1:8082, and http://192.168.0.2:8082
-INFO: Loading libraries.csv from /app/libraries.csv
-(B)0[?1049h[1;24r[m[4l[?1h=[?1h=[39;49m[39;49m[37m[40m[1;1H                                                                                [2;1H                                                                                [3;1H                                                                                [4;1H                                                                                [5;1H                                                                                [6;1H                                                                                [7;1H                                                                                [8;1H                                                                                [9;1H                                                                                [10;1H                                                                                [11;1H                                                                                [12;1H                                                                                [13;1H                                                                                [14;1H                                                                                [15;1H                                                                                [16;1H                                                                                [17;1H                                                                                [18;1H                                                                                [19;1H                                                                                [20;1H                                                                                [21;1H                                                                                [22;1H                                                                                [23;1H                                                                                [24;1H                                                                                [1@[37m[40m [H[m[39;49m[37m[40m[39;49m[37m[40m                                                                                [2;1H                                                                                [3;1H                                                                                [4;1H                                                                                [5;1H                                                                                [6;1H                                                                                [7;1H                                                                                [8;1H                                                                                [9;1H                                                                                [10;1H                                                                                [11;1H                                                                                [12;1H                                                                                [13;1H                                                                                [14;1H                                                                                [15;1H                                                                                [16;1H                                                                                [17;1H                                                                                [18;1H                                                                                [19;1H                                                                                [20;1H                                                                                [21;1H                                                                                [22;1H                                                                                [23;1H                                                                                [24;1H                                                                                [1@ [H[39;49m[m[22d[93m[44mGetting http://127.0.0.1:8082/                                                  [22;31H[39;49m[m[93m[44mLooking up 127.0.0.1:8082     [26G[39;49m[m[93m[44mMaking HTTP connection to 127.0.0.1:8082[39;49m[m[24d[24;1H[?1049l[?1l>INFO: Loaded 216906 records into csv_bank from libraries.csv
-INFO: Loading Oxford codicological database from /app/oxford_full_db.json
-INFO: Loaded 3764 codicological parts from Oxford database
