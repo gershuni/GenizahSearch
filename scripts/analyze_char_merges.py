@@ -201,19 +201,19 @@ def find_char_substitutions(word1: str, word2: str) -> List[Tuple[str, str, str]
             orig = word1[i1:i2]
             repl = word2[j1:j2]
 
-            # מתמקדים בחילופים 2↔1
-            if len(orig) == 2 and len(repl) == 1:
-                # שתי אותיות הפכו לאחת (ב-V0.8 זה "תיקון")
-                # אם V0.7 הוא ה-HTR הישן, אז orig הוא מה שה-HTR "ראה"
+            # חילופים 1↔1 (אות באות)
+            if len(orig) == 1 and len(repl) == 1:
+                substitutions.append((orig, repl, 'single'))
+            # חילופים 2↔1
+            elif len(orig) == 2 and len(repl) == 1:
                 substitutions.append((orig, repl, 'merge'))
             elif len(orig) == 1 and len(repl) == 2:
-                # אות אחת הפכה לשתיים
                 substitutions.append((orig, repl, 'split'))
+            # חילופים 2↔2
             elif len(orig) == 2 and len(repl) == 2:
-                # אולי יש כאן חילוף 2↔2 מעניין
-                pass  # אפשר להרחיב
+                substitutions.append((orig, repl, 'swap2'))
+            # חילופים 3↔1
             elif len(orig) == 3 and len(repl) == 1:
-                # שלוש אותיות הפכו לאחת
                 substitutions.append((orig, repl, 'merge3'))
             elif len(orig) == 1 and len(repl) == 3:
                 substitutions.append((orig, repl, 'split3'))
