@@ -16,6 +16,25 @@ import csv
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
+import platform
+
+
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """
+    A RotatingFileHandler that handles Windows file locking gracefully.
+    On Windows, if the log file can't be rotated (due to being in use),
+    it continues logging to the current file without raising an error.
+    """
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except (PermissionError, OSError) as e:
+            # On Windows, file might be locked by another process
+            # Just continue logging to current file
+            if platform.system() == 'Windows':
+                pass  # Silently continue without rotation
+            else:
+                raise
 from typing import Mapping
 from functools import lru_cache
 import itertools
@@ -1283,7 +1302,7 @@ def configure_logger():
     logger.setLevel(logging.DEBUG)
     os.makedirs(Config.INDEX_DIR, exist_ok=True)
 
-    file_handler = RotatingFileHandler(Config.LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler = SafeRotatingFileHandler(Config.LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s"))
     file_handler.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
@@ -1327,7 +1346,7 @@ def configure_lab_logger():
     # Ensure lab directory exists
     os.makedirs(Config.LAB_DIR, exist_ok=True)
 
-    file_handler = RotatingFileHandler(Config.LAB_LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler = SafeRotatingFileHandler(Config.LAB_LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] - %(message)s"))
     file_handler.setLevel(logging.DEBUG)
     lab_logger.addHandler(file_handler)
@@ -1564,18 +1583,19 @@ class VariantManager:
     """
 
     # Mode-to-pairs mapping: how many pairs to use for each search mode
-    # User slider overrides these defaults
+    # Matches preset buttons: Basic (30), Extended (70), Maximum (150)
+    # User slider overrides these defaults when enabled
     _MODE_PAIRS_COUNT = {
-        'variants': 30,           # Basic: top 30 most frequent pairs
-        'variants_extended': 100, # Extended: top 100 pairs
-        'variants_maximum': 500,  # Maximum: top 500 pairs
+        'variants': 30,           # Basic (?): top 30 most frequent pairs
+        'variants_extended': 70,  # Extended (??): top 70 pairs
+        'variants_maximum': 150,  # Maximum (???): top 150 pairs
     }
 
     # Tier configuration for balanced flexibility vs explosion prevention
     _TIER_CONFIG = {
         'variants': {'max_changes': 1, 'per_term_limit': 50},
-        'variants_extended': {'max_changes': 2, 'per_term_limit': 150},
-        'variants_maximum': {'max_changes': 2, 'per_term_limit': 300},
+        'variants_extended': {'max_changes': 2, 'per_term_limit': 100},
+        'variants_maximum': {'max_changes': 2, 'per_term_limit': 200},
     }
 
     @staticmethod

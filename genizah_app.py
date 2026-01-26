@@ -425,16 +425,26 @@ class SearchSettingsDialog(QDialog):
         self.chk_variant_aggressive.setToolTip(tr("Like old behavior: apply max changes to all words regardless of length. More results, more noise."))
         grid.addWidget(self.chk_variant_aggressive, 3, 0, 1, 2)
 
-        # --- Variant Pairs Slider ---
+        # Use slider instead of presets
+        self.chk_use_slider = QCheckBox(tr("Use slider instead of preset buttons (Basic, Extended, Maximum)"))
+        self.chk_use_slider.setChecked(getattr(self.settings, 'variant_use_slider', False))
+        self.chk_use_slider.setToolTip(tr("When enabled, shows a slider in the search bar instead of preset buttons"))
+        grid.addWidget(self.chk_use_slider, 4, 0, 1, 2)
+
+        # --- Variant Pairs Slider (shown only when slider mode is enabled) ---
+        self.slider_container = QWidget()
+        slider_container_layout = QVBoxLayout(self.slider_container)
+        slider_container_layout.setContentsMargins(0, 0, 0, 0)
+
         lbl_pairs = QLabel(tr("Variant Pairs Level:"))
         lbl_pairs.setStyleSheet("font-weight: bold; margin-top: 10px; color: #2980b9;")
-        grid.addWidget(lbl_pairs, 4, 0, 1, 2)
+        slider_container_layout.addWidget(lbl_pairs)
 
         # Slider for number of variant pairs to use
         slider_layout = QHBoxLayout()
         self.slider_variant_pairs = QSlider(Qt.Orientation.Horizontal)
-        self.slider_variant_pairs.setRange(10, 500)
-        self.slider_variant_pairs.setValue(getattr(self.settings, 'variant_pairs_count', 50))
+        self.slider_variant_pairs.setRange(10, 300)
+        self.slider_variant_pairs.setValue(getattr(self.settings, 'variant_pairs_count', 70))
         self.slider_variant_pairs.setToolTip(tr("Number of variant pairs to use. Higher = more substitutions but slower search.\nBased on frequency: top pairs are most common HTR confusions."))
 
         self.lbl_pairs_value = QLabel(str(self.slider_variant_pairs.value()))
@@ -445,20 +455,20 @@ class SearchSettingsDialog(QDialog):
 
         slider_layout.addWidget(QLabel(tr("10")))
         slider_layout.addWidget(self.slider_variant_pairs)
-        slider_layout.addWidget(QLabel(tr("500")))
+        slider_layout.addWidget(QLabel(tr("300")))
         slider_layout.addWidget(self.lbl_pairs_value)
-        grid.addLayout(slider_layout, 5, 0, 1, 2)
+        slider_container_layout.addLayout(slider_layout)
 
         lbl_pairs_help = QLabel(tr("Controls how many character substitution pairs to use. Higher values find more variants but are slower."))
         lbl_pairs_help.setStyleSheet("font-size: 10px; color: gray; font-style: italic;")
         lbl_pairs_help.setWordWrap(True)
-        grid.addWidget(lbl_pairs_help, 6, 0, 1, 2)
+        slider_container_layout.addWidget(lbl_pairs_help)
 
-        # Use slider instead of presets
-        self.chk_use_slider = QCheckBox(tr("Use slider instead of preset buttons (?, ??, ???)"))
-        self.chk_use_slider.setChecked(getattr(self.settings, 'variant_use_slider', False))
-        self.chk_use_slider.setToolTip(tr("When enabled, shows a slider in the search bar instead of ?, ??, ??? buttons"))
-        grid.addWidget(self.chk_use_slider, 7, 0, 1, 2)
+        grid.addWidget(self.slider_container, 5, 0, 1, 2)
+
+        # Show/hide slider container based on checkbox
+        self.slider_container.setVisible(self.chk_use_slider.isChecked())
+        self.chk_use_slider.toggled.connect(self.slider_container.setVisible)
 
         layout.addLayout(grid)
 
@@ -5169,7 +5179,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
-        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use slider to control intensity)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
+        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Basic variants (30 pairs)\n?? = Extended variants (70 pairs)\n??? = Maximum variants (150 pairs)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ??שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._update_variant_count_preview)
         
@@ -5211,24 +5221,24 @@ class GenizahGUI(QMainWindow):
         self.variant_presets_widget = QWidget()
         presets_layout = QHBoxLayout(self.variant_presets_widget)
         presets_layout.setContentsMargins(0, 0, 0, 0)
-        presets_layout.setSpacing(2)
+        presets_layout.setSpacing(4)
 
-        self.btn_variant_basic = QPushButton("?")
-        self.btn_variant_basic.setFixedWidth(32)
-        self.btn_variant_basic.setToolTip(tr("Basic variants (30 pairs)"))
+        self.btn_variant_basic = QPushButton("○ " + tr("Basic"))
+        self.btn_variant_basic.setToolTip(tr("Basic variants (30 pairs)\nShortcut: ?"))
         self.btn_variant_basic.setCheckable(True)
+        self.btn_variant_basic.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_basic.clicked.connect(lambda: self._set_variant_preset(30))
 
-        self.btn_variant_extended = QPushButton("??")
-        self.btn_variant_extended.setFixedWidth(32)
-        self.btn_variant_extended.setToolTip(tr("Extended variants (70 pairs)"))
+        self.btn_variant_extended = QPushButton("◐ " + tr("Extended"))
+        self.btn_variant_extended.setToolTip(tr("Extended variants (70 pairs)\nShortcut: ??"))
         self.btn_variant_extended.setCheckable(True)
+        self.btn_variant_extended.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_extended.clicked.connect(lambda: self._set_variant_preset(70))
 
-        self.btn_variant_maximum = QPushButton("???")
-        self.btn_variant_maximum.setFixedWidth(36)
-        self.btn_variant_maximum.setToolTip(tr("Maximum variants (150 pairs) - slower"))
+        self.btn_variant_maximum = QPushButton("● " + tr("Maximum"))
+        self.btn_variant_maximum.setToolTip(tr("Maximum variants (150 pairs) - slower\nShortcut: ???"))
         self.btn_variant_maximum.setCheckable(True)
+        self.btn_variant_maximum.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_maximum.clicked.connect(lambda: self._set_variant_preset(150))
 
         # Set default selection

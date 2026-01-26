@@ -112,12 +112,12 @@ def create_parallels_page(initial_text: str = None):
 
                         # Preset buttons (?, ??, ???)
                         with ui.row().classes('items-center gap-1') as presets_row:
-                            btn_basic = ui.button('?').classes('w-8 h-8 p-0')
-                            btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                            btn_extended = ui.button('??').classes('w-10 h-8 p-0')
-                            btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                            btn_maximum = ui.button('???').classes('w-12 h-8 p-0')
-                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
+                            btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
+                            btn_basic.tooltip(tr('Basic variants (30 pairs)\nShortcut: ?'))
+                            btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
+                            btn_extended.tooltip(tr('Extended variants (70 pairs)\nShortcut: ??'))
+                            btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
+                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower\nShortcut: ???'))
 
                         # Slider (alternative mode)
                         with ui.row().classes('items-center gap-2') as slider_row:
