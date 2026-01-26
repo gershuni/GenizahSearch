@@ -45,18 +45,36 @@ def extract_hebrew_words(text: str) -> List[str]:
 
 def load_corpus(corpus_path: str) -> Set[str]:
     """
-    טוען קורפוס של מילים אמיתיות מתיקייה עם קבצי טקסט.
+    טוען קורפוס של מילים אמיתיות.
+    יכול להיות:
+    - תיקייה עם קבצי טקסט
+    - קובץ עם מילה בכל שורה (פלט של prepare_corpus.py)
+
     מחזיר set של כל המילים העבריות בקורפוס.
     """
     corpus_words = set()
-    corpus_dir = Path(corpus_path)
+    corpus_path = Path(corpus_path)
 
-    if not corpus_dir.exists():
-        print(f"אזהרה: תיקיית הקורפוס {corpus_path} לא נמצאה")
+    if not corpus_path.exists():
+        print(f"אזהרה: הקורפוס {corpus_path} לא נמצא")
         return corpus_words
 
-    # קורא את כל קבצי הטקסט בתיקייה
-    text_files = list(corpus_dir.glob('*.txt')) + list(corpus_dir.glob('**/*.txt'))
+    # אם זה קובץ בודד - קורא מילה בכל שורה
+    if corpus_path.is_file():
+        print(f"  קורא קובץ מילים: {corpus_path}")
+        try:
+            with open(corpus_path, 'r', encoding='utf-8-sig') as f:
+                for line in f:
+                    word = line.strip()
+                    if word and len(word) >= 2:
+                        corpus_words.add(word)
+        except Exception as e:
+            print(f"  שגיאה בקריאת {corpus_path}: {e}")
+        print(f"  נטענו {len(corpus_words)} מילים מהקובץ")
+        return corpus_words
+
+    # אם זו תיקייה - קורא את כל קבצי הטקסט
+    text_files = list(corpus_path.glob('*.txt')) + list(corpus_path.glob('**/*.txt'))
     print(f"  נמצאו {len(text_files)} קבצי טקסט בקורפוס")
 
     for txt_file in text_files:
