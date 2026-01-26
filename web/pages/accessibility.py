@@ -20,7 +20,7 @@ def create_accessibility_page():
         # Introduction
         with ui.card().classes('w-full p-6'):
             ui.markdown(f'''
-            **{tr('Genizah Search Pro is committed to ensuring digital accessibility for people with disabilities.')}**
+            **{tr('Dicta Genizah Search is committed to ensuring digital accessibility for people with disabilities.')}**
             {tr('We are continually improving the user experience for everyone, and applying the relevant accessibility standards.')}
             ''').style('font-size: 1.1em;')
 
@@ -30,7 +30,7 @@ def create_accessibility_page():
             ui.markdown(f'''
             {tr('The Web Content Accessibility Guidelines (WCAG) defines requirements for designers and developers to improve accessibility for people with disabilities. It defines three levels of conformance: Level A, Level AA, and Level AAA.')}
 
-            **{tr('Genizah Search Pro is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.')}**
+            **{tr('Dicta Genizah Search is partially conformant with WCAG 2.0 Level AA and Israeli Standard 5568.')}**
 
             {tr('"Partially conformant" means that some parts of the content do not fully conform to the accessibility standard, primarily due to the nature of historical manuscript images.')}
             ''')
@@ -63,7 +63,7 @@ def create_accessibility_page():
         with ui.card().classes('w-full p-6 border-l-4').style('border-left-color: var(--primary-600);'):
             h2(tr('Feedback and Contact'), classes='text-xl font-bold mb-4', style='color: var(--primary-700);')
             ui.markdown(f'''
-            {tr('We welcome your feedback on the accessibility of Genizah Search Pro. Please let us know if you encounter accessibility barriers:')}
+            {tr('We welcome your feedback on the accessibility of Dicta Genizah Search. Please let us know if you encounter accessibility barriers:')}
 
             *   **{tr('Email')}**: `gershuni [at] gmail [dot] com`
 

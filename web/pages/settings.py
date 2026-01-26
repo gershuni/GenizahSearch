@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Settings Page - Genizah Search Pro
+Settings Page - Dicta Genizah Search
 
 General settings for search behavior, display preferences, and Lab Mode configuration.
 """
@@ -393,7 +393,9 @@ def create_settings_page():
 
             # Version info
             ui.markdown('''
-            **Genizah Search Pro v5.0**
+            **Dicta Genizah Search**
+
+            *Formerly Genizah Search Pro 5.0*
 
             Data Source: MiDRASH Project (Friedberg Genizah Project)
             ''').style('color: var(--text-muted);')

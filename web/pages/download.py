@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Download Page - Genizah Search Pro
+Download Page - Dicta Genizah Search
 
 Desktop application download page with installation instructions.
 """

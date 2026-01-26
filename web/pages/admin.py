@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Admin Panel - Genizah Search Pro
+Admin Panel - Dicta Genizah Search
 
 User management, corrections review, and system administration for admins.
 """

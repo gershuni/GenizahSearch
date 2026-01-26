@@ -23,7 +23,7 @@ from web.translations import tr, is_rtl, get_dir, set_language, get_language
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, Config
 
 # App configuration
-APP_TITLE = "Genizah Search Pro | חיפוש גניזת קהיר"
+APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 APP_VERSION = "5.0"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
@@ -40,25 +40,25 @@ app.add_static_files('/static', STATIC_DIR)
 
 META_TAGS = '''
 <!-- Meta Tags -->
-<meta name="description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
-<meta name="keywords" content="Genizah Search Pro, חיפוש גניזה, גניזת קהיר, כתבי יד, גניזה קהירית, מחקר גניזה, Cairo Genizah, Genizah search, manuscripts, Jewish manuscripts">
-<meta name="author" content="Genizah Search Pro">
+<meta name="description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta name="keywords" content="Dicta Genizah Search, חיפוש גניזה, גניזת קהיר, כתבי יד, גניזה קהירית, מחקר גניזה, Cairo Genizah, Genizah search, manuscripts, Jewish manuscripts">
+<meta name="author" content="Dicta Genizah Search">
 <meta name="theme-color" content="#059669">
 
 <!-- Open Graph / Facebook / WhatsApp / Slack -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://GenizahSearch.com/">
-<meta property="og:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta property="og:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta property="og:title" content="Dicta Genizah Search | Cairo Genizah Manuscript Research Platform">
+<meta property="og:description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta property="og:image" content="https://GenizahSearch.com/static/og-image.png">
 <meta property="og:locale" content="he_IL">
-<meta property="og:site_name" content="Genizah Search Pro">
+<meta property="og:site_name" content="Dicta Genizah Search">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:url" content="https://GenizahSearch.com/">
-<meta name="twitter:title" content="Genizah Search Pro | Cairo Genizah Manuscript Research Platform">
-<meta name="twitter:description" content="Genizah Search Pro - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
+<meta name="twitter:title" content="Dicta Genizah Search | Cairo Genizah Manuscript Research Platform">
+<meta name="twitter:description" content="Dicta Genizah Search - חיפוש גניזת קהיר. Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments.">
 <meta name="twitter:image" content="https://GenizahSearch.com/static/og-image.png">
 
 <!-- Canonical URL -->
@@ -475,6 +475,36 @@ COMMON_STYLES = '''
         padding: 16px 24px;
         border-top: 1px solid var(--border-light);
         margin-top: auto;
+    }
+
+    /* Global Citation Footer */
+    .citation-footer {
+        background: var(--primary-50, #eff6ff) !important;
+        border-top: 1px solid var(--primary-200, #bfdbfe) !important;
+        color: var(--primary-800, #1e40af) !important;
+        min-height: auto !important;
+        padding: 0 !important;
+    }
+    .citation-footer a {
+        color: var(--primary-700, #1d4ed8) !important;
+    }
+    .citation-footer a:hover {
+        text-decoration: underline !important;
+    }
+    [data-theme="dark"] .citation-footer {
+        background: var(--primary-900, #1e3a5f) !important;
+        border-top-color: var(--primary-700, #1e40af) !important;
+        color: var(--primary-200, #bfdbfe) !important;
+    }
+    [data-theme="dark"] .citation-footer a {
+        color: var(--primary-300, #93c5fd) !important;
+    }
+
+    /* Hide Hebrew label on mobile */
+    @media (max-width: 768px) {
+        .citation-hebrew-label {
+            display: none !important;
+        }
     }
 
     .theme-switcher {
@@ -1250,8 +1280,8 @@ def create_layout():
                     with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "parchment" else ""}'): pass
                     with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "dark" else ""}'): pass
 
-                # Version Info
-                ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
+                # Version Info (hidden - using "formerly" in settings instead)
+                # ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
 
                 # Accessibility Link
                 with ui.row().classes('w-full justify-center mt-2'):
@@ -1259,6 +1289,23 @@ def create_layout():
 
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
+
+    # Global Footer with Citation Note (dismissible)
+    full_citation = 'Stoekl Ben Ezra et al. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments. https://doi.org/10.5281/zenodo.17734473'
+    footer = ui.footer().classes('citation-footer')
+    with footer:
+        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
+            # Copy button
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
+            # Citation link (English, LTR)
+            ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
+            # Hebrew label (hidden on mobile)
+            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
+            # Close button
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+
+    # Check if footer was dismissed and hide it
+    ui.run_javascript('if(localStorage.getItem("citation_footer_dismissed") === "true") { document.querySelector(".citation-footer").style.display = "none"; }')
 
     return content_col
 
@@ -1534,7 +1581,7 @@ app.on_startup(initialize_engine)
 
 if __name__ in {'__main__', '__mp_main__'}:
     print(f"\n{'='*60}")
-    print(f"  Genizah Search Pro v{APP_VERSION}")
+    print(f"  Dicta Genizah Search v{APP_VERSION}")
     print(f"  Starting on port {APP_PORT}...")
     print(f"{'='*60}\n")
 
