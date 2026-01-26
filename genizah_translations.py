@@ -1423,6 +1423,7 @@ TRANSLATIONS = {
     "When publishing material from this site, please cite:": "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
     "Citation copied!": "הציטוט הועתק!",
     "Copy citation": "העתק ציטוט",
+    "Dismiss": "סגור",
     "Toggle Filters": "הצג/הסתר מסננים",
     "Filter Results": "סנן תוצאות",
     "Filter by shelfmark": "סנן לפי מספר מדף",

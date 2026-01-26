@@ -500,6 +500,13 @@ COMMON_STYLES = '''
         color: var(--primary-300, #93c5fd) !important;
     }
 
+    /* Hide Hebrew label on mobile */
+    @media (max-width: 768px) {
+        .citation-hebrew-label {
+            display: none !important;
+        }
+    }
+
     .theme-switcher {
         display: flex;
         gap: 8px;
@@ -1283,16 +1290,22 @@ def create_layout():
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
-    # Global Footer with Citation Note
+    # Global Footer with Citation Note (dismissible)
     full_citation = 'Stoekl Ben Ezra et al. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments. https://doi.org/10.5281/zenodo.17734473'
-    with ui.footer().classes('citation-footer'):
+    footer = ui.footer().classes('citation-footer')
+    with footer:
         with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
             # Copy button
             ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
             # Citation link (English, LTR)
-            ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('direction: ltr; text-decoration: none;')
-            # Hebrew label
-            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80')
+            ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
+            # Hebrew label (hidden on mobile)
+            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
+            # Close button
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+
+    # Check if footer was dismissed and hide it
+    ui.run_javascript('if(localStorage.getItem("citation_footer_dismissed") === "true") { document.querySelector(".citation-footer").style.display = "none"; }')
 
     return content_col
 
