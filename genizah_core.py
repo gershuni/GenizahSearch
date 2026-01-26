@@ -24,6 +24,19 @@ import html
 
 from genizah_translations import TRANSLATIONS
 
+# Import multichar variant pairs (generated from V0.7 vs V0.8 HTR comparison)
+try:
+    from multichar_pairs import (
+        _BASIC_MULTICHAR_PAIRS,
+        _EXTENDED_MULTICHAR_PAIRS,
+        _MAXIMUM_MULTICHAR_PAIRS
+    )
+except ImportError:
+    # Fallback if file not found
+    _BASIC_MULTICHAR_PAIRS = []
+    _EXTENDED_MULTICHAR_PAIRS = []
+    _MAXIMUM_MULTICHAR_PAIRS = []
+
 # --- Shmidman Rare-Letter Helpers ---
 HEBREW_FREQ = {
     'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 
@@ -125,6 +138,7 @@ class LabSettings:
         self.variant_min_word_len = 2      # Words <= this length get only 1 change
         self.variant_max_changes = 2       # Max character changes per word
         self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
+        self.multichar_variants_enabled = True  # Enable built-in multichar variant pairs
 
         self.load()
 
@@ -161,6 +175,7 @@ class LabSettings:
                     self.variant_min_word_len = data.get('variant_min_word_len', 2)
                     self.variant_max_changes = data.get('variant_max_changes', 2)
                     self.variant_aggressive = data.get('variant_aggressive', False)
+                    self.multichar_variants_enabled = data.get('multichar_variants_enabled', True)
             except Exception: pass
 
     def save(self):
@@ -195,7 +210,8 @@ class LabSettings:
                     # Variant settings
                     'variant_min_word_len': self.variant_min_word_len,
                     'variant_max_changes': self.variant_max_changes,
-                    'variant_aggressive': self.variant_aggressive
+                    'variant_aggressive': self.variant_aggressive,
+                    'multichar_variants_enabled': self.multichar_variants_enabled
                 }, f, indent=4)
         except Exception: pass
 
@@ -1648,13 +1664,45 @@ class VariantManager:
                             multi_pairs.append((a, b))
         return single_pairs, multi_pairs
 
-    def _generate_multichar_variants(self, term: str) -> set:
+    # Maximum multichar variants per term to prevent explosion
+    MAX_MULTICHAR_VARIANTS = 8
+
+    def _get_multichar_pairs_for_mode(self, mode: str) -> list:
+        """
+        Get the appropriate multichar pairs list based on search mode.
+        Hierarchical: each level includes all previous levels.
+        """
+        # Check if multichar variants are enabled
+        if self._settings and not getattr(self._settings, 'multichar_variants_enabled', True):
+            return []
+
+        # Get custom pairs from settings
+        _, custom_multi = self._get_custom_pairs()
+
+        if mode == 'variants':
+            # Basic mode: only custom pairs (user-defined)
+            return custom_multi
+        elif mode == 'variants_extended':
+            # Extended: BASIC built-in + custom
+            return list(_BASIC_MULTICHAR_PAIRS) + custom_multi
+        elif mode == 'variants_maximum':
+            # Maximum: all built-in + custom
+            return (list(_BASIC_MULTICHAR_PAIRS) +
+                    list(_EXTENDED_MULTICHAR_PAIRS) +
+                    list(_MAXIMUM_MULTICHAR_PAIRS) +
+                    custom_multi)
+        else:
+            return custom_multi
+
+    def _generate_multichar_variants(self, term: str, mode: str = 'variants') -> set:
         """
         Generate variants using multi-character substitution pairs.
         Each pair is applied as simple string replacement (bidirectional).
         Returns set of variant terms (may have different lengths than original).
+
+        Limited to MAX_MULTICHAR_VARIANTS to prevent explosion.
         """
-        _, multi_pairs = self._get_custom_pairs()
+        multi_pairs = self._get_multichar_pairs_for_mode(mode)
         if not multi_pairs:
             return set()
 
@@ -1663,9 +1711,13 @@ class VariantManager:
             # a -> b substitution
             if a in term:
                 variants.add(term.replace(a, b))
+                if len(variants) >= self.MAX_MULTICHAR_VARIANTS:
+                    break
             # b -> a substitution
             if b in term:
                 variants.add(term.replace(b, a))
+                if len(variants) >= self.MAX_MULTICHAR_VARIANTS:
+                    break
 
         # Remove original term if present
         variants.discard(term)
@@ -1816,7 +1868,7 @@ class VariantManager:
         max_changes = self._get_max_changes_for_length(len(term), base_max)
 
         # Step 1: Generate multi-char substitution variants (e.g., כו=מ)
-        multichar_variants = self._generate_multichar_variants(term)
+        multichar_variants = self._generate_multichar_variants(term, mode)
 
         # Step 2: Generate single-char variants for original term
         variants = self.generate_variants(term, mapping, max_changes, limit)
