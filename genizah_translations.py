@@ -1205,6 +1205,7 @@ TRANSLATIONS = {
     "Genizah Search": "חיפוש גניזה",
     "Cairo Genizah Search Engine": "מנוע חיפוש לגניזת קהיר",
     "Welcome to Genizah Search Pro": "ברוכים הבאים ל-Genizah Search Pro",
+    "Welcome to Dicta Genizah Search": "ברוכים הבאים ל-Dicta Genizah Search",
     "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
     "Research Tools": "כלי מחקר",
     "Pages": "עמודים",

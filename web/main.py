@@ -1250,8 +1250,8 @@ def create_layout():
                     with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "parchment" else ""}'): pass
                     with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "dark" else ""}'): pass
 
-                # Version Info
-                ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
+                # Version Info (hidden - using "formerly" in settings instead)
+                # ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
 
                 # Accessibility Link
                 with ui.row().classes('w-full justify-center mt-2'):
