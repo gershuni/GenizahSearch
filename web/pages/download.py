@@ -20,7 +20,7 @@ def create_download_page():
 
         # === Page Header ===
         with ui.column().classes('gap-2 mb-2'):
-            h1(tr('Get Dicta Genizah Search'), classes='text-3xl font-bold', style='color: var(--text-primary);')
+            h1(tr('Get Genizah Search Pro'), classes='text-3xl font-bold', style='color: var(--text-primary);')
             ui.label(tr('Desktop Application')).style('color: var(--text-secondary);')
 
         # === Download Card ===
