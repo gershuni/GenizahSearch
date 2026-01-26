@@ -100,11 +100,13 @@ def create_parallels_page(initial_text: str = None):
                         label=tr('Search Mode')
                     ).classes('w-full').props('outlined dense')
 
-                    # Check if user prefers slider or presets
-                    use_slider = getattr(state.lab_engine.settings if state.lab_engine else None, 'variant_use_slider', False)
+                    # Check if user prefers slider or presets (default: presets)
+                    use_slider = False
+                    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
+                        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
                     # Track current preset level
-                    current_preset = {'value': 70}  # Default: extended (??)
+                    current_preset = {'value': 70}  # Default: extended
 
                     # Variant Level Controls (visible only in Variants mode)
                     with ui.column().classes('gap-1') as variant_slider_col:
