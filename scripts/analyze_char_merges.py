@@ -356,7 +356,15 @@ def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
                 for orig, repl, sub_type in subs:
                     # רק אותיות עבריות
                     if all(is_hebrew(c) for c in orig) and all(is_hebrew(c) for c in repl):
-                        key = (orig, repl)
+                        # יוצר מפתח קנוני - מאחד כיוונים הפוכים (ד→ר = ר→ד)
+                        # הארוך קודם, ואם אותו אורך - לפי סדר אלפביתי
+                        if len(orig) > len(repl):
+                            key = (orig, repl)
+                        elif len(repl) > len(orig):
+                            key = (repl, orig)
+                        else:
+                            key = tuple(sorted([orig, repl]))
+
                         substitutions[key].append({
                             'doc_id': norm_id,
                             'word_v7': w7,
