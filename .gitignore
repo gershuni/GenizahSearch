@@ -25,5 +25,10 @@ backend.log
 web.log
 .claude/settings.local.json
 פקודת אריזה.txt
-/web/.nicegui
+.nicegui/
 data/
+
+# Runtime files
+app.log
+server.log
+app.pid
