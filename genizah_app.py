@@ -5216,7 +5216,7 @@ class GenizahGUI(QMainWindow):
         self.variant_count_label = QLabel("")
         self.variant_count_label.setFixedWidth(50)
         self.variant_count_label.setStyleSheet("font-size: 10px; color: #7f8c8d;")
-        self.variant_count_label.setToolTip(tr("Estimated variants for first word in query"))
+        self.variant_count_label.setToolTip(tr("Total estimated variants for all words in query"))
 
         # Max changes spinbox
         self.spin_max_changes = QSpinBox()
