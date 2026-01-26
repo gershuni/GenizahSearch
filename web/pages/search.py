@@ -47,7 +47,7 @@ def create_search_page(initial_query: str = None):
     # Restore search settings from storage
     saved_mode = app.storage.user.get('search_mode', 'exact')
     saved_query = app.storage.user.get('search_query', '')
-    saved_preset = app.storage.user.get('search_preset', 70)
+    saved_preset = app.storage.user.get('search_preset', 30)
     saved_max_changes = app.storage.user.get('search_max_changes', 2)
     saved_gap = app.storage.user.get('search_gap', 0)
 
@@ -94,134 +94,88 @@ def create_search_page(initial_query: str = None):
 
                 # Variant Level Controls (visible only in Variants mode)
                 with ui.row().classes('items-end gap-4') as variant_controls_row:
-                    # Check if user prefers slider or presets (default: presets)
+                    # Check if user prefers slider or presets (default: presets/dropdown)
                     use_slider = False
                     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
                         use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
-                    # Track current preset level - restore from storage
-                    current_preset = {'value': saved_preset}
+                    # Track current preset level - restore from storage (default: Basic=30)
+                    current_preset = {'value': saved_preset if saved_preset else 30}
 
                     # Create variables for elements (needed for callbacks)
-                    btn_basic = btn_extended = btn_maximum = None
+                    variant_level_select = None
                     variant_slider = variant_slider_label = None
-                    variant_count_label_presets = variant_count_label = None
 
-                    with ui.column().classes('gap-1'):
-                        h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    if not use_slider:
+                        # Dropdown selector (compact mode)
+                        with ui.column().classes('gap-1'):
+                            h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                            variant_level_select = ui.select(
+                                {
+                                    30: '○ ' + tr('Basic'),
+                                    70: '◐ ' + tr('Extended'),
+                                    150: '● ' + tr('Maximum'),
+                                },
+                                value=current_preset['value']
+                            ).classes('w-36').props('outlined dense')
 
-                        if not use_slider:
-                            # Preset buttons (default) - toggle button group style
-                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden; height: 40px;'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
-                            variant_count_label_presets = ui.label('').classes('text-xs mt-1').style('color: var(--text-muted);')
-                        else:
-                            # Slider (alternative mode)
-                            with ui.row().classes('items-center gap-2'):
-                                variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-40').props('label-always')
-                                variant_slider_label = ui.label('70').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
-                                variant_count_label = ui.label('').classes('text-xs w-12').style('color: var(--text-muted);')
+                        # Max changes selector - restore from storage
+                        with ui.column().classes('gap-1'):
+                            h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                            ui.tooltip(tr('Max character changes per word'))
 
-                    # Max changes selector - restore from storage
-                    with ui.column().classes('gap-1'):
-                        h3(tr('Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
-                        ui.tooltip(tr('Max character changes per word'))
+                # Slider row (separate, below search row) - only when slider mode enabled
+                variant_slider_row = None
+                if use_slider:
+                    variant_slider_row = ui.row().classes('w-full items-center gap-6 mt-2 px-2')
+                    with variant_slider_row:
+                        with ui.row().classes('items-center gap-2 flex-grow'):
+                            ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                            variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('w-64').props('label-always')
+                            variant_slider_label = ui.label(str(current_preset['value'])).classes('text-sm font-medium w-10').style('color: var(--primary-600);')
+                        with ui.row().classes('items-center gap-2'):
+                            ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                    variant_slider_row.set_visibility(saved_mode == 'variants')
 
                 # Show variant controls if mode was variants
-                variant_controls_row.set_visibility(saved_mode == 'variants')
+                variant_controls_row.set_visibility(saved_mode == 'variants' and not use_slider)
 
-                def update_preset_buttons():
-                    """Update preset button styles based on current selection."""
-                    if not btn_basic:
-                        return
-                    val = current_preset['value']
-                    # Reset all buttons to default state
-                    for btn in [btn_basic, btn_extended, btn_maximum]:
-                        btn.style('background: transparent !important; color: var(--text-secondary) !important;')
-                    # Highlight the active button
-                    if val == 30:
-                        btn_basic.style('background: var(--primary-600) !important; color: #ffffff !important;')
-                    elif val == 70:
-                        btn_extended.style('background: var(--primary-600) !important; color: #ffffff !important;')
-                    elif val == 150:
-                        btn_maximum.style('background: var(--primary-600) !important; color: #ffffff !important;')
-
-                def set_preset(pairs_count):
-                    """Set variant level from preset button."""
-                    current_preset['value'] = pairs_count
-                    app.storage.user['search_preset'] = pairs_count
+                def set_level(level_value):
+                    """Set variant level."""
+                    current_preset['value'] = level_value
+                    app.storage.user['search_preset'] = level_value
                     if state.var_mgr:
-                        state.var_mgr.set_variant_level(pairs_count)
-                    update_preset_buttons()
-                    update_variant_preview()
+                        state.var_mgr.set_variant_level(level_value)
 
-                if btn_basic:
-                    btn_basic.on('click', lambda: set_preset(30))
-                    btn_extended.on('click', lambda: set_preset(70))
-                    btn_maximum.on('click', lambda: set_preset(150))
-                    # Initialize button styles
-                    update_preset_buttons()
+                if variant_level_select:
+                    def on_level_change():
+                        set_level(int(variant_level_select.value))
+                    variant_level_select.on('update:model-value', on_level_change)
+
+                if variant_slider:
+                    def on_slider_change():
+                        val = int(variant_slider.value)
+                        current_preset['value'] = val
+                        app.storage.user['search_preset'] = val
+                        variant_slider_label.set_text(str(val))
+                        if state.var_mgr:
+                            state.var_mgr.set_variant_level(val)
+                    variant_slider.on('update:model-value', on_slider_change)
 
                 # Save max changes on change
                 def save_max_changes():
                     app.storage.user['search_max_changes'] = int(max_changes_select.value)
                 max_changes_select.on('update:model-value', save_max_changes)
 
-                def update_variant_preview():
-                    """Update variant count based on current query and level."""
-                    # Get current pairs count (from preset or slider)
-                    pairs_count = current_preset['value']
-                    if variant_slider:
-                        pairs_count = int(variant_slider.value)
-                        variant_slider_label.set_text(str(pairs_count))
-
-                    query = query_input.value.strip() if query_input.value else ""
-                    if not query or not state.var_mgr:
-                        if variant_count_label:
-                            variant_count_label.set_text('')
-                        if variant_count_label_presets:
-                            variant_count_label_presets.set_text('')
-                        return
-                    # Strip prefixes
-                    for prefix in ['?', '=', '~', '/', '#', '$']:
-                        if query.startswith(prefix):
-                            query = query[len(prefix):].strip()
-                            break
-                    words = query.split()
-                    if not words:
-                        if variant_count_label:
-                            variant_count_label.set_text('')
-                        if variant_count_label_presets:
-                            variant_count_label_presets.set_text('')
-                        return
-                    try:
-                        state.var_mgr.set_variant_level(pairs_count)
-                        total = sum(len(state.var_mgr.get_variants(w, 'variants', 500)) for w in words if len(w) >= 2)
-                        if variant_count_label:
-                            variant_count_label.set_text(f'≈{total}')
-                        if variant_count_label_presets:
-                            variant_count_label_presets.set_text(f'≈{total}')
-                    except Exception:
-                        if variant_count_label:
-                            variant_count_label.set_text('')
-                        if variant_count_label_presets:
-                            variant_count_label_presets.set_text('')
-
-                if variant_slider:
-                    variant_slider.on('update:model-value', update_variant_preview)
-                query_input.on('input', update_variant_preview)
-
                 def on_mode_change():
                     is_variants = mode_select.value == 'variants'
-                    variant_controls_row.set_visibility(is_variants)
+                    if use_slider:
+                        if variant_slider_row:
+                            variant_slider_row.set_visibility(is_variants)
+                    else:
+                        variant_controls_row.set_visibility(is_variants)
                     # Save mode to storage
                     app.storage.user['search_mode'] = mode_select.value
 

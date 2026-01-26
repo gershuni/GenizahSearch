@@ -105,70 +105,65 @@ def create_parallels_page(initial_text: str = None):
                     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
                         use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
-                    # Track current preset level
-                    current_preset = {'value': 70}  # Default: extended
+                    # Track current preset level (default: Basic=30)
+                    current_preset = {'value': 30}
 
                     # Variables for elements
-                    btn_basic = btn_extended = btn_maximum = None
-                    variant_slider = None
+                    variant_level_select = None
+                    variant_slider = variant_slider_label = None
 
                     # Variant Level Controls (visible only in Variants mode)
-                    with ui.column().classes('gap-1') as variant_slider_col:
-                        h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-
+                    with ui.row().classes('items-center gap-4') as variant_controls_col:
                         if not use_slider:
-                            # Preset buttons (default) - toggle button group style
-                            with ui.row().classes('items-center gap-0').style('border: 1px solid var(--border-medium); border-radius: 8px; overflow: hidden; height: 40px;'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                ui.element('div').style('width: 1px; height: 28px; background: var(--border-medium);')
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-3 h-10').props('flat no-caps').style('border-radius: 0; min-width: auto;')
-                                btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
+                            # Dropdown selector (compact mode)
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                variant_level_select = ui.select(
+                                    {
+                                        30: '○ ' + tr('Basic'),
+                                        70: '◐ ' + tr('Extended'),
+                                        150: '● ' + tr('Maximum'),
+                                    },
+                                    value=current_preset['value']
+                                ).classes('w-36').props('outlined dense')
+
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
                         else:
-                            # Slider (alternative mode)
-                            with ui.row().classes('items-center gap-2'):
-                                variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-full').props('label-always')
+                            # Slider mode
+                            with ui.column().classes('gap-1 w-full'):
+                                h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                with ui.row().classes('items-center gap-2 w-full'):
+                                    variant_slider = ui.slider(min=10, max=300, value=30, step=10).classes('flex-grow').props('label-always')
+                                    variant_slider_label = ui.label('30').classes('text-sm font-medium w-10').style('color: var(--primary-600);')
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
 
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            ui.label(tr('Max changes:')).classes('text-xs').style('color: var(--text-muted);')
-                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-20').props('outlined dense')
-
-                    def update_preset_buttons():
-                        """Update preset button styles based on current selection."""
-                        if not btn_basic:
-                            return
-                        val = current_preset['value']
-                        # Reset all buttons to default state
-                        for btn in [btn_basic, btn_extended, btn_maximum]:
-                            btn.style('background: transparent !important; color: var(--text-secondary) !important;')
-                        # Highlight the active button
-                        if val == 30:
-                            btn_basic.style('background: var(--primary-600) !important; color: #ffffff !important;')
-                        elif val == 70:
-                            btn_extended.style('background: var(--primary-600) !important; color: #ffffff !important;')
-                        elif val == 150:
-                            btn_maximum.style('background: var(--primary-600) !important; color: #ffffff !important;')
-
-                    def set_preset(pairs_count):
-                        """Set variant level from preset button."""
-                        current_preset['value'] = pairs_count
+                    def set_level(level_value):
+                        """Set variant level."""
+                        current_preset['value'] = level_value
                         if state.var_mgr:
-                            state.var_mgr.set_variant_level(pairs_count)
-                        update_preset_buttons()
+                            state.var_mgr.set_variant_level(level_value)
 
-                    if btn_basic:
-                        btn_basic.on('click', lambda: set_preset(30))
-                        btn_extended.on('click', lambda: set_preset(70))
-                        btn_maximum.on('click', lambda: set_preset(150))
-                        # Initialize button styles
-                        update_preset_buttons()
+                    if variant_level_select:
+                        def on_level_change():
+                            set_level(int(variant_level_select.value))
+                        variant_level_select.on('update:model-value', on_level_change)
+
+                    if variant_slider:
+                        def on_slider_change():
+                            val = int(variant_slider.value)
+                            current_preset['value'] = val
+                            variant_slider_label.set_text(str(val))
+                            if state.var_mgr:
+                                state.var_mgr.set_variant_level(val)
+                        variant_slider.on('update:model-value', on_slider_change)
 
                     def on_mode_change():
                         is_variants = mode_select.value == 'variants'
-                        variant_slider_col.set_visibility(is_variants)
+                        variant_controls_col.set_visibility(is_variants)
 
                     mode_select.on('update:model-value', on_mode_change)
 

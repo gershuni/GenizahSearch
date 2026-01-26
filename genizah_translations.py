@@ -148,6 +148,7 @@ TRANSLATIONS = {
     "Maximum variants: Very broad search": "וריאנטים מרביים: חיפוש רחב מאוד",
     "Level": "דרגה",
     "Changes": "שינויים",
+    "Num Changes": "מס' שינויים",
     "Max character changes per word": "שינויי תווים מקסימליים למילה",
     "Variant Level": "דרגת וריאנטים",
     "Current level": "דרגה נוכחית",
