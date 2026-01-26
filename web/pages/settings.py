@@ -286,6 +286,12 @@ def create_settings_page():
                 variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'), value=aggressive_val).classes('mt-4')
                 ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs ml-12').style('color: var(--text-muted);')
 
+                # Use slider instead of presets toggle
+                ui.separator().classes('my-4')
+                use_slider_val = getattr(lab_settings, 'variant_use_slider', False)
+                variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (?, ??, ???)'), value=use_slider_val).classes('mt-4')
+                ui.label(tr('When enabled, shows a slider in the search bar instead of ?, ??, ??? buttons')).classes('text-xs ml-12').style('color: var(--text-muted);')
+
                 # Save Button
                 def save_variant_settings():
                     try:
@@ -303,6 +309,7 @@ def create_settings_page():
                         lab_settings.variant_max_changes = int(variant_max_changes.value)
                         lab_settings.variant_pairs_count = int(variant_pairs_slider.value)
                         lab_settings.variant_aggressive = variant_aggressive.value
+                        lab_settings.variant_use_slider = variant_use_slider.value
 
                         # Update VariantManager if available
                         if state.var_mgr:

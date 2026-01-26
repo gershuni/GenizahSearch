@@ -100,14 +100,61 @@ def create_parallels_page(initial_text: str = None):
                         label=tr('Search Mode')
                     ).classes('w-full').props('outlined dense')
 
-                    # Variant Level Slider (visible only in Variants mode)
+                    # Check if user prefers slider or presets
+                    use_slider = getattr(state.lab_engine.settings if state.lab_engine else None, 'variant_use_slider', False)
+
+                    # Track current preset level
+                    current_preset = {'value': 70}  # Default: extended (??)
+
+                    # Variant Level Controls (visible only in Variants mode)
                     with ui.column().classes('gap-1') as variant_slider_col:
                         h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        with ui.row().classes('items-center gap-2'):
-                            variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-full').props('label-always')
+
+                        # Preset buttons (?, ??, ???)
+                        with ui.row().classes('items-center gap-1') as presets_row:
+                            btn_basic = ui.button('?').classes('w-8 h-8 p-0')
+                            btn_basic.tooltip(tr('Basic variants (30 pairs)'))
+                            btn_extended = ui.button('??').classes('w-10 h-8 p-0')
+                            btn_extended.tooltip(tr('Extended variants (70 pairs)'))
+                            btn_maximum = ui.button('???').classes('w-12 h-8 p-0')
+                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
+
+                        # Slider (alternative mode)
+                        with ui.row().classes('items-center gap-2') as slider_row:
+                            variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-full').props('label-always')
+
+                        # Show presets or slider based on setting
+                        presets_row.set_visibility(not use_slider)
+                        slider_row.set_visibility(use_slider)
+
                         with ui.row().classes('items-center gap-2 mt-2'):
                             ui.label(tr('Max changes:')).classes('text-xs').style('color: var(--text-muted);')
                             max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-20').props('outlined dense')
+
+                    def update_preset_buttons():
+                        """Update preset button styles based on current selection."""
+                        val = current_preset['value']
+                        for btn, v in [(btn_basic, 30), (btn_extended, 70), (btn_maximum, 150)]:
+                            if val == v:
+                                btn.classes(add='btn-primary', remove='btn-secondary')
+                            else:
+                                btn.classes(add='btn-secondary', remove='btn-primary')
+
+                    def set_preset(pairs_count):
+                        """Set variant level from preset button."""
+                        current_preset['value'] = pairs_count
+                        if state.var_mgr:
+                            state.var_mgr.set_variant_level(pairs_count)
+                        # Sync slider
+                        variant_slider.value = pairs_count
+                        update_preset_buttons()
+
+                    btn_basic.on('click', lambda: set_preset(30))
+                    btn_extended.on('click', lambda: set_preset(70))
+                    btn_maximum.on('click', lambda: set_preset(150))
+
+                    # Initialize button styles
+                    update_preset_buttons()
 
                     def on_mode_change():
                         is_variants = mode_select.value == 'variants'
@@ -218,7 +265,10 @@ def create_parallels_page(initial_text: str = None):
 
         # Update variant level and max changes from UI before search
         if mode_select.value == 'variants' and state.var_mgr:
-            state.var_mgr.set_variant_level(int(variant_slider.value))
+            # Get pairs count from preset or slider based on setting
+            use_slider_mode = getattr(state.lab_engine.settings if state.lab_engine else None, 'variant_use_slider', False)
+            pairs_count = int(variant_slider.value) if use_slider_mode else current_preset['value']
+            state.var_mgr.set_variant_level(pairs_count)
             if state.lab_engine and state.lab_engine.settings:
                 state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
 

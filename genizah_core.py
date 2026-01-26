@@ -135,6 +135,7 @@ class LabSettings:
         self.variant_max_changes = 2       # Max character changes per word
         self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
         self.variant_pairs_count = 50      # Number of top variant pairs to use (slider value)
+        self.variant_use_slider = False    # If True, show slider instead of preset buttons
 
         self.load()
 
@@ -172,6 +173,7 @@ class LabSettings:
                     self.variant_max_changes = data.get('variant_max_changes', 2)
                     self.variant_aggressive = data.get('variant_aggressive', False)
                     self.variant_pairs_count = data.get('variant_pairs_count', 50)
+                    self.variant_use_slider = data.get('variant_use_slider', False)
             except Exception: pass
 
     def save(self):
@@ -207,7 +209,8 @@ class LabSettings:
                     'variant_min_word_len': self.variant_min_word_len,
                     'variant_max_changes': self.variant_max_changes,
                     'variant_aggressive': self.variant_aggressive,
-                    'variant_pairs_count': self.variant_pairs_count
+                    'variant_pairs_count': self.variant_pairs_count,
+                    'variant_use_slider': self.variant_use_slider
                 }, f, indent=4)
         except Exception: pass
 
