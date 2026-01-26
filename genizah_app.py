@@ -425,6 +425,35 @@ class SearchSettingsDialog(QDialog):
         self.chk_variant_aggressive.setToolTip(tr("Like old behavior: apply max changes to all words regardless of length. More results, more noise."))
         grid.addWidget(self.chk_variant_aggressive, 3, 0, 1, 2)
 
+        # --- Variant Pairs Slider ---
+        lbl_pairs = QLabel(tr("Variant Pairs Level:"))
+        lbl_pairs.setStyleSheet("font-weight: bold; margin-top: 10px; color: #2980b9;")
+        grid.addWidget(lbl_pairs, 4, 0, 1, 2)
+
+        # Slider for number of variant pairs to use
+        slider_layout = QHBoxLayout()
+        self.slider_variant_pairs = QSlider(Qt.Orientation.Horizontal)
+        self.slider_variant_pairs.setRange(10, 500)
+        self.slider_variant_pairs.setValue(getattr(self.settings, 'variant_pairs_count', 50))
+        self.slider_variant_pairs.setToolTip(tr("Number of variant pairs to use. Higher = more substitutions but slower search.\nBased on frequency: top pairs are most common HTR confusions."))
+
+        self.lbl_pairs_value = QLabel(str(self.slider_variant_pairs.value()))
+        self.lbl_pairs_value.setMinimumWidth(40)
+        self.slider_variant_pairs.valueChanged.connect(
+            lambda v: self.lbl_pairs_value.setText(str(v))
+        )
+
+        slider_layout.addWidget(QLabel(tr("10")))
+        slider_layout.addWidget(self.slider_variant_pairs)
+        slider_layout.addWidget(QLabel(tr("500")))
+        slider_layout.addWidget(self.lbl_pairs_value)
+        grid.addLayout(slider_layout, 5, 0, 1, 2)
+
+        lbl_pairs_help = QLabel(tr("Controls how many character substitution pairs to use. Higher values find more variants but are slower."))
+        lbl_pairs_help.setStyleSheet("font-size: 10px; color: gray; font-style: italic;")
+        lbl_pairs_help.setWordWrap(True)
+        grid.addWidget(lbl_pairs_help, 6, 0, 1, 2)
+
         layout.addLayout(grid)
 
         # --- Custom Variants Section ---
@@ -469,6 +498,7 @@ class SearchSettingsDialog(QDialog):
         self.settings.variant_min_word_len = self.spin_variant_min_len.value()
         self.settings.variant_max_changes = self.spin_variant_max_changes.value()
         self.settings.variant_aggressive = self.chk_variant_aggressive.isChecked()
+        self.settings.variant_pairs_count = self.slider_variant_pairs.value()
 
         # Parse custom variants
         text = self.txt_custom_variants.toPlainText().strip()

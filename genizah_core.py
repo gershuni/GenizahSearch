@@ -24,18 +24,14 @@ import html
 
 from genizah_translations import TRANSLATIONS
 
-# Import multichar variant pairs (generated from V0.7 vs V0.8 HTR comparison)
+# Import unified variant pairs (generated from V0.7 vs V0.8 HTR comparison)
+# Sorted by frequency - use top N pairs based on slider setting
 try:
-    from multichar_pairs import (
-        _BASIC_MULTICHAR_PAIRS,
-        _EXTENDED_MULTICHAR_PAIRS,
-        _MAXIMUM_MULTICHAR_PAIRS
-    )
+    from unified_variants import UNIFIED_VARIANT_PAIRS, get_top_pairs
 except ImportError:
     # Fallback if file not found
-    _BASIC_MULTICHAR_PAIRS = []
-    _EXTENDED_MULTICHAR_PAIRS = []
-    _MAXIMUM_MULTICHAR_PAIRS = []
+    UNIFIED_VARIANT_PAIRS = []
+    def get_top_pairs(n): return []
 
 # --- Shmidman Rare-Letter Helpers ---
 HEBREW_FREQ = {
@@ -138,7 +134,7 @@ class LabSettings:
         self.variant_min_word_len = 2      # Words <= this length get only 1 change
         self.variant_max_changes = 2       # Max character changes per word
         self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
-        self.multichar_variants_enabled = True  # Enable built-in multichar variant pairs
+        self.variant_pairs_count = 50      # Number of top variant pairs to use (slider value)
 
         self.load()
 
@@ -175,7 +171,7 @@ class LabSettings:
                     self.variant_min_word_len = data.get('variant_min_word_len', 2)
                     self.variant_max_changes = data.get('variant_max_changes', 2)
                     self.variant_aggressive = data.get('variant_aggressive', False)
-                    self.multichar_variants_enabled = data.get('multichar_variants_enabled', True)
+                    self.variant_pairs_count = data.get('variant_pairs_count', 50)
             except Exception: pass
 
     def save(self):
@@ -211,7 +207,7 @@ class LabSettings:
                     'variant_min_word_len': self.variant_min_word_len,
                     'variant_max_changes': self.variant_max_changes,
                     'variant_aggressive': self.variant_aggressive,
-                    'multichar_variants_enabled': self.multichar_variants_enabled
+                    'variant_pairs_count': self.variant_pairs_count
                 }, f, indent=4)
         except Exception: pass
 
@@ -1554,59 +1550,23 @@ class AIManager:
 # ==============================================================================
 class VariantManager:
     """
-    Generate spelling variants for Hebrew search terms using hierarchical maps.
+    Generate spelling variants for Hebrew search terms using unified frequency-based pairs.
 
-    Improvements over original:
-    1. Hierarchical maps: extended builds on basic, maximum builds on extended
-    2. Single-pass generation instead of redundant multi-layer processing
+    Features:
+    1. Unified variant pairs: both 1↔1 and 2↔1 substitutions sorted by frequency
+    2. Slider-based selection: use top N pairs based on user setting
     3. Dynamic max_changes based on term length to prevent combinatorial explosion
     4. LRU caching for frequently searched terms
     5. Early termination with smarter limit handling
     """
 
-    # === HIERARCHICAL PAIR DEFINITIONS ===
-    # Basic: High-confidence visual confusions in HTR
-    _BASIC_PAIRS = [
-        ('ד', 'ר'), ('כ', 'ב'), ('ה', 'ח'),
-        ('ו', 'ז'), ('ו', 'י'), ('ו', 'ן'),
-        ('ט', 'ת'), ('ס', 'ש')
-    ]
-
-    # Extended additions: Medium-confidence confusions
-    _EXTENDED_ADDITIONS = [
-        ('ת', 'ה'), ('י', 'ל'), ('א', 'ו'), ('ה', 'ר'), ('א', 'י'), ('ה', 'ת'),
-        ('ר', 'י'), ('א', 'ח'), ('י', 'ר'), ('ק', 'ה'), ('נ', 'ו'), ('ל', 'ו'),
-        ('ה', 'ו'), ('ו', 'א'), ('ה', 'י'), ('א', 'ה'), ('ר', 'ו'), ('ל', 'ר'),
-        ('מ', 'י'), ('מ', 'א'), ('נ', 'י'), ('מ', 'ו'), ('י', 'ה'), ('א', 'ל'),
-        ('ל', 'נ'), ('י', 'נ'), ('ת', 'י'), ('י', 'מ'), ('ת', 'ח'), ('ב', 'י'),
-        ('ל', 'א'), ('ה', 'ם'), ('ר', 'ה'), ('ו', 'ש'), ('ל', 'כ'), ('י', 'ת'),
-        ('א', 'מ'), ('ת', 'ר'), ('ב', 'ו'), ('ר', 'ל'), ('י', 'ש'), ('ב', 'ר'),
-        ('א', 'ש'), ('ש', 'י'), ('ס', 'ם'), ('ש', 'ו'), ('ב', 'נ'), ('ו', 'מ'),
-        ('מ', 'ש'), ('מ', 'ע'), ('ת', 'ו'), ('ר', 'א'), ('מ', 'ל'), ('מ', 'ב'),
-        ('ד', 'י'), ('נ', 'ג'), ('ה', 'ד')
-    ]
-
-    # Maximum additions: Lower-confidence / aggressive confusions
-    _MAXIMUM_ADDITIONS = [
-        ("'", 'י'), ("'", 'ר'), ('א', 'ב'), ('א', 'ד'), ('א', 'ם'), ('א', 'נ'),
-        ('א', 'ע'), ('א', 'ת'), ('ב', 'ד'), ('ב', 'ה'), ('ב', 'ל'), ('ב', 'מ'),
-        ('ב', 'פ'), ('ב', 'ש'), ('ב', 'ת'), ('ג', 'ו'), ('ג', 'נ'), ('ד', 'ה'),
-        ('ד', 'ו'), ('ד', 'כ'), ('ד', 'ל'), ('ה', 'ב'), ('ה', 'ך'), ('ה', 'כ'),
-        ('ה', 'ל'), ('ה', 'מ'), ('ה', 'ק'), ('ה', 'ש'), ('ו', 'ג'), ('ו', 'ד'),
-        ('ו', 'ח'), ('ו', 'כ'), ('ו', 'ם'), ('ו', 'ע'), ('ו', 'ת'), ('ז', 'י'),
-        ('ח', 'י'), ('ח', 'מ'), ('ח', 'ר'), ('ח', 'ת'), ('ט', 'ע'), ('ט', 'ש'),
-        ('י', 'ד'), ('י', 'ך'), ('י', 'כ'), ('י', 'ם'), ('י', 'ן'), ('י', 'ע'),
-        ('כ', 'ה'), ('כ', 'ו'), ('כ', 'ל'), ('כ', 'מ'), ('כ', 'נ'), ('כ', 'פ'),
-        ('כ', 'ר'), ('כ', 'ת'), ('ל', 'ד'), ('ל', 'ה'), ('ל', 'מ'), ('ל', 'ם'),
-        ('ל', 'ע'), ('ל', 'ש'), ('ל', 'ת'), ('מ', 'ה'), ('מ', 'ח'), ('מ', 'נ'),
-        ('מ', 'ס'), ('מ', 'ר'), ('מ', 'ת'), ('נ', 'ל'), ('נ', 'פ'), ('נ', 'ר'),
-        ('נ', 'ת'), ('ס', 'מ'), ('ע', 'ל'), ('ע', 'מ'), ('ע', 'נ'), ('ע', 'ש'),
-        ('פ', 'ב'), ('פ', 'כ'), ('פ', 'נ'), ('ק', 'ר'), ('ר', 'ב'), ('ר', 'ך'),
-        ('ר', 'כ'), ('ר', 'מ'), ('ר', 'נ'), ('ר', 'ק'), ('ר', 'ש'), ('ר', 'ת'),
-        ('ש', 'ב'), ('ש', 'ה'), ('ש', 'ט'), ('ש', 'ל'), ('ש', 'מ'), ('ש', 'ע'),
-        ('ש', 'ר'), ('ת', 'ט'), ('ת', 'כ'), ('ת', 'ל'), ('ת', 'מ'), ('ת', 'ם'),
-        ('ת', 'נ')
-    ]
+    # Mode-to-pairs mapping: how many pairs to use for each search mode
+    # User slider overrides these defaults
+    _MODE_PAIRS_COUNT = {
+        'variants': 30,           # Basic: top 30 most frequent pairs
+        'variants_extended': 100, # Extended: top 100 pairs
+        'variants_maximum': 500,  # Maximum: top 500 pairs
+    }
 
     # Tier configuration for balanced flexibility vs explosion prevention
     _TIER_CONFIG = {
@@ -1667,32 +1627,58 @@ class VariantManager:
     # Maximum multichar variants per term to prevent explosion
     MAX_MULTICHAR_VARIANTS = 8
 
+    def _get_pairs_count(self, mode: str = None) -> int:
+        """
+        Get the number of variant pairs to use.
+        Settings slider value takes precedence over mode defaults.
+        """
+        # If settings has explicit pairs count, use it
+        if self._settings:
+            count = getattr(self._settings, 'variant_pairs_count', None)
+            if count is not None:
+                return count
+
+        # Fall back to mode-based defaults
+        if mode:
+            return self._MODE_PAIRS_COUNT.get(mode, 50)
+        return 50  # Default
+
+    def _get_unified_pairs(self, n: int) -> tuple:
+        """
+        Get top N pairs from unified variant list, split into single-char and multi-char.
+        Returns (single_char_pairs, multi_char_pairs) tuple.
+        """
+        if not UNIFIED_VARIANT_PAIRS:
+            return [], []
+
+        # Get top N pairs (without frequency)
+        top_pairs = [(s, t) for s, t, _ in UNIFIED_VARIANT_PAIRS[:n]]
+
+        single_pairs = []
+        multi_pairs = []
+        for a, b in top_pairs:
+            if len(a) == 1 and len(b) == 1:
+                single_pairs.append((a, b))
+            else:
+                multi_pairs.append((a, b))
+
+        return single_pairs, multi_pairs
+
     def _get_multichar_pairs_for_mode(self, mode: str) -> list:
         """
-        Get the appropriate multichar pairs list based on search mode.
-        Hierarchical: each level includes all previous levels.
+        Get multi-character pairs based on search mode and settings.
+        Uses unified frequency-sorted pairs list.
         """
-        # Check if multichar variants are enabled
-        if self._settings and not getattr(self._settings, 'multichar_variants_enabled', True):
-            return []
-
         # Get custom pairs from settings
         _, custom_multi = self._get_custom_pairs()
 
-        if mode == 'variants':
-            # Basic mode: only custom pairs (user-defined)
-            return custom_multi
-        elif mode == 'variants_extended':
-            # Extended: BASIC built-in + custom
-            return list(_BASIC_MULTICHAR_PAIRS) + custom_multi
-        elif mode == 'variants_maximum':
-            # Maximum: all built-in + custom
-            return (list(_BASIC_MULTICHAR_PAIRS) +
-                    list(_EXTENDED_MULTICHAR_PAIRS) +
-                    list(_MAXIMUM_MULTICHAR_PAIRS) +
-                    custom_multi)
-        else:
-            return custom_multi
+        # Get count based on mode and settings
+        n = self._get_pairs_count(mode)
+
+        # Get multi-char pairs from unified list
+        _, unified_multi = self._get_unified_pairs(n)
+
+        return unified_multi + custom_multi
 
     def _generate_multichar_variants(self, term: str, mode: str = 'variants') -> set:
         """
@@ -1724,25 +1710,58 @@ class VariantManager:
         return variants
 
     def _rebuild_maps(self):
-        """Build hierarchical maps including single-char custom variants from settings."""
-        single_char_pairs, _ = self._get_custom_pairs()
+        """Build variant maps from unified frequency-sorted pairs list."""
+        custom_single, _ = self._get_custom_pairs()
 
-        # Build hierarchical maps (each level includes all previous)
-        self.basic_map = self.make_multimap(self._BASIC_PAIRS + single_char_pairs)
+        # Get pairs count from settings (or use default for maximum coverage)
+        n = self._get_pairs_count()
 
-        self.extended_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + single_char_pairs
-        )
+        # Build maps for each mode using unified pairs
+        # Basic: top 30 pairs
+        basic_single, _ = self._get_unified_pairs(self._MODE_PAIRS_COUNT['variants'])
+        self.basic_map = self.make_multimap(basic_single + custom_single)
 
-        self.maximum_map = self.make_multimap(
-            self._BASIC_PAIRS + self._EXTENDED_ADDITIONS + self._MAXIMUM_ADDITIONS + single_char_pairs
-        )
+        # Extended: top 100 pairs
+        extended_single, _ = self._get_unified_pairs(self._MODE_PAIRS_COUNT['variants_extended'])
+        self.extended_map = self.make_multimap(extended_single + custom_single)
+
+        # Maximum: uses settings slider value (default 500)
+        max_single, _ = self._get_unified_pairs(max(n, self._MODE_PAIRS_COUNT['variants_maximum']))
+        self.maximum_map = self.make_multimap(max_single + custom_single)
+
+        # Also store a dynamic map based on current slider value
+        slider_single, _ = self._get_unified_pairs(n)
+        self.slider_map = self.make_multimap(slider_single + custom_single)
 
     def set_settings(self, settings):
         """Update settings reference, rebuild maps, and clear cache."""
         self._settings = settings
         self._rebuild_maps()
         self._cache.clear()
+
+    def set_variant_level(self, n: int):
+        """
+        Update variant pairs count (slider value) and rebuild slider map.
+        Call this when user adjusts the slider to avoid full rebuild.
+        """
+        if self._settings:
+            self._settings.variant_pairs_count = n
+
+        # Rebuild only the slider map
+        custom_single, _ = self._get_custom_pairs()
+        slider_single, _ = self._get_unified_pairs(n)
+        self.slider_map = self.make_multimap(slider_single + custom_single)
+
+        # Clear cache since pairs changed
+        self._cache.clear()
+
+    def get_variant_level(self) -> int:
+        """Get current variant pairs count."""
+        return self._get_pairs_count()
+
+    def get_max_variant_pairs(self) -> int:
+        """Get total number of available variant pairs."""
+        return len(UNIFIED_VARIANT_PAIRS)
 
     def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
         """
@@ -1828,11 +1847,11 @@ class VariantManager:
         """
         Generate spelling variants for Hebrew search terms.
 
-        Uses single-pass generation with the appropriate hierarchical map,
-        instead of redundant multi-layer processing.
+        Uses unified frequency-sorted pairs with slider-based selection.
+        The number of pairs used is determined by settings.variant_pairs_count.
 
-        Also applies multi-character substitutions from custom variant pairs,
-        generating single-char variants for each multi-char substitution result.
+        Also applies multi-character substitutions for pairs where one side
+        has more than one character (2↔1 substitutions).
         """
         if len(term) < 2:
             return [term]
@@ -1848,13 +1867,20 @@ class VariantManager:
         else:
             limit = min(limit, Config.VARIANT_GEN_LIMIT)
 
-        # Check cache
-        cache_key = (term, mode, limit)
+        # Get current pairs count for cache key
+        pairs_count = self._get_pairs_count(mode)
+
+        # Check cache (include pairs_count for proper invalidation)
+        cache_key = (term, mode, limit, pairs_count)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Select the appropriate map (hierarchical - includes all lower tiers)
-        if mode == 'variants':
+        # Select the appropriate map based on mode
+        # Use slider_map when settings has custom pairs count
+        if self._settings and hasattr(self._settings, 'variant_pairs_count'):
+            # Rebuild slider map with current value if needed
+            mapping = self.slider_map
+        elif mode == 'variants':
             mapping = self.basic_map
         elif mode == 'variants_extended':
             mapping = self.extended_map

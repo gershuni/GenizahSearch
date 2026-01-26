@@ -261,7 +261,27 @@ def create_settings_page():
                         ).props('outlined dense').classes('w-full')
                         ui.label(tr('Maximum character substitutions per word')).classes('text-xs').style('color: var(--text-muted);')
 
+                # Variant Pairs Level Slider
+                ui.separator().classes('my-4')
+                h3(tr('Variant Pairs Level'), classes='text-lg font-medium mb-2', style='color: var(--text-secondary);')
+                ui.label(tr('Controls how many character substitution pairs to use. Higher values find more variants but are slower.')).classes('text-xs mb-4').style('color: var(--text-muted);')
+
+                pairs_val = getattr(lab_settings, 'variant_pairs_count', 50)
+                variant_pairs_label = ui.label(f'{tr("Current level")}: {pairs_val}').classes('font-medium').style('color: var(--primary-600);')
+
+                variant_pairs_slider = ui.slider(
+                    min=10, max=500, value=pairs_val, step=10
+                ).props('label-always').classes('w-full')
+
+                def update_pairs_label():
+                    variant_pairs_label.set_text(f'{tr("Current level")}: {int(variant_pairs_slider.value)}')
+
+                variant_pairs_slider.on('update:model-value', update_pairs_label)
+
+                ui.label(tr('Based on frequency analysis of HTR confusions. Top pairs are most common substitutions.')).classes('text-xs mt-2').style('color: var(--text-muted);')
+
                 # Aggressive mode toggle
+                ui.separator().classes('my-4')
                 aggressive_val = getattr(lab_settings, 'variant_aggressive', False)
                 variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'), value=aggressive_val).classes('mt-4')
                 ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs ml-12').style('color: var(--text-muted);')
@@ -281,11 +301,12 @@ def create_settings_page():
                         lab_settings.custom_variants = custom
                         lab_settings.variant_min_word_len = int(variant_min_len.value)
                         lab_settings.variant_max_changes = int(variant_max_changes.value)
+                        lab_settings.variant_pairs_count = int(variant_pairs_slider.value)
                         lab_settings.variant_aggressive = variant_aggressive.value
 
                         # Update VariantManager if available
                         if state.var_mgr:
-                            state.var_mgr.load_custom_variant_pairs(custom.keys() if custom else [])
+                            state.var_mgr.set_variant_level(int(variant_pairs_slider.value))
 
                         if hasattr(lab_settings, 'save'):
                             lab_settings.save()
@@ -300,24 +321,27 @@ def create_settings_page():
                 # Common Variants Info
                 ui.separator().classes('my-6')
                 # Changed to H3
-                h3(tr('Common Built-in Variant Pairs'), classes='text-lg font-medium mb-4', style='color: var(--text-secondary);')
+                h3(tr('Top Variant Pairs (by frequency)'), classes='text-lg font-medium mb-4', style='color: var(--text-secondary);')
+
+                ui.label(tr('Pairs are sorted by frequency from HTR analysis. The slider above controls how many to use.')).classes('text-xs mb-4').style('color: var(--text-muted);')
 
                 variant_pairs = [
-                    ('ד ↔ ר', tr('Common HTR confusion')),
-                    ('ה ↔ ח ↔ ת', tr('Similar shapes')),
-                    ('ו ↔ י ↔ ן', tr('Vertical strokes')),
-                    ('כ ↔ ב', tr('Similar shapes')),
-                    ('א ↔ ע ↔ ה', tr('Gutturals')),
-                    ('מ ↔ ם', tr('Final forms')),
+                    ('ד ↔ ר', '326,671', tr('Most common')),
+                    ('ב ↔ כ', '316,547', tr('Similar shapes')),
+                    ('ו ↔ י', '222,498', tr('Vertical strokes')),
+                    ('ה ↔ ח', '86,135', tr('Similar tops')),
+                    ('ה ↔ ת', '80,587', tr('Similar shapes')),
+                    ('רי ↔ ה', '14,100', tr('2↔1 merge')),
                 ]
 
                 with ui.row().classes('gap-3 flex-wrap'):
-                    for pair, desc in variant_pairs:
+                    for pair, freq, desc in variant_pairs:
                         with ui.element('div').classes('px-4 py-3 rounded-lg').style(
                             'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
                         ):
                             ui.label(pair).classes('font-mono text-lg font-bold').style('color: var(--primary-700);')
-                            ui.label(desc).classes('text-xs mt-1').style('color: var(--text-muted);')
+                            ui.label(freq).classes('text-xs font-medium').style('color: var(--accent-blue);')
+                            ui.label(desc).classes('text-xs').style('color: var(--text-muted);')
 
             else:
                 with ui.column().classes('items-center py-8'):
