@@ -92,11 +92,11 @@ def create_parallels_page(initial_text: str = None):
                     # Mode
                     mode_select = ui.select(
                         {
-                            'variants': tr('Variants') + ' (' + tr('recommended') + ')',
                             'exact': tr('Exact'),
+                            'variants': tr('Variants'),
                             'fuzzy': tr('Fuzzy'),
                         },
-                        value='variants',
+                        value='exact',
                         label=tr('Search Mode')
                     ).classes('w-full').props('outlined dense')
 
