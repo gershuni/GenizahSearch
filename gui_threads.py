@@ -341,6 +341,11 @@ class UpdateCheckerThread(QThread):
                 curr_v = [int(x) for x in self.current_version.replace('v','').split('.') if x.isdigit()]
                 remote_v = [int(x) for x in tag.replace('v','').split('.') if x.isdigit()]
 
+                # Normalize version lists to same length (pad with zeros)
+                max_len = max(len(curr_v), len(remote_v))
+                curr_v.extend([0] * (max_len - len(curr_v)))
+                remote_v.extend([0] * (max_len - len(remote_v)))
+
                 if remote_v > curr_v:
                     self.finished_signal.emit(True, tag, html_url, self.is_manual)
                 else:
