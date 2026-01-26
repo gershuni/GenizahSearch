@@ -72,15 +72,29 @@ def create_search_page(initial_query: str = None):
                         {
                             'exact': tr('Exact') + ' (=)',
                             'variants': tr('Variants') + ' (?)',
-                            'variants_extended': tr('Extended') + ' (??)',
-                            'variants_maximum': tr('Maximum') + ' (???)',
                             'fuzzy': tr('Fuzzy') + ' (~)',
                             'Regex': tr('Regex') + ' (/)',
                             'Shelfmark': tr('Shelfmark') + ' (#)',
                             'Title': tr('Title') + ' ($)',
                         },
                         value='exact'  # Default to exact
-                    ).classes('w-48').props('outlined dense')
+                    ).classes('w-40').props('outlined dense')
+
+                # Variant Level Slider (visible only in Variants mode)
+                with ui.column().classes('gap-1') as variant_slider_col:
+                    h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    with ui.row().classes('items-center gap-2'):
+                        variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-32').props('label-always')
+                        variant_slider_label = ui.label('50').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
+                        variant_slider.on('update:model-value', lambda: variant_slider_label.set_text(str(int(variant_slider.value))))
+                    ui.tooltip(tr('More pairs = more results but slower'))
+                variant_slider_col.set_visibility(False)  # Hidden by default
+
+                def on_mode_change():
+                    is_variants = mode_select.value == 'variants'
+                    variant_slider_col.set_visibility(is_variants)
+
+                mode_select.on('update:model-value', on_mode_change)
 
                 # Gap Control
                 with ui.column().classes('gap-1'):
@@ -131,7 +145,6 @@ def create_search_page(initial_query: str = None):
                                 shortcuts = [
                                     ('=', tr('Exact')),
                                     ('?', tr('Variants')),
-                                    ('??', tr('Extended')),
                                     ('/', tr('Regex')),
                                     ('#', tr('Shelfmark')),
                                     ('$', tr('Title')),
@@ -439,9 +452,16 @@ def create_search_page(initial_query: str = None):
         if mode_override:
             mode = mode_override
             clean_query = parsed_query
+            # Map old extended/maximum to variants (slider controls intensity)
+            if mode in ('variants_extended', 'variants_maximum'):
+                mode = 'variants'
             mode_select.value = mode
         else:
             mode = mode_select.value
+
+        # Update variant level from slider before search
+        if mode == 'variants' and state.var_mgr:
+            state.var_mgr.set_variant_level(int(variant_slider.value))
 
         # Reset UI
         search_state.is_running = True

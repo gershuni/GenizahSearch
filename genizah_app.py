@@ -5183,17 +5183,35 @@ class GenizahGUI(QMainWindow):
         row2 = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Extended (??)"), tr("Maximum (???)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)")])
+        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)")])
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
-        self.mode_combo.setItemData(1, tr("Basic variants: ד/ר, ה/ח, ו/י/ן etc."))
-        self.mode_combo.setItemData(2, tr("Extended variants: Adds more swaps (א/ע, ק/כ etc.)"))
-        self.mode_combo.setItemData(3, tr("Maximum variants: Very broad search"))
-        self.mode_combo.setItemData(4, tr("Fuzzy search: Levenshtein distance"))
-        self.mode_combo.setItemData(5, tr("Regex: Use AI Assistant for complex patterns"))
-        self.mode_combo.setItemData(6, tr("Search in Title metadata"))
-        self.mode_combo.setItemData(7, tr("Search in Shelfmark metadata"))
-        
+        self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
+        self.mode_combo.setItemData(2, tr("Fuzzy search: Levenshtein distance"))
+        self.mode_combo.setItemData(3, tr("Regex: Use AI Assistant for complex patterns"))
+        self.mode_combo.setItemData(4, tr("Search in Title metadata"))
+        self.mode_combo.setItemData(5, tr("Search in Shelfmark metadata"))
+        self.mode_combo.currentIndexChanged.connect(self._on_search_mode_changed)
+
+        # Variant Level Slider (visible only in Variants mode)
+        self.variant_slider_container = QWidget()
+        slider_layout = QHBoxLayout(self.variant_slider_container)
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        self.variant_slider = QSlider(Qt.Orientation.Horizontal)
+        self.variant_slider.setRange(10, 500)
+        self.variant_slider.setValue(getattr(self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None, 'variant_pairs_count', 50) if hasattr(self, 'lab_engine') else 50)
+        self.variant_slider.setFixedWidth(100)
+        self.variant_slider.setToolTip(tr("Variant intensity: more pairs = more results but slower"))
+        self.variant_slider_label = QLabel("50")
+        self.variant_slider_label.setFixedWidth(30)
+        self.variant_slider.valueChanged.connect(lambda v: (
+            self.variant_slider_label.setText(str(v)),
+            self._sync_variant_sliders(v, 'search') if hasattr(self, '_sync_variant_sliders') else None
+        ))
+        slider_layout.addWidget(self.variant_slider)
+        slider_layout.addWidget(self.variant_slider_label)
+        self.variant_slider_container.setVisible(False)  # Hidden by default (Exact mode)
+
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
 
@@ -5228,6 +5246,7 @@ class GenizahGUI(QMainWindow):
 
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
+        row2.addWidget(self.variant_slider_container)
         row2.addWidget(QLabel(tr("Gap:")))
         row2.addWidget(self.gap_input)
         row2.addWidget(QLabel(tr("Exclude:")))
@@ -5416,12 +5435,30 @@ class GenizahGUI(QMainWindow):
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
         self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
         
-        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Extended"), tr("Maximum"), tr("Fuzzy")])
+        self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Fuzzy")])
         self.comp_mode_combo.setItemData(0, tr("Exact match"))
-        self.comp_mode_combo.setItemData(1, tr("Basic variants"))
-        self.comp_mode_combo.setItemData(2, tr("Extended variants"))
-        self.comp_mode_combo.setItemData(3, tr("Maximum variants"))
-        self.comp_mode_combo.setItemData(4, tr("Fuzzy search"))
+        self.comp_mode_combo.setItemData(1, tr("Variant search (uses slider level)"))
+        self.comp_mode_combo.setItemData(2, tr("Fuzzy search"))
+        self.comp_mode_combo.currentIndexChanged.connect(self._on_comp_mode_changed)
+
+        # Variant Level Slider for Composition (visible only in Variants mode)
+        self.comp_variant_slider_container = QWidget()
+        comp_slider_layout = QHBoxLayout(self.comp_variant_slider_container)
+        comp_slider_layout.setContentsMargins(0, 0, 0, 0)
+        self.comp_variant_slider = QSlider(Qt.Orientation.Horizontal)
+        self.comp_variant_slider.setRange(10, 500)
+        self.comp_variant_slider.setValue(50)
+        self.comp_variant_slider.setFixedWidth(80)
+        self.comp_variant_slider.setToolTip(tr("Variant intensity"))
+        self.comp_variant_slider_label = QLabel("50")
+        self.comp_variant_slider_label.setFixedWidth(25)
+        self.comp_variant_slider.valueChanged.connect(lambda v: (
+            self.comp_variant_slider_label.setText(str(v)),
+            self._sync_variant_sliders(v, 'comp') if hasattr(self, '_sync_variant_sliders') else None
+        ))
+        comp_slider_layout.addWidget(self.comp_variant_slider)
+        comp_slider_layout.addWidget(self.comp_variant_slider_label)
+        self.comp_variant_slider_container.setVisible(False)
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
@@ -5432,7 +5469,8 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
-        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+        cr.addWidget(self.comp_mode_combo); cr.addWidget(self.comp_variant_slider_container)
+        cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
 
         # 3. Lab & Action
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
@@ -9561,7 +9599,7 @@ class GenizahGUI(QMainWindow):
         if not self.ai_mgr.api_key:
             QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
         d = AIDialog(self, self.ai_mgr)
-        if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(5)
+        if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(3)  # Regex mode
 
     def open_search_settings(self):
         """Open the Search Settings dialog for variant configuration."""
@@ -9569,6 +9607,33 @@ class GenizahGUI(QMainWindow):
             return
         d = SearchSettingsDialog(self, self.lab_engine.settings)
         d.exec()
+
+    def _on_search_mode_changed(self, index):
+        """Show/hide variant slider based on selected mode."""
+        # Index 1 = Variants mode
+        is_variants = (index == 1)
+        if hasattr(self, 'variant_slider_container'):
+            self.variant_slider_container.setVisible(is_variants)
+
+    def _on_comp_mode_changed(self, index):
+        """Show/hide variant slider for composition based on selected mode."""
+        # Index 1 = Variants mode
+        is_variants = (index == 1)
+        if hasattr(self, 'comp_variant_slider_container'):
+            self.comp_variant_slider_container.setVisible(is_variants)
+
+    def _sync_variant_sliders(self, value, source='search'):
+        """Keep variant sliders synchronized between search and composition tabs."""
+        if source == 'search' and hasattr(self, 'comp_variant_slider'):
+            self.comp_variant_slider.blockSignals(True)
+            self.comp_variant_slider.setValue(value)
+            self.comp_variant_slider_label.setText(str(value))
+            self.comp_variant_slider.blockSignals(False)
+        elif source == 'comp' and hasattr(self, 'variant_slider'):
+            self.variant_slider.blockSignals(True)
+            self.variant_slider.setValue(value)
+            self.variant_slider_label.setText(str(value))
+            self.variant_slider.blockSignals(False)
 
     def update_lab_ui_state(self, checked):
         """Disable standard controls when Lab Mode is active."""
@@ -9641,11 +9706,14 @@ class GenizahGUI(QMainWindow):
 
         if mode_override:
             # Map mode string back to combo index
-            # modes list must match the order in init_ui or be derived dynamically
-            modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+            # modes list must match the order in init_ui (simplified to single Variants mode)
+            modes = ['literal', 'variants', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
             # Handle 'exact' vs 'literal' naming difference if present
             core_mode = mode_override
             if core_mode == 'exact': core_mode = 'literal'
+            # Map old extended/maximum to variants (slider controls intensity)
+            if core_mode in ('variants_extended', 'variants_maximum'):
+                core_mode = 'variants'
 
             try:
                 combo_idx = modes.index(core_mode)
@@ -9655,8 +9723,12 @@ class GenizahGUI(QMainWindow):
                 pass # Mode not found in UI list
 
         mode_idx = self.mode_combo.currentIndex()
-        modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+        modes = ['literal', 'variants', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
         mode = modes[mode_idx]
+
+        # Update variant level from slider before search
+        if mode == 'variants' and hasattr(self, 'variant_slider') and self.var_mgr:
+            self.var_mgr.set_variant_level(self.variant_slider.value())
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words
@@ -11889,13 +11961,17 @@ class GenizahGUI(QMainWindow):
 
         chunk_size = self.spin_chunk.value()
         
-        # מיפוי מצב חיפוש
-        available_modes = ['literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy']
+        # מיפוי מצב חיפוש (simplified to single Variants mode with slider)
+        available_modes = ['literal', 'variants', 'fuzzy']
         idx = self.comp_mode_combo.currentIndex()
         if 0 <= idx < len(available_modes):
             mode = available_modes[idx]
         else:
             mode = 'variants'
+
+        # Update variant level from slider before search
+        if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
+            self.var_mgr.set_variant_level(self.comp_variant_slider.value())
 
         excluded_ids = self.excluded_raw_entries
 
