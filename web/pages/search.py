@@ -226,8 +226,7 @@ def create_search_page(initial_query: str = None):
 
                         # Lab Mode Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            # Changed to H4
-                            h4(tr('Lab Mode'), classes='font-bold', style='color: var(--text-primary);')
+                            ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                             lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
                             with ui.row().classes('gap-2 items-center'):
                                 deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
@@ -237,29 +236,11 @@ def create_search_page(initial_query: str = None):
 
                         # NOT Filter Section
                         with ui.column().classes('gap-3 min-w-64'):
-                            # Changed to H4
-                            h4(tr('Exclude Words'), classes='font-bold', style='color: var(--text-primary);')
+                            ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                             not_filter = ui.input(
                                 placeholder=tr('Words to exclude (space separated)')
                             ).classes('w-full').props('outlined dense').style('direction: rtl;')
                             ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
-
-                        # Syntax Shortcuts Section
-                        with ui.column().classes('gap-3 min-w-64'):
-                            # Changed to H4
-                            h4(tr('Shortcuts'), classes='font-bold', style='color: var(--text-primary);')
-                            with ui.row().classes('gap-2 flex-wrap'):
-                                shortcuts = [
-                                    ('=', tr('Exact')),
-                                    ('?', tr('Variants')),
-                                    ('/', tr('Regex')),
-                                    ('#', tr('Shelfmark')),
-                                    ('$', tr('Title')),
-                                ]
-                                for prefix, tip in shortcuts:
-                                    ui.button(prefix, on_click=lambda p=prefix: prepend_to_query(p)).props(
-                                        'flat dense size=sm'
-                                    ).tooltip(tip)
 
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')

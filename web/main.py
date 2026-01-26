@@ -1272,13 +1272,18 @@ def create_layout():
                 with ui.row().classes('theme-switcher w-full'):
                     def set_theme(theme_name):
                         app.storage.user['theme'] = theme_name
-                        ui.run_javascript(f'document.body.setAttribute("data-theme", "{theme_name}")')
+                        ui.run_javascript(f'''
+                            document.documentElement.setAttribute("data-theme", "{theme_name}");
+                            document.body.setAttribute("data-theme", "{theme_name}");
+                            document.querySelectorAll(".theme-btn").forEach(btn => btn.classList.remove("active"));
+                            document.querySelector(".theme-btn-{theme_name}").classList.add("active");
+                        ''')
 
                     current_theme = app.storage.user.get('theme', 'light')
 
-                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "light" else ""}'): pass
-                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "parchment" else ""}'): pass
-                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn {"active" if current_theme == "dark" else ""}'): pass
+                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('flat round size=sm').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
+                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
+                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn theme-btn-dark {"active" if current_theme == "dark" else ""}'): pass
 
                 # Version Info (hidden - using "formerly" in settings instead)
                 # ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
