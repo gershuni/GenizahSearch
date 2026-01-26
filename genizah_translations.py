@@ -1419,7 +1419,7 @@ TRANSLATIONS = {
     "Transcriptions provided by the MiDRASH Project": "תעתיקים מסופקים על ידי פרויקט MiDRASH",
     "View Dataset on Zenodo": "צפה במאגר הנתונים ב-Zenodo",
     "Licensed under CC BY 4.0": "ברישיון CC BY 4.0",
-    "When publishing material from this database, please cite the Zenodo link above.": "בכל פרסום של החומר המוצג כאן, נא להפנות לקישור Zenodo למעלה.",
+    "When publishing material from this site, please cite:": "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
     "Toggle Filters": "הצג/הסתר מסננים",
     "Filter Results": "סנן תוצאות",
     "Filter by shelfmark": "סנן לפי מספר מדף",

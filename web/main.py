@@ -477,6 +477,29 @@ COMMON_STYLES = '''
         margin-top: auto;
     }
 
+    /* Global Citation Footer */
+    .citation-footer {
+        background: var(--primary-50, #eff6ff) !important;
+        border-top: 1px solid var(--primary-200, #bfdbfe) !important;
+        color: var(--primary-800, #1e40af) !important;
+        min-height: auto !important;
+        padding: 0 !important;
+    }
+    .citation-footer a {
+        color: var(--primary-700, #1d4ed8) !important;
+    }
+    .citation-footer a:hover {
+        text-decoration: underline !important;
+    }
+    [data-theme="dark"] .citation-footer {
+        background: var(--primary-900, #1e3a5f) !important;
+        border-top-color: var(--primary-700, #1e40af) !important;
+        color: var(--primary-200, #bfdbfe) !important;
+    }
+    [data-theme="dark"] .citation-footer a {
+        color: var(--primary-300, #93c5fd) !important;
+    }
+
     .theme-switcher {
         display: flex;
         gap: 8px;
@@ -1259,6 +1282,14 @@ def create_layout():
 
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
+
+    # Global Footer with Citation Note
+    with ui.footer().classes('citation-footer'):
+        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4'):
+            ui.icon('format_quote').classes('text-sm opacity-70')
+            citation_text = tr('When publishing material from this site, please cite:')
+            ui.label(citation_text).classes('text-xs opacity-80')
+            ui.link('Stoekl Ben Ezra et al. (2025)', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('text-decoration: none;')
 
     return content_col
 

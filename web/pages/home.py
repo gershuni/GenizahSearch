@@ -338,10 +338,5 @@ def create_page():
                         ui.icon('open_in_new').classes('text-sm').style('color: var(--primary-600);')
                         ui.link('https://doi.org/10.5281/zenodo.17734473', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-sm').style('color: var(--primary-600); text-decoration: none;')
 
-                    # Citation request note
-                    with ui.row().classes('items-center gap-2 mt-2').style('background: var(--primary-50); padding: 8px 12px; border-radius: 6px;'):
-                        ui.icon('format_quote').classes('text-lg').style('color: var(--primary-700);')
-                        ui.label(tr('When publishing material from this database, please cite the Zenodo link above.')).classes('text-xs font-medium').style('color: var(--primary-800);')
-
                     # License
                     ui.label(tr('Licensed under CC BY 4.0')).classes('text-xs mt-2').style('color: var(--text-muted);')
