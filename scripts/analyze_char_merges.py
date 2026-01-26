@@ -5,15 +5,19 @@
 
 שימוש:
     python analyze_char_merges.py --v7 AllGenizah_OLD.txt --v8 Transcriptions.txt --output merges_report.xlsx
+
+עם קורפוס לסינון מילים אמיתיות:
+    python analyze_char_merges.py --v7 ... --v8 ... --corpus /path/to/corpus_folder
 """
 
 import argparse
 import re
 import sys
+import os
 from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 import unicodedata
 
 # Hebrew character range
@@ -37,6 +41,53 @@ def extract_hebrew_words(text: str) -> List[str]:
     # מוצא רצפים של אותיות עבריות
     words = re.findall(r'[\u0590-\u05FF]+', text)
     return [w for w in words if len(w) >= 2]  # מילים עם לפחות 2 אותיות
+
+
+def load_corpus(corpus_path: str) -> Set[str]:
+    """
+    טוען קורפוס של מילים אמיתיות.
+    יכול להיות:
+    - תיקייה עם קבצי טקסט
+    - קובץ עם מילה בכל שורה (פלט של prepare_corpus.py)
+
+    מחזיר set של כל המילים העבריות בקורפוס.
+    """
+    corpus_words = set()
+    corpus_path = Path(corpus_path)
+
+    if not corpus_path.exists():
+        print(f"אזהרה: הקורפוס {corpus_path} לא נמצא")
+        return corpus_words
+
+    # אם זה קובץ בודד - קורא מילה בכל שורה
+    if corpus_path.is_file():
+        print(f"  קורא קובץ מילים: {corpus_path}")
+        try:
+            with open(corpus_path, 'r', encoding='utf-8-sig') as f:
+                for line in f:
+                    word = line.strip()
+                    if word and len(word) >= 2:
+                        corpus_words.add(word)
+        except Exception as e:
+            print(f"  שגיאה בקריאת {corpus_path}: {e}")
+        print(f"  נטענו {len(corpus_words)} מילים מהקובץ")
+        return corpus_words
+
+    # אם זו תיקייה - קורא את כל קבצי הטקסט
+    text_files = list(corpus_path.glob('*.txt')) + list(corpus_path.glob('**/*.txt'))
+    print(f"  נמצאו {len(text_files)} קבצי טקסט בקורפוס")
+
+    for txt_file in text_files:
+        try:
+            with open(txt_file, 'r', encoding='utf-8-sig') as f:
+                text = f.read()
+                words = extract_hebrew_words(text)
+                corpus_words.update(words)
+        except Exception as e:
+            print(f"  שגיאה בקריאת {txt_file}: {e}")
+
+    print(f"  נטענו {len(corpus_words)} מילים ייחודיות מהקורפוס")
+    return corpus_words
 
 def parse_v8_file(filepath: str) -> Dict[str, dict]:
     """
@@ -201,19 +252,19 @@ def find_char_substitutions(word1: str, word2: str) -> List[Tuple[str, str, str]
             orig = word1[i1:i2]
             repl = word2[j1:j2]
 
-            # מתמקדים בחילופים 2↔1
-            if len(orig) == 2 and len(repl) == 1:
-                # שתי אותיות הפכו לאחת (ב-V0.8 זה "תיקון")
-                # אם V0.7 הוא ה-HTR הישן, אז orig הוא מה שה-HTR "ראה"
+            # חילופים 1↔1 (אות באות)
+            if len(orig) == 1 and len(repl) == 1:
+                substitutions.append((orig, repl, 'single'))
+            # חילופים 2↔1
+            elif len(orig) == 2 and len(repl) == 1:
                 substitutions.append((orig, repl, 'merge'))
             elif len(orig) == 1 and len(repl) == 2:
-                # אות אחת הפכה לשתיים
                 substitutions.append((orig, repl, 'split'))
+            # חילופים 2↔2
             elif len(orig) == 2 and len(repl) == 2:
-                # אולי יש כאן חילוף 2↔2 מעניין
-                pass  # אפשר להרחיב
+                substitutions.append((orig, repl, 'swap2'))
+            # חילופים 3↔1
             elif len(orig) == 3 and len(repl) == 1:
-                # שלוש אותיות הפכו לאחת
                 substitutions.append((orig, repl, 'merge3'))
             elif len(orig) == 1 and len(repl) == 3:
                 substitutions.append((orig, repl, 'split3'))
@@ -248,10 +299,13 @@ def first_line_similarity(line1: str, line2: str) -> float:
 
 def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
                       progress_callback=None,
-                      min_similarity: float = 0.2) -> Dict[Tuple[str, str], List[dict]]:
+                      min_similarity: float = 0.2,
+                      corpus_words: Set[str] = None) -> Dict[Tuple[str, str], List[dict]]:
     """
     משווה מסמכים ואוסף סטטיסטיקת חילופים
     מתאים מסמכים לפי ID ומוודא דמיון בשורה הראשונה
+
+    אם corpus_words מסופק, רק זוגות מילים שלפחות אחת מהן בקורפוס ייכללו.
     """
     # מציאת מסמכים משותפים לפי ID
     common_ids = set(v7_docs.keys()) & set(v8_docs.keys())
@@ -261,6 +315,8 @@ def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
     substitutions = defaultdict(list)
     matched_count = 0
     skipped_low_similarity = 0
+    skipped_no_corpus_match = 0
+    corpus_filtered_pairs = 0
 
     for idx, norm_id in enumerate(common_ids):
         if progress_callback and idx % 1000 == 0:
@@ -289,11 +345,26 @@ def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
 
         for w7, w8 in aligned:
             if w7 and w8 and w7 != w8:
+                # סינון לפי קורפוס - לפחות אחת מהמילים חייבת להיות אמיתית
+                if corpus_words is not None:
+                    if w7 not in corpus_words and w8 not in corpus_words:
+                        skipped_no_corpus_match += 1
+                        continue
+                    corpus_filtered_pairs += 1
+
                 subs = find_char_substitutions(w7, w8)
                 for orig, repl, sub_type in subs:
                     # רק אותיות עבריות
                     if all(is_hebrew(c) for c in orig) and all(is_hebrew(c) for c in repl):
-                        key = (orig, repl)
+                        # יוצר מפתח קנוני - מאחד כיוונים הפוכים (ד→ר = ר→ד)
+                        # הארוך קודם, ואם אותו אורך - לפי סדר אלפביתי
+                        if len(orig) > len(repl):
+                            key = (orig, repl)
+                        elif len(repl) > len(orig):
+                            key = (repl, orig)
+                        else:
+                            key = tuple(sorted([orig, repl]))
+
                         substitutions[key].append({
                             'doc_id': norm_id,
                             'word_v7': w7,
@@ -303,6 +374,9 @@ def analyze_documents(v7_docs: Dict[str, dict], v8_docs: Dict[str, dict],
 
     print(f"  מסמכים שעברו בדיקת דמיון: {matched_count}")
     print(f"  מסמכים שדולגו (דמיון נמוך): {skipped_low_similarity}")
+    if corpus_words is not None:
+        print(f"  זוגות שעברו סינון קורפוס: {corpus_filtered_pairs}")
+        print(f"  זוגות שנפסלו (אין מילה אמיתית): {skipped_no_corpus_match}")
 
     return substitutions
 
@@ -542,6 +616,8 @@ def main():
                         help='מספר הופעות מינימלי להכללה בדוח (ברירת מחדל: 2)')
     parser.add_argument('--similarity', type=float, default=0.2,
                         help='סף דמיון מינימלי בשורה הראשונה (0-1, ברירת מחדל: 0.2)')
+    parser.add_argument('--corpus', type=str, default=None,
+                        help='תיקייה עם קבצי טקסט של קורפוס אמיתי לסינון מילים')
     parser.add_argument('--summary-only', action='store_true',
                         help='רק סיכום לקונסול, בלי קובץ אקסל')
 
@@ -555,7 +631,16 @@ def main():
         print(f"שגיאה: הקובץ {args.v8} לא נמצא")
         sys.exit(1)
 
-    print("קורא קבצים...")
+    # טעינת קורפוס אם צוין
+    corpus_words = None
+    if args.corpus:
+        print(f"\nטוען קורפוס מילים אמיתיות מ: {args.corpus}")
+        corpus_words = load_corpus(args.corpus)
+        if not corpus_words:
+            print("אזהרה: הקורפוס ריק, ממשיך ללא סינון")
+            corpus_words = None
+
+    print("\nקורא קבצים...")
     print(f"  V0.7: {args.v7}")
     v7_docs = parse_v7_file(args.v7)
     print(f"    נקראו {len(v7_docs)} מסמכים")
@@ -565,12 +650,16 @@ def main():
     print(f"    נקראו {len(v8_docs)} מסמכים")
 
     print(f"\nמנתח חילופים (סף דמיון: {args.similarity})...")
+    if corpus_words:
+        print(f"  סינון לפי קורפוס: פעיל ({len(corpus_words)} מילים)")
+
     def progress(current, total):
         print(f"  התקדמות: {current}/{total} ({100*current//total}%)", end='\r')
 
     substitutions = analyze_documents(v7_docs, v8_docs,
                                       progress_callback=progress,
-                                      min_similarity=args.similarity)
+                                      min_similarity=args.similarity,
+                                      corpus_words=corpus_words)
     print(f"\nנמצאו {len(substitutions)} סוגי חילופים ייחודיים")
 
     # סיכום לקונסול
