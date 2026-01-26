@@ -329,14 +329,14 @@ def create_page():
                     ui.label(tr('Transcriptions provided by the MiDRASH Project')).classes('text-sm').style('color: var(--text-secondary);')
 
                     # Citation
-                    with ui.row().classes('items-center gap-2 mt-2'):
+                    with ui.column().classes('gap-1 mt-2'):
                         ui.label(tr('Citation:')).classes('text-xs font-semibold').style('color: var(--text-muted);')
-                        ui.label('Stoekl Ben Ezra, D., et al. (2025). MiDRASH Automatic Transcriptions.').classes('text-xs').style('color: var(--text-muted);')
+                        ui.label('Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments [Data set]. Zenodo.').classes('text-xs').style('color: var(--text-muted);')
 
                     # Zenodo link
                     with ui.row().classes('items-center gap-2 mt-1'):
                         ui.icon('open_in_new').classes('text-sm').style('color: var(--primary-600);')
-                        ui.link('View Dataset on Zenodo', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-sm').style('color: var(--primary-600); text-decoration: none;')
+                        ui.link('https://doi.org/10.5281/zenodo.17734473', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-sm').style('color: var(--primary-600); text-decoration: none;')
 
                     # License
-                    ui.label('Licensed under CC BY 4.0').classes('text-xs mt-2').style('color: var(--text-muted);')
+                    ui.label(tr('Licensed under CC BY 4.0')).classes('text-xs mt-2').style('color: var(--text-muted);')
