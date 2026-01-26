@@ -90,29 +90,30 @@ def create_search_page(initial_query: str = None):
                     # Track current preset level
                     current_preset = {'value': 70}  # Default: extended
 
-                    # Preset buttons
-                    with ui.column().classes('gap-1') as presets_container:
-                        h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        with ui.row().classes('items-center gap-1'):
-                            btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
-                            btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                            btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
-                            btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                            btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
-                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
-                            variant_count_label_presets = ui.label('').classes('text-xs ml-2').style('color: var(--text-muted);')
+                    # Create variables for elements (needed for callbacks)
+                    btn_basic = btn_extended = btn_maximum = None
+                    variant_slider = variant_slider_label = None
+                    variant_count_label_presets = variant_count_label = None
 
-                    # Slider (alternative mode)
-                    with ui.column().classes('gap-1') as slider_container:
+                    with ui.column().classes('gap-1'):
                         h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        with ui.row().classes('items-center gap-2'):
-                            variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-40').props('label-always')
-                            variant_slider_label = ui.label('70').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
-                            variant_count_label = ui.label('').classes('text-xs w-12').style('color: var(--text-muted);')
 
-                    # Show presets or slider based on setting
-                    presets_container.set_visibility(not use_slider)
-                    slider_container.set_visibility(use_slider)
+                        if not use_slider:
+                            # Preset buttons (default)
+                            with ui.row().classes('items-center gap-1'):
+                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
+                                btn_basic.tooltip(tr('Basic variants (30 pairs)'))
+                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
+                                btn_extended.tooltip(tr('Extended variants (70 pairs)'))
+                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
+                                btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
+                                variant_count_label_presets = ui.label('').classes('text-xs ml-2').style('color: var(--text-muted);')
+                        else:
+                            # Slider (alternative mode)
+                            with ui.row().classes('items-center gap-2'):
+                                variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-40').props('label-always')
+                                variant_slider_label = ui.label('70').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
+                                variant_count_label = ui.label('').classes('text-xs w-12').style('color: var(--text-muted);')
 
                     # Max changes selector
                     with ui.column().classes('gap-1'):
@@ -124,6 +125,8 @@ def create_search_page(initial_query: str = None):
 
                 def update_preset_buttons():
                     """Update preset button styles based on current selection."""
+                    if not btn_basic:
+                        return
                     val = current_preset['value']
                     btn_basic.classes(remove='btn-primary', add='btn-secondary' if val != 30 else 'btn-primary')
                     btn_extended.classes(remove='btn-primary', add='btn-secondary' if val != 70 else 'btn-primary')
@@ -140,51 +143,58 @@ def create_search_page(initial_query: str = None):
                     current_preset['value'] = pairs_count
                     if state.var_mgr:
                         state.var_mgr.set_variant_level(pairs_count)
-                    # Sync slider
-                    variant_slider.value = pairs_count
-                    variant_slider_label.set_text(str(pairs_count))
                     update_preset_buttons()
                     update_variant_preview()
 
-                btn_basic.on('click', lambda: set_preset(30))
-                btn_extended.on('click', lambda: set_preset(70))
-                btn_maximum.on('click', lambda: set_preset(150))
-
-                # Initialize button styles
-                update_preset_buttons()
+                if btn_basic:
+                    btn_basic.on('click', lambda: set_preset(30))
+                    btn_extended.on('click', lambda: set_preset(70))
+                    btn_maximum.on('click', lambda: set_preset(150))
+                    # Initialize button styles
+                    update_preset_buttons()
 
                 def update_variant_preview():
                     """Update variant count based on current query and level."""
                     # Get current pairs count (from preset or slider)
-                    use_slider_mode = getattr(state.lab_engine.settings if state.lab_engine else None, 'variant_use_slider', False)
-                    pairs_count = int(variant_slider.value) if use_slider_mode else current_preset['value']
+                    pairs_count = current_preset['value']
+                    if variant_slider:
+                        pairs_count = int(variant_slider.value)
+                        variant_slider_label.set_text(str(pairs_count))
 
-                    variant_slider_label.set_text(str(int(variant_slider.value)))
                     query = query_input.value.strip() if query_input.value else ""
                     if not query or not state.var_mgr:
-                        variant_count_label.set_text('')
-                        variant_count_label_presets.set_text('')
+                        if variant_count_label:
+                            variant_count_label.set_text('')
+                        if variant_count_label_presets:
+                            variant_count_label_presets.set_text('')
                         return
                     # Strip prefixes
-                    for prefix in ['?', '??', '???', '=', '~', '/', '#', '$']:
+                    for prefix in ['?', '=', '~', '/', '#', '$']:
                         if query.startswith(prefix):
                             query = query[len(prefix):].strip()
                             break
                     words = query.split()
                     if not words:
-                        variant_count_label.set_text('')
-                        variant_count_label_presets.set_text('')
+                        if variant_count_label:
+                            variant_count_label.set_text('')
+                        if variant_count_label_presets:
+                            variant_count_label_presets.set_text('')
                         return
                     try:
                         state.var_mgr.set_variant_level(pairs_count)
                         total = sum(len(state.var_mgr.get_variants(w, 'variants', 500)) for w in words if len(w) >= 2)
-                        variant_count_label.set_text(f'≈{total}')
-                        variant_count_label_presets.set_text(f'≈{total}')
+                        if variant_count_label:
+                            variant_count_label.set_text(f'≈{total}')
+                        if variant_count_label_presets:
+                            variant_count_label_presets.set_text(f'≈{total}')
                     except Exception:
-                        variant_count_label.set_text('')
-                        variant_count_label_presets.set_text('')
+                        if variant_count_label:
+                            variant_count_label.set_text('')
+                        if variant_count_label_presets:
+                            variant_count_label_presets.set_text('')
 
-                variant_slider.on('update:model-value', update_variant_preview)
+                if variant_slider:
+                    variant_slider.on('update:model-value', update_variant_preview)
                 query_input.on('input', update_variant_preview)
 
                 def on_mode_change():
@@ -558,9 +568,8 @@ def create_search_page(initial_query: str = None):
 
         # Update variant level and max changes from UI before search
         if mode == 'variants' and state.var_mgr:
-            # Get pairs count from preset or slider based on setting
-            use_slider_mode = getattr(state.lab_engine.settings if state.lab_engine else None, 'variant_use_slider', False)
-            pairs_count = int(variant_slider.value) if use_slider_mode else current_preset['value']
+            # Get pairs count from preset or slider
+            pairs_count = int(variant_slider.value) if variant_slider else current_preset['value']
             state.var_mgr.set_variant_level(pairs_count)
             # Update max_changes in settings
             if state.lab_engine and state.lab_engine.settings:
