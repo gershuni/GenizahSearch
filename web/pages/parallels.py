@@ -100,6 +100,19 @@ def create_parallels_page(initial_text: str = None):
                         label=tr('Search Mode')
                     ).classes('w-full').props('outlined dense')
 
+                    # Variant Level Slider (visible only in Variants mode)
+                    with ui.column().classes('gap-1') as variant_slider_col:
+                        h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2'):
+                            variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-full').props('label-always')
+                        ui.label(tr('More = more results but slower')).classes('text-xs').style('color: var(--text-muted);')
+
+                    def on_mode_change():
+                        is_variants = mode_select.value == 'variants'
+                        variant_slider_col.set_visibility(is_variants)
+
+                    mode_select.on('update:model-value', on_mode_change)
+
                     # Chunk Size
                     with ui.column().classes('gap-1'):
                         # Changed to H3
@@ -200,6 +213,10 @@ def create_parallels_page(initial_text: str = None):
         if not state.lab_engine:
             ui.notify(tr('Lab Engine not initialized'), type='negative')
             return
+
+        # Update variant level from slider before search
+        if mode_select.value == 'variants' and state.var_mgr:
+            state.var_mgr.set_variant_level(int(variant_slider.value))
 
         # Reset state
         p_state.is_running = True
