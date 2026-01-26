@@ -93,11 +93,11 @@ def create_search_page(initial_query: str = None):
                         h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         with ui.row().classes('items-center gap-1'):
                             btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
-                            btn_basic.tooltip(tr('Basic variants (30 pairs)\nShortcut: ?'))
+                            btn_basic.tooltip(tr('Basic variants (30 pairs)'))
                             btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
-                            btn_extended.tooltip(tr('Extended variants (70 pairs)\nShortcut: ??'))
+                            btn_extended.tooltip(tr('Extended variants (70 pairs)'))
                             btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
-                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower\nShortcut: ???'))
+                            btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
                             variant_count_label_presets = ui.label('').classes('text-xs ml-2').style('color: var(--text-muted);')
 
                     # Slider (alternative mode)

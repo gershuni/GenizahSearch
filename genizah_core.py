@@ -3902,10 +3902,7 @@ class SearchEngine:
         """
         if not query: return None, ""
 
-        # Order matters: check longer prefixes first
         prefix_map = [
-            ('???', 'variants_maximum'),
-            ('??', 'variants_extended'),
             ('?', 'variants'),
             ('=', 'exact'),
             ('~', 'fuzzy'),

@@ -5179,7 +5179,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
-        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Basic variants (30 pairs)\n?? = Extended variants (70 pairs)\n??? = Maximum variants (150 pairs)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ??שלום"))
+        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._update_variant_count_preview)
         
@@ -5224,19 +5224,19 @@ class GenizahGUI(QMainWindow):
         presets_layout.setSpacing(4)
 
         self.btn_variant_basic = QPushButton("○ " + tr("Basic"))
-        self.btn_variant_basic.setToolTip(tr("Basic variants (30 pairs)\nShortcut: ?"))
+        self.btn_variant_basic.setToolTip(tr("Basic variants (30 pairs)"))
         self.btn_variant_basic.setCheckable(True)
         self.btn_variant_basic.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_basic.clicked.connect(lambda: self._set_variant_preset(30))
 
         self.btn_variant_extended = QPushButton("◐ " + tr("Extended"))
-        self.btn_variant_extended.setToolTip(tr("Extended variants (70 pairs)\nShortcut: ??"))
+        self.btn_variant_extended.setToolTip(tr("Extended variants (70 pairs)"))
         self.btn_variant_extended.setCheckable(True)
         self.btn_variant_extended.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_extended.clicked.connect(lambda: self._set_variant_preset(70))
 
         self.btn_variant_maximum = QPushButton("● " + tr("Maximum"))
-        self.btn_variant_maximum.setToolTip(tr("Maximum variants (150 pairs) - slower\nShortcut: ???"))
+        self.btn_variant_maximum.setToolTip(tr("Maximum variants (150 pairs) - slower"))
         self.btn_variant_maximum.setCheckable(True)
         self.btn_variant_maximum.setStyleSheet("padding: 2px 6px;")
         self.btn_variant_maximum.clicked.connect(lambda: self._set_variant_preset(150))
