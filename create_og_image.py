@@ -19,7 +19,7 @@ def create_og_image(
     title="Dicta Genizah Search",
     subtitle="Advanced Research Platform for Cairo Genizah Manuscripts",
     features="Full-Text Search  •  Manuscript Viewer  •  Parallel Detection",
-    url="genizah.dicta.org.il",
+    url="GenizahSearch.com",
     output_path="web/static/og-image.png"
 ):
     # Create image
