@@ -5162,7 +5162,7 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
-        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
+        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use slider to control intensity)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._update_variant_count_preview)
         
