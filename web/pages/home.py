@@ -331,10 +331,10 @@ def create_page():
                     # Citation
                     with ui.column().classes('gap-1 mt-2'):
                         ui.label(tr('Citation:')).classes('text-xs font-semibold').style('color: var(--text-muted);')
-                        ui.label('Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments [Data set]. Zenodo.').classes('text-xs').style('color: var(--text-muted);')
+                        ui.label('Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments [Data set]. Zenodo.').classes('text-xs').style('color: var(--text-muted); direction: ltr; text-align: left;')
 
                     # Zenodo link
-                    with ui.row().classes('items-center gap-2 mt-1'):
+                    with ui.row().classes('items-center gap-2 mt-1').style('direction: ltr;'):
                         ui.icon('open_in_new').classes('text-sm').style('color: var(--primary-600);')
                         ui.link('https://doi.org/10.5281/zenodo.17734473', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-sm').style('color: var(--primary-600); text-decoration: none;')
 
