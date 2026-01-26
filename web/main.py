@@ -1284,12 +1284,13 @@ def create_layout():
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
     # Global Footer with Citation Note
+    full_citation = 'Stoekl Ben Ezra et al. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments. https://doi.org/10.5281/zenodo.17734473'
     with ui.footer().classes('citation-footer'):
-        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4'):
-            ui.icon('format_quote').classes('text-sm opacity-70')
-            citation_text = tr('When publishing material from this site, please cite:')
-            ui.label(citation_text).classes('text-xs opacity-80')
-            ui.link('Stoekl Ben Ezra et al. (2025)', 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('text-decoration: none;')
+        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
+            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80')
+            with ui.row().classes('items-center gap-1').style('direction: ltr;'):
+                ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium').style('text-decoration: none;')
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
 
     return content_col
 
