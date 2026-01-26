@@ -14,20 +14,20 @@ from web.components.typography import h1, h2, h3
 def create_settings_page():
     """Create the Settings page."""
 
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 fade-in p-4'):
+    with ui.column().classes('w-full max-w-4xl mx-auto gap-4 fade-in p-4'):
 
         # === Page Header ===
-        with ui.column().classes('gap-1 mb-2'):
-            h1(tr('Settings'), classes='text-2xl font-bold', style='color: var(--text-primary);')
-            ui.label(tr('Configure search and display preferences')).classes('text-sm').style('color: var(--text-secondary);')
+        with ui.column().classes('gap-0'):
+            h1(tr('Settings'), classes='text-xl font-bold', style='color: var(--text-primary);')
+            ui.label(tr('Configure search and display preferences')).classes('text-xs').style('color: var(--text-secondary);')
 
         # === Display Settings ===
-        with ui.card().classes('w-full p-5'):
-            with ui.row().classes('items-center gap-2 mb-4'):
+        with ui.card().classes('w-full p-4'):
+            with ui.row().classes('items-center gap-2 mb-3'):
                 ui.icon('palette').classes('text-xl').style('color: var(--primary-600);')
                 h2(tr('Display Settings'), classes='text-lg font-semibold', style='color: var(--text-primary);')
 
-            with ui.row().classes('w-full gap-6 flex-wrap'):
+            with ui.row().classes('w-full gap-4 flex-wrap'):
                 # Theme
                 with ui.column().classes('gap-1 min-w-48'):
                     ui.label(tr('Theme')).classes('text-sm font-medium').style('color: var(--text-secondary);')
@@ -64,12 +64,12 @@ def create_settings_page():
                     rpp_select.on('update:model-value', change_rpp)
 
         # === Search Settings ===
-        with ui.card().classes('w-full p-5'):
-            with ui.row().classes('items-center gap-2 mb-4'):
+        with ui.card().classes('w-full p-4'):
+            with ui.row().classes('items-center gap-2 mb-3'):
                 ui.icon('search').classes('text-xl').style('color: var(--primary-600);')
                 h2(tr('Search Settings'), classes='text-lg font-semibold', style='color: var(--text-primary);')
 
-            with ui.row().classes('w-full gap-6 flex-wrap'):
+            with ui.row().classes('w-full gap-4 flex-wrap'):
                 # Default search mode
                 with ui.column().classes('gap-1 min-w-40'):
                     ui.label(tr('Default search mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
@@ -104,7 +104,7 @@ def create_settings_page():
                     gap_input.on('update:model-value', change_gap)
 
             # Lab Mode default toggle
-            ui.separator().classes('my-3')
+            ui.separator().classes('my-2')
             lab_default = app.storage.user.get('lab_mode_default', False)
             lab_switch = ui.switch(tr('Enable Lab Mode by default'), value=lab_default)
 
@@ -114,8 +114,8 @@ def create_settings_page():
             lab_switch.on('update:model-value', toggle_lab)
 
         # === Variant Search Configuration ===
-        with ui.card().classes('w-full p-5'):
-            with ui.row().classes('items-center gap-2 mb-4'):
+        with ui.card().classes('w-full p-4'):
+            with ui.row().classes('items-center gap-2 mb-3'):
                 ui.icon('spellcheck').classes('text-xl').style('color: var(--primary-600);')
                 h2(tr('Variant Search Configuration'), classes='text-lg font-semibold', style='color: var(--text-primary);')
 
@@ -129,7 +129,7 @@ def create_settings_page():
 
             if lab_settings:
                 # Basic options in a row
-                with ui.row().classes('w-full gap-6 flex-wrap mb-4'):
+                with ui.row().classes('w-full gap-4 flex-wrap mb-3'):
                     # Min word length
                     with ui.column().classes('gap-1'):
                         ui.label(tr('Limit Short Words (≤N chars)')).classes('text-sm font-medium').style('color: var(--text-secondary);')
@@ -137,6 +137,12 @@ def create_settings_page():
                         variant_min_len = ui.number(
                             value=min_len_val, min=1, max=5
                         ).props('outlined dense').classes('w-24')
+
+                        def apply_min_len():
+                            lab_settings.variant_min_word_len = int(variant_min_len.value)
+                            if hasattr(lab_settings, 'save'):
+                                lab_settings.save()
+                        variant_min_len.on('update:model-value', apply_min_len)
 
                     # Max changes
                     with ui.column().classes('gap-1'):
@@ -146,19 +152,38 @@ def create_settings_page():
                             value=max_changes_val, min=1, max=3
                         ).props('outlined dense').classes('w-24')
 
+                        def apply_max_changes():
+                            lab_settings.variant_max_changes = int(variant_max_changes.value)
+                            if hasattr(lab_settings, 'save'):
+                                lab_settings.save()
+                        variant_max_changes.on('update:model-value', apply_max_changes)
+
                 # Toggles
-                ui.separator().classes('my-3')
+                ui.separator().classes('my-2')
 
                 aggressive_val = getattr(lab_settings, 'variant_aggressive', False)
                 variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'), value=aggressive_val)
                 ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
+                def apply_aggressive():
+                    lab_settings.variant_aggressive = variant_aggressive.value
+                    if hasattr(lab_settings, 'save'):
+                        lab_settings.save()
+                variant_aggressive.on('update:model-value', apply_aggressive)
+
                 use_slider_val = getattr(lab_settings, 'variant_use_slider', False)
                 variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (Basic, Extended, Maximum)'), value=use_slider_val).classes('mt-2')
                 ui.label(tr('When enabled, shows a slider in the search bar instead of preset buttons')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
+                def apply_use_slider():
+                    lab_settings.variant_use_slider = variant_use_slider.value
+                    if hasattr(lab_settings, 'save'):
+                        lab_settings.save()
+                    ui.notify(tr('Refresh page to see changes'), type='info')
+                variant_use_slider.on('update:model-value', apply_use_slider)
+
                 # Custom Variants (collapsible)
-                ui.separator().classes('my-3')
+                ui.separator().classes('my-2')
                 with ui.expansion(tr('Custom Variant Pairs'), icon='edit').classes('w-full'):
                     ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-2').style('color: var(--text-muted);')
                     custom_variants = getattr(lab_settings, 'custom_variants', {})
@@ -168,32 +193,22 @@ def create_settings_page():
                         value=existing_text
                     ).classes('w-full').props('outlined rows=4')
 
-                # Save Button
-                def save_variant_settings():
-                    try:
-                        text = custom_textarea.value.strip()
-                        custom = {}
-                        if text:
-                            for line in text.split('\n'):
-                                line = line.strip()
-                                if '=' in line:
-                                    custom[line] = True
-
-                        lab_settings.custom_variants = custom
-                        lab_settings.variant_min_word_len = int(variant_min_len.value)
-                        lab_settings.variant_max_changes = int(variant_max_changes.value)
-                        lab_settings.variant_aggressive = variant_aggressive.value
-                        lab_settings.variant_use_slider = variant_use_slider.value
-
-                        if hasattr(lab_settings, 'save'):
-                            lab_settings.save()
-
-                        ui.notify(tr('Variant settings saved'), type='positive')
-                    except Exception as e:
-                        print(f"Variant settings save error: {e}")
-                        ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
-
-                ui.button(tr('Save Variant Settings'), icon='save', on_click=save_variant_settings).classes('btn-primary mt-4')
+                    # Apply custom variants immediately on change
+                    def apply_custom_variants():
+                        try:
+                            text = custom_textarea.value.strip()
+                            custom = {}
+                            if text:
+                                for line in text.split('\n'):
+                                    line = line.strip()
+                                    if '=' in line:
+                                        custom[line] = True
+                            lab_settings.custom_variants = custom
+                            if hasattr(lab_settings, 'save'):
+                                lab_settings.save()
+                        except Exception as e:
+                            print(f"Custom variants error: {e}")
+                    custom_textarea.on('blur', apply_custom_variants)
 
             else:
                 with ui.column().classes('items-center py-6'):
@@ -201,12 +216,12 @@ def create_settings_page():
                     ui.label(tr('Lab Engine not initialized')).classes('mt-2 text-sm').style('color: var(--text-muted);')
 
         # === Lab Mode Parameters (for composition search) ===
-        with ui.card().classes('w-full p-5'):
-            with ui.row().classes('items-center gap-2 mb-4'):
+        with ui.card().classes('w-full p-4'):
+            with ui.row().classes('items-center gap-2 mb-3'):
                 ui.icon('science').classes('text-xl').style('color: var(--accent-blue);')
                 h2(tr('Lab Mode Parameters'), classes='text-lg font-semibold', style='color: var(--text-primary);')
 
-            ui.label(tr('Parameters for composition/parallel search using the Shmidman-Koppel-Porat algorithm.')).classes('text-xs mb-4').style('color: var(--text-muted);')
+            ui.label(tr('Parameters for composition/parallel search using the Shmidman-Koppel-Porat algorithm.')).classes('text-xs mb-3').style('color: var(--text-muted);')
 
             settings = None
             if state.lab_engine:
@@ -216,7 +231,7 @@ def create_settings_page():
                     pass
 
             if settings:
-                with ui.row().classes('w-full gap-6 flex-wrap'):
+                with ui.row().classes('w-full gap-4 flex-wrap'):
                     # Candidate Limit
                     with ui.column().classes('gap-1'):
                         ui.label(tr('Candidate Limit')).classes('text-sm font-medium').style('color: var(--text-secondary);')
@@ -224,6 +239,13 @@ def create_settings_page():
                         candidate_limit = ui.number(
                             value=candidate_val, min=100, max=50000, step=100
                         ).props('outlined dense').classes('w-32')
+
+                        def apply_candidate_limit():
+                            if hasattr(settings, 'candidate_limit'):
+                                settings.candidate_limit = int(candidate_limit.value)
+                                if hasattr(settings, 'save'):
+                                    settings.save()
+                        candidate_limit.on('update:model-value', apply_candidate_limit)
 
                     # Display Limit
                     with ui.column().classes('gap-1'):
@@ -233,6 +255,15 @@ def create_settings_page():
                             value=display_val, min=50, max=2000, step=50
                         ).props('outlined dense').classes('w-32')
 
+                        def apply_display_limit():
+                            if hasattr(settings, 'lab_display_limit'):
+                                settings.lab_display_limit = int(display_limit.value)
+                            elif hasattr(settings, 'display_limit'):
+                                settings.display_limit = int(display_limit.value)
+                            if hasattr(settings, 'save'):
+                                settings.save()
+                        display_limit.on('update:model-value', apply_display_limit)
+
                     # Chunk Size
                     with ui.column().classes('gap-1'):
                         ui.label(tr('Default Chunk Size')).classes('text-sm font-medium').style('color: var(--text-secondary);')
@@ -240,6 +271,15 @@ def create_settings_page():
                         chunk_size = ui.number(
                             value=chunk_val, min=2, max=15
                         ).props('outlined dense').classes('w-24')
+
+                        def apply_chunk_size():
+                            if hasattr(settings, 'comp_chunk_size'):
+                                settings.comp_chunk_size = int(chunk_size.value)
+                            elif hasattr(settings, 'chunk_size'):
+                                settings.chunk_size = int(chunk_size.value)
+                            if hasattr(settings, 'save'):
+                                settings.save()
+                        chunk_size.on('update:model-value', apply_chunk_size)
 
                     # Min Score
                     with ui.column().classes('gap-1'):
@@ -249,30 +289,12 @@ def create_settings_page():
                             value=score_val, min=10, max=100
                         ).props('outlined dense').classes('w-24')
 
-                # Save Button
-                def save_lab_settings():
-                    try:
-                        if hasattr(settings, 'candidate_limit'):
-                            settings.candidate_limit = int(candidate_limit.value)
-                        if hasattr(settings, 'lab_display_limit'):
-                            settings.lab_display_limit = int(display_limit.value)
-                        elif hasattr(settings, 'display_limit'):
-                            settings.display_limit = int(display_limit.value)
-                        if hasattr(settings, 'comp_chunk_size'):
-                            settings.comp_chunk_size = int(chunk_size.value)
-                        elif hasattr(settings, 'chunk_size'):
-                            settings.chunk_size = int(chunk_size.value)
-                        if hasattr(settings, 'comp_min_score'):
-                            settings.comp_min_score = int(min_score.value)
-
-                        if hasattr(settings, 'save'):
-                            settings.save()
-                        ui.notify(tr('Settings saved'), type='positive')
-                    except Exception as e:
-                        print(f"Settings save error: {e}")
-                        ui.notify(tr('Settings saved'), type='positive')
-
-                ui.button(tr('Save Settings'), icon='save', on_click=save_lab_settings).classes('btn-primary mt-4')
+                        def apply_min_score():
+                            if hasattr(settings, 'comp_min_score'):
+                                settings.comp_min_score = int(min_score.value)
+                            if hasattr(settings, 'save'):
+                                settings.save()
+                        min_score.on('update:model-value', apply_min_score)
 
             else:
                 with ui.column().classes('items-center py-6'):
@@ -280,8 +302,8 @@ def create_settings_page():
                     ui.label(tr('Lab Engine not initialized')).classes('mt-2 text-sm').style('color: var(--text-muted);')
 
         # === System Status ===
-        with ui.card().classes('w-full p-5'):
-            with ui.row().classes('items-center gap-2 mb-4'):
+        with ui.card().classes('w-full p-4'):
+            with ui.row().classes('items-center gap-2 mb-3'):
                 ui.icon('info').classes('text-xl').style('color: var(--text-muted);')
                 h2(tr('System Status'), classes='text-lg font-semibold', style='color: var(--text-primary);')
 
@@ -312,7 +334,7 @@ def create_settings_page():
                     except Exception:
                         pass
 
-            ui.separator().classes('my-3')
+            ui.separator().classes('my-2')
 
             ui.markdown('''
             **Dicta Genizah Search** · *Data: MiDRASH Project (Friedberg Genizah Project)*

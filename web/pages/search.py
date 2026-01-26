@@ -92,20 +92,32 @@ def create_search_page(initial_query: str = None):
                         value=saved_mode
                     ).classes('w-40').props('outlined dense')
 
-                # Variant Level Controls (visible only in Variants mode)
+                # Check if user prefers slider or presets (default: presets/dropdown)
+                use_slider = False
+                if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
+                    use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+
+                # Track current preset level - restore from storage (default: Basic=30)
+                # When not using slider, round to nearest valid preset to avoid invalid value error
+                def round_to_preset(val):
+                    """Round to nearest valid preset (30, 70, 150)."""
+                    if val <= 50:
+                        return 30
+                    elif val <= 110:
+                        return 70
+                    else:
+                        return 150
+
+                raw_preset = saved_preset if saved_preset else 30
+                current_preset = {'value': raw_preset if use_slider else round_to_preset(raw_preset)}
+
+                # Create variables for elements (needed for callbacks)
+                variant_level_select = None
+                variant_slider = variant_slider_label = None
+                max_changes_select = None
+
+                # Variant Level Controls (visible only in Variants mode, non-slider)
                 with ui.row().classes('items-end gap-4') as variant_controls_row:
-                    # Check if user prefers slider or presets (default: presets/dropdown)
-                    use_slider = False
-                    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-                        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
-
-                    # Track current preset level - restore from storage (default: Basic=30)
-                    current_preset = {'value': saved_preset if saved_preset else 30}
-
-                    # Create variables for elements (needed for callbacks)
-                    variant_level_select = None
-                    variant_slider = variant_slider_label = None
-
                     if not use_slider:
                         # Dropdown selector (compact mode)
                         with ui.column().classes('gap-1'):
@@ -125,21 +137,7 @@ def create_search_page(initial_query: str = None):
                             max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
                             ui.tooltip(tr('Max character changes per word'))
 
-                # Slider row (separate, below search row) - only when slider mode enabled
-                variant_slider_row = None
-                if use_slider:
-                    variant_slider_row = ui.row().classes('w-full items-center gap-6 mt-2 px-2')
-                    with variant_slider_row:
-                        with ui.row().classes('items-center gap-2 flex-grow'):
-                            ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('w-64').props('label-always')
-                            variant_slider_label = ui.label(str(current_preset['value'])).classes('text-sm font-medium w-10').style('color: var(--primary-600);')
-                        with ui.row().classes('items-center gap-2'):
-                            ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
-                    variant_slider_row.set_visibility(saved_mode == 'variants')
-
-                # Show variant controls if mode was variants
+                # Show variant controls if mode was variants and not using slider
                 variant_controls_row.set_visibility(saved_mode == 'variants' and not use_slider)
 
                 def set_level(level_value):
@@ -153,33 +151,6 @@ def create_search_page(initial_query: str = None):
                     def on_level_change():
                         set_level(int(variant_level_select.value))
                     variant_level_select.on('update:model-value', on_level_change)
-
-                if variant_slider:
-                    def on_slider_change():
-                        val = int(variant_slider.value)
-                        current_preset['value'] = val
-                        app.storage.user['search_preset'] = val
-                        variant_slider_label.set_text(str(val))
-                        if state.var_mgr:
-                            state.var_mgr.set_variant_level(val)
-                    variant_slider.on('update:model-value', on_slider_change)
-
-                # Save max changes on change
-                def save_max_changes():
-                    app.storage.user['search_max_changes'] = int(max_changes_select.value)
-                max_changes_select.on('update:model-value', save_max_changes)
-
-                def on_mode_change():
-                    is_variants = mode_select.value == 'variants'
-                    if use_slider:
-                        if variant_slider_row:
-                            variant_slider_row.set_visibility(is_variants)
-                    else:
-                        variant_controls_row.set_visibility(is_variants)
-                    # Save mode to storage
-                    app.storage.user['search_mode'] = mode_select.value
-
-                mode_select.on('update:model-value', on_mode_change)
 
                 # Gap Control - restore from storage
                 with ui.column().classes('gap-1'):
@@ -196,6 +167,48 @@ def create_search_page(initial_query: str = None):
                 search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
                     'btn-primary h-10 px-8'
                 )
+
+            # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
+            variant_slider_row = None
+            if use_slider:
+                variant_slider_row = ui.row().classes('w-full items-center gap-4 px-2')
+                with variant_slider_row:
+                    ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
+                    variant_slider_label = ui.label(str(current_preset['value'])).classes('text-sm font-medium w-10').style('color: var(--primary-600);')
+                    with ui.row().classes('items-center gap-2'):
+                        ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                variant_slider_row.set_visibility(saved_mode == 'variants')
+
+                # Slider change handler
+                def on_slider_change():
+                    val = int(variant_slider.value)
+                    current_preset['value'] = val
+                    app.storage.user['search_preset'] = val
+                    variant_slider_label.set_text(str(val))
+                    if state.var_mgr:
+                        state.var_mgr.set_variant_level(val)
+                variant_slider.on('update:model-value', on_slider_change)
+
+            # Save max changes on change (handle both slider and non-slider modes)
+            if max_changes_select:
+                def save_max_changes():
+                    app.storage.user['search_max_changes'] = int(max_changes_select.value)
+                max_changes_select.on('update:model-value', save_max_changes)
+
+            # Mode change handler (must be after variant_slider_row is defined)
+            def on_mode_change():
+                is_variants = mode_select.value == 'variants'
+                if use_slider:
+                    if variant_slider_row:
+                        variant_slider_row.set_visibility(is_variants)
+                else:
+                    variant_controls_row.set_visibility(is_variants)
+                # Save mode to storage
+                app.storage.user['search_mode'] = mode_select.value
+
+            mode_select.on('update:model-value', on_mode_change)
 
             # Advanced Options Row
             with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
@@ -535,7 +548,7 @@ def create_search_page(initial_query: str = None):
             pairs_count = int(variant_slider.value) if variant_slider else current_preset['value']
             state.var_mgr.set_variant_level(pairs_count)
             # Update max_changes in settings
-            if state.lab_engine and state.lab_engine.settings:
+            if state.lab_engine and state.lab_engine.settings and max_changes_select:
                 state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
 
         # Reset UI
