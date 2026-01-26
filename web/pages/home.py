@@ -102,7 +102,7 @@ def create_page():
                         )
 
                         with ui.row().classes('gap-2 flex-wrap'):
-                            for mode in ['Exact', 'Variants', 'Fuzzy', 'Regex']:
+                            for mode in ['Exact', 'Variants', 'Regex']:
                                 ui.badge(tr(mode)).props('outline').classes('text-xs')
 
                         ui.button(tr('Start Search'), icon='arrow_forward').classes('btn-primary mt-2').props('tabindex=-1')
@@ -198,7 +198,7 @@ def create_page():
                     with ui.column().classes('gap-1'):
                         # Changed to H3
                         h3(tr('Help Center'), classes='text-lg font-bold', style='color: var(--text-primary);')
-                        ui.label(tr('Learn how to use Genizah Search')).classes('text-sm').style(
+                        ui.label(tr('Learn how to use the Genizah site')).classes('text-sm').style(
                             'color: var(--text-muted);'
                         )
 
