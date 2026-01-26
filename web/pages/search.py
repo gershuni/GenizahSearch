@@ -81,18 +81,52 @@ def create_search_page(initial_query: str = None):
                     ).classes('w-40').props('outlined dense')
 
                 # Variant Level Slider (visible only in Variants mode)
-                with ui.column().classes('gap-1') as variant_slider_col:
-                    h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    with ui.row().classes('items-center gap-2'):
-                        variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-32').props('label-always')
-                        variant_slider_label = ui.label('50').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
-                        variant_slider.on('update:model-value', lambda: variant_slider_label.set_text(str(int(variant_slider.value))))
-                    ui.tooltip(tr('More pairs = more results but slower'))
-                variant_slider_col.set_visibility(False)  # Hidden by default
+                with ui.row().classes('items-end gap-4') as variant_controls_row:
+                    # Slider for pairs count
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2'):
+                            variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-40').props('label-always')
+                            variant_slider_label = ui.label('50').classes('text-sm font-medium w-8').style('color: var(--primary-600);')
+                            variant_count_label = ui.label('').classes('text-xs w-12').style('color: var(--text-muted);')
+
+                    # Max changes selector
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                        ui.tooltip(tr('Max character changes per word'))
+
+                variant_controls_row.set_visibility(False)  # Hidden by default
+
+                def update_variant_preview():
+                    """Update variant count based on current query and slider."""
+                    variant_slider_label.set_text(str(int(variant_slider.value)))
+                    query = query_input.value.strip() if query_input.value else ""
+                    if not query or not state.var_mgr:
+                        variant_count_label.set_text('')
+                        return
+                    # Strip prefixes
+                    for prefix in ['?', '=', '~', '/', '#', '$']:
+                        if query.startswith(prefix):
+                            query = query[len(prefix):].strip()
+                            break
+                    words = query.split()
+                    if not words:
+                        variant_count_label.set_text('')
+                        return
+                    try:
+                        state.var_mgr.set_variant_level(int(variant_slider.value))
+                        total = sum(len(state.var_mgr.get_variants(w, 'variants', 500)) for w in words if len(w) >= 2)
+                        variant_count_label.set_text(f'≈{total}')
+                    except Exception:
+                        variant_count_label.set_text('')
+
+                variant_slider.on('update:model-value', update_variant_preview)
+                query_input.on('input', update_variant_preview)
 
                 def on_mode_change():
                     is_variants = mode_select.value == 'variants'
-                    variant_slider_col.set_visibility(is_variants)
+                    variant_controls_row.set_visibility(is_variants)
 
                 mode_select.on('update:model-value', on_mode_change)
 
@@ -459,9 +493,12 @@ def create_search_page(initial_query: str = None):
         else:
             mode = mode_select.value
 
-        # Update variant level from slider before search
+        # Update variant level and max changes from UI before search
         if mode == 'variants' and state.var_mgr:
             state.var_mgr.set_variant_level(int(variant_slider.value))
+            # Update max_changes in settings
+            if state.lab_engine and state.lab_engine.settings:
+                state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
 
         # Reset UI
         search_state.is_running = True

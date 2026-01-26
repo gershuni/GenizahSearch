@@ -5162,8 +5162,9 @@ class GenizahGUI(QMainWindow):
         # Row 1: Query & Search Buttons
         row1 = QHBoxLayout()
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
-        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Basic variants\n?? = Extended variants\n??? = Maximum variants\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
+        self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
+        self.query_input.textChanged.connect(self._update_variant_count_preview)
         
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
@@ -5197,19 +5198,44 @@ class GenizahGUI(QMainWindow):
         self.variant_slider_container = QWidget()
         slider_layout = QHBoxLayout(self.variant_slider_container)
         slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.setSpacing(4)
+
+        # Slider for variant pairs count
         self.variant_slider = QSlider(Qt.Orientation.Horizontal)
         self.variant_slider.setRange(10, 500)
         self.variant_slider.setValue(getattr(self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None, 'variant_pairs_count', 50) if hasattr(self, 'lab_engine') else 50)
-        self.variant_slider.setFixedWidth(100)
+        self.variant_slider.setFixedWidth(150)
         self.variant_slider.setToolTip(tr("Variant intensity: more pairs = more results but slower"))
+
+        # Label showing current pair count
         self.variant_slider_label = QLabel("50")
-        self.variant_slider_label.setFixedWidth(30)
+        self.variant_slider_label.setFixedWidth(28)
+        self.variant_slider_label.setStyleSheet("font-size: 11px;")
+
+        # Dynamic label showing estimated variants for current query
+        self.variant_count_label = QLabel("")
+        self.variant_count_label.setFixedWidth(50)
+        self.variant_count_label.setStyleSheet("font-size: 10px; color: #7f8c8d;")
+        self.variant_count_label.setToolTip(tr("Estimated variants for first word in query"))
+
+        # Max changes spinbox
+        self.spin_max_changes = QSpinBox()
+        self.spin_max_changes.setRange(1, 3)
+        self.spin_max_changes.setValue(getattr(self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None, 'variant_max_changes', 2) if hasattr(self, 'lab_engine') else 2)
+        self.spin_max_changes.setFixedWidth(40)
+        self.spin_max_changes.setToolTip(tr("Max character changes per word (1-3)"))
+        self.spin_max_changes.setPrefix("×")
+
         self.variant_slider.valueChanged.connect(lambda v: (
             self.variant_slider_label.setText(str(v)),
-            self._sync_variant_sliders(v, 'search') if hasattr(self, '_sync_variant_sliders') else None
+            self._sync_variant_sliders(v, 'search') if hasattr(self, '_sync_variant_sliders') else None,
+            self._update_variant_count_preview()
         ))
+
         slider_layout.addWidget(self.variant_slider)
         slider_layout.addWidget(self.variant_slider_label)
+        slider_layout.addWidget(self.variant_count_label)
+        slider_layout.addWidget(self.spin_max_changes)
         self.variant_slider_container.setVisible(False)  # Hidden by default (Exact mode)
 
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
@@ -9635,6 +9661,47 @@ class GenizahGUI(QMainWindow):
             self.variant_slider_label.setText(str(value))
             self.variant_slider.blockSignals(False)
 
+    def _update_variant_count_preview(self):
+        """Update the variant count label based on current query and slider value."""
+        if not hasattr(self, 'variant_count_label') or not hasattr(self, 'query_input'):
+            return
+        if not hasattr(self, 'var_mgr') or not self.var_mgr:
+            return
+
+        query = self.query_input.text().strip()
+        if not query:
+            self.variant_count_label.setText("")
+            return
+
+        # Strip search prefixes
+        for prefix in ['?', '??', '???', '=', '~', '/', '#', '$']:
+            if query.startswith(prefix):
+                query = query[len(prefix):].strip()
+                break
+
+        words = query.split()
+        if not words:
+            self.variant_count_label.setText("")
+            return
+
+        try:
+            # Temporarily set variant level from slider
+            slider_val = self.variant_slider.value()
+            self.var_mgr.set_variant_level(slider_val)
+
+            # Calculate total variants for all words
+            total_variants = 0
+            for word in words:
+                if len(word) >= 2:
+                    variants = self.var_mgr.get_variants(word, 'variants', limit=500)
+                    total_variants += len(variants)
+                else:
+                    total_variants += 1  # Single char = 1 variant (itself)
+
+            self.variant_count_label.setText(f"≈{total_variants}")
+        except Exception:
+            self.variant_count_label.setText("")
+
     def update_lab_ui_state(self, checked):
         """Disable standard controls when Lab Mode is active."""
         # Search Tab
@@ -9726,9 +9793,12 @@ class GenizahGUI(QMainWindow):
         modes = ['literal', 'variants', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
         mode = modes[mode_idx]
 
-        # Update variant level from slider before search
+        # Update variant level and max changes from UI before search
         if mode == 'variants' and hasattr(self, 'variant_slider') and self.var_mgr:
             self.var_mgr.set_variant_level(self.variant_slider.value())
+            # Update max_changes in settings
+            if self.lab_engine and hasattr(self, 'spin_max_changes'):
+                self.lab_engine.settings.variant_max_changes = self.spin_max_changes.value()
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words

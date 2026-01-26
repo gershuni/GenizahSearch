@@ -105,7 +105,9 @@ def create_parallels_page(initial_text: str = None):
                         h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         with ui.row().classes('items-center gap-2'):
                             variant_slider = ui.slider(min=10, max=500, value=50, step=10).classes('w-full').props('label-always')
-                        ui.label(tr('More = more results but slower')).classes('text-xs').style('color: var(--text-muted);')
+                        with ui.row().classes('items-center gap-2 mt-2'):
+                            ui.label(tr('Max changes:')).classes('text-xs').style('color: var(--text-muted);')
+                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-20').props('outlined dense')
 
                     def on_mode_change():
                         is_variants = mode_select.value == 'variants'
@@ -214,9 +216,11 @@ def create_parallels_page(initial_text: str = None):
             ui.notify(tr('Lab Engine not initialized'), type='negative')
             return
 
-        # Update variant level from slider before search
+        # Update variant level and max changes from UI before search
         if mode_select.value == 'variants' and state.var_mgr:
             state.var_mgr.set_variant_level(int(variant_slider.value))
+            if state.lab_engine and state.lab_engine.settings:
+                state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
 
         # Reset state
         p_state.is_running = True
