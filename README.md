@@ -92,6 +92,8 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
+> **Antivirus Note:** Some antivirus software (Avast, AVG, Windows Defender) may flag the installer as suspicious. These are **false positives** caused by PyInstaller packaging. See [ANTIVIRUS_INFO.md](ANTIVIRUS_INFO.md) for details and solutions.
+
 ---
 
 ## Credits & Data
@@ -202,6 +204,8 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 1. **הורדה:** הורידו את `GenizahSearchPro_V5.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
+
+> **הערה לגבי אנטיוירוס:** חלק מתוכנות האנטיוירוס (Avast, AVG, Windows Defender) עשויות לסמן את קובץ ההתקנה כחשוד. אלה **זיהויים שגויים** הנגרמים מאריזת PyInstaller. ראו [ANTIVIRUS_INFO.md](ANTIVIRUS_INFO.md) לפרטים ופתרונות.
 
 ---
 
