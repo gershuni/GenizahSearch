@@ -18,8 +18,8 @@ import os
 import requests
 from web.components.typography import h1, h2, h3, h4
 
-# Import Sefaria sources and text cleaning from the shared filter_text_dialog module
-from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
+# Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
+from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
 
 
 def get_source_display_name(ref: str) -> str:
