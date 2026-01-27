@@ -473,6 +473,25 @@ TRANSLATIONS = {
     "Load Text": "טען טקסט",
     "Load": "טען",
 
+    # --- Sefaria Sources ---
+    "Load from Sefaria": "טען מספריא",
+    "Tanakh": "תנ\"ך",
+    "Mishnah": "משנה",
+    "Talmud": "תלמוד בבלי",
+    "Load Bible text from Sefaria": "טען טקסט תנ\"ך מספריא",
+    "Load Mishnah text from Sefaria": "טען טקסט משנה מספריא",
+    "Load Talmud Bavli text from Sefaria": "טען טקסט תלמוד בבלי מספריא",
+    "Select Books": "בחר ספרים",
+    "Category:": "קטגוריה:",
+    "All": "הכל",
+    "Select All": "בחר הכל",
+    "Selected: {} / {}": "נבחרו: {} / {}",
+    "Load Selected": "טען נבחרים",
+    "Please select at least one book.": "אנא בחר לפחות ספר אחד.",
+    "Loading: {}": "טוען: {}",
+    "Error: {}": "שגיאה: {}",
+    "Clear": "נקה",
+
     # --- Export Report Headers ---
     "Composition Search": "חיפוש חיבורים", 
     "COMPOSITION REPORT SUMMARY": "סיכום דוח חיפוש חיבורים", 
