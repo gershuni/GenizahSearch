@@ -297,7 +297,7 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outline color=red').style('display: none;')
 
                     # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0')
+                    progress_bar = ui.linear_progress(0).classes('w-full').style('opacity: 0;')
                     status_label = ui.label('').classes('text-xs text-center').style('color: var(--text-muted);')
 
         # === Filter Text (Collapsible) ===
@@ -717,6 +717,12 @@ def create_parallels_page(initial_text: str = None):
         p_state.results = []
         p_state.filtered_results = []
         results_container.clear()
+
+        # Show immediate feedback
+        ui.notify(tr('Starting search...'), type='info', timeout=2000)
+        progress_bar.style('opacity: 1;')
+        progress_bar.set_value(0)
+        status_label.text = tr('Initializing search...')
 
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()

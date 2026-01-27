@@ -496,6 +496,7 @@ TRANSLATIONS = {
     "texts": "טקסטים",
     "failed": "נכשלו",
     "Failed to load": "הטעינה נכשלה",
+    "Starting search...": "מתחיל חיפוש...",
     "Matches containing text from this field will be filtered out": "התאמות המכילות טקסט משדה זה יסוננו",
     "Paste text to exclude from results...": "הדבק טקסט להחרגה מהתוצאות...",
     "Filter text (exclude known sources)": "טקסט סינון (הסרת מקורות ידועים)",
