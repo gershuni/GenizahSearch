@@ -1,18 +1,30 @@
-# Genizah Search Pro 5.0
+# Genizah Search Pro 5.1
 
-**From Research Suite to Collaborative Platform**
+**Collaborative Research Platform for the Cairo Genizah**
 
-Genizah Search Pro has evolved again. Version 5.0 introduces the **Web Platform** and **Community Features**, transforming the software into a collaborative research environment for the Cairo Genizah.
+A comprehensive research environment for the Cairo Genizah, featuring a **Web Platform** ([Dicta Genizah Search](https://genizahsearch.com)), **Community Features**, and full **WCAG 2.0 Accessibility**.
 
-> **Web Access:** [genizahsearch.com](https://genizahsearch.com) - Search, browse, and collaborate from any browser
+> **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
 
 ---
 
-## What's New in Version 5.0?
+## What's New in Version 5.1?
 
-### Web Platform
+### Accessibility (WCAG 2.0 / IS 5568)
 
-Access Genizah Search Pro from any device with a web browser.
+Full compliance with Israeli Standard 5568 and WCAG 2.0 AA accessibility guidelines.
+
+### New Features
+
+* **Automatic Text Source Filtering:** Intelligent filtering based on Sefaria text database
+* **Enhanced Variant Search:** Improved letter variation handling
+* **Fullscreen Edit Mode:** Image controls with side-by-side viewing
+* **Fragment Joins:** Connect related fragments via Discovery Center
+* **Exclude Words:** Exclude specific words from search results
+
+### Web Platform: Dicta Genizah Search (אתר הגניזה של דיקטה)
+
+Access from any device with a web browser at [genizahsearch.com](https://genizahsearch.com).
 
 * **Public Web Application:** Full-featured interface accessible anywhere
 * **Mobile Responsive:** Optimized for tablets and phones
@@ -88,7 +100,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -111,17 +123,29 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.0
+# Genizah Search Pro 5.1 | אתר הגניזה של דיקטה
 
-**מכלי מחקר לפלטפורמה שיתופית**
+**פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.0 משיקה את **פלטפורמת האינטרנט** ו**תכונות הקהילה**, והופכת את התוכנה לסביבת מחקר שיתופית לגניזה הקהירית.
+גרסה 5.1 כוללת **נגישות מלאה לפי WCAG 2.0**, **תכונות חיפוש חדשות** ושיפורים רבים בממשק.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.0?
+## מה חדש בגרסה 5.1?
+
+### נגישות (WCAG 2.0 / ת"י 5568)
+
+עמידה מלאה בתקן הישראלי 5568 והנחיות הנגישות WCAG 2.0 AA.
+
+### תכונות חדשות
+
+* **סינון אוטומטי של מקורות טקסט:** סינון חכם המבוסס על מאגר הטקסטים של ספריא
+* **חיפוש וריאנטים משופר:** טיפול משופר בוריאציות אותיות
+* **מצב עריכה במסך מלא:** פקדי תמונה עם תצוגה זה לצד זה
+* **חיבורי קטעים:** חיבור קטעים קשורים דרך מרכז הגילויים
+* **החרגת מילים:** החרגת מילים ספציפיות מתוצאות החיפוש
 
 ### פלטפורמת אינטרנט
 
@@ -201,7 +225,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.0_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.1_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 

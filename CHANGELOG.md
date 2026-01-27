@@ -4,6 +4,61 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.1.0] - 2026-01-27
+
+### Web Platform: Dicta Genizah Search (אתר הגניזה של דיקטה)
+
+The web platform has been rebranded to **"Dicta Genizah Search"** (אתר הגניזה של דיקטה), reflecting our partnership with DICTA. The desktop application remains "Genizah Search Pro".
+
+### Accessibility Compliance (WCAG 2.0 / IS 5568)
+
+- Full compliance with Israeli Standard 5568 and WCAG 2.0 AA accessibility guidelines
+- Improved Hebrew RTL layout and text alignment
+- Semantic headings with proper sizing
+- Enhanced keyboard navigation support
+
+### New Features
+
+- **Automatic Text Source Filtering:** Intelligent filtering based on Sefaria text database
+- **Enhanced Variant Search:** Improved letter variation handling (multi-character, 2-to-1 letters)
+- **Fullscreen Edit Mode:** Image controls with splitter for side-by-side viewing
+- **Fragment Joins System:** Connect related fragments via Discovery Center
+- **Exclude Words UI:** Exclude specific words from search results
+- **Citation Footer:** Dismissible footer with publishing guidelines
+
+### Browse & Viewer Improvements
+
+- Side-by-side layout for browse page
+- Image drag, rotate, and wheel zoom in manuscript viewer
+- Image credits/attribution for NLI and Oxford sources
+- Title truncation with tooltips for long titles
+
+### UI/UX Improvements
+
+- Desktop app download page with website integration
+- SEO metadata for social sharing
+- Dark mode fixes across multiple pages
+- Dismissible transcription disclaimer banner
+- Creator credit in sidebar footer
+
+### Technical Improvements
+
+- Migrated to google-genai SDK (gemini-3-flash-preview)
+- SSL certificate verification for all HTTPS requests
+- Build optimizations for faster packaging
+- Antivirus false positive documentation
+- Server-side index building support
+
+### Bug Fixes
+
+- Fixed NLI and Oxford image loading issues
+- Fixed version comparison for different component lengths
+- Fixed RTL layout overlap and alignment issues
+- Fixed theme toggle functionality
+- Fixed fullscreen edit image loading
+
+---
+
 ## [5.0.0] - 2026-01-19
 
 ### Major Release: Web Platform & Community Features
