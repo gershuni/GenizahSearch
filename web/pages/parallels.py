@@ -659,19 +659,20 @@ def create_parallels_page(initial_text: str = None):
         if p_state.is_running:
             run_btn.disable()
             cancel_btn.style('display: block;')
-            progress_bar.classes(remove='opacity-0')
-            progress_bar.value = p_state.progress
+            progress_bar.style('opacity: 1;')
+            progress_bar.set_value(p_state.progress)
             status_label.text = p_state.status
         else:
             run_btn.enable()
             cancel_btn.style('display: none;')
             if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
-                progress_bar.value = 1.0
+                progress_bar.set_value(1.0)
                 status_label.text = tr('Done')
                 p_state.finished_animation_shown = True
-                ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
+                ui.timer(2.0, lambda: progress_bar.style('opacity: 0;'), once=True)
 
-    ui.timer(0.1, update_ui)
+    # Use faster timer for more responsive progress updates
+    ui.timer(0.05, update_ui)
 
     def cancel_search():
         p_state.is_cancelled = True
@@ -1266,30 +1267,40 @@ def create_parallels_page(initial_text: str = None):
         stored_refs = app.storage.user.get('filter_sources_refs', [])
         stored_enabled = set(app.storage.user.get('filter_sources_enabled', []))
 
+        print(f"[DEBUG] Restore: found {len(stored_refs)} stored refs, {len(stored_enabled)} enabled")
+
         if not stored_refs:
             filter_sources['pending_restore'] = False
+            refresh_loaded_sources_ui()  # Show empty state
             return
 
         # Show loading indicator
+        sefaria_progress.style('display: block;')
         sefaria_status.style('display: block;')
+        sefaria_progress.value = 0
         sefaria_status.text = tr('Loading: {}').format(f"0/{len(stored_refs)}")
 
         # Load refs from cache (in background thread)
+        loaded_count = 0
         for i, ref in enumerate(stored_refs):
             text = await run.io_bound(fetch_sefaria_text, ref, True)
             if text:
                 filter_sources['loaded'][ref] = text
                 if ref in stored_enabled:
                     filter_sources['enabled'].add(ref)
+                loaded_count += 1
+            sefaria_progress.value = (i + 1) / len(stored_refs)
             sefaria_status.text = tr('Loading: {}').format(f"{i+1}/{len(stored_refs)}")
 
         # Update UI
         filter_sources['pending_restore'] = False
+        sefaria_progress.style('display: none;')
         sefaria_status.style('display: none;')
         refresh_loaded_sources_ui()
 
-        if filter_sources['loaded']:
-            print(f"[DEBUG] Restored {len(filter_sources['loaded'])} filter sources from cache")
+        if loaded_count > 0:
+            print(f"[DEBUG] Restored {loaded_count}/{len(stored_refs)} filter sources from cache")
+            ui.notify(f'{tr("Loaded")} {loaded_count} {tr("texts")}', type='info')
 
     # Schedule async restore on page load
     ui.timer(0.1, restore_filter_sources, once=True)
