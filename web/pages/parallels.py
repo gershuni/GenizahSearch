@@ -649,12 +649,14 @@ def create_parallels_page(initial_text: str = None):
             try:
                 # Use the correct method signature from genizah_core
                 # lab_composition_search(full_text, mode, progress_callback, chunk_size, excluded_ids, filter_text, deep_scan, scan_limit)
+                ft = get_filter_text()
+                print(f"[DEBUG] Filter text length: {len(ft) if ft else 0}, enabled sources: {len(filter_sources['enabled'])}, loaded sources: {len(filter_sources['loaded'])}")
                 result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
                     progress_callback=progress_cb,
                     chunk_size=int(chunk_size.value),
-                    filter_text=get_filter_text() or None,
+                    filter_text=ft or None,
                     deep_scan=deep_scan.value
                 )
                 return result
