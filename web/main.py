@@ -1377,10 +1377,17 @@ def apply_theme_immediately():
         }})();
     </script>'''
 
+def set_current_page(page_path: str):
+    """Safely set the current page in user storage."""
+    try:
+        app.storage.user['current_page'] = page_path
+    except (AssertionError, KeyError, Exception):
+        pass  # Storage not ready yet, ignore
+
 @ui.page('/')
 def dashboard_page():
-    app.storage.user['current_page'] = '/'
-    current_theme = app.storage.user.get('theme', 'light')
+    set_current_page('/')
+    current_theme = app.storage.user.get('theme', 'light') if hasattr(app.storage, 'user') else 'light'
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1393,7 +1400,7 @@ def dashboard_page():
 
 @ui.page('/search')
 def search_page_route(q: str = None):
-    app.storage.user['current_page'] = '/search'
+    set_current_page('/search')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1405,7 +1412,7 @@ def search_page_route(q: str = None):
 
 @ui.page('/parallels')
 def parallels_page_route(text: str = None):
-    app.storage.user['current_page'] = '/parallels'
+    set_current_page('/parallels')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1417,7 +1424,7 @@ def parallels_page_route(text: str = None):
 
 @ui.page('/browse')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None):
-    app.storage.user['current_page'] = '/browse'
+    set_current_page('/browse')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1429,7 +1436,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
 
 @ui.page('/lists')
 def lists_page_route():
-    app.storage.user['current_page'] = '/lists'
+    set_current_page('/lists')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1441,7 +1448,7 @@ def lists_page_route():
 
 @ui.page('/settings')
 def settings_page_route():
-    app.storage.user['current_page'] = '/settings'
+    set_current_page('/settings')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1453,7 +1460,7 @@ def settings_page_route():
 
 @ui.page('/help')
 def help_page_route():
-    app.storage.user['current_page'] = '/help'
+    set_current_page('/help')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1465,7 +1472,7 @@ def help_page_route():
 
 @ui.page('/corrections')
 async def corrections_page_route():
-    app.storage.user['current_page'] = '/corrections'
+    set_current_page('/corrections')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1477,7 +1484,7 @@ async def corrections_page_route():
 
 @ui.page('/discoveries')
 async def discoveries_page_route():
-    app.storage.user['current_page'] = '/discoveries'
+    set_current_page('/discoveries')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1489,7 +1496,7 @@ async def discoveries_page_route():
 
 @ui.page('/admin')
 async def admin_page_route():
-    app.storage.user['current_page'] = '/admin'
+    set_current_page('/admin')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1501,7 +1508,7 @@ async def admin_page_route():
 
 @ui.page('/profile')
 async def profile_page_route():
-    app.storage.user['current_page'] = '/profile'
+    set_current_page('/profile')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1513,7 +1520,7 @@ async def profile_page_route():
 
 @ui.page('/accessibility')
 def accessibility_page_route():
-    app.storage.user['current_page'] = '/accessibility'
+    set_current_page('/accessibility')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1526,7 +1533,7 @@ def accessibility_page_route():
 
 @ui.page('/download')
 def download_page_route():
-    app.storage.user['current_page'] = '/download'
+    set_current_page('/download')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
