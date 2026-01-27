@@ -140,7 +140,8 @@ def create_search_page(initial_query: str = None):
 
                 # Show max changes only for variant modes when not using slider
                 is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
-                max_changes_col.set_visibility(is_variant_mode and not use_slider)
+                if not (is_variant_mode and not use_slider):
+                    max_changes_col.style('display: none;')
 
                 def set_level(level_value):
                     """Set variant level."""
@@ -165,11 +166,10 @@ def create_search_page(initial_query: str = None):
                     'btn-primary h-10 px-8'
                 )
 
-                # Stop Button (hidden by default)
+                # Stop Button (hidden by default using style)
                 stop_btn = ui.button(tr('Stop'), icon='stop', on_click=lambda: cancel_search()).classes(
                     'h-10 px-6'
-                ).props('outline color=red')
-                stop_btn.set_visibility(False)
+                ).props('outline color=red').style('display: none;')
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -180,7 +180,8 @@ def create_search_page(initial_query: str = None):
                     variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
                     ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-20').props('outlined dense')
-                variant_slider_row.set_visibility(saved_mode == 'variants')
+                if saved_mode != 'variants':
+                    variant_slider_row.style('display: none;')
 
                 # Slider change handler
                 def on_slider_change():
@@ -205,10 +206,10 @@ def create_search_page(initial_query: str = None):
                 if use_slider:
                     # Slider mode: show/hide slider row
                     if variant_slider_row:
-                        variant_slider_row.set_visibility(is_variants)
+                        variant_slider_row.style('display: flex;' if is_variants else 'display: none;')
                 else:
                     # Preset mode: show/hide max changes column, update level based on mode
-                    max_changes_col.set_visibility(is_variants)
+                    max_changes_col.style('display: flex;' if is_variants else 'display: none;')
                     if is_variants:
                         set_level(get_level_from_mode(mode))
 
@@ -526,14 +527,14 @@ def create_search_page(initial_query: str = None):
             status_label.text = search_state.status
             # Only update visibility when state changes
             if not prev_is_running['value']:
-                search_btn.set_visibility(False)
-                stop_btn.set_visibility(True)
+                search_btn.style('display: none;')
+                stop_btn.style('display: block;')
                 prev_is_running['value'] = True
         else:
             # Only update visibility when state changes
             if prev_is_running['value']:
-                search_btn.set_visibility(True)
-                stop_btn.set_visibility(False)
+                search_btn.style('display: block;')
+                stop_btn.style('display: none;')
                 prev_is_running['value'] = False
             if search_state.is_cancelled:
                 status_label.text = tr('Search stopped')
