@@ -192,7 +192,7 @@ def create_parallels_page(initial_text: str = None):
                         words = len([w for w in text.split() if w])
                         word_count_label.text = f"{words} {tr('Words')}"
 
-                    text_input.on('input', update_word_count)
+                    text_input.on('update:model-value', update_word_count)
                     # Update immediately if we have initial text
                     if decoded_text:
                         update_word_count()
@@ -279,6 +279,8 @@ def create_parallels_page(initial_text: str = None):
                         variant_controls_col.set_visibility(is_variants)
 
                     mode_select.on('update:model-value', on_mode_change)
+                    # Set initial visibility (exact mode = hide variant controls)
+                    variant_controls_col.set_visibility(False)
 
                     # Chunk Size
                     with ui.column().classes('gap-1'):
@@ -889,6 +891,7 @@ def create_parallels_page(initial_text: str = None):
         p_state.status = tr('Cancelling...')
 
     async def execute_parallels():
+        print("[DEBUG] execute_parallels called")
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
 
@@ -940,6 +943,8 @@ def create_parallels_page(initial_text: str = None):
 
         def run_search():
             try:
+                print(f"[DEBUG] Starting search: mode={mode_select.value}, chunk_size={chunk_size.value}, deep_scan={deep_scan.value}")
+                print(f"[DEBUG] Text length: {len(text)} chars, {len(text.split())} words")
                 # Use the correct method signature from genizah_core
                 result = state.lab_engine.lab_composition_search(
                     text,
@@ -949,6 +954,7 @@ def create_parallels_page(initial_text: str = None):
                     filter_text=captured_filter_text or None,
                     deep_scan=deep_scan.value
                 )
+                print(f"[DEBUG] Search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}")
                 return result
             except InterruptedError:
                 return None
