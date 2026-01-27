@@ -1602,4 +1602,5 @@ if __name__ in {'__main__', '__mp_main__'}:
         reload=reload_enabled,
         show=show_browser,
         storage_secret='genizah-secret-v5',
+        favicon='/static/favicon.ico',
     )
