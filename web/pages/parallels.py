@@ -586,7 +586,7 @@ def create_parallels_page(initial_text: str = None):
     btn_tanakh.on('click', lambda: show_sefaria_selection_dialog('tanakh'))
     btn_mishnah.on('click', lambda: show_sefaria_selection_dialog('mishnah'))
     btn_talmud.on('click', lambda: show_sefaria_selection_dialog('talmud'))
-    btn_more.on('click', show_all_sources_dialog)
+    btn_more.on('click', lambda: show_all_sources_dialog())
     btn_sefaria_search.on('click', lambda: show_sefaria_search_dialog())
     btn_add_custom.on('click', lambda: show_add_custom_dialog())
 
