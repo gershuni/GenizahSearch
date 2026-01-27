@@ -679,16 +679,21 @@ def init_api_routes():
 
                 source_ctx = item.get('source_ctx', '').replace('*', '')
                 # Use longer text context - prefer full_text if available, fall back to text
-                ms_text = item.get('text', '').replace('*', '')
+                # Remove line breaks so text flows continuously in Excel cell
+                ms_text = item.get('text', '').replace('*', '').replace('\n', ' ').replace('\r', ' ')
+                # Clean up multiple spaces
+                while '  ' in ms_text:
+                    ms_text = ms_text.replace('  ', ' ')
+                ms_text = ms_text.strip()
 
                 filtered_mark = 'Yes' if is_filtered else ''
                 row = [idx, shelfmark, title, score, source_ctx, ms_text, filtered_mark]
 
-                # Sanitize for illegal chars
+                # Sanitize for illegal chars (remove newlines to keep text flowing)
                 clean_row = []
                 for cell in row:
                     if isinstance(cell, str):
-                        cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\n\r\t")
+                        cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch == "\t")
                     clean_row.append(cell)
                 ws.append(clean_row)
             return start_idx + len(results)
