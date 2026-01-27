@@ -19,7 +19,7 @@ import requests
 from web.components.typography import h1, h2, h3, h4
 
 # Import Sefaria sources and text cleaning from the shared filter_text_dialog module
-from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir
+from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
 
 
 def get_source_display_name(ref: str) -> str:
@@ -586,7 +586,7 @@ def create_parallels_page(initial_text: str = None):
     btn_tanakh.on('click', lambda: show_sefaria_selection_dialog('tanakh'))
     btn_mishnah.on('click', lambda: show_sefaria_selection_dialog('mishnah'))
     btn_talmud.on('click', lambda: show_sefaria_selection_dialog('talmud'))
-    btn_more.on('click', lambda: show_all_sources_dialog())
+    btn_more.on('click', show_all_sources_dialog)
     btn_sefaria_search.on('click', lambda: show_sefaria_search_dialog())
     btn_add_custom.on('click', lambda: show_add_custom_dialog())
 
@@ -682,83 +682,141 @@ def create_parallels_page(initial_text: str = None):
 
         dialog.open()
 
-    def show_all_sources_dialog():
-        """Show dialog to browse all available Sefaria sources."""
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px] max-w-[600px]'):
-            h3(tr('More Sources'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+    async def show_all_sources_dialog():
+        """Show dialog to browse all Sefaria sources in hierarchical tree."""
+        library = get_sefaria_library()
 
-            # Source type selector
+        # Track selected refs
+        selected_refs_state = {'refs': set()}
+
+        with ui.dialog().classes('max-w-4xl') as dialog, ui.card().classes('p-6 w-full').style('min-width: 700px; max-height: 80vh;'):
+            h3(tr('Sefaria Library'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            # Search box
             with ui.row().classes('w-full items-center gap-2 mb-4'):
-                ui.label(tr('Source Type:')).classes('text-sm').style('color: var(--text-secondary);')
-                source_options = {key: data['name'] for key, data in SEFARIA_SOURCES.items()}
-                source_select = ui.select(source_options, value=list(source_options.keys())[0]).props('outlined dense').classes('flex-grow')
+                ui.label(tr('Search:')).classes('text-sm').style('color: var(--text-secondary);')
+                search_input = ui.input(placeholder=tr('Search texts...')).classes('flex-grow').props('outlined dense')
 
-            # Category selector
-            with ui.row().classes('w-full items-center gap-2 mb-4'):
-                ui.label(tr('Category:')).classes('text-sm').style('color: var(--text-secondary);')
-                cat_select = ui.select({'all': tr('All')}, value='all').props('outlined dense').classes('flex-grow')
+            # Status label
+            status_label = ui.label(tr('Loading library...')).classes('text-sm').style('color: var(--text-muted);')
 
-            # Books list container
-            books_container = ui.column().classes('w-full max-h-64 overflow-y-auto gap-1 p-2 rounded').style('background: var(--bg-secondary);')
+            # Main content area with two columns
+            with ui.splitter(value=35).classes('w-full').style('height: 400px;') as splitter:
+                with splitter.before:
+                    # Category tree (left side)
+                    with ui.scroll_area().classes('w-full h-full'):
+                        categories_container = ui.column().classes('w-full gap-1 p-2')
 
-            # Track selected books
-            all_sources_refs = {'refs': []}
-
-            def populate_all_sources_cats():
-                cat_select.options = {'all': tr('All')}
-                source_key = source_select.value
-                source_data = SEFARIA_SOURCES.get(source_key, {})
-                for key, book_data in source_data.get('books', {}).items():
-                    cat_select.options[key] = book_data['name']
-                cat_select.update()
-                populate_all_sources_books()
-
-            def populate_all_sources_books():
-                books_container.clear()
-                all_sources_refs['refs'] = []
-                source_key = source_select.value
-                source_data = SEFARIA_SOURCES.get(source_key, {})
-                cat_key = cat_select.value
-
-                with books_container:
-                    if cat_key == 'all':
-                        for book_key, book_data in source_data.get('books', {}).items():
-                            with ui.expansion(book_data['name'], icon='folder').classes('w-full'):
-                                for ref, he_name in zip(book_data['refs'], book_data['he_names']):
-                                    cb = ui.checkbox(he_name).classes('text-sm')
-                                    cb.on('update:model-value', lambda checked, r=ref: toggle_all_sources_ref(r, checked))
-                    else:
-                        book_data = source_data.get('books', {}).get(cat_key, {})
-                        for ref, he_name in zip(book_data.get('refs', []), book_data.get('he_names', [])):
-                            cb = ui.checkbox(he_name).classes('text-sm')
-                            cb.on('update:model-value', lambda checked, r=ref: toggle_all_sources_ref(r, checked))
-
-            def toggle_all_sources_ref(ref, checked):
-                if checked and ref not in all_sources_refs['refs']:
-                    all_sources_refs['refs'].append(ref)
-                elif not checked and ref in all_sources_refs['refs']:
-                    all_sources_refs['refs'].remove(ref)
-
-            source_select.on('update:model-value', lambda: populate_all_sources_cats())
-            cat_select.on('update:model-value', lambda: populate_all_sources_books())
-
-            # Select all checkbox
-            def select_all_sources(checked):
-                all_sources_refs['refs'] = []
-                if checked:
-                    source_data = SEFARIA_SOURCES.get(source_select.value, {})
-                    for book_data in source_data.get('books', {}).values():
-                        all_sources_refs['refs'].extend(book_data['refs'])
-                populate_all_sources_books()
-
-            ui.checkbox(tr('Select All'), on_change=lambda e: select_all_sources(e.value)).classes('my-2')
-
-            populate_all_sources_cats()
+                with splitter.after:
+                    # Texts list (right side)
+                    with ui.column().classes('w-full h-full'):
+                        texts_container = ui.scroll_area().classes('w-full flex-grow')
+                        with ui.row().classes('w-full items-center gap-2 mt-2'):
+                            select_all_cb = ui.checkbox(tr('Select All in Category'))
+                            info_label = ui.label(tr('Selected: 0')).classes('text-xs').style('color: var(--text-muted);')
 
             # Buttons
             with ui.row().classes('w-full justify-end gap-2 mt-4'):
                 ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                ui.button(tr('Load Selected'), on_click=lambda: load_all_sources_refs(all_sources_refs['refs'], dialog)).classes('btn-primary')
+                load_btn = ui.button(tr('Load Selected'), on_click=lambda: finish_selection()).classes('btn-primary')
+
+            def update_info():
+                info_label.text = tr('Selected: {}').format(len(selected_refs_state['refs']))
+
+            def toggle_ref(ref, checked):
+                if checked:
+                    selected_refs_state['refs'].add(ref)
+                else:
+                    selected_refs_state['refs'].discard(ref)
+                update_info()
+
+            def show_category_texts(category_data):
+                """Show texts from a category in the right panel."""
+                texts_container.clear()
+                select_all_cb.value = False
+
+                texts = library.get_texts_recursive(category_data)
+
+                with texts_container:
+                    with ui.column().classes('w-full gap-1 p-2'):
+                        for text in texts:
+                            title = text.get('title', '')
+                            he_title = text.get('heTitle', title)
+                            cb = ui.checkbox(he_title, value=title in selected_refs_state['refs']).classes('text-sm')
+                            cb.on('update:model-value', lambda checked, r=title: toggle_ref(r, checked))
+
+                # Connect select all
+                def on_select_all(checked):
+                    for text in texts:
+                        title = text.get('title', '')
+                        if checked:
+                            selected_refs_state['refs'].add(title)
+                        else:
+                            selected_refs_state['refs'].discard(title)
+                    show_category_texts(category_data)  # Refresh to update checkboxes
+                    update_info()
+
+                select_all_cb.on('update:model-value', on_select_all)
+                update_info()
+
+            def build_category_tree(parent_container, contents, depth=0):
+                """Recursively build the category tree."""
+                for item in contents:
+                    if isinstance(item, dict):
+                        if 'category' in item:
+                            # It's a category
+                            cat_name = item.get('heCategory', item.get('category', ''))
+                            sub_contents = item.get('contents', [])
+
+                            if sub_contents:
+                                # Has children - make it expandable
+                                with parent_container:
+                                    with ui.expansion(cat_name, icon='folder').classes('w-full'):
+                                        inner_container = ui.column().classes('w-full gap-1 pl-4')
+                                        build_category_tree(inner_container, sub_contents, depth + 1)
+
+                                    # Add click handler to show texts
+                                    # The expansion header can be clicked to show texts
+                            else:
+                                # Leaf category
+                                with parent_container:
+                                    btn = ui.button(cat_name, on_click=lambda i=item: show_category_texts(i)).props('flat dense align=left').classes('w-full justify-start')
+
+            async def load_library():
+                """Load the Sefaria library TOC."""
+                toc = await run.io_bound(library.get_toc)
+                if not toc:
+                    status_label.text = tr('Failed to load library. Check internet connection.')
+                    return
+
+                status_label.text = ''
+                categories_container.clear()
+
+                with categories_container:
+                    for category in toc:
+                        if isinstance(category, dict) and 'category' in category:
+                            cat_name = category.get('heCategory', category.get('category', ''))
+                            sub_contents = category.get('contents', [])
+
+                            with ui.expansion(cat_name, icon='folder').classes('w-full') as exp:
+                                inner_container = ui.column().classes('w-full gap-1')
+
+                                # Add click handler for the expansion to show its texts
+                                exp.on('click', lambda c=category: show_category_texts(c))
+
+                                if sub_contents:
+                                    build_category_tree(inner_container, sub_contents, 1)
+
+            async def finish_selection():
+                """Complete the selection and load texts."""
+                if not selected_refs_state['refs']:
+                    ui.notify(tr('Please select at least one book.'), type='warning')
+                    return
+                dialog.close()
+                await load_selected_refs(list(selected_refs_state['refs']), None)
+
+            # Start loading
+            await load_library()
 
         dialog.open()
 

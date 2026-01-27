@@ -1,14 +1,131 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPlainTextEdit, QHBoxLayout, QPushButton,
     QFileDialog, QGroupBox, QProgressBar, QMessageBox, QComboBox, QCheckBox,
-    QListWidget, QListWidgetItem, QAbstractItemView
+    QListWidget, QListWidgetItem, QAbstractItemView, QTreeWidget, QTreeWidgetItem,
+    QSplitter, QLineEdit, QWidget
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from genizah_core import tr
 import os
 import json
 import requests
+import time
 
+
+class SefariaLibraryManager:
+    """Manages the Sefaria library table of contents with local caching."""
+
+    TOC_URL = "https://www.sefaria.org/api/index/"
+    CACHE_TTL_DAYS = 7
+
+    def __init__(self):
+        self.toc = None
+        self._cache_file = os.path.join(get_cache_dir(), "sefaria_toc.json")
+
+    def get_toc(self):
+        """Get the full table of contents, loading from cache or API as needed."""
+        if self.toc is not None:
+            return self.toc
+
+        # Try loading from cache
+        if self._cache_is_valid():
+            cached = self._load_from_cache()
+            if cached:
+                self.toc = cached
+                return self.toc
+
+        # Fetch from API
+        self.toc = self._fetch_from_api()
+        if self.toc:
+            self._save_to_cache()
+
+        return self.toc
+
+    def _cache_is_valid(self):
+        """Check if cache exists and is not expired."""
+        if not os.path.exists(self._cache_file):
+            return False
+        try:
+            mtime = os.path.getmtime(self._cache_file)
+            age_days = (time.time() - mtime) / (60 * 60 * 24)
+            return age_days < self.CACHE_TTL_DAYS
+        except Exception:
+            return False
+
+    def _load_from_cache(self):
+        """Load TOC from local cache file."""
+        try:
+            with open(self._cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading Sefaria TOC cache: {e}")
+            return None
+
+    def _save_to_cache(self):
+        """Save TOC to local cache file."""
+        try:
+            os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
+            with open(self._cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.toc, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving Sefaria TOC cache: {e}")
+
+    def _fetch_from_api(self):
+        """Fetch the full TOC from Sefaria API."""
+        try:
+            print("[DEBUG] Fetching Sefaria TOC from API...")
+            resp = requests.get(self.TOC_URL, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                print(f"[DEBUG] Fetched Sefaria TOC: {len(data)} top-level categories")
+                return data
+        except Exception as e:
+            print(f"Error fetching Sefaria TOC: {e}")
+        return None
+
+    def get_categories(self):
+        """Get top-level categories."""
+        toc = self.get_toc()
+        if not toc:
+            return []
+        return toc
+
+    def get_texts_recursive(self, node, max_depth=10):
+        """Recursively get all texts from a category node."""
+        texts = []
+        if max_depth <= 0:
+            return texts
+
+        if isinstance(node, list):
+            for item in node:
+                texts.extend(self.get_texts_recursive(item, max_depth - 1))
+        elif isinstance(node, dict):
+            # If it has 'title', it's a text
+            if 'title' in node and 'contents' not in node:
+                texts.append({
+                    'title': node.get('title', ''),
+                    'heTitle': node.get('heTitle', node.get('title', '')),
+                    'categories': node.get('categories', [])
+                })
+            # If it has 'contents', recurse
+            if 'contents' in node:
+                texts.extend(self.get_texts_recursive(node['contents'], max_depth - 1))
+
+        return texts
+
+
+# Singleton instance
+_sefaria_library = None
+
+def get_sefaria_library():
+    """Get the singleton SefariaLibraryManager instance."""
+    global _sefaria_library
+    if _sefaria_library is None:
+        _sefaria_library = SefariaLibraryManager()
+    return _sefaria_library
+
+
+# Legacy SEFARIA_SOURCES dict for backwards compatibility with quick presets
 # Sefaria text indices organized by category
 SEFARIA_SOURCES = {
     "tanakh": {
@@ -513,53 +630,67 @@ class SourceSelectionDialog(QDialog):
 
 
 class AllSourcesDialog(QDialog):
-    """Dialog for browsing all available Sefaria sources."""
+    """Dialog for browsing all Sefaria sources in a hierarchical tree."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.selected_refs = []
+        self.library = get_sefaria_library()
 
-        self.setWindowTitle(tr("More Sources"))
-        self.resize(500, 600)
+        self.setWindowTitle(tr("Sefaria Library"))
+        self.resize(700, 600)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout()
 
-        # Source type selector
-        type_row = QHBoxLayout()
-        type_row.addWidget(QLabel(tr("Source Type:")))
-        self.type_combo = QComboBox()
+        # Search box
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel(tr("Search:")))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(tr("Search texts..."))
+        self.search_input.textChanged.connect(self._on_search_changed)
+        search_row.addWidget(self.search_input)
+        layout.addLayout(search_row)
 
-        for key, source_data in SEFARIA_SOURCES.items():
-            self.type_combo.addItem(source_data["name"], key)
-        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
-        type_row.addWidget(self.type_combo)
-        type_row.addStretch()
-        layout.addLayout(type_row)
+        # Main splitter with tree and text list
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Category selector
-        cat_row = QHBoxLayout()
-        cat_row.addWidget(QLabel(tr("Category:")))
-        self.cat_combo = QComboBox()
-        self.cat_combo.currentIndexChanged.connect(self._on_category_changed)
-        cat_row.addWidget(self.cat_combo)
-        cat_row.addStretch()
-        layout.addLayout(cat_row)
+        # Category tree on the left
+        self.category_tree = QTreeWidget()
+        self.category_tree.setHeaderLabel(tr("Categories"))
+        self.category_tree.itemClicked.connect(self._on_category_selected)
+        self.category_tree.itemExpanded.connect(self._on_category_expanded)
+        splitter.addWidget(self.category_tree)
 
-        # Select all checkbox
-        self.chk_select_all = QCheckBox(tr("Select All"))
+        # Text list on the right
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.text_list = QListWidget()
+        self.text_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        self.text_list.itemSelectionChanged.connect(self._update_info)
+        right_layout.addWidget(self.text_list)
+
+        # Select all in category
+        self.chk_select_all = QCheckBox(tr("Select All in Category"))
         self.chk_select_all.toggled.connect(self._on_select_all_toggled)
-        layout.addWidget(self.chk_select_all)
+        right_layout.addWidget(self.chk_select_all)
 
-        # Book list
-        self.book_list = QListWidget()
-        self.book_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
-        layout.addWidget(self.book_list)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([250, 450])
+
+        layout.addWidget(splitter)
 
         # Info label
         self.info_label = QLabel("")
         self.info_label.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(self.info_label)
+
+        # Status label for loading
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #888; font-style: italic;")
+        layout.addWidget(self.status_label)
 
         # Buttons
         btn_row = QHBoxLayout()
@@ -574,57 +705,111 @@ class AllSourcesDialog(QDialog):
 
         self.setLayout(layout)
 
-        # Initialize
-        self._on_type_changed(0)
+        # Load the library
+        self._populate_tree()
 
-    def _on_type_changed(self, index):
-        self.cat_combo.clear()
-        source_key = self.type_combo.currentData()
-        source_data = SEFARIA_SOURCES.get(source_key, {})
+    def _populate_tree(self):
+        """Populate the category tree from Sefaria TOC."""
+        self.category_tree.clear()
+        self.status_label.setText(tr("Loading library..."))
 
-        self.cat_combo.addItem(tr("All"), "all")
-        for key, book_data in source_data.get("books", {}).items():
-            self.cat_combo.addItem(book_data["name"], key)
+        toc = self.library.get_toc()
+        if not toc:
+            self.status_label.setText(tr("Failed to load library. Check internet connection."))
+            return
 
-        self._populate_list()
+        self.status_label.setText("")
 
-    def _on_category_changed(self, index):
-        self._populate_list()
+        for category in toc:
+            if isinstance(category, dict) and 'category' in category:
+                item = QTreeWidgetItem([category.get('heCategory', category.get('category', ''))])
+                item.setData(0, Qt.ItemDataRole.UserRole, category)
+                # Add a dummy child to show expand arrow
+                if 'contents' in category and category['contents']:
+                    dummy = QTreeWidgetItem([tr("Loading...")])
+                    item.addChild(dummy)
+                self.category_tree.addTopLevelItem(item)
 
-    def _populate_list(self):
-        self.book_list.clear()
-        source_key = self.type_combo.currentData()
-        source_data = SEFARIA_SOURCES.get(source_key, {})
-        cat_key = self.cat_combo.currentData()
+    def _on_category_expanded(self, item):
+        """Lazy load subcategories when expanded."""
+        # Check if this has a dummy child
+        if item.childCount() == 1 and item.child(0).text(0) == tr("Loading..."):
+            item.takeChildren()  # Remove dummy
+            category_data = item.data(0, Qt.ItemDataRole.UserRole)
+            if category_data and 'contents' in category_data:
+                self._add_children(item, category_data['contents'])
 
-        if cat_key == "all":
-            for book_key, book_data in source_data.get("books", {}).items():
-                for i, (ref, he_name) in enumerate(zip(book_data["refs"], book_data["he_names"])):
-                    item = QListWidgetItem(f"{book_data['name']} - {he_name}")
-                    item.setData(Qt.ItemDataRole.UserRole, ref)
-                    self.book_list.addItem(item)
-        else:
-            book_data = source_data.get("books", {}).get(cat_key, {})
-            for ref, he_name in zip(book_data.get("refs", []), book_data.get("he_names", [])):
-                item = QListWidgetItem(he_name)
-                item.setData(Qt.ItemDataRole.UserRole, ref)
-                self.book_list.addItem(item)
+    def _add_children(self, parent_item, contents):
+        """Add child items to a tree node."""
+        for child in contents:
+            if isinstance(child, dict):
+                if 'category' in child:
+                    # It's a subcategory
+                    child_item = QTreeWidgetItem([child.get('heCategory', child.get('category', ''))])
+                    child_item.setData(0, Qt.ItemDataRole.UserRole, child)
+                    if 'contents' in child and child['contents']:
+                        dummy = QTreeWidgetItem([tr("Loading...")])
+                        child_item.addChild(dummy)
+                    parent_item.addChild(child_item)
+                elif 'title' in child:
+                    # It's a text - add to parent's data for later
+                    pass
+
+    def _on_category_selected(self, item, column):
+        """When a category is selected, show its texts in the list."""
+        self.text_list.clear()
+        self.chk_select_all.setChecked(False)
+
+        category_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not category_data:
+            return
+
+        # Get all texts in this category recursively
+        texts = self.library.get_texts_recursive(category_data)
+
+        for text in texts:
+            display_name = text.get('heTitle', text.get('title', ''))
+            list_item = QListWidgetItem(display_name)
+            list_item.setData(Qt.ItemDataRole.UserRole, text.get('title', ''))
+            self.text_list.addItem(list_item)
 
         self._update_info()
 
+    def _on_search_changed(self, text):
+        """Filter the text list by search query."""
+        search_text = text.strip().lower()
+        if not search_text:
+            # Show all items
+            for i in range(self.text_list.count()):
+                self.text_list.item(i).setHidden(False)
+            return
+
+        # Filter items
+        for i in range(self.text_list.count()):
+            item = self.text_list.item(i)
+            item_text = item.text().lower()
+            ref = (item.data(Qt.ItemDataRole.UserRole) or '').lower()
+            visible = search_text in item_text or search_text in ref
+            item.setHidden(not visible)
+
     def _on_select_all_toggled(self, checked):
-        for i in range(self.book_list.count()):
-            self.book_list.item(i).setSelected(checked)
+        """Select or deselect all visible items."""
+        for i in range(self.text_list.count()):
+            item = self.text_list.item(i)
+            if not item.isHidden():
+                item.setSelected(checked)
         self._update_info()
 
     def _update_info(self):
-        count = len(self.book_list.selectedItems())
-        total = self.book_list.count()
-        self.info_label.setText(tr("Selected: {} / {}").format(count, total))
+        """Update the info label with selection count."""
+        selected = len(self.text_list.selectedItems())
+        total = sum(1 for i in range(self.text_list.count()) if not self.text_list.item(i).isHidden())
+        self.info_label.setText(tr("Selected: {} / {}").format(selected, total))
 
     def _on_ok(self):
+        """Accept the dialog with selected refs."""
         self.selected_refs = []
-        for item in self.book_list.selectedItems():
+        for item in self.text_list.selectedItems():
             ref = item.data(Qt.ItemDataRole.UserRole)
             if ref:
                 self.selected_refs.append(ref)

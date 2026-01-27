@@ -541,6 +541,15 @@ TRANSLATIONS = {
     "Add your own text as a filter source": "הוסף טקסט משלך כמקור סינון",
     "Load": "טען",
     "Add": "הוסף",
+    "Sefaria Library": "ספריית ספריא",
+    "Search:": "חיפוש:",
+    "Search texts...": "חפש טקסטים...",
+    "Categories": "קטגוריות",
+    "Select All in Category": "בחר הכל בקטגוריה",
+    "Selected: {}": "נבחרו: {}",
+    "Loading library...": "טוען ספרייה...",
+    "Failed to load library. Check internet connection.": "טעינת הספרייה נכשלה. בדוק חיבור לאינטרנט.",
+    "Loading...": "טוען...",
 
     # --- Export Report Headers ---
     "Composition Search": "חיפוש חיבורים", 
