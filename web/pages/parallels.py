@@ -201,9 +201,10 @@ def create_parallels_page(initial_text: str = None):
                             pass
 
                     text_input.on('update:model-value', update_word_count)
-                    # Update immediately if we have initial text
-                    if decoded_text:
-                        update_word_count()
+                    # Also update on blur to catch paste events
+                    text_input.on('blur', update_word_count)
+                    # Update after a short delay to ensure textarea has initial value from storage
+                    ui.timer(0.3, update_word_count, once=True)
 
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
