@@ -851,9 +851,10 @@ class LabEngine:
         2. Boosts V0.8.
         3. FIX: Separates excluded/known manuscripts.
         4. Supports Filter Text and Batching.
+        5. Returns partial results if interrupted/cancelled.
         """
         if not full_text:
-            return {'main': [], 'filtered': [], 'known': []} # Added known
+            return {'main': [], 'filtered': [], 'known': [], 'partial': False}
 
         # Determine strategy: Static or Dynamic
         use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
@@ -880,104 +881,111 @@ class LabEngine:
         if len(tokens) < c_size: chunks_data = [(0, tokens)]
 
         total_chunks = len(chunks_data)
-        results_map = {} 
+        results_map = {}
+        was_interrupted = False
+        chunks_processed = 0
 
-        # (Part 2: Scanning)
-        for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
-            if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
-            chunk_text = " ".join(chunk_tokens)
-            
-            if self._is_phrase_statistically_weak(chunk_text): continue
+        # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
+        try:
+            for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
+                chunks_processed = i
+                if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
+                chunk_text = " ".join(chunk_tokens)
 
-            fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
-            if not fp_str or len(chunk_tokens) < 4: continue
-            
-            fp_list = fp_str.split()
-            needed_unique_fps = set(fp_list) 
+                if self._is_phrase_statistically_weak(chunk_text): continue
 
-            # Query with Boost
-            query_tokens = fp_str.split()
-            clauses = [f'{target_field}:{t}' for t in query_tokens]
-            core_query = " OR ".join(clauses)
-            final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
-            
-            q_obj = None
-            try:
-                q_obj = self.lab_index.parse_query(final_query_str)
-            except:
+                fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
+                if not fp_str or len(chunk_tokens) < 4: continue
+
+                fp_list = fp_str.split()
+                needed_unique_fps = set(fp_list)
+
+                # Query with Boost
+                query_tokens = fp_str.split()
+                clauses = [f'{target_field}:{t}' for t in query_tokens]
+                core_query = " OR ".join(clauses)
+                final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
+
+                q_obj = None
                 try:
-                    q_obj = self.lab_index.parse_query(core_query)
-                except: continue
+                    q_obj = self.lab_index.parse_query(final_query_str)
+                except:
+                    try:
+                        q_obj = self.lab_index.parse_query(core_query)
+                    except: continue
 
-            if not q_obj: continue
+                if not q_obj: continue
 
-            iterator = []
-            if deep_scan:
-                batch_cb = None
-                if progress_callback:
-                    batch_cb = lambda *args: progress_callback(*args) if callable(progress_callback) else None
-                iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
-            else:
-                try:
-                    res = self.lab_searcher.search(q_obj, 5000)
-                    iterator = res.hits
-                except Exception:
-                    iterator = []
+                iterator = []
+                if deep_scan:
+                    batch_cb = None
+                    if progress_callback:
+                        batch_cb = lambda *args: progress_callback(*args) if callable(progress_callback) else None
+                    iterator = self._execute_batched_search(q_obj, progress_callback=batch_cb, limit_override=scan_limit)
+                else:
+                    try:
+                        res = self.lab_searcher.search(q_obj, 5000)
+                        iterator = res.hits
+                    except Exception:
+                        iterator = []
 
-            for score, doc_addr in iterator:
-                try:
-                    doc = self.lab_searcher.doc(doc_addr)
-                    content = doc['content'][0]
-                    uid = doc['unique_id'][0]
+                for score, doc_addr in iterator:
+                    try:
+                        doc = self.lab_searcher.doc(doc_addr)
+                        content = doc['content'][0]
+                        uid = doc['unique_id'][0]
 
-                    # --- Filter Text Logic ---
-                    # Check if the search chunk's words appear in sequence in the filter text
-                    is_filtered_match = False
-                    if filter_text and len(chunk_tokens) >= 3:
-                        # Normalize: keep only Hebrew letters, join with single space
-                        clean_chunk = ' '.join(re.findall(r'[\u05D0-\u05EA]+', chunk_text))
-                        if clean_chunk and clean_chunk in filter_text:
-                            is_filtered_match = True
-                            # Debug: log first few filter matches
-                            if not hasattr(self, '_filter_match_count'):
-                                self._filter_match_count = 0
-                            self._filter_match_count += 1
-                            if self._filter_match_count <= 3:
-                                print(f"[DEBUG] Filter match #{self._filter_match_count}: '{clean_chunk[:60]}...'")
+                        # --- Filter Text Logic ---
+                        # Check if the search chunk's words appear in sequence in the filter text
+                        is_filtered_match = False
+                        if filter_text and len(chunk_tokens) >= 3:
+                            # Normalize: keep only Hebrew letters, join with single space
+                            clean_chunk = ' '.join(re.findall(r'[\u05D0-\u05EA]+', chunk_text))
+                            if clean_chunk and clean_chunk in filter_text:
+                                is_filtered_match = True
+                                # Debug: log first few filter matches
+                                if not hasattr(self, '_filter_match_count'):
+                                    self._filter_match_count = 0
+                                self._filter_match_count += 1
+                                if self._filter_match_count <= 3:
+                                    print(f"[DEBUG] Filter match #{self._filter_match_count}: '{clean_chunk[:60]}...'")
 
-                    match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
-                    
-                    found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
-                    common_fps = found_unique_fps.intersection(needed_unique_fps)
-                    if len(needed_unique_fps) > 0:
-                        if (len(common_fps) / len(needed_unique_fps)) < min_pct_ratio: continue
-                    
-                    if match_score < MIN_SCORE_THRESHOLD: continue
+                        match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
 
-                    if uid not in results_map:
-                        results_map[uid] = {
-                            'uid': uid, 'total_score': 0, 'hits_count': 0,
-                            'raw_header': doc['full_header'][0], 'source': doc['source'][0],
-                            'content': content, 'best_chunk_score': -1,
-                            'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
-                            'is_text_filtered': False
-                        }
-                    rec = results_map[uid]
+                        found_unique_fps = set(m['fp'] for m in matches[best_window[0]:best_window[1]+1])
+                        common_fps = found_unique_fps.intersection(needed_unique_fps)
+                        if len(needed_unique_fps) > 0:
+                            if (len(common_fps) / len(needed_unique_fps)) < min_pct_ratio: continue
 
-                    if is_filtered_match:
-                        rec['is_text_filtered'] = True
+                        if match_score < MIN_SCORE_THRESHOLD: continue
 
-                    rec['total_score'] += match_score
-                    rec['hits_count'] += 1
-                    token_end_idx = token_start_idx + len(chunk_tokens)
-                    rec['src_indices'].update(range(token_start_idx, token_end_idx))
-                    start_m, end_m = best_window
-                    if matches:
-                        rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
-                        for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
-                except: pass
+                        if uid not in results_map:
+                            results_map[uid] = {
+                                'uid': uid, 'total_score': 0, 'hits_count': 0,
+                                'raw_header': doc['full_header'][0], 'source': doc['source'][0],
+                                'content': content, 'best_chunk_score': -1,
+                                'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
+                                'is_text_filtered': False
+                            }
+                        rec = results_map[uid]
 
-        # (Part 3: Result Processing)
+                        if is_filtered_match:
+                            rec['is_text_filtered'] = True
+
+                        rec['total_score'] += match_score
+                        rec['hits_count'] += 1
+                        token_end_idx = token_start_idx + len(chunk_tokens)
+                        rec['src_indices'].update(range(token_start_idx, token_end_idx))
+                        start_m, end_m = best_window
+                        if matches:
+                            rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
+                            for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
+                    except: pass
+        except InterruptedError:
+            was_interrupted = True
+            print(f"[DEBUG] Search interrupted at chunk {chunks_processed}/{total_chunks}, found {len(results_map)} results so far")
+
+        # (Part 3: Result Processing) - runs even if interrupted to return partial results
         raw_final_items = []
         is_short_search = (total_chunks <= 3)
 
@@ -1070,7 +1078,7 @@ class LabEngine:
             main_list = main_list[:MAX_FINAL]
 
         # Split return so GUI builds tree correctly
-        return {'main': main_list, 'known': known_list, 'filtered': filtered_list}
+        return {'main': main_list, 'known': known_list, 'filtered': filtered_list, 'partial': was_interrupted}
     
     @lru_cache(maxsize=10000)
     def _is_word_too_common(self, word, threshold=5000):

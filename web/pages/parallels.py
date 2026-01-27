@@ -960,6 +960,7 @@ def create_parallels_page(initial_text: str = None):
                 print(f"[DEBUG] Starting search: mode={mode_select.value}, chunk_size={chunk_size.value}, deep_scan={deep_scan.value}")
                 print(f"[DEBUG] Text length: {len(text)} chars, {len(text.split())} words")
                 # Use the correct method signature from genizah_core
+                # Note: lab_composition_search now returns partial results if interrupted
                 result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
@@ -968,10 +969,8 @@ def create_parallels_page(initial_text: str = None):
                     filter_text=captured_filter_text or None,
                     deep_scan=deep_scan.value
                 )
-                print(f"[DEBUG] Search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}")
+                print(f"[DEBUG] Search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}, partial={result.get('partial', False)}")
                 return result
-            except InterruptedError:
-                return None
             except Exception as e:
                 print(f"Parallels Error: {e}")
                 import traceback
@@ -983,13 +982,10 @@ def create_parallels_page(initial_text: str = None):
         p_state.is_running = False
         p_state.progress = 1.0
 
-        if p_state.is_cancelled:
-            p_state.status = tr('Search cancelled')
-            return
-
         if result_data:
             main_results = result_data.get('main', [])
             filtered_results = result_data.get('filtered', [])
+            is_partial = result_data.get('partial', False)
 
             if main_results or filtered_results:
                 p_state.results = main_results
@@ -1000,8 +996,16 @@ def create_parallels_page(initial_text: str = None):
                     app.storage.user['parallels_filtered'] = filtered_results
                 except Exception:
                     pass
-                render_results(main_results, filtered_results)
+
+                # Show message if results are partial (search was cancelled)
+                if is_partial:
+                    p_state.status = tr('Partial results (search cancelled)')
+                    ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+
+                render_results(main_results, filtered_results, is_partial=is_partial)
             else:
+                if is_partial:
+                    p_state.status = tr('Search cancelled - no results yet')
                 with results_container:
                     show_empty_state()
         else:
@@ -1015,7 +1019,7 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
-    def render_results(results, filtered_results=None):
+    def render_results(results, filtered_results=None, is_partial=False):
         try:
             _ = results_container.client
         except (RuntimeError, Exception):
@@ -1125,14 +1129,15 @@ def create_parallels_page(initial_text: str = None):
         total_results = len(results)
         total_manuscripts = len(sorted_groups)
         filtered_count = len(filtered_results) if filtered_results else 0
+        partial_suffix = f" - {tr('partial results')}" if is_partial else ""
 
         if total_results == 0 and filtered_count > 0:
             # All results were filtered - explain this to user
-            results_header.text = f"{tr('All results filtered')} ({filtered_count} {tr('in filtered sources')})"
+            results_header.text = f"{tr('All results filtered')} ({filtered_count} {tr('in filtered sources')}){partial_suffix}"
         elif filtered_count > 0:
-            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')} ({filtered_count} {tr('filtered')})"
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')} ({filtered_count} {tr('filtered')}){partial_suffix}"
         else:
-            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}{partial_suffix}"
 
         with results_container:
             # Container for main results
