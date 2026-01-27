@@ -51,6 +51,15 @@ def create_search_page(initial_query: str = None):
     saved_max_changes = app.storage.user.get('search_max_changes', 2)
     saved_gap = app.storage.user.get('search_gap', 0)
 
+    # Check if user prefers slider or presets (default: presets/dropdown)
+    use_slider = False
+    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
+        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+
+    # In slider mode, convert extended variant modes to 'variants'
+    if use_slider and saved_mode in ('variants_extended', 'variants_maximum'):
+        saved_mode = 'variants'
+
     # === UI Layout ===
     with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
 
@@ -75,11 +84,6 @@ def create_search_page(initial_query: str = None):
                     def save_query():
                         app.storage.user['search_query'] = query_input.value or ''
                     query_input.on('blur', save_query)
-
-                # Check if user prefers slider or presets (default: presets/dropdown)
-                use_slider = False
-                if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-                    use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
                 # Mode Selector - includes variant levels when not using slider
                 with ui.column().classes('gap-1'):
