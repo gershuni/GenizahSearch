@@ -1467,6 +1467,8 @@ TRANSLATIONS = {
     "Showing": "מציג",
     "of": "מתוך",
     "filtered manuscripts": "כתבי יד מסוננים",
+    "Load more": "טען עוד",
+    "remaining": "נותרו",
     "Top score": "ציון גבוה ביותר",
     "Sort by score": "מיון לפי ציון",
     "Sort by shelfmark": "מיון לפי מספר מדף",

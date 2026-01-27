@@ -1107,12 +1107,10 @@ def create_parallels_page(initial_text: str = None):
 
         sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
 
-        # Limit displayed results to prevent browser slowdown
-        MAX_DISPLAYED_GROUPS = 50
-        display_groups = sorted_groups[:MAX_DISPLAYED_GROUPS]
-        display_filtered_groups = sorted_filtered_groups[:MAX_DISPLAYED_GROUPS]
-        truncated_main = len(sorted_groups) > MAX_DISPLAYED_GROUPS
-        truncated_filtered = len(sorted_filtered_groups) > MAX_DISPLAYED_GROUPS
+        # Lazy loading configuration
+        BATCH_SIZE = 50
+        main_displayed = [0]  # Use list to allow modification in nested function
+        filtered_displayed = [0]
 
         # Update header with manuscript count
         total_results = len(results)
@@ -1128,28 +1126,67 @@ def create_parallels_page(initial_text: str = None):
             results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
 
         with results_container:
-            # Main results
-            for group_key, group_data in display_groups:
-                create_manuscript_group(group_data)
-
-            if truncated_main:
-                with ui.row().classes('w-full justify-center py-4'):
-                    ui.label(f"{tr('Showing')} {MAX_DISPLAYED_GROUPS} {tr('of')} {len(sorted_groups)} {tr('manuscripts')}...").classes('text-sm').style('color: var(--text-muted);')
+            # Container for main results
+            main_results_container = ui.column().classes('w-full gap-4')
+            main_load_more_container = ui.row().classes('w-full justify-center py-4')
 
             # Filtered results section
-            if display_filtered_groups:
+            filtered_section = ui.column().classes('w-full gap-4')
+            filtered_load_more_container = ui.row().classes('w-full justify-center py-4')
+
+        def load_more_main():
+            """Load next batch of main results."""
+            start = main_displayed[0]
+            end = min(start + BATCH_SIZE, len(sorted_groups))
+            with main_results_container:
+                for group_key, group_data in sorted_groups[start:end]:
+                    create_manuscript_group(group_data)
+            main_displayed[0] = end
+
+            # Update load more button
+            main_load_more_container.clear()
+            remaining = len(sorted_groups) - main_displayed[0]
+            if remaining > 0:
+                with main_load_more_container:
+                    ui.button(
+                        f"{tr('Load more')} ({remaining} {tr('remaining')})",
+                        icon='expand_more',
+                        on_click=load_more_main
+                    ).props('flat color=primary')
+
+        def load_more_filtered():
+            """Load next batch of filtered results."""
+            start = filtered_displayed[0]
+            end = min(start + BATCH_SIZE, len(sorted_filtered_groups))
+            with filtered_section:
+                for group_key, group_data in sorted_filtered_groups[start:end]:
+                    create_manuscript_group(group_data, is_filtered=True)
+            filtered_displayed[0] = end
+
+            # Update load more button
+            filtered_load_more_container.clear()
+            remaining = len(sorted_filtered_groups) - filtered_displayed[0]
+            if remaining > 0:
+                with filtered_load_more_container:
+                    ui.button(
+                        f"{tr('Load more')} ({remaining} {tr('remaining')})",
+                        icon='expand_more',
+                        on_click=load_more_filtered
+                    ).props('flat color=amber')
+
+        # Initial load of main results
+        if sorted_groups:
+            load_more_main()
+
+        # Filtered results section header and initial load
+        if sorted_filtered_groups:
+            with results_container:
                 ui.separator().classes('my-4')
                 with ui.row().classes('w-full items-center gap-2 py-2'):
                     ui.icon('filter_alt').classes('text-xl').style('color: var(--accent-amber);')
                     h3(tr('Filtered Results (found in source texts)'), classes='text-lg', style='color: var(--accent-amber);')
                     ui.badge(f"{filtered_count}", color='amber').classes('text-xs')
-
-                for group_key, group_data in display_filtered_groups:
-                    create_manuscript_group(group_data, is_filtered=True)
-
-                if truncated_filtered:
-                    with ui.row().classes('w-full justify-center py-4'):
-                        ui.label(f"{tr('Showing')} {MAX_DISPLAYED_GROUPS} {tr('of')} {len(sorted_filtered_groups)} {tr('filtered manuscripts')}...").classes('text-sm').style('color: var(--text-muted);')
+            load_more_filtered()
 
     def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
