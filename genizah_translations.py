@@ -507,6 +507,14 @@ TRANSLATIONS = {
     "Sifra": "ספרא",
     "Sifrei": "ספרי",
     "Mekhilta": "מכילתא",
+    "Select sources to filter results (matches found in checked sources will be moved to a separate list):": "בחר מקורות לסינון תוצאות (התאמות שנמצאות במקורות המסומנים יועברו לרשימה נפרדת):",
+    "Loaded Sources": "מקורות שנטענו",
+    "Deselect All": "בטל בחירה",
+    "Remove Unchecked": "הסר לא מסומנים",
+    "Active: {} / {}": "פעילים: {} / {}",
+    "Info": "מידע",
+    "All selected sources are already loaded.": "כל המקורות שנבחרו כבר נטענו.",
+    "No sources loaded yet": "עדיין לא נטענו מקורות",
 
     # --- Export Report Headers ---
     "Composition Search": "חיפוש חיבורים", 

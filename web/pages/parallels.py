@@ -18,15 +18,18 @@ import os
 import requests
 from web.components.typography import h1, h2, h3, h4
 
-# Import Sefaria sources from the shared filter_text_dialog module
-from filter_text_dialog import SEFARIA_SOURCES
+# Import Sefaria sources and text cleaning from the shared filter_text_dialog module
+from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir
 
 
-def get_sefaria_cache_dir():
-    """Get or create the cache directory for Sefaria texts."""
-    cache_dir = os.path.join(os.path.expanduser("~"), ".genizah_search", "sefaria_cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
+def get_source_display_name(ref: str) -> str:
+    """Get a display name for a source reference."""
+    for source_type, source_data in SEFARIA_SOURCES.items():
+        for book_key, book_data in source_data.get("books", {}).items():
+            if ref in book_data.get("refs", []):
+                idx = book_data["refs"].index(ref)
+                return f"{source_data['name']} - {book_data['he_names'][idx]}"
+    return ref
 
 
 def flatten_sefaria_text(text_data):
@@ -44,9 +47,9 @@ def flatten_sefaria_text(text_data):
 
 
 def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
-    """Fetch a single text from Sefaria API."""
-    cache_dir = get_sefaria_cache_dir()
-    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}.txt")
+    """Fetch a single text from Sefaria API (cleaned, no nikud/taamim)."""
+    cache_dir = get_cache_dir()
+    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
 
     if use_cache and os.path.exists(cache_file):
         try:
@@ -64,17 +67,20 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
             data = resp.json()
             he_text = data.get('he', [])
             if isinstance(he_text, str):
-                text = he_text
+                raw_text = he_text
             else:
-                text = flatten_sefaria_text(he_text)
+                raw_text = flatten_sefaria_text(he_text)
 
-            if text:
-                try:
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        f.write(text)
-                except Exception:
-                    pass
-                return text
+            if raw_text:
+                # Clean the text (remove nikud, taamim, non-Hebrew)
+                cleaned = clean_hebrew_text(raw_text)
+                if cleaned:
+                    try:
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            f.write(cleaned)
+                    except Exception:
+                        pass
+                    return cleaned
     except Exception as e:
         print(f"Error fetching {ref}: {e}")
 
@@ -260,9 +266,12 @@ def create_parallels_page(initial_text: str = None):
                     status_label = ui.label('').classes('text-xs text-center').style('color: var(--text-muted);')
 
         # === Filter Text (Collapsible) ===
+        # State for loaded sources: {ref: cleaned_text}
+        filter_sources = {'loaded': {}, 'enabled': set()}
+
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
             with ui.column().classes('w-full p-4 gap-4'):
-                ui.label(tr('Matches containing text from this field will be filtered out')).classes('text-sm').style('color: var(--text-muted);')
+                ui.label(tr('Select sources to filter results (matches found in checked sources will be moved to a separate list):')).classes('text-sm').style('color: var(--text-muted);')
 
                 # Sefaria source buttons
                 with ui.row().classes('w-full items-center gap-2'):
@@ -276,13 +285,18 @@ def create_parallels_page(initial_text: str = None):
                 sefaria_progress = ui.linear_progress(0).classes('w-full').style('display: none;')
                 sefaria_status = ui.label('').classes('text-xs').style('color: var(--text-muted); display: none;')
 
-                filter_input = ui.textarea(
-                    placeholder=tr('Paste text to exclude from results...')
-                ).classes('w-full').props('outlined rows=3').style('direction: rtl;')
+                # Loaded sources list (checkboxes)
+                with ui.column().classes('w-full gap-2'):
+                    h4(tr('Loaded Sources'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
-                # Clear button
-                with ui.row().classes('w-full justify-end'):
-                    ui.button(tr('Clear'), icon='clear', on_click=lambda: filter_input.set_value('')).props('flat dense size=sm')
+                    with ui.row().classes('gap-2 mb-2'):
+                        btn_select_all = ui.button(tr('Select All'), icon='check_box').props('flat dense size=sm')
+                        btn_deselect_all = ui.button(tr('Deselect All'), icon='check_box_outline_blank').props('flat dense size=sm')
+                        btn_remove_unchecked = ui.button(tr('Remove Unchecked'), icon='delete').props('flat dense size=sm color=red')
+
+                    loaded_sources_container = ui.column().classes('w-full max-h-48 overflow-y-auto gap-1 p-2 rounded').style('background: var(--bg-secondary);')
+
+                    filter_info_label = ui.label(tr('Active: {} / {}').format(0, 0)).classes('text-xs').style('color: var(--text-muted);')
 
         # === Results Section ===
         with ui.card().classes('w-full p-6'):
@@ -380,6 +394,58 @@ def create_parallels_page(initial_text: str = None):
 
         dialog.open()
 
+    def refresh_loaded_sources_ui():
+        """Refresh the list of loaded sources with checkboxes."""
+        loaded_sources_container.clear()
+
+        with loaded_sources_container:
+            if not filter_sources['loaded']:
+                ui.label(tr('No sources loaded yet')).classes('text-sm text-gray-500')
+            else:
+                for ref in sorted(filter_sources['loaded'].keys()):
+                    cb = ui.checkbox(get_source_display_name(ref), value=ref in filter_sources['enabled']).classes('text-sm')
+                    cb.on('update:model-value', lambda checked, r=ref: on_source_toggled(r, checked))
+
+        update_filter_info()
+
+    def on_source_toggled(ref, checked):
+        """Handle source checkbox toggle."""
+        if checked:
+            filter_sources['enabled'].add(ref)
+        else:
+            filter_sources['enabled'].discard(ref)
+        update_filter_info()
+
+    def update_filter_info():
+        """Update the info label."""
+        enabled = len(filter_sources['enabled'])
+        total = len(filter_sources['loaded'])
+        filter_info_label.text = tr('Active: {} / {}').format(enabled, total)
+
+    def select_all_sources():
+        filter_sources['enabled'] = set(filter_sources['loaded'].keys())
+        refresh_loaded_sources_ui()
+
+    def deselect_all_sources():
+        filter_sources['enabled'].clear()
+        refresh_loaded_sources_ui()
+
+    def remove_unchecked_sources():
+        to_remove = [ref for ref in filter_sources['loaded'].keys() if ref not in filter_sources['enabled']]
+        for ref in to_remove:
+            del filter_sources['loaded'][ref]
+        refresh_loaded_sources_ui()
+
+    def get_filter_text():
+        """Get combined text from all enabled sources."""
+        texts = [filter_sources['loaded'][ref] for ref in filter_sources['enabled'] if ref in filter_sources['loaded']]
+        return " ".join(texts)
+
+    # Connect filter management buttons
+    btn_select_all.on('click', select_all_sources)
+    btn_deselect_all.on('click', deselect_all_sources)
+    btn_remove_unchecked.on('click', remove_unchecked_sources)
+
     async def load_selected_refs(refs, dialog):
         """Load selected refs from Sefaria."""
         if not refs:
@@ -389,35 +455,37 @@ def create_parallels_page(initial_text: str = None):
         if dialog:
             dialog.close()
 
+        # Filter out already loaded refs
+        new_refs = [r for r in refs if r not in filter_sources['loaded']]
+        if not new_refs:
+            ui.notify(tr('All selected sources are already loaded.'), type='info')
+            return
+
         # Show progress
         sefaria_progress.style('display: block;')
         sefaria_status.style('display: block;')
         sefaria_progress.value = 0
 
-        all_texts = []
-        total = len(refs)
+        total = len(new_refs)
 
         def fetch_all():
-            texts = []
-            for i, ref in enumerate(refs):
+            results = {}
+            for i, ref in enumerate(new_refs):
                 text = fetch_sefaria_text(ref)
                 if text:
-                    texts.append(text)
-            return texts
+                    results[ref] = text
+            return results
 
         sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
 
-        all_texts = await run.io_bound(fetch_all)
+        results = await run.io_bound(fetch_all)
 
-        # Update filter input
-        if all_texts:
-            current = filter_input.value or ""
-            new_text = "\n\n".join(all_texts)
-            if current:
-                filter_input.set_value(current + "\n\n" + new_text)
-            else:
-                filter_input.set_value(new_text)
-            ui.notify(f'{tr("Loaded")} {len(all_texts)} {tr("texts")}', type='positive')
+        # Add new sources
+        if results:
+            filter_sources['loaded'].update(results)
+            filter_sources['enabled'].update(results.keys())
+            refresh_loaded_sources_ui()
+            ui.notify(f'{tr("Loaded")} {len(results)} {tr("texts")}', type='positive')
 
         # Hide progress
         sefaria_progress.style('display: none;')
@@ -586,7 +654,7 @@ def create_parallels_page(initial_text: str = None):
                     mode=mode_select.value,
                     progress_callback=progress_cb,
                     chunk_size=int(chunk_size.value),
-                    filter_text=filter_input.value or None,
+                    filter_text=get_filter_text() or None,
                     deep_scan=deep_scan.value
                 )
                 return result

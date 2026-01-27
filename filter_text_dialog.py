@@ -301,10 +301,27 @@ def get_cache_dir():
     return cache_dir
 
 
+def clean_hebrew_text(text):
+    """Remove nikud, taamim and non-alphabetic characters from Hebrew text.
+
+    Keeps only Hebrew letters (א-ת) and basic whitespace.
+    """
+    import re
+    # Hebrew letter range: \u05D0-\u05EA (א-ת)
+    # Remove everything except Hebrew letters and whitespace
+    # First remove HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Keep only Hebrew letters and spaces
+    text = re.sub(r'[^\u05D0-\u05EA\s]', '', text)
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
 class SefariaFetchThread(QThread):
     """Background thread for fetching texts from Sefaria API."""
     progress = pyqtSignal(int, int, str)  # current, total, current_item
-    finished = pyqtSignal(str)  # final text
+    finished = pyqtSignal(dict)  # dict of {ref: cleaned_text}
     error = pyqtSignal(str)  # error message
 
     def __init__(self, refs, use_cache=True):
@@ -317,7 +334,7 @@ class SefariaFetchThread(QThread):
         self._cancelled = True
 
     def run(self):
-        all_text = []
+        results = {}  # {ref: cleaned_text}
         cache_dir = get_cache_dir()
 
         for i, ref in enumerate(self.refs):
@@ -326,15 +343,15 @@ class SefariaFetchThread(QThread):
 
             self.progress.emit(i, len(self.refs), ref)
 
-            # Check cache first
-            cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}.txt")
+            # Check cache first (cleaned version)
+            cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
 
             if self.use_cache and os.path.exists(cache_file):
                 try:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         text = f.read()
                         if text:
-                            all_text.append(text)
+                            results[ref] = text
                             continue
                 except Exception:
                     pass
@@ -345,20 +362,23 @@ class SefariaFetchThread(QThread):
                 resp = requests.get(url, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
-                    text = self._extract_hebrew_text(data)
-                    if text:
-                        all_text.append(text)
-                        # Cache the result
-                        try:
-                            with open(cache_file, 'w', encoding='utf-8') as f:
-                                f.write(text)
-                        except Exception:
-                            pass
+                    raw_text = self._extract_hebrew_text(data)
+                    if raw_text:
+                        # Clean the text (remove nikud, taamim, non-Hebrew)
+                        cleaned = clean_hebrew_text(raw_text)
+                        if cleaned:
+                            results[ref] = cleaned
+                            # Cache the cleaned result
+                            try:
+                                with open(cache_file, 'w', encoding='utf-8') as f:
+                                    f.write(cleaned)
+                            except Exception:
+                                pass
             except Exception as e:
                 self.error.emit(f"Error fetching {ref}: {str(e)}")
 
         self.progress.emit(len(self.refs), len(self.refs), "Done")
-        self.finished.emit("\n".join(all_text))
+        self.finished.emit(results)
 
     def _extract_hebrew_text(self, data):
         """Extract Hebrew text from Sefaria API response."""
@@ -609,23 +629,32 @@ class AllSourcesDialog(QDialog):
 
 
 class FilterTextDialog(QDialog):
-    """Dialog to input or load text for filtering composition results."""
+    """Dialog to manage text sources for filtering composition results.
 
-    def __init__(self, parent, current_text=""):
+    Sources are loaded from Sefaria and stored internally. Only checked sources
+    are included in the final filter text.
+    """
+
+    def __init__(self, parent, current_sources=None):
+        """
+        Args:
+            parent: Parent widget
+            current_sources: dict of {ref: text} for previously loaded sources
+        """
         super().__init__(parent)
         self.setWindowTitle(tr("Filter Text"))
         self.resize(600, 500)
-        self.result_text = current_text
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        # Store loaded sources: {ref: cleaned_text}
+        self.loaded_sources = current_sources.copy() if current_sources else {}
+        # Track which sources are enabled
+        self.enabled_sources = set(self.loaded_sources.keys())
         self.fetch_thread = None
 
         layout = QVBoxLayout()
 
-        layout.addWidget(QLabel(tr("Enter text to filter results (results found in this text will be moved to a separate list):")))
-
-        self.text_area = QPlainTextEdit()
-        self.text_area.setPlaceholderText(tr("Paste text here..."))
-        self.text_area.setPlainText(current_text)
-        layout.addWidget(self.text_area)
+        layout.addWidget(QLabel(tr("Select sources to filter results (matches found in checked sources will be moved to a separate list):")))
 
         # Sefaria sources section
         sources_group = QGroupBox(tr("Load from Sefaria"))
@@ -668,16 +697,39 @@ class FilterTextDialog(QDialog):
         sources_group.setLayout(sources_layout)
         layout.addWidget(sources_group)
 
+        # Loaded sources list (checkboxes)
+        loaded_group = QGroupBox(tr("Loaded Sources"))
+        loaded_layout = QVBoxLayout()
+
+        # Select all / deselect all buttons
+        select_row = QHBoxLayout()
+        btn_select_all = QPushButton(tr("Select All"))
+        btn_select_all.clicked.connect(self._select_all)
+        btn_deselect_all = QPushButton(tr("Deselect All"))
+        btn_deselect_all.clicked.connect(self._deselect_all)
+        btn_remove_selected = QPushButton(tr("Remove Unchecked"))
+        btn_remove_selected.clicked.connect(self._remove_unchecked)
+        select_row.addWidget(btn_select_all)
+        select_row.addWidget(btn_deselect_all)
+        select_row.addWidget(btn_remove_selected)
+        select_row.addStretch()
+        loaded_layout.addLayout(select_row)
+
+        # Scrollable list of loaded sources
+        self.sources_list = QListWidget()
+        self.sources_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        loaded_layout.addWidget(self.sources_list)
+
+        # Info label
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet("color: #666; font-size: 11px;")
+        loaded_layout.addWidget(self.info_label)
+
+        loaded_group.setLayout(loaded_layout)
+        layout.addWidget(loaded_group)
+
         # Bottom buttons
         btn_row = QHBoxLayout()
-        btn_load = QPushButton(tr("Load from File"))
-        btn_load.clicked.connect(self.load_file)
-        btn_row.addWidget(btn_load)
-
-        btn_clear = QPushButton(tr("Clear"))
-        btn_clear.clicked.connect(lambda: self.text_area.clear())
-        btn_row.addWidget(btn_clear)
-
         btn_row.addStretch()
 
         btn_ok = QPushButton(tr("OK"))
@@ -690,6 +742,68 @@ class FilterTextDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
+
+        # Populate the list with any existing sources
+        self._refresh_sources_list()
+
+    def _get_source_display_name(self, ref):
+        """Get a display name for a source reference."""
+        # Try to find the Hebrew name from SEFARIA_SOURCES
+        for source_type, source_data in SEFARIA_SOURCES.items():
+            for book_key, book_data in source_data.get("books", {}).items():
+                if ref in book_data.get("refs", []):
+                    idx = book_data["refs"].index(ref)
+                    return f"{source_data['name']} - {book_data['he_names'][idx]}"
+        return ref
+
+    def _refresh_sources_list(self):
+        """Refresh the list of loaded sources with checkboxes."""
+        self.sources_list.clear()
+
+        for ref in sorted(self.loaded_sources.keys()):
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, ref)
+
+            checkbox = QCheckBox(self._get_source_display_name(ref))
+            checkbox.setChecked(ref in self.enabled_sources)
+            checkbox.toggled.connect(lambda checked, r=ref: self._on_source_toggled(r, checked))
+
+            item.setSizeHint(checkbox.sizeHint())
+            self.sources_list.addItem(item)
+            self.sources_list.setItemWidget(item, checkbox)
+
+        self._update_info()
+
+    def _on_source_toggled(self, ref, checked):
+        """Handle source checkbox toggle."""
+        if checked:
+            self.enabled_sources.add(ref)
+        else:
+            self.enabled_sources.discard(ref)
+        self._update_info()
+
+    def _select_all(self):
+        """Select all loaded sources."""
+        self.enabled_sources = set(self.loaded_sources.keys())
+        self._refresh_sources_list()
+
+    def _deselect_all(self):
+        """Deselect all loaded sources."""
+        self.enabled_sources.clear()
+        self._refresh_sources_list()
+
+    def _remove_unchecked(self):
+        """Remove sources that are not checked."""
+        to_remove = [ref for ref in self.loaded_sources.keys() if ref not in self.enabled_sources]
+        for ref in to_remove:
+            del self.loaded_sources[ref]
+        self._refresh_sources_list()
+
+    def _update_info(self):
+        """Update the info label with source count."""
+        enabled = len(self.enabled_sources)
+        total = len(self.loaded_sources)
+        self.info_label.setText(tr("Active: {} / {}").format(enabled, total))
 
     def _open_source_dialog(self, source_type):
         """Open dialog to select specific books from a source."""
@@ -713,12 +827,18 @@ class FilterTextDialog(QDialog):
             self.fetch_thread.cancel()
             self.fetch_thread.wait()
 
+        # Filter out already loaded refs
+        new_refs = [r for r in refs if r not in self.loaded_sources]
+        if not new_refs:
+            QMessageBox.information(self, tr("Info"), tr("All selected sources are already loaded."))
+            return
+
         self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(len(refs))
+        self.progress_bar.setMaximum(len(new_refs))
         self.progress_bar.setValue(0)
         self.progress_label.setVisible(True)
 
-        self.fetch_thread = SefariaFetchThread(refs)
+        self.fetch_thread = SefariaFetchThread(new_refs)
         self.fetch_thread.progress.connect(self._on_fetch_progress)
         self.fetch_thread.finished.connect(self._on_fetch_finished)
         self.fetch_thread.error.connect(self._on_fetch_error)
@@ -728,33 +848,33 @@ class FilterTextDialog(QDialog):
         self.progress_bar.setValue(current)
         self.progress_label.setText(tr("Loading: {}").format(item))
 
-    def _on_fetch_finished(self, text):
+    def _on_fetch_finished(self, results):
+        """Handle fetch completion. results is a dict of {ref: cleaned_text}."""
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
 
-        if text:
-            # Append to existing text
-            current = self.text_area.toPlainText()
-            if current:
-                self.text_area.setPlainText(current + "\n\n" + text)
-            else:
-                self.text_area.setPlainText(text)
+        if results:
+            # Add new sources
+            self.loaded_sources.update(results)
+            # Enable all new sources
+            self.enabled_sources.update(results.keys())
+            self._refresh_sources_list()
 
     def _on_fetch_error(self, error_msg):
         self.progress_label.setText(tr("Error: {}").format(error_msg))
 
-    def load_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, tr("Load Text"), "", "Text Files (*.txt);;All Files (*)")
-        if path:
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    self.text_area.setPlainText(f.read())
-            except Exception as e:
-                # In a real app we might show an error message, but simplicity for now
-                pass
-
     def get_text(self):
-        return self.text_area.toPlainText()
+        """Get combined text from all enabled sources."""
+        texts = [self.loaded_sources[ref] for ref in self.enabled_sources if ref in self.loaded_sources]
+        return " ".join(texts)
+
+    def get_sources(self):
+        """Get the dict of loaded sources."""
+        return self.loaded_sources.copy()
+
+    def get_enabled_sources(self):
+        """Get the set of enabled source refs."""
+        return self.enabled_sources.copy()
 
     def closeEvent(self, event):
         if self.fetch_thread and self.fetch_thread.isRunning():
