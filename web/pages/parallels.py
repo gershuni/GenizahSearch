@@ -318,7 +318,7 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outline color=red').style('display: none;')
 
                     # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full').style('opacity: 0; height: 8px;')
+                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0').style('height: 8px;')
                     status_label = ui.label('').classes('text-sm text-center font-medium').style('color: var(--text-secondary);')
 
         # === Filter Text (Collapsible) ===

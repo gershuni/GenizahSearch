@@ -297,6 +297,39 @@ COMMON_STYLES = '''
         color: white !important;
     }
 
+    /* Dark Theme Select/Dropdown Fixes */
+    [data-theme="dark"] .q-select .q-field__native,
+    [data-theme="dark"] .q-select .q-field__input {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-select__dropdown-icon {
+        color: var(--text-secondary) !important;
+    }
+
+    [data-theme="dark"] .q-select .q-chip {
+        background: var(--bg-tertiary) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* Dark theme option/item text in select dropdown */
+    [data-theme="dark"] .q-item__label {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-item__label--caption {
+        color: var(--text-tertiary) !important;
+    }
+
+    /* Fix select popup/virtual scroll in dark mode */
+    [data-theme="dark"] .q-virtual-scroll__content {
+        background: var(--bg-card) !important;
+    }
+
+    [data-theme="dark"] .q-select__dialog {
+        background: var(--bg-card) !important;
+    }
+
     /* Parchment theme input fixes */
     [data-theme="parchment"] .q-field__native,
     [data-theme="parchment"] .q-field__input,
@@ -826,6 +859,43 @@ COMMON_STYLES = '''
     /* ========================================================================
        Mobile Responsive - Minimal Breakpoints
        ======================================================================== */
+
+    /* Mobile select dialog dark mode fixes */
+    [data-theme="dark"] .q-dialog--menu .q-card,
+    [data-theme="dark"] .q-select__dialog .q-card {
+        background: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-dialog--menu .q-item,
+    [data-theme="dark"] .q-select__dialog .q-item {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="dark"] .q-dialog--menu .q-item:hover,
+    [data-theme="dark"] .q-select__dialog .q-item:hover,
+    [data-theme="dark"] .q-dialog--menu .q-item--active,
+    [data-theme="dark"] .q-select__dialog .q-item--active {
+        background: var(--bg-hover) !important;
+    }
+
+    /* Parchment theme select/dropdown fixes */
+    [data-theme="parchment"] .q-menu {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-light) !important;
+    }
+
+    [data-theme="parchment"] .q-item {
+        color: var(--text-primary) !important;
+    }
+
+    [data-theme="parchment"] .q-item:hover {
+        background: var(--bg-hover) !important;
+    }
+
+    [data-theme="parchment"] .q-select .q-field__native {
+        color: var(--text-primary) !important;
+    }
 
     /* Tablet and below */
     @media (max-width: 768px) {
