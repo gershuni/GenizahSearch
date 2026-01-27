@@ -931,10 +931,13 @@ class LabEngine:
                     uid = doc['unique_id'][0]
 
                     # --- Filter Text Logic ---
-                    # Check if the search chunk appears in the loaded source texts (e.g., Tanakh)
+                    # Check if the search chunk's words appear in sequence in the filter text
                     is_filtered_match = False
-                    if filter_text and chunk_text in filter_text:
-                        is_filtered_match = True
+                    if filter_text and len(chunk_tokens) >= 3:
+                        # Normalize: keep only Hebrew letters, join with single space
+                        clean_chunk = ' '.join(re.findall(r'[\u05D0-\u05EA]+', chunk_text))
+                        if clean_chunk and clean_chunk in filter_text:
+                            is_filtered_match = True
 
                     match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
                     
