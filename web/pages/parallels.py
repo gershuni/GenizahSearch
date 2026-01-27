@@ -152,13 +152,16 @@ def create_parallels_page(initial_text: str = None):
         except Exception:
             pass
 
-    # Decode initial text from URL
+    # Decode initial text from URL or restore from storage
     decoded_text = ""
     if initial_text:
         try:
             decoded_text = unquote(initial_text)
         except Exception:
             decoded_text = initial_text
+    else:
+        # Try to restore from storage
+        decoded_text = app.storage.user.get('parallels_source_text', '')
 
     # === UI Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto gap-6 fade-in'):
@@ -191,6 +194,11 @@ def create_parallels_page(initial_text: str = None):
                         text = text_input.value or ""
                         words = len([w for w in text.split() if w])
                         word_count_label.text = f"{words} {tr('Words')}"
+                        # Save text to storage for persistence
+                        try:
+                            app.storage.user['parallels_source_text'] = text
+                        except Exception:
+                            pass
 
                     text_input.on('update:model-value', update_word_count)
                     # Update immediately if we have initial text
