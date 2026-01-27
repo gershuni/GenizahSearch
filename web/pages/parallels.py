@@ -14,7 +14,192 @@ from web.translations import tr
 from urllib.parse import unquote
 import re
 import html
+import os
+import requests
 from web.components.typography import h1, h2, h3, h4
+
+# Sefaria text indices organized by category
+SEFARIA_SOURCES = {
+    "tanakh": {
+        "name": "תנ\"ך",
+        "books": {
+            "torah": {
+                "name": "תורה",
+                "refs": ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"],
+                "he_names": ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"]
+            },
+            "neviim": {
+                "name": "נביאים",
+                "refs": ["Joshua", "Judges", "I Samuel", "II Samuel", "I Kings", "II Kings",
+                        "Isaiah", "Jeremiah", "Ezekiel", "Hosea", "Joel", "Amos", "Obadiah",
+                        "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai",
+                        "Zechariah", "Malachi"],
+                "he_names": ["יהושע", "שופטים", "שמואל א", "שמואל ב", "מלכים א", "מלכים ב",
+                            "ישעיהו", "ירמיהו", "יחזקאל", "הושע", "יואל", "עמוס", "עובדיה",
+                            "יונה", "מיכה", "נחום", "חבקוק", "צפניה", "חגי", "זכריה", "מלאכי"]
+            },
+            "ketuvim": {
+                "name": "כתובים",
+                "refs": ["Psalms", "Proverbs", "Job", "Song of Songs", "Ruth", "Lamentations",
+                        "Ecclesiastes", "Esther", "Daniel", "Ezra", "Nehemiah",
+                        "I Chronicles", "II Chronicles"],
+                "he_names": ["תהלים", "משלי", "איוב", "שיר השירים", "רות", "איכה",
+                            "קהלת", "אסתר", "דניאל", "עזרא", "נחמיה", "דברי הימים א", "דברי הימים ב"]
+            }
+        }
+    },
+    "mishnah": {
+        "name": "משנה",
+        "books": {
+            "zeraim": {
+                "name": "זרעים",
+                "refs": ["Mishnah Berakhot", "Mishnah Peah", "Mishnah Demai", "Mishnah Kilayim",
+                        "Mishnah Sheviit", "Mishnah Terumot", "Mishnah Maasrot", "Mishnah Maaser Sheni",
+                        "Mishnah Challah", "Mishnah Orlah", "Mishnah Bikkurim"],
+                "he_names": ["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות",
+                            "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים"]
+            },
+            "moed": {
+                "name": "מועד",
+                "refs": ["Mishnah Shabbat", "Mishnah Eruvin", "Mishnah Pesachim", "Mishnah Shekalim",
+                        "Mishnah Yoma", "Mishnah Sukkah", "Mishnah Beitzah", "Mishnah Rosh Hashanah",
+                        "Mishnah Taanit", "Mishnah Megillah", "Mishnah Moed Katan", "Mishnah Chagigah"],
+                "he_names": ["שבת", "עירובין", "פסחים", "שקלים", "יומא", "סוכה",
+                            "ביצה", "ראש השנה", "תענית", "מגילה", "מועד קטן", "חגיגה"]
+            },
+            "nashim": {
+                "name": "נשים",
+                "refs": ["Mishnah Yevamot", "Mishnah Ketubot", "Mishnah Nedarim", "Mishnah Nazir",
+                        "Mishnah Sotah", "Mishnah Gittin", "Mishnah Kiddushin"],
+                "he_names": ["יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין"]
+            },
+            "nezikin": {
+                "name": "נזיקין",
+                "refs": ["Mishnah Bava Kamma", "Mishnah Bava Metzia", "Mishnah Bava Batra",
+                        "Mishnah Sanhedrin", "Mishnah Makkot", "Mishnah Shevuot", "Mishnah Eduyot",
+                        "Mishnah Avodah Zarah", "Pirkei Avot", "Mishnah Horayot"],
+                "he_names": ["בבא קמא", "בבא מציעא", "בבא בתרא", "סנהדרין", "מכות",
+                            "שבועות", "עדיות", "עבודה זרה", "אבות", "הוריות"]
+            },
+            "kodashim": {
+                "name": "קדשים",
+                "refs": ["Mishnah Zevachim", "Mishnah Menachot", "Mishnah Chullin", "Mishnah Bekhorot",
+                        "Mishnah Arakhin", "Mishnah Temurah", "Mishnah Keritot", "Mishnah Meilah",
+                        "Mishnah Tamid", "Mishnah Middot", "Mishnah Kinnim"],
+                "he_names": ["זבחים", "מנחות", "חולין", "בכורות", "ערכין",
+                            "תמורה", "כריתות", "מעילה", "תמיד", "מידות", "קינים"]
+            },
+            "tahorot": {
+                "name": "טהרות",
+                "refs": ["Mishnah Kelim", "Mishnah Oholot", "Mishnah Negaim", "Mishnah Parah",
+                        "Mishnah Tahorot", "Mishnah Mikvaot", "Mishnah Niddah", "Mishnah Makhshirin",
+                        "Mishnah Zavim", "Mishnah Tevul Yom", "Mishnah Yadayim", "Mishnah Oktzin"],
+                "he_names": ["כלים", "אהלות", "נגעים", "פרה", "טהרות", "מקוואות",
+                            "נידה", "מכשירין", "זבים", "טבול יום", "ידיים", "עוקצין"]
+            }
+        }
+    },
+    "talmud": {
+        "name": "תלמוד בבלי",
+        "books": {
+            "zeraim": {
+                "name": "זרעים",
+                "refs": ["Berakhot"],
+                "he_names": ["ברכות"]
+            },
+            "moed": {
+                "name": "מועד",
+                "refs": ["Shabbat", "Eruvin", "Pesachim", "Yoma", "Sukkah", "Beitzah",
+                        "Rosh Hashanah", "Taanit", "Megillah", "Moed Katan", "Chagigah"],
+                "he_names": ["שבת", "עירובין", "פסחים", "יומא", "סוכה", "ביצה",
+                            "ראש השנה", "תענית", "מגילה", "מועד קטן", "חגיגה"]
+            },
+            "nashim": {
+                "name": "נשים",
+                "refs": ["Yevamot", "Ketubot", "Nedarim", "Nazir", "Sotah", "Gittin", "Kiddushin"],
+                "he_names": ["יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין"]
+            },
+            "nezikin": {
+                "name": "נזיקין",
+                "refs": ["Bava Kamma", "Bava Metzia", "Bava Batra", "Sanhedrin", "Makkot",
+                        "Shevuot", "Avodah Zarah", "Horayot"],
+                "he_names": ["בבא קמא", "בבא מציעא", "בבא בתרא", "סנהדרין", "מכות",
+                            "שבועות", "עבודה זרה", "הוריות"]
+            },
+            "kodashim": {
+                "name": "קדשים",
+                "refs": ["Zevachim", "Menachot", "Chullin", "Bekhorot", "Arakhin",
+                        "Temurah", "Keritot", "Meilah", "Tamid"],
+                "he_names": ["זבחים", "מנחות", "חולין", "בכורות", "ערכין",
+                            "תמורה", "כריתות", "מעילה", "תמיד"]
+            },
+            "tahorot": {
+                "name": "טהרות",
+                "refs": ["Niddah"],
+                "he_names": ["נידה"]
+            }
+        }
+    }
+}
+
+
+def get_sefaria_cache_dir():
+    """Get or create the cache directory for Sefaria texts."""
+    cache_dir = os.path.join(os.path.expanduser("~"), ".genizah_search", "sefaria_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def flatten_sefaria_text(text_data):
+    """Recursively flatten nested text arrays from Sefaria."""
+    if isinstance(text_data, str):
+        return re.sub(r'<[^>]+>', '', text_data)
+    elif isinstance(text_data, list):
+        parts = []
+        for item in text_data:
+            flattened = flatten_sefaria_text(item)
+            if flattened:
+                parts.append(flattened)
+        return " ".join(parts)
+    return ""
+
+
+def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
+    """Fetch a single text from Sefaria API."""
+    cache_dir = get_sefaria_cache_dir()
+    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}.txt")
+
+    if use_cache and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                text = f.read()
+                if text:
+                    return text
+        except Exception:
+            pass
+
+    try:
+        url = f"https://www.sefaria.org/api/texts/{ref.replace(' ', '%20')}?context=0&pad=0"
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            he_text = data.get('he', [])
+            if isinstance(he_text, str):
+                text = he_text
+            else:
+                text = flatten_sefaria_text(he_text)
+
+            if text:
+                try:
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                except Exception:
+                    pass
+                return text
+    except Exception as e:
+        print(f"Error fetching {ref}: {e}")
+
+    return ""
 
 
 def create_parallels_page(initial_text: str = None):
@@ -197,11 +382,27 @@ def create_parallels_page(initial_text: str = None):
 
         # === Filter Text (Collapsible) ===
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
-            with ui.column().classes('w-full p-4 gap-2'):
+            with ui.column().classes('w-full p-4 gap-4'):
                 ui.label(tr('Matches containing text from this field will be filtered out')).classes('text-sm').style('color: var(--text-muted);')
+
+                # Sefaria source buttons
+                with ui.row().classes('w-full items-center gap-2'):
+                    ui.label(tr('Load from Sefaria') + ':').classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    btn_tanakh = ui.button(tr('Tanakh'), icon='menu_book').props('outline dense size=sm')
+                    btn_mishnah = ui.button(tr('Mishnah'), icon='menu_book').props('outline dense size=sm')
+                    btn_talmud = ui.button(tr('Talmud'), icon='menu_book').props('outline dense size=sm')
+
+                # Progress for Sefaria loading
+                sefaria_progress = ui.linear_progress(0).classes('w-full').style('display: none;')
+                sefaria_status = ui.label('').classes('text-xs').style('color: var(--text-muted); display: none;')
+
                 filter_input = ui.textarea(
                     placeholder=tr('Paste text to exclude from results...')
                 ).classes('w-full').props('outlined rows=3').style('direction: rtl;')
+
+                # Clear button
+                with ui.row().classes('w-full justify-end'):
+                    ui.button(tr('Clear'), icon='clear', on_click=lambda: filter_input.set_value('')).props('flat dense size=sm')
 
         # === Results Section ===
         with ui.card().classes('w-full p-6'):
@@ -230,6 +431,121 @@ def create_parallels_page(initial_text: str = None):
             results_container = ui.column().classes('w-full gap-4')
 
     # === Logic ===
+
+    # === Sefaria Loading Functions ===
+    def show_sefaria_selection_dialog(source_type: str):
+        """Show dialog to select books from a Sefaria source."""
+        source_data = SEFARIA_SOURCES.get(source_type)
+        if not source_data:
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[400px] max-w-[500px]'):
+            h3(tr('Select Books'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            # Category selector
+            with ui.row().classes('w-full items-center gap-2 mb-4'):
+                ui.label(tr('Category:') if tr('Category:') != 'Category:' else 'קטגוריה:').classes('text-sm').style('color: var(--text-secondary);')
+                cat_options = {'all': tr('All')}
+                for key, book_data in source_data['books'].items():
+                    cat_options[key] = book_data['name']
+                cat_select = ui.select(cat_options, value='all').props('outlined dense').classes('flex-grow')
+
+            # Books list container
+            books_container = ui.column().classes('w-full max-h-64 overflow-y-auto gap-1 p-2 rounded').style('background: var(--bg-secondary);')
+
+            # Track selected books
+            selected_refs = {'refs': []}
+
+            def populate_books():
+                books_container.clear()
+                cat_key = cat_select.value
+
+                with books_container:
+                    if cat_key == 'all':
+                        for book_key, book_data in source_data['books'].items():
+                            with ui.expansion(book_data['name'], icon='folder').classes('w-full'):
+                                for ref, he_name in zip(book_data['refs'], book_data['he_names']):
+                                    cb = ui.checkbox(he_name).classes('text-sm')
+                                    cb.on('update:model-value', lambda checked, r=ref: toggle_ref(r, checked))
+                    else:
+                        book_data = source_data['books'].get(cat_key, {})
+                        for ref, he_name in zip(book_data.get('refs', []), book_data.get('he_names', [])):
+                            cb = ui.checkbox(he_name).classes('text-sm')
+                            cb.on('update:model-value', lambda checked, r=ref: toggle_ref(r, checked))
+
+            def toggle_ref(ref, checked):
+                if checked and ref not in selected_refs['refs']:
+                    selected_refs['refs'].append(ref)
+                elif not checked and ref in selected_refs['refs']:
+                    selected_refs['refs'].remove(ref)
+
+            cat_select.on('update:model-value', lambda: populate_books())
+
+            # Select all checkbox
+            def select_all(checked):
+                selected_refs['refs'] = []
+                if checked:
+                    for book_data in source_data['books'].values():
+                        selected_refs['refs'].extend(book_data['refs'])
+                populate_books()
+
+            ui.checkbox(tr('Select All'), on_change=lambda e: select_all(e.value)).classes('my-2')
+
+            populate_books()
+
+            # Buttons
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Load Selected'), on_click=lambda: load_selected_refs(selected_refs['refs'], dialog)).classes('btn-primary')
+
+        dialog.open()
+
+    async def load_selected_refs(refs, dialog):
+        """Load selected refs from Sefaria."""
+        if not refs:
+            ui.notify(tr('Please select at least one book.'), type='warning')
+            return
+
+        dialog.close()
+
+        # Show progress
+        sefaria_progress.style('display: block;')
+        sefaria_status.style('display: block;')
+        sefaria_progress.value = 0
+
+        all_texts = []
+        total = len(refs)
+
+        def fetch_all():
+            texts = []
+            for i, ref in enumerate(refs):
+                text = fetch_sefaria_text(ref)
+                if text:
+                    texts.append(text)
+            return texts
+
+        sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
+
+        all_texts = await run.io_bound(fetch_all)
+
+        # Update filter input
+        if all_texts:
+            current = filter_input.value or ""
+            new_text = "\n\n".join(all_texts)
+            if current:
+                filter_input.set_value(current + "\n\n" + new_text)
+            else:
+                filter_input.set_value(new_text)
+            ui.notify(f'{tr("Loaded")} {len(all_texts)} {tr("texts")}', type='positive')
+
+        # Hide progress
+        sefaria_progress.style('display: none;')
+        sefaria_status.style('display: none;')
+
+    # Connect Sefaria buttons
+    btn_tanakh.on('click', lambda: show_sefaria_selection_dialog('tanakh'))
+    btn_mishnah.on('click', lambda: show_sefaria_selection_dialog('mishnah'))
+    btn_talmud.on('click', lambda: show_sefaria_selection_dialog('talmud'))
 
     def update_ui():
         if p_state.is_running:

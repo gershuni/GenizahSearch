@@ -11849,9 +11849,10 @@ class GenizahGUI(QMainWindow):
     def open_filter_dialog(self, col_idx=None):
         # If called from CheckBoxHeader, col_idx is passed
         # If called from Composition (filter text), no arg is passed (or handled differently)
+        # Note: button.clicked signal passes bool (checked state), so we need to filter that out
 
-        # Check if this is the Search Tab's results table callback
-        if isinstance(col_idx, int):
+        # Check if this is the Search Tab's results table callback (must be int but not bool)
+        if isinstance(col_idx, int) and not isinstance(col_idx, bool):
             if col_idx == 1:
                 self.open_list_filter_dialog()
                 return
