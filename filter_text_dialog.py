@@ -314,6 +314,8 @@ def clean_hebrew_text(text):
     text = re.sub(r'<[^>]+>', '', text)
     # Remove content in curly braces like {ס} {פ}
     text = re.sub(r'\{[^}]*\}', '', text)
+    # Replace maqaf (Hebrew hyphen ־) and regular hyphen with space
+    text = re.sub(r'[\u05BE\-]', ' ', text)
     # Keep only Hebrew letters (א-ת) and spaces - this removes nikud, taamim, and everything else
     # Hebrew letter range: \u05D0-\u05EA (א-ת)
     text = re.sub(r'[^\u05D0-\u05EA\s]', '', text)
