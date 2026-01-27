@@ -1596,11 +1596,12 @@ if __name__ in {'__main__', '__mp_main__'}:
     reload_enabled = os.environ.get('NICEGUI_RELOAD', 'true').lower() == 'true'
     show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
 
+    favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
         reload=reload_enabled,
         show=show_browser,
         storage_secret='genizah-secret-v5',
-        favicon='/static/favicon.ico',
+        favicon=favicon_path,
     )
