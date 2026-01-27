@@ -636,7 +636,14 @@ def create_parallels_page(initial_text: str = None):
         p_state.finished_animation_shown = False
         p_state.status = tr('Initializing search...')
         p_state.results = []
+        p_state.filtered_results = []
         results_container.clear()
+
+        # Capture filter text in main thread to avoid closure issues in background thread
+        captured_filter_text = get_filter_text()
+        print(f"[DEBUG] Captured filter text length: {len(captured_filter_text) if captured_filter_text else 0}, enabled: {len(filter_sources['enabled'])}, loaded: {len(filter_sources['loaded'])}")
+        if captured_filter_text:
+            print(f"[DEBUG] Filter text sample (first 100 chars): {captured_filter_text[:100]}")
 
         def progress_cb(current, total):
             if p_state.is_cancelled:
@@ -648,15 +655,12 @@ def create_parallels_page(initial_text: str = None):
         def run_search():
             try:
                 # Use the correct method signature from genizah_core
-                # lab_composition_search(full_text, mode, progress_callback, chunk_size, excluded_ids, filter_text, deep_scan, scan_limit)
-                ft = get_filter_text()
-                print(f"[DEBUG] Filter text length: {len(ft) if ft else 0}, enabled sources: {len(filter_sources['enabled'])}, loaded sources: {len(filter_sources['loaded'])}")
                 result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
                     progress_callback=progress_cb,
                     chunk_size=int(chunk_size.value),
-                    filter_text=ft or None,
+                    filter_text=captured_filter_text or None,
                     deep_scan=deep_scan.value
                 )
                 return result
