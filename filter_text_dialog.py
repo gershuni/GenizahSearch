@@ -634,6 +634,143 @@ class AllSourcesDialog(QDialog):
         self.accept()
 
 
+class SefariaSearchDialog(QDialog):
+    """Dialog to search Sefaria by reference."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.ref = None
+
+        self.setWindowTitle(tr("Search Sefaria"))
+        self.resize(450, 250)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+
+        layout.addWidget(QLabel(tr("Enter a Sefaria reference (e.g., \"Genesis 1\", \"Berakhot 2a\", \"Rashi on Genesis 1\"):")))
+
+        from PyQt6.QtWidgets import QLineEdit
+        self.ref_input = QLineEdit()
+        self.ref_input.setPlaceholderText("Genesis 1")
+        layout.addWidget(self.ref_input)
+
+        # Examples
+        layout.addWidget(QLabel(tr("Examples:")))
+        examples_row = QHBoxLayout()
+        for example in ['Genesis 1', 'Exodus', 'Psalms', 'Berakhot', 'Rashi on Genesis']:
+            btn = QPushButton(example)
+            btn.clicked.connect(lambda checked, e=example: self.ref_input.setText(e))
+            examples_row.addWidget(btn)
+        examples_row.addStretch()
+        layout.addLayout(examples_row)
+
+        # Status
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(self.reject)
+        btn_load = QPushButton(tr("Load"))
+        btn_load.clicked.connect(self._on_load)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_load)
+        layout.addLayout(btn_row)
+
+        self.setLayout(layout)
+
+    def _on_load(self):
+        ref = self.ref_input.text().strip()
+        if not ref:
+            QMessageBox.warning(self, tr("Warning"), tr("Please enter a Sefaria reference"))
+            return
+
+        self.ref = ref
+        self.accept()
+
+
+class AddCustomTextDialog(QDialog):
+    """Dialog to add custom text as a filter source."""
+
+    # Class-level counter for unique IDs
+    _custom_count = 0
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.custom_ref = None
+        self.custom_text = None
+        self.custom_name = None
+
+        self.setWindowTitle(tr("Add Custom Text"))
+        self.resize(500, 400)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+
+        layout.addWidget(QLabel(tr("Enter a name for this source:")))
+
+        from PyQt6.QtWidgets import QLineEdit
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText(tr("e.g., My Commentary"))
+        layout.addWidget(self.name_input)
+
+        layout.addWidget(QLabel(tr("Paste your text (will be cleaned automatically):")))
+
+        self.text_area = QPlainTextEdit()
+        self.text_area.setPlaceholderText(tr("Paste Hebrew text here..."))
+        self.text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        layout.addWidget(self.text_area)
+
+        # Info
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.info_label)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(self.reject)
+        btn_add = QPushButton(tr("Add"))
+        btn_add.clicked.connect(self._on_add)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_add)
+        layout.addLayout(btn_row)
+
+        self.setLayout(layout)
+
+    def _on_add(self):
+        name = self.name_input.text().strip()
+        text = self.text_area.toPlainText().strip()
+
+        if not name:
+            QMessageBox.warning(self, tr("Warning"), tr("Please enter a name for the source"))
+            return
+
+        if not text or len(text) < 10:
+            QMessageBox.warning(self, tr("Warning"), tr("Please enter at least 10 characters of text"))
+            return
+
+        # Clean the text
+        cleaned = clean_hebrew_text(text)
+        if not cleaned or len(cleaned) < 10:
+            QMessageBox.warning(self, tr("Warning"), tr("No valid Hebrew text found"))
+            return
+
+        # Generate unique ref
+        AddCustomTextDialog._custom_count += 1
+        self.custom_ref = f"custom:{AddCustomTextDialog._custom_count}:{name}"
+        self.custom_text = cleaned
+        self.custom_name = name
+
+        self.accept()
+
+
 class FilterTextDialog(QDialog):
     """Dialog to manage text sources for filtering composition results.
 
@@ -688,8 +825,23 @@ class FilterTextDialog(QDialog):
         btn_more.clicked.connect(self._open_all_sources_dialog)
         sources_btn_row.addWidget(btn_more)
 
+        btn_search = QPushButton(tr("Search Sefaria"))
+        btn_search.setToolTip(tr("Search for any Sefaria text by reference"))
+        btn_search.clicked.connect(self._open_sefaria_search_dialog)
+        sources_btn_row.addWidget(btn_search)
+
         sources_btn_row.addStretch()
         sources_layout.addLayout(sources_btn_row)
+
+        # Custom source row
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(QLabel(tr("Custom source") + ":"))
+        btn_custom = QPushButton(tr("Add Custom Text"))
+        btn_custom.setToolTip(tr("Add your own text as a filter source"))
+        btn_custom.clicked.connect(self._open_add_custom_dialog)
+        custom_row.addWidget(btn_custom)
+        custom_row.addStretch()
+        sources_layout.addLayout(custom_row)
 
         # Progress bar for loading
         self.progress_bar = QProgressBar()
@@ -754,6 +906,13 @@ class FilterTextDialog(QDialog):
 
     def _get_source_display_name(self, ref):
         """Get a display name for a source reference."""
+        # Handle custom sources
+        if ref.startswith('custom:'):
+            parts = ref.split(':', 2)
+            if len(parts) >= 3:
+                return f"📝 {parts[2]}"
+            return "📝 Custom Text"
+
         # Try to find the Hebrew name from SEFARIA_SOURCES
         for source_type, source_data in SEFARIA_SOURCES.items():
             for book_key, book_data in source_data.get("books", {}).items():
@@ -826,6 +985,25 @@ class FilterTextDialog(QDialog):
         dlg = AllSourcesDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_refs:
             self._start_fetch(dlg.selected_refs)
+
+    def _open_sefaria_search_dialog(self):
+        """Open dialog to search Sefaria by reference."""
+        dlg = SefariaSearchDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.ref:
+            self._start_fetch([dlg.ref])
+
+    def _open_add_custom_dialog(self):
+        """Open dialog to add custom text source."""
+        dlg = AddCustomTextDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.custom_ref and dlg.custom_text:
+            # Add directly to loaded sources
+            self.loaded_sources[dlg.custom_ref] = dlg.custom_text
+            self.enabled_sources.add(dlg.custom_ref)
+            self._refresh_sources_list()
+            QMessageBox.information(
+                self, tr("Info"),
+                f'{tr("Added")} "{dlg.custom_name}" ({len(dlg.custom_text)} {tr("characters")})'
+            )
 
     def _start_fetch(self, refs):
         """Start fetching texts from Sefaria."""

@@ -24,6 +24,14 @@ from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir
 
 def get_source_display_name(ref: str) -> str:
     """Get a display name for a source reference."""
+    # Handle custom sources
+    if ref.startswith('custom:'):
+        parts = ref.split(':', 2)
+        if len(parts) >= 3:
+            return f"📝 {parts[2]}"  # Return the custom name
+        return "📝 Custom Text"
+
+    # Look up in predefined sources
     for source_type, source_data in SEFARIA_SOURCES.items():
         for book_key, book_data in source_data.get("books", {}).items():
             if ref in book_data.get("refs", []):
@@ -304,19 +312,25 @@ def create_parallels_page(initial_text: str = None):
         # State for loaded sources: {ref: cleaned_text}
         # Only store refs in persistent storage (not the full text - too large for WebSocket)
         # Full text is reloaded from cache files on page load (async)
-        filter_sources = {'loaded': {}, 'enabled': set(), 'pending_restore': True}
+        filter_sources = {'loaded': {}, 'enabled': set(), 'pending_restore': True, 'custom_count': 0}
 
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
             with ui.column().classes('w-full p-4 gap-4'):
                 ui.label(tr('Select sources to filter results (matches found in checked sources will be moved to a separate list):')).classes('text-sm').style('color: var(--text-muted);')
 
                 # Sefaria source buttons
-                with ui.row().classes('w-full items-center gap-2'):
+                with ui.row().classes('w-full items-center gap-2 flex-wrap'):
                     ui.label(tr('Load from Sefaria') + ':').classes('text-sm font-medium').style('color: var(--text-secondary);')
                     btn_tanakh = ui.button(tr('Tanakh'), icon='menu_book').props('outline dense size=sm')
                     btn_mishnah = ui.button(tr('Mishnah'), icon='menu_book').props('outline dense size=sm')
                     btn_talmud = ui.button(tr('Talmud'), icon='menu_book').props('outline dense size=sm')
                     btn_more = ui.button(tr('More Sources...'), icon='library_books').props('outline dense size=sm')
+                    btn_sefaria_search = ui.button(tr('Search Sefaria'), icon='search').props('outline dense size=sm')
+
+                # Custom text button
+                with ui.row().classes('w-full items-center gap-2'):
+                    ui.label(tr('Custom source') + ':').classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    btn_add_custom = ui.button(tr('Add Custom Text'), icon='add').props('outline dense size=sm')
 
                 # Progress for Sefaria loading
                 sefaria_progress = ui.linear_progress(0).classes('w-full').style('display: none;')
@@ -448,9 +462,17 @@ def create_parallels_page(initial_text: str = None):
     def save_filter_sources():
         """Save filter source refs to persistent storage (not the full text - too large)."""
         try:
-            # Only save refs (not full text) to avoid WebSocket issues with large data
-            app.storage.user['filter_sources_refs'] = list(filter_sources['loaded'].keys())
+            # Separate custom texts from Sefaria refs
+            sefaria_refs = [ref for ref in filter_sources['loaded'].keys() if not ref.startswith('custom:')]
+            custom_texts = {ref: filter_sources['loaded'][ref] for ref in filter_sources['loaded'].keys() if ref.startswith('custom:')}
+
+            # Save Sefaria refs (text reloaded from cache)
+            app.storage.user['filter_sources_refs'] = sefaria_refs
             app.storage.user['filter_sources_enabled'] = list(filter_sources['enabled'])
+
+            # Save custom texts (small enough to store directly)
+            app.storage.user['filter_sources_custom'] = custom_texts
+            app.storage.user['filter_sources_custom_count'] = filter_sources.get('custom_count', 0)
         except Exception as e:
             print(f"[DEBUG] Error saving filter sources: {e}")
 
@@ -565,6 +587,100 @@ def create_parallels_page(initial_text: str = None):
     btn_mishnah.on('click', lambda: show_sefaria_selection_dialog('mishnah'))
     btn_talmud.on('click', lambda: show_sefaria_selection_dialog('talmud'))
     btn_more.on('click', lambda: show_all_sources_dialog())
+    btn_sefaria_search.on('click', lambda: show_sefaria_search_dialog())
+    btn_add_custom.on('click', lambda: show_add_custom_dialog())
+
+    def show_add_custom_dialog():
+        """Show dialog to add custom text source."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px] max-w-[600px]'):
+            h3(tr('Add Custom Text'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            ui.label(tr('Enter a name for this source:')).classes('text-sm').style('color: var(--text-secondary);')
+            name_input = ui.input(placeholder=tr('e.g., My Commentary')).classes('w-full mb-4').props('outlined')
+
+            ui.label(tr('Paste your text (will be cleaned automatically):')).classes('text-sm').style('color: var(--text-secondary);')
+            text_area = ui.textarea(placeholder=tr('Paste Hebrew text here...')).classes('w-full').props('outlined rows=10').style('direction: rtl;')
+
+            def add_custom_text():
+                name = name_input.value.strip() if name_input.value else ''
+                text = text_area.value.strip() if text_area.value else ''
+
+                if not name:
+                    ui.notify(tr('Please enter a name for the source'), type='warning')
+                    return
+                if not text or len(text) < 10:
+                    ui.notify(tr('Please enter at least 10 characters of text'), type='warning')
+                    return
+
+                # Clean the text
+                cleaned = clean_hebrew_text(text)
+                if not cleaned or len(cleaned) < 10:
+                    ui.notify(tr('No valid Hebrew text found'), type='warning')
+                    return
+
+                # Generate a unique ref for custom text
+                filter_sources['custom_count'] = filter_sources.get('custom_count', 0) + 1
+                custom_ref = f"custom:{filter_sources['custom_count']}:{name}"
+
+                # Add to sources
+                filter_sources['loaded'][custom_ref] = cleaned
+                filter_sources['enabled'].add(custom_ref)
+                save_filter_sources()
+                refresh_loaded_sources_ui()
+
+                dialog.close()
+                ui.notify(f'{tr("Added")} "{name}" ({len(cleaned)} {tr("characters")})', type='positive')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Add'), on_click=add_custom_text).classes('btn-primary')
+
+        dialog.open()
+
+    async def show_sefaria_search_dialog():
+        """Show dialog to search and load any Sefaria text by reference."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px] max-w-[600px]'):
+            h3(tr('Search Sefaria'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            ui.label(tr('Enter a Sefaria reference (e.g., "Genesis 1", "Berakhot 2a", "Rashi on Genesis 1"):')).classes('text-sm').style('color: var(--text-muted);')
+            ref_input = ui.input(placeholder='Genesis 1').classes('w-full mb-2').props('outlined')
+
+            # Quick examples
+            ui.label(tr('Examples:')).classes('text-xs mt-2').style('color: var(--text-muted);')
+            with ui.row().classes('gap-1 flex-wrap'):
+                for example in ['Genesis 1', 'Exodus', 'Psalms', 'Berakhot', 'Shabbat', 'Rashi on Genesis', 'Mishneh Torah']:
+                    ui.button(example, on_click=lambda e=example: ref_input.set_value(e)).props('flat dense size=xs')
+
+            # Status
+            search_status = ui.label('').classes('text-sm mt-4').style('color: var(--text-secondary);')
+
+            async def search_and_load():
+                ref = ref_input.value.strip() if ref_input.value else ''
+                if not ref:
+                    ui.notify(tr('Please enter a Sefaria reference'), type='warning')
+                    return
+
+                search_status.text = tr('Searching...')
+
+                # Try to fetch
+                text = await run.io_bound(fetch_sefaria_text, ref, True)
+
+                if text:
+                    filter_sources['loaded'][ref] = text
+                    filter_sources['enabled'].add(ref)
+                    save_filter_sources()
+                    refresh_loaded_sources_ui()
+                    dialog.close()
+                    ui.notify(f'{tr("Loaded")} "{ref}" ({len(text)} {tr("characters")})', type='positive')
+                else:
+                    search_status.text = tr('Not found. Try a different reference.')
+                    ui.notify(tr('Text not found'), type='negative')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Load'), on_click=search_and_load).classes('btn-primary')
+
+        dialog.open()
 
     def show_all_sources_dialog():
         """Show dialog to browse all available Sefaria sources."""
@@ -1281,13 +1397,22 @@ def create_parallels_page(initial_text: str = None):
         """Restore filter sources from cache files (async to avoid blocking)."""
         stored_refs = app.storage.user.get('filter_sources_refs', [])
         stored_enabled = set(app.storage.user.get('filter_sources_enabled', []))
+        stored_custom = app.storage.user.get('filter_sources_custom', {})
+        filter_sources['custom_count'] = app.storage.user.get('filter_sources_custom_count', 0)
 
-        print(f"[DEBUG] Restore: found {len(stored_refs)} stored refs, {len(stored_enabled)} enabled")
+        # Restore custom texts immediately (they're already in storage)
+        for ref, text in stored_custom.items():
+            filter_sources['loaded'][ref] = text
+            if ref in stored_enabled:
+                filter_sources['enabled'].add(ref)
+
+        total_to_load = len(stored_refs) + len(stored_custom)
+        print(f"[DEBUG] Restore: found {len(stored_refs)} Sefaria refs, {len(stored_custom)} custom, {len(stored_enabled)} enabled")
 
         if not stored_refs:
             filter_sources['pending_restore'] = False
             try:
-                refresh_loaded_sources_ui()  # Show empty state
+                refresh_loaded_sources_ui()  # Show current state (may include custom texts)
             except Exception:
                 pass  # Client may have been deleted
             return
@@ -1301,8 +1426,8 @@ def create_parallels_page(initial_text: str = None):
         except Exception:
             return  # Client deleted, abort
 
-        # Load refs from cache (in background thread)
-        loaded_count = 0
+        # Load Sefaria refs from cache (in background thread)
+        loaded_count = len(stored_custom)  # Count custom texts already loaded
         for i, ref in enumerate(stored_refs):
             # Check if client is still valid before each iteration
             try:
