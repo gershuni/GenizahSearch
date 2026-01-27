@@ -39,7 +39,7 @@ VSVersionInfo(
             StringStruct(u'FileDescription', u'Genizah Search Pro - Academic Research Tool for Cairo Genizah Manuscripts'),
             StringStruct(u'FileVersion', u'5.1.0.0'),
             StringStruct(u'InternalName', u'GenizahSearchPro'),
-            StringStruct(u'LegalCopyright', u'Copyright (c) 2024-2026 Genizah Search Project. Open Source - MIT License.'),
+            StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Hillel Gershuni / Dicta. CC BY-NC-SA 4.0 License.'),
             StringStruct(u'OriginalFilename', u'GenizahSearchPro.exe'),
             StringStruct(u'ProductName', u'Genizah Search Pro'),
             StringStruct(u'ProductVersion', u'5.1.0.0'),
