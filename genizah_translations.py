@@ -27,6 +27,8 @@ TRANSLATIONS = {
     "Please wait while components load...": "אנא המתן בעת טעינת הרכיבים...",
     "Stop": "עצור",
     "Stopped": "נעצר",
+    "Stopping...": "עוצר...",
+    "Search stopped": "החיפוש נעצר",
     "Reset": "אפס",
     "Unknown": "לא ידוע",
     "Unknown Shelfmark": "מספר מדף לא ידוע",

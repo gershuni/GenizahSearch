@@ -29,6 +29,7 @@ def create_search_page(initial_query: str = None):
             self.progress = 0.0
             self.status = ""
             self.is_running = False
+            self.is_cancelled = False
             self.results = []
             self.selected_result = None
             self.total_count = 0
@@ -164,6 +165,12 @@ def create_search_page(initial_query: str = None):
                     'btn-primary h-10 px-8'
                 )
 
+                # Stop Button (hidden by default)
+                stop_btn = ui.button(tr('Stop'), icon='stop', on_click=lambda: cancel_search()).classes(
+                    'h-10 px-6'
+                ).props('outline color=red')
+                stop_btn.set_visibility(False)
+
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
             if use_slider:
@@ -171,8 +178,8 @@ def create_search_page(initial_query: str = None):
                 with variant_slider_row:
                     ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
+                    ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-20').props('outlined dense')
-                    ui.tooltip(tr('Max character changes per word'))
                 variant_slider_row.set_visibility(saved_mode == 'variants')
 
                 # Slider change handler
@@ -504,13 +511,25 @@ def create_search_page(initial_query: str = None):
         ''')
         ui.notify(f"{len(selected_results)} {tr('results copied to clipboard')}", type='positive')
 
+    def cancel_search():
+        """Cancel the running search."""
+        search_state.is_cancelled = True
+        search_state.status = tr('Stopping...')
+
     def update_progress_ui():
         if search_state.is_running:
             progress_bar.classes(remove='opacity-0')
             progress_bar.value = search_state.progress
             status_label.text = search_state.status
+            search_btn.set_visibility(False)
+            stop_btn.set_visibility(True)
         else:
-            if search_state.progress >= 1.0:
+            search_btn.set_visibility(True)
+            stop_btn.set_visibility(False)
+            if search_state.is_cancelled:
+                status_label.text = tr('Search stopped')
+                ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
+            elif search_state.progress >= 1.0:
                 progress_bar.value = 1.0
                 status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
                 ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
@@ -557,12 +576,14 @@ def create_search_page(initial_query: str = None):
 
         # Reset UI
         search_state.is_running = True
+        search_state.is_cancelled = False
         search_state.progress = 0
         search_state.status = tr("Starting...")
         search_state.results = []
-        search_btn.disable()
 
         def progress_cb(current, total):
+            if search_state.is_cancelled:
+                raise InterruptedError("Search cancelled")
             if total > 0:
                 search_state.progress = current / total
                 search_state.status = f"{current} / {total}"
@@ -589,6 +610,8 @@ def create_search_page(initial_query: str = None):
                         progress_callback=progress_cb,
                         exclude_words=not_words
                     )
+            except InterruptedError:
+                return None
             except Exception as e:
                 print(f"Search Error: {e}")
                 import traceback
@@ -597,12 +620,16 @@ def create_search_page(initial_query: str = None):
 
         results = await run.io_bound(run_core_search)
 
+        # Handle cancelled search
+        search_state.is_running = False
+        if results is None or search_state.is_cancelled:
+            search_state.progress = 0
+            return
+
         # Save results
         state.last_results = results
-        search_state.is_running = False
         search_state.progress = 1.0
         search_state.results = results
-        search_btn.enable()
 
         try:
             app.storage.user['search_results'] = results
