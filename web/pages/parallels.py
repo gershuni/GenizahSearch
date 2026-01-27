@@ -14,7 +14,120 @@ from web.translations import tr
 from urllib.parse import unquote
 import re
 import html
+import os
+import requests
 from web.components.typography import h1, h2, h3, h4
+
+# Import Sefaria sources and text cleaning from the shared filter_text_dialog module
+from filter_text_dialog import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
+
+
+def get_source_display_name(ref: str) -> str:
+    """Get a display name for a source reference."""
+    # Handle custom sources
+    if ref.startswith('custom:'):
+        parts = ref.split(':', 2)
+        if len(parts) >= 3:
+            return f"📝 {parts[2]}"  # Return the custom name
+        return "📝 Custom Text"
+
+    # Look up in predefined sources
+    for source_type, source_data in SEFARIA_SOURCES.items():
+        for book_key, book_data in source_data.get("books", {}).items():
+            if ref in book_data.get("refs", []):
+                idx = book_data["refs"].index(ref)
+                return f"{source_data['name']} - {book_data['he_names'][idx]}"
+    return ref
+
+
+def flatten_sefaria_text(text_data):
+    """Recursively flatten nested text arrays from Sefaria."""
+    if isinstance(text_data, str):
+        return re.sub(r'<[^>]+>', '', text_data)
+    elif isinstance(text_data, list):
+        parts = []
+        for item in text_data:
+            flattened = flatten_sefaria_text(item)
+            if flattened:
+                parts.append(flattened)
+        return " ".join(parts)
+    return ""
+
+
+def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
+    """Fetch a single text from Sefaria API (cleaned, no nikud/taamim)."""
+    cache_dir = get_cache_dir()
+    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_v2.txt")
+
+    if use_cache and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                text = f.read()
+                if text:
+                    return text
+        except Exception:
+            pass
+
+    try:
+        encoded_ref = ref.replace(' ', '%20')
+        raw_text = ""
+
+        # Determine if this is a Tanakh ref (for v3 "Text Only" version)
+        is_tanakh = any(ref.startswith(book) for book in [
+            'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+            'Joshua', 'Judges', 'I Samuel', 'II Samuel', 'I Kings', 'II Kings',
+            'Isaiah', 'Jeremiah', 'Ezekiel', 'Hosea', 'Joel', 'Amos', 'Obadiah',
+            'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai',
+            'Zechariah', 'Malachi', 'Psalms', 'Proverbs', 'Job', 'Song of Songs',
+            'Ruth', 'Lamentations', 'Ecclesiastes', 'Esther', 'Daniel',
+            'Ezra', 'Nehemiah', 'I Chronicles', 'II Chronicles'
+        ])
+
+        if is_tanakh:
+            # Try v3 API with "Text Only" version (no nikud/taamim) for Tanakh
+            url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
+            resp = requests.get(url, timeout=15)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                versions = data.get('versions', [])
+                for ver in versions:
+                    if ver.get('language') == 'he':
+                        ver_text = ver.get('text', [])
+                        if isinstance(ver_text, str):
+                            raw_text = ver_text
+                        else:
+                            raw_text = flatten_sefaria_text(ver_text)
+                        break
+
+        # Use v2 API for non-Tanakh or as fallback
+        if not raw_text:
+            url = f"https://www.sefaria.org/api/texts/{encoded_ref}?context=0&pad=0"
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                he_text = data.get('he', [])
+                if isinstance(he_text, str):
+                    raw_text = he_text
+                else:
+                    raw_text = flatten_sefaria_text(he_text)
+
+        if raw_text:
+            # Clean the text (remove any remaining nikud, taamim, non-Hebrew)
+            cleaned = clean_hebrew_text(raw_text)
+            if cleaned:
+                try:
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        f.write(cleaned)
+                except Exception:
+                    pass
+                return cleaned
+    except requests.Timeout:
+        print(f"Timeout fetching {ref}")
+    except Exception as e:
+        print(f"Error fetching {ref}: {e}")
+
+    return ""
 
 
 def create_parallels_page(initial_text: str = None):
@@ -39,13 +152,16 @@ def create_parallels_page(initial_text: str = None):
         except Exception:
             pass
 
-    # Decode initial text from URL
+    # Decode initial text from URL or restore from storage
     decoded_text = ""
     if initial_text:
         try:
             decoded_text = unquote(initial_text)
         except Exception:
             decoded_text = initial_text
+    else:
+        # Try to restore from storage
+        decoded_text = app.storage.user.get('parallels_source_text', '')
 
     # === UI Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto gap-6 fade-in'):
@@ -78,11 +194,17 @@ def create_parallels_page(initial_text: str = None):
                         text = text_input.value or ""
                         words = len([w for w in text.split() if w])
                         word_count_label.text = f"{words} {tr('Words')}"
+                        # Save text to storage for persistence
+                        try:
+                            app.storage.user['parallels_source_text'] = text
+                        except Exception:
+                            pass
 
-                    text_input.on('input', update_word_count)
-                    # Update immediately if we have initial text
-                    if decoded_text:
-                        update_word_count()
+                    text_input.on('update:model-value', update_word_count)
+                    # Also update on blur to catch paste events
+                    text_input.on('blur', update_word_count)
+                    # Update after a short delay to ensure textarea has initial value from storage
+                    ui.timer(0.3, update_word_count, once=True)
 
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
@@ -166,6 +288,8 @@ def create_parallels_page(initial_text: str = None):
                         variant_controls_col.set_visibility(is_variants)
 
                     mode_select.on('update:model-value', on_mode_change)
+                    # Set initial visibility (exact mode = hide variant controls)
+                    variant_controls_col.set_visibility(False)
 
                     # Chunk Size
                     with ui.column().classes('gap-1'):
@@ -194,16 +318,49 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outline color=red').style('display: none;')
 
                     # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0').style('height: 8px;')
+                    progress_bar = ui.linear_progress(0).classes('w-full').style('opacity: 0; height: 8px;')
                     status_label = ui.label('').classes('text-sm text-center font-medium').style('color: var(--text-secondary);')
 
         # === Filter Text (Collapsible) ===
+        # State for loaded sources: {ref: cleaned_text}
+        # Only store refs in persistent storage (not the full text - too large for WebSocket)
+        # Full text is reloaded from cache files on page load (async)
+        filter_sources = {'loaded': {}, 'enabled': set(), 'pending_restore': True, 'custom_count': 0}
+
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
-            with ui.column().classes('w-full p-4 gap-2'):
-                ui.label(tr('Matches containing text from this field will be filtered out')).classes('text-sm').style('color: var(--text-muted);')
-                filter_input = ui.textarea(
-                    placeholder=tr('Paste text to exclude from results...')
-                ).classes('w-full').props('outlined rows=3').style('direction: rtl;')
+            with ui.column().classes('w-full p-4 gap-4'):
+                ui.label(tr('Select sources to filter results (matches found in checked sources will be moved to a separate list):')).classes('text-sm').style('color: var(--text-muted);')
+
+                # Sefaria source buttons
+                with ui.row().classes('w-full items-center gap-2 flex-wrap'):
+                    ui.label(tr('Load from Sefaria') + ':').classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    btn_tanakh = ui.button(tr('Tanakh'), icon='menu_book').props('outline dense size=sm')
+                    btn_mishnah = ui.button(tr('Mishnah'), icon='menu_book').props('outline dense size=sm')
+                    btn_talmud = ui.button(tr('Talmud'), icon='menu_book').props('outline dense size=sm')
+                    btn_more = ui.button(tr('More Sources...'), icon='library_books').props('outline dense size=sm')
+                    btn_sefaria_search = ui.button(tr('Search Sefaria'), icon='search').props('outline dense size=sm')
+
+                # Custom text button
+                with ui.row().classes('w-full items-center gap-2'):
+                    ui.label(tr('Custom source') + ':').classes('text-sm font-medium').style('color: var(--text-secondary);')
+                    btn_add_custom = ui.button(tr('Add Custom Text'), icon='add').props('outline dense size=sm')
+
+                # Progress for Sefaria loading
+                sefaria_progress = ui.linear_progress(0).classes('w-full').style('display: none;')
+                sefaria_status = ui.label('').classes('text-xs').style('color: var(--text-muted); display: none;')
+
+                # Loaded sources list (checkboxes)
+                with ui.column().classes('w-full gap-2'):
+                    h4(tr('Loaded Sources'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+
+                    with ui.row().classes('gap-2 mb-2'):
+                        btn_select_all = ui.button(tr('Select All'), icon='check_box').props('flat dense size=sm')
+                        btn_deselect_all = ui.button(tr('Deselect All'), icon='check_box_outline_blank').props('flat dense size=sm')
+                        btn_remove_unchecked = ui.button(tr('Remove Unchecked'), icon='delete').props('flat dense size=sm color=red')
+
+                    loaded_sources_container = ui.column().classes('w-full max-h-48 overflow-y-auto gap-1 p-2 rounded').style('background: var(--bg-secondary);')
+
+                    filter_info_label = ui.label(tr('Active: {} / {}').format(0, 0)).classes('text-xs').style('color: var(--text-muted);')
 
         # === Results Section ===
         with ui.card().classes('w-full p-6'):
@@ -233,32 +390,522 @@ def create_parallels_page(initial_text: str = None):
 
     # === Logic ===
 
+    # === Sefaria Loading Functions ===
+    def show_sefaria_selection_dialog(source_type: str):
+        """Show dialog to select books from a Sefaria source."""
+        source_data = SEFARIA_SOURCES.get(source_type)
+        if not source_data:
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[400px] max-w-[500px]'):
+            h3(tr('Select Books'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            # Category selector
+            with ui.row().classes('w-full items-center gap-2 mb-4'):
+                ui.label(tr('Category:') if tr('Category:') != 'Category:' else 'קטגוריה:').classes('text-sm').style('color: var(--text-secondary);')
+                cat_options = {'all': tr('All')}
+                for key, book_data in source_data['books'].items():
+                    cat_options[key] = book_data['name']
+                cat_select = ui.select(cat_options, value='all').props('outlined dense').classes('flex-grow')
+
+            # Books list container
+            books_container = ui.column().classes('w-full max-h-64 overflow-y-auto gap-1 p-2 rounded').style('background: var(--bg-secondary);')
+
+            # Track selected books
+            selected_refs = {'refs': []}
+
+            def populate_books():
+                books_container.clear()
+                cat_key = cat_select.value
+
+                with books_container:
+                    if cat_key == 'all':
+                        for book_key, book_data in source_data['books'].items():
+                            with ui.expansion(book_data['name'], icon='folder').classes('w-full'):
+                                for ref, he_name in zip(book_data['refs'], book_data['he_names']):
+                                    cb = ui.checkbox(he_name).classes('text-sm')
+                                    cb.on('update:model-value', lambda checked, r=ref: toggle_ref(r, checked))
+                    else:
+                        book_data = source_data['books'].get(cat_key, {})
+                        for ref, he_name in zip(book_data.get('refs', []), book_data.get('he_names', [])):
+                            cb = ui.checkbox(he_name).classes('text-sm')
+                            cb.on('update:model-value', lambda checked, r=ref: toggle_ref(r, checked))
+
+            def toggle_ref(ref, checked):
+                if checked and ref not in selected_refs['refs']:
+                    selected_refs['refs'].append(ref)
+                elif not checked and ref in selected_refs['refs']:
+                    selected_refs['refs'].remove(ref)
+
+            cat_select.on('update:model-value', lambda: populate_books())
+
+            # Select all checkbox
+            def select_all(checked):
+                selected_refs['refs'] = []
+                if checked:
+                    for book_data in source_data['books'].values():
+                        selected_refs['refs'].extend(book_data['refs'])
+                populate_books()
+
+            ui.checkbox(tr('Select All'), on_change=lambda e: select_all(e.value)).classes('my-2')
+
+            populate_books()
+
+            # Buttons
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Load Selected'), on_click=lambda: load_selected_refs(selected_refs['refs'], dialog)).classes('btn-primary')
+
+        dialog.open()
+
+    def refresh_loaded_sources_ui():
+        """Refresh the list of loaded sources with checkboxes."""
+        loaded_sources_container.clear()
+
+        with loaded_sources_container:
+            if not filter_sources['loaded']:
+                ui.label(tr('No sources loaded yet')).classes('text-sm text-gray-500')
+            else:
+                for ref in sorted(filter_sources['loaded'].keys()):
+                    cb = ui.checkbox(get_source_display_name(ref), value=ref in filter_sources['enabled']).classes('text-sm')
+                    cb.on('update:model-value', lambda checked, r=ref: on_source_toggled(r, checked))
+
+        update_filter_info()
+
+    def save_filter_sources():
+        """Save filter source refs to persistent storage (not the full text - too large)."""
+        try:
+            # Separate custom texts from Sefaria refs
+            sefaria_refs = [ref for ref in filter_sources['loaded'].keys() if not ref.startswith('custom:')]
+            custom_texts = {ref: filter_sources['loaded'][ref] for ref in filter_sources['loaded'].keys() if ref.startswith('custom:')}
+
+            # Save Sefaria refs (text reloaded from cache)
+            app.storage.user['filter_sources_refs'] = sefaria_refs
+            app.storage.user['filter_sources_enabled'] = list(filter_sources['enabled'])
+
+            # Save custom texts (small enough to store directly)
+            app.storage.user['filter_sources_custom'] = custom_texts
+            app.storage.user['filter_sources_custom_count'] = filter_sources.get('custom_count', 0)
+        except Exception as e:
+            print(f"[DEBUG] Error saving filter sources: {e}")
+
+    def on_source_toggled(ref, checked):
+        """Handle source checkbox toggle."""
+        if checked:
+            filter_sources['enabled'].add(ref)
+        else:
+            filter_sources['enabled'].discard(ref)
+        update_filter_info()
+        save_filter_sources()
+
+    def update_filter_info():
+        """Update the info label."""
+        enabled = len(filter_sources['enabled'])
+        total = len(filter_sources['loaded'])
+        filter_info_label.text = tr('Active: {} / {}').format(enabled, total)
+
+    def select_all_sources():
+        filter_sources['enabled'] = set(filter_sources['loaded'].keys())
+        refresh_loaded_sources_ui()
+        save_filter_sources()
+
+    def deselect_all_sources():
+        filter_sources['enabled'].clear()
+        refresh_loaded_sources_ui()
+        save_filter_sources()
+
+    def remove_unchecked_sources():
+        to_remove = [ref for ref in filter_sources['loaded'].keys() if ref not in filter_sources['enabled']]
+        for ref in to_remove:
+            del filter_sources['loaded'][ref]
+        refresh_loaded_sources_ui()
+        save_filter_sources()
+
+    def get_filter_text():
+        """Get combined text from all enabled sources."""
+        texts = [filter_sources['loaded'][ref] for ref in filter_sources['enabled'] if ref in filter_sources['loaded']]
+        return " ".join(texts)
+
+    # Connect filter management buttons
+    btn_select_all.on('click', select_all_sources)
+    btn_deselect_all.on('click', deselect_all_sources)
+    btn_remove_unchecked.on('click', remove_unchecked_sources)
+
+    async def load_selected_refs(refs, dialog):
+        """Load selected refs from Sefaria with incremental progress."""
+        if not refs:
+            ui.notify(tr('Please select at least one book.'), type='warning')
+            return
+
+        if dialog:
+            try:
+                dialog.close()
+            except Exception:
+                pass
+
+        # Filter out already loaded refs
+        new_refs = [r for r in refs if r not in filter_sources['loaded']]
+        if not new_refs:
+            ui.notify(tr('All selected sources are already loaded.'), type='info')
+            return
+
+        # Show progress
+        try:
+            sefaria_progress.style('display: block;')
+            sefaria_status.style('display: block;')
+            sefaria_progress.value = 0
+        except (RuntimeError, Exception):
+            return  # Client deleted
+
+        total = len(new_refs)
+        loaded_count = 0
+        failed_count = 0
+
+        try:
+            sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
+        except (RuntimeError, Exception):
+            return
+
+        # Fetch one at a time with progress updates
+        for i, ref in enumerate(new_refs):
+            # Check if client is still valid
+            try:
+                _ = sefaria_progress.client
+            except (RuntimeError, Exception):
+                print("[DEBUG] Client deleted during load, aborting")
+                return
+
+            # Update progress before fetching
+            try:
+                sefaria_status.text = tr('Loading: {}').format(f"{i}/{total} - {get_source_display_name(ref)[:30]}...")
+                sefaria_progress.value = i / total
+            except (RuntimeError, Exception):
+                return
+
+            # Fetch in background thread to avoid blocking UI
+            text = await run.io_bound(fetch_sefaria_text, ref)
+
+            if text:
+                filter_sources['loaded'][ref] = text
+                filter_sources['enabled'].add(ref)
+                loaded_count += 1
+            else:
+                failed_count += 1
+
+            # Update UI periodically (every item)
+            try:
+                sefaria_progress.value = (i + 1) / total
+            except (RuntimeError, Exception):
+                return
+
+        # Save to storage
+        save_filter_sources()
+
+        # Update UI
+        try:
+            refresh_loaded_sources_ui()
+
+            # Notify user
+            if loaded_count > 0:
+                msg = f'{tr("Loaded")} {loaded_count} {tr("texts")}'
+                if failed_count > 0:
+                    msg += f' ({failed_count} {tr("failed")})'
+                ui.notify(msg, type='positive')
+            elif failed_count > 0:
+                ui.notify(f'{tr("Failed to load")} {failed_count} {tr("texts")}', type='negative')
+
+            # Hide progress
+            sefaria_progress.style('display: none;')
+            sefaria_status.style('display: none;')
+        except (RuntimeError, Exception):
+            pass  # Client deleted
+
+    # Connect Sefaria buttons
+    btn_tanakh.on('click', lambda: show_sefaria_selection_dialog('tanakh'))
+    btn_mishnah.on('click', lambda: show_sefaria_selection_dialog('mishnah'))
+    btn_talmud.on('click', lambda: show_sefaria_selection_dialog('talmud'))
+    btn_more.on('click', lambda: show_all_sources_dialog())
+    btn_sefaria_search.on('click', lambda: show_sefaria_search_dialog())
+    btn_add_custom.on('click', lambda: show_add_custom_dialog())
+
+    def show_add_custom_dialog():
+        """Show dialog to add custom text source."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px] max-w-[600px]'):
+            h3(tr('Add Custom Text'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            ui.label(tr('Enter a name for this source:')).classes('text-sm').style('color: var(--text-secondary);')
+            name_input = ui.input(placeholder=tr('e.g., My Commentary')).classes('w-full mb-4').props('outlined')
+
+            ui.label(tr('Paste your text (will be cleaned automatically):')).classes('text-sm').style('color: var(--text-secondary);')
+            text_area = ui.textarea(placeholder=tr('Paste Hebrew text here...')).classes('w-full').props('outlined rows=10').style('direction: rtl;')
+
+            def add_custom_text():
+                name = name_input.value.strip() if name_input.value else ''
+                text = text_area.value.strip() if text_area.value else ''
+
+                if not name:
+                    ui.notify(tr('Please enter a name for the source'), type='warning')
+                    return
+                if not text or len(text) < 10:
+                    ui.notify(tr('Please enter at least 10 characters of text'), type='warning')
+                    return
+
+                # Clean the text
+                cleaned = clean_hebrew_text(text)
+                if not cleaned or len(cleaned) < 10:
+                    ui.notify(tr('No valid Hebrew text found'), type='warning')
+                    return
+
+                # Generate a unique ref for custom text
+                filter_sources['custom_count'] = filter_sources.get('custom_count', 0) + 1
+                custom_ref = f"custom:{filter_sources['custom_count']}:{name}"
+
+                # Add to sources
+                filter_sources['loaded'][custom_ref] = cleaned
+                filter_sources['enabled'].add(custom_ref)
+                save_filter_sources()
+                refresh_loaded_sources_ui()
+
+                dialog.close()
+                ui.notify(f'{tr("Added")} "{name}" ({len(cleaned)} {tr("characters")})', type='positive')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Add'), on_click=add_custom_text).classes('btn-primary')
+
+        dialog.open()
+
+    async def show_sefaria_search_dialog():
+        """Show dialog to search and load any Sefaria text by reference."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px] max-w-[600px]'):
+            h3(tr('Search Sefaria'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            ui.label(tr('Enter a Sefaria reference (e.g., "Genesis 1", "Berakhot 2a", "Rashi on Genesis 1"):')).classes('text-sm').style('color: var(--text-muted);')
+            ref_input = ui.input(placeholder='Genesis 1').classes('w-full mb-2').props('outlined')
+
+            # Quick examples
+            ui.label(tr('Examples:')).classes('text-xs mt-2').style('color: var(--text-muted);')
+            with ui.row().classes('gap-1 flex-wrap'):
+                for example in ['Genesis 1', 'Exodus', 'Psalms', 'Berakhot', 'Shabbat', 'Rashi on Genesis', 'Mishneh Torah']:
+                    ui.button(example, on_click=lambda e=example: ref_input.set_value(e)).props('flat dense size=xs')
+
+            # Status
+            search_status = ui.label('').classes('text-sm mt-4').style('color: var(--text-secondary);')
+
+            async def search_and_load():
+                ref = ref_input.value.strip() if ref_input.value else ''
+                if not ref:
+                    ui.notify(tr('Please enter a Sefaria reference'), type='warning')
+                    return
+
+                search_status.text = tr('Searching...')
+
+                # Try to fetch
+                text = await run.io_bound(fetch_sefaria_text, ref, True)
+
+                if text:
+                    filter_sources['loaded'][ref] = text
+                    filter_sources['enabled'].add(ref)
+                    save_filter_sources()
+                    refresh_loaded_sources_ui()
+                    dialog.close()
+                    ui.notify(f'{tr("Loaded")} "{ref}" ({len(text)} {tr("characters")})', type='positive')
+                else:
+                    search_status.text = tr('Not found. Try a different reference.')
+                    ui.notify(tr('Text not found'), type='negative')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                ui.button(tr('Load'), on_click=search_and_load).classes('btn-primary')
+
+        dialog.open()
+
+    async def show_all_sources_dialog():
+        """Show dialog to browse all Sefaria sources in hierarchical tree."""
+        library = get_sefaria_library()
+
+        # Track selected refs
+        selected_refs_state = {'refs': set()}
+
+        with ui.dialog().classes('max-w-4xl') as dialog, ui.card().classes('p-6 w-full').style('min-width: 700px; max-height: 80vh;'):
+            h3(tr('Sefaria Library'), classes='text-xl font-bold mb-4').style('color: var(--text-primary);')
+
+            # Search box
+            with ui.row().classes('w-full items-center gap-2 mb-4'):
+                ui.label(tr('Search:')).classes('text-sm').style('color: var(--text-secondary);')
+                search_input = ui.input(placeholder=tr('Search texts...')).classes('flex-grow').props('outlined dense')
+
+            # Status label
+            status_label = ui.label(tr('Loading library...')).classes('text-sm').style('color: var(--text-muted);')
+
+            # Main content area with two columns
+            with ui.splitter(value=35).classes('w-full').style('height: 400px;') as splitter:
+                with splitter.before:
+                    # Category tree (left side)
+                    with ui.scroll_area().classes('w-full h-full'):
+                        categories_container = ui.column().classes('w-full gap-1 p-2')
+
+                with splitter.after:
+                    # Texts list (right side)
+                    with ui.column().classes('w-full h-full'):
+                        texts_container = ui.scroll_area().classes('w-full flex-grow')
+                        with ui.row().classes('w-full items-center gap-2 mt-2'):
+                            select_all_cb = ui.checkbox(tr('Select All in Category'))
+                            info_label = ui.label(tr('Selected: 0')).classes('text-xs').style('color: var(--text-muted);')
+
+            # Buttons
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                load_btn = ui.button(tr('Load Selected'), on_click=lambda: finish_selection()).classes('btn-primary')
+
+            def update_info():
+                info_label.text = tr('Selected: {}').format(len(selected_refs_state['refs']))
+
+            def toggle_ref(ref, checked):
+                if checked:
+                    selected_refs_state['refs'].add(ref)
+                else:
+                    selected_refs_state['refs'].discard(ref)
+                update_info()
+
+            def show_category_texts(category_data):
+                """Show texts from a category in the right panel."""
+                texts_container.clear()
+                select_all_cb.value = False
+
+                texts = library.get_texts_recursive(category_data)
+
+                with texts_container:
+                    with ui.column().classes('w-full gap-1 p-2'):
+                        for text in texts:
+                            title = text.get('title', '')
+                            he_title = text.get('heTitle', title)
+                            cb = ui.checkbox(he_title, value=title in selected_refs_state['refs']).classes('text-sm')
+                            cb.on('update:model-value', lambda checked, r=title: toggle_ref(r, checked))
+
+                # Connect select all
+                def on_select_all(checked):
+                    for text in texts:
+                        title = text.get('title', '')
+                        if checked:
+                            selected_refs_state['refs'].add(title)
+                        else:
+                            selected_refs_state['refs'].discard(title)
+                    show_category_texts(category_data)  # Refresh to update checkboxes
+                    update_info()
+
+                select_all_cb.on('update:model-value', on_select_all)
+                update_info()
+
+            def build_category_tree(parent_container, contents, depth=0):
+                """Recursively build the category tree."""
+                for item in contents:
+                    if isinstance(item, dict):
+                        if 'category' in item:
+                            # It's a category
+                            cat_name = item.get('heCategory', item.get('category', ''))
+                            sub_contents = item.get('contents', [])
+
+                            if sub_contents:
+                                # Has children - make it expandable
+                                with parent_container:
+                                    with ui.expansion(cat_name, icon='folder').classes('w-full'):
+                                        inner_container = ui.column().classes('w-full gap-1 pl-4')
+                                        build_category_tree(inner_container, sub_contents, depth + 1)
+
+                                    # Add click handler to show texts
+                                    # The expansion header can be clicked to show texts
+                            else:
+                                # Leaf category
+                                with parent_container:
+                                    btn = ui.button(cat_name, on_click=lambda i=item: show_category_texts(i)).props('flat dense align=left').classes('w-full justify-start')
+
+            async def load_library():
+                """Load the Sefaria library TOC."""
+                toc = await run.io_bound(library.get_toc)
+                if not toc:
+                    status_label.text = tr('Failed to load library. Check internet connection.')
+                    return
+
+                status_label.text = ''
+                categories_container.clear()
+
+                with categories_container:
+                    for category in toc:
+                        if isinstance(category, dict) and 'category' in category:
+                            cat_name = category.get('heCategory', category.get('category', ''))
+                            sub_contents = category.get('contents', [])
+
+                            with ui.expansion(cat_name, icon='folder').classes('w-full') as exp:
+                                inner_container = ui.column().classes('w-full gap-1')
+
+                                # Add click handler for the expansion to show its texts
+                                exp.on('click', lambda c=category: show_category_texts(c))
+
+                                if sub_contents:
+                                    build_category_tree(inner_container, sub_contents, 1)
+
+            async def finish_selection():
+                """Complete the selection and load texts."""
+                if not selected_refs_state['refs']:
+                    ui.notify(tr('Please select at least one book.'), type='warning')
+                    return
+                dialog.close()
+                await load_selected_refs(list(selected_refs_state['refs']), None)
+
+            # Start loading
+            await load_library()
+
+        dialog.open()
+
+    async def load_all_sources_refs(refs, dialog):
+        """Load selected refs from the all sources dialog."""
+        if not refs:
+            ui.notify(tr('Please select at least one book.'), type='warning')
+            return
+
+        dialog.close()
+        await load_selected_refs(refs, None)
+
     def update_ui():
+        try:
+            # Check if client still exists
+            _ = progress_bar.client
+        except (RuntimeError, Exception):
+            return  # Client deleted, stop updating
+
         try:
             if p_state.is_running:
                 run_btn.disable()
                 cancel_btn.style('display: block;')
-                progress_bar.classes(remove='opacity-0')
-                progress_bar.value = p_state.progress
+                progress_bar.style('opacity: 1;')
+                progress_bar.set_value(p_state.progress)
                 status_label.text = p_state.status
             else:
                 run_btn.enable()
                 cancel_btn.style('display: none;')
                 if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
-                    progress_bar.value = 1.0
+                    progress_bar.set_value(1.0)
                     status_label.text = tr('Done')
                     p_state.finished_animation_shown = True
-                    progress_bar.classes(add='opacity-0')
-        except Exception:
-            pass  # Client may have been deleted
+                    ui.timer(2.0, lambda: progress_bar.style('opacity: 0;'), once=True)
+        except (RuntimeError, Exception):
+            pass  # Client may be deleted
 
-    ui.timer(0.5, update_ui)
+    # Use faster timer for more responsive progress updates
+    ui.timer(0.05, update_ui)
 
     def cancel_search():
         p_state.is_cancelled = True
         p_state.status = tr('Cancelling...')
 
     async def execute_parallels():
+        # Prevent duplicate executions
+        if p_state.is_running:
+            print("[DEBUG] execute_parallels: already running, skipping")
+            return
+
+        print("[DEBUG] execute_parallels called")
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
 
@@ -286,7 +933,20 @@ def create_parallels_page(initial_text: str = None):
         p_state.finished_animation_shown = False
         p_state.status = tr('Initializing search...')
         p_state.results = []
+        p_state.filtered_results = []
         results_container.clear()
+
+        # Show immediate feedback
+        ui.notify(tr('Starting search...'), type='info', timeout=2000)
+        progress_bar.style('opacity: 1;')
+        progress_bar.set_value(0)
+        status_label.text = tr('Initializing search...')
+
+        # Capture filter text in main thread to avoid closure issues in background thread
+        captured_filter_text = get_filter_text()
+        print(f"[DEBUG] Captured filter text length: {len(captured_filter_text) if captured_filter_text else 0}, enabled: {len(filter_sources['enabled'])}, loaded: {len(filter_sources['loaded'])}")
+        if captured_filter_text:
+            print(f"[DEBUG] Filter text sample (first 100 chars): {captured_filter_text[:100]}")
 
         def progress_cb(current, total):
             if p_state.is_cancelled:
@@ -297,19 +957,20 @@ def create_parallels_page(initial_text: str = None):
 
         def run_search():
             try:
+                print(f"[DEBUG] Starting search: mode={mode_select.value}, chunk_size={chunk_size.value}, deep_scan={deep_scan.value}")
+                print(f"[DEBUG] Text length: {len(text)} chars, {len(text.split())} words")
                 # Use the correct method signature from genizah_core
-                # lab_composition_search(full_text, mode, progress_callback, chunk_size, excluded_ids, filter_text, deep_scan, scan_limit)
+                # Note: lab_composition_search now returns partial results if interrupted
                 result = state.lab_engine.lab_composition_search(
                     text,
                     mode=mode_select.value,
                     progress_callback=progress_cb,
                     chunk_size=int(chunk_size.value),
-                    filter_text=filter_input.value or None,
+                    filter_text=captured_filter_text or None,
                     deep_scan=deep_scan.value
                 )
+                print(f"[DEBUG] Search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}, partial={result.get('partial', False)}")
                 return result
-            except InterruptedError:
-                return None
             except Exception as e:
                 print(f"Parallels Error: {e}")
                 import traceback
@@ -321,20 +982,30 @@ def create_parallels_page(initial_text: str = None):
         p_state.is_running = False
         p_state.progress = 1.0
 
-        if p_state.is_cancelled:
-            p_state.status = tr('Search cancelled')
-            return
-
         if result_data:
             main_results = result_data.get('main', [])
-            if main_results:
+            filtered_results = result_data.get('filtered', [])
+            is_partial = result_data.get('partial', False)
+
+            if main_results or filtered_results:
                 p_state.results = main_results
+                p_state.filtered_results = filtered_results
                 try:
+                    # Store both main and filtered results for export
                     app.storage.user['parallels_results'] = main_results
+                    app.storage.user['parallels_filtered'] = filtered_results
                 except Exception:
                     pass
-                render_results(main_results)
+
+                # Show message if results are partial (search was cancelled)
+                if is_partial:
+                    p_state.status = tr('Partial results (search cancelled)')
+                    ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+
+                render_results(main_results, filtered_results, is_partial=is_partial)
             else:
+                if is_partial:
+                    p_state.status = tr('Search cancelled - no results yet')
                 with results_container:
                     show_empty_state()
         else:
@@ -348,10 +1019,18 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
-    def render_results(results):
-        results_container.clear()
+    def render_results(results, filtered_results=None, is_partial=False):
+        try:
+            _ = results_container.client
+        except (RuntimeError, Exception):
+            return  # Client deleted
 
-        if not results:
+        try:
+            results_container.clear()
+        except (RuntimeError, Exception):
+            return
+
+        if not results and not filtered_results:
             with results_container:
                 show_empty_state()
             return
@@ -405,16 +1084,125 @@ def create_parallels_page(initial_text: str = None):
         # Sort groups by max score
         sorted_groups = sorted(grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
 
+        # Group filtered results similarly
+        filtered_grouped = {}
+        if filtered_results:
+            for item in filtered_results:
+                raw_header = item.get('raw_header', '')
+                sys_id = None
+                shelfmark = 'Unknown'
+
+                if raw_header and state.meta_mgr:
+                    try:
+                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        if sys_match:
+                            sys_id = sys_match.group(1)
+                            shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
+                            shelfmark = shelf_temp or shelfmark
+                    except Exception:
+                        pass
+
+                key = sys_id if sys_id else shelfmark
+                if key not in filtered_grouped:
+                    filtered_grouped[key] = {
+                        'sys_id': sys_id,
+                        'shelfmark': shelfmark,
+                        'items': [],
+                        'max_score': 0,
+                        'avg_score': 0
+                    }
+                filtered_grouped[key]['items'].append(item)
+                filtered_grouped[key]['max_score'] = max(filtered_grouped[key]['max_score'], item.get('score', 0))
+
+            for key in filtered_grouped:
+                scores = [item.get('score', 0) for item in filtered_grouped[key]['items']]
+                filtered_grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
+
+        sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+
+        # Lazy loading configuration
+        BATCH_SIZE = 50
+        main_displayed = [0]  # Use list to allow modification in nested function
+        filtered_displayed = [0]
+
         # Update header with manuscript count
         total_results = len(results)
         total_manuscripts = len(sorted_groups)
-        results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
+        filtered_count = len(filtered_results) if filtered_results else 0
+        partial_suffix = f" - {tr('partial results')}" if is_partial else ""
+
+        if total_results == 0 and filtered_count > 0:
+            # All results were filtered - explain this to user
+            results_header.text = f"{tr('All results filtered')} ({filtered_count} {tr('in filtered sources')}){partial_suffix}"
+        elif filtered_count > 0:
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')} ({filtered_count} {tr('filtered')}){partial_suffix}"
+        else:
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}{partial_suffix}"
 
         with results_container:
-            for group_key, group_data in sorted_groups:
-                create_manuscript_group(group_data)
+            # Container for main results
+            main_results_container = ui.column().classes('w-full gap-4')
+            main_load_more_container = ui.row().classes('w-full justify-center py-4')
 
-    def create_manuscript_group(group_data):
+            # Filtered results section
+            filtered_section = ui.column().classes('w-full gap-4')
+            filtered_load_more_container = ui.row().classes('w-full justify-center py-4')
+
+        def load_more_main():
+            """Load next batch of main results."""
+            start = main_displayed[0]
+            end = min(start + BATCH_SIZE, len(sorted_groups))
+            with main_results_container:
+                for group_key, group_data in sorted_groups[start:end]:
+                    create_manuscript_group(group_data)
+            main_displayed[0] = end
+
+            # Update load more button
+            main_load_more_container.clear()
+            remaining = len(sorted_groups) - main_displayed[0]
+            if remaining > 0:
+                with main_load_more_container:
+                    ui.button(
+                        f"{tr('Load more')} ({remaining} {tr('remaining')})",
+                        icon='expand_more',
+                        on_click=load_more_main
+                    ).props('flat color=primary')
+
+        def load_more_filtered():
+            """Load next batch of filtered results."""
+            start = filtered_displayed[0]
+            end = min(start + BATCH_SIZE, len(sorted_filtered_groups))
+            with filtered_section:
+                for group_key, group_data in sorted_filtered_groups[start:end]:
+                    create_manuscript_group(group_data, is_filtered=True)
+            filtered_displayed[0] = end
+
+            # Update load more button
+            filtered_load_more_container.clear()
+            remaining = len(sorted_filtered_groups) - filtered_displayed[0]
+            if remaining > 0:
+                with filtered_load_more_container:
+                    ui.button(
+                        f"{tr('Load more')} ({remaining} {tr('remaining')})",
+                        icon='expand_more',
+                        on_click=load_more_filtered
+                    ).props('flat color=amber')
+
+        # Initial load of main results
+        if sorted_groups:
+            load_more_main()
+
+        # Filtered results section header and initial load
+        if sorted_filtered_groups:
+            with results_container:
+                ui.separator().classes('my-4')
+                with ui.row().classes('w-full items-center gap-2 py-2'):
+                    ui.icon('filter_alt').classes('text-xl').style('color: var(--accent-amber);')
+                    h3(tr('Filtered Results (found in source texts)'), classes='text-lg', style='color: var(--accent-amber);')
+                    ui.badge(f"{filtered_count}", color='amber').classes('text-xs')
+            load_more_filtered()
+
+    def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
         shelfmark = group_data['shelfmark']
         sys_id = group_data['sys_id']
@@ -431,15 +1219,19 @@ def create_parallels_page(initial_text: str = None):
             except Exception:
                 pass
 
-        with ui.card().classes('w-full p-0 overflow-hidden').style('border: 2px solid var(--border-light);'):
+        border_style = 'border: 2px solid var(--accent-amber);' if is_filtered else 'border: 2px solid var(--border-light);'
+        with ui.card().classes('w-full p-0 overflow-hidden').style(border_style):
             # Header (always visible)
             with ui.row().classes('w-full items-center justify-between p-4').style('background: var(--bg-card);'):
                 with ui.column().classes('gap-1 flex-grow'):
                     with ui.row().classes('items-center gap-3'):
-                        ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
+                        icon_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-600);'
+                        ui.icon('menu_book').classes('text-xl').style(icon_color)
                         # Changed to H3
-                        h3(shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
-                        ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
+                        shelfmark_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-700);'
+                        h3(shelfmark, classes='text-lg font-bold', style=shelfmark_color)
+                        badge_color = 'amber' if is_filtered else 'blue'
+                        ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
                     if title:
                         title_short = (title[:100] + '...') if len(title) > 100 else title
@@ -773,3 +1565,78 @@ def create_parallels_page(initial_text: str = None):
     if p_state.results:
         results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
         render_results(p_state.results)
+
+    # Async function to restore filter sources from persistent storage
+    async def restore_filter_sources():
+        """Restore filter sources from cache files (async to avoid blocking)."""
+        stored_refs = app.storage.user.get('filter_sources_refs', [])
+        stored_enabled = set(app.storage.user.get('filter_sources_enabled', []))
+        stored_custom = app.storage.user.get('filter_sources_custom', {})
+        filter_sources['custom_count'] = app.storage.user.get('filter_sources_custom_count', 0)
+
+        # Restore custom texts immediately (they're already in storage)
+        for ref, text in stored_custom.items():
+            filter_sources['loaded'][ref] = text
+            if ref in stored_enabled:
+                filter_sources['enabled'].add(ref)
+
+        total_to_load = len(stored_refs) + len(stored_custom)
+        print(f"[DEBUG] Restore: found {len(stored_refs)} Sefaria refs, {len(stored_custom)} custom, {len(stored_enabled)} enabled")
+
+        if not stored_refs:
+            filter_sources['pending_restore'] = False
+            try:
+                refresh_loaded_sources_ui()  # Show current state (may include custom texts)
+            except Exception:
+                pass  # Client may have been deleted
+            return
+
+        # Show loading indicator
+        try:
+            sefaria_progress.style('display: block;')
+            sefaria_status.style('display: block;')
+            sefaria_progress.value = 0
+            sefaria_status.text = tr('Loading: {}').format(f"0/{len(stored_refs)}")
+        except Exception:
+            return  # Client deleted, abort
+
+        # Load Sefaria refs from cache (in background thread)
+        loaded_count = len(stored_custom)  # Count custom texts already loaded
+        for i, ref in enumerate(stored_refs):
+            # Check if client is still valid before each iteration
+            try:
+                _ = sefaria_progress.client
+            except (RuntimeError, Exception):
+                print("[DEBUG] Client deleted, aborting restore")
+                return
+
+            text = await run.io_bound(fetch_sefaria_text, ref, True)
+            if text:
+                filter_sources['loaded'][ref] = text
+                if ref in stored_enabled:
+                    filter_sources['enabled'].add(ref)
+                loaded_count += 1
+
+            # Update UI with error handling
+            try:
+                sefaria_progress.value = (i + 1) / len(stored_refs)
+                sefaria_status.text = tr('Loading: {}').format(f"{i+1}/{len(stored_refs)}")
+            except (RuntimeError, Exception):
+                print("[DEBUG] Client deleted during restore, aborting")
+                return
+
+        # Update UI
+        filter_sources['pending_restore'] = False
+        try:
+            sefaria_progress.style('display: none;')
+            sefaria_status.style('display: none;')
+            refresh_loaded_sources_ui()
+
+            if loaded_count > 0:
+                print(f"[DEBUG] Restored {loaded_count}/{len(stored_refs)} filter sources from cache")
+                ui.notify(f'{tr("Loaded")} {loaded_count} {tr("texts")}', type='info')
+        except (RuntimeError, Exception):
+            pass  # Client deleted
+
+    # Schedule async restore on page load
+    ui.timer(0.1, restore_filter_sources, once=True)

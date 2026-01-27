@@ -643,49 +643,67 @@ def init_api_routes():
         from nicegui import app as nicegui_app
 
         parallels_results = nicegui_app.storage.user.get('parallels_results', [])
-        if not parallels_results:
+        filtered_results = nicegui_app.storage.user.get('parallels_filtered', [])
+
+        if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
 
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Parallels Results"
 
-        headers = ["#", "Shelfmark", "Title", "Score", "Source Context", "Manuscript Match"]
+        headers = ["#", "Shelfmark", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
         ws.append(headers)
 
-        for idx, item in enumerate(parallels_results, 1):
-            score = item.get('score', 0)
-            raw_header = item.get('raw_header', '')
+        def add_results_to_sheet(results, start_idx, is_filtered=False):
+            for idx, item in enumerate(results, start_idx):
+                score = item.get('score', 0)
+                raw_header = item.get('raw_header', '')
 
-            # Extract metadata
-            sys_id = None
-            shelfmark = 'Unknown'
-            title = ''
+                # Extract metadata
+                sys_id = None
+                shelfmark = 'Unknown'
+                title = ''
 
-            if raw_header and state.meta_mgr:
-                try:
-                    import re
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
-                    if sys_match:
-                        sys_id = sys_match.group(1)
-                        shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
-                        shelfmark = shelf_temp or shelfmark
-                        title = title_temp or ''
-                except Exception:
-                    pass
+                if raw_header and state.meta_mgr:
+                    try:
+                        import re
+                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        if sys_match:
+                            sys_id = sys_match.group(1)
+                            shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                            shelfmark = shelf_temp or shelfmark
+                            title = title_temp or ''
+                    except Exception:
+                        pass
 
-            source_ctx = item.get('source_ctx', '').replace('*', '')
-            ms_text = item.get('text', '').replace('*', '')
+                source_ctx = item.get('source_ctx', '').replace('*', '')
+                # Use longer text context - prefer full_text if available, fall back to text
+                # Remove line breaks so text flows continuously in Excel cell
+                ms_text = item.get('text', '').replace('*', '').replace('\n', ' ').replace('\r', ' ')
+                # Clean up multiple spaces
+                while '  ' in ms_text:
+                    ms_text = ms_text.replace('  ', ' ')
+                ms_text = ms_text.strip()
 
-            row = [idx, shelfmark, title, score, source_ctx, ms_text]
+                filtered_mark = 'Yes' if is_filtered else ''
+                row = [idx, shelfmark, title, score, source_ctx, ms_text, filtered_mark]
 
-            # Sanitize for illegal chars
-            clean_row = []
-            for cell in row:
-                if isinstance(cell, str):
-                    cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\n\r\t")
-                clean_row.append(cell)
-            ws.append(clean_row)
+                # Sanitize for illegal chars (remove newlines to keep text flowing)
+                clean_row = []
+                for cell in row:
+                    if isinstance(cell, str):
+                        cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch == "\t")
+                    clean_row.append(cell)
+                ws.append(clean_row)
+            return start_idx + len(results)
+
+        # Add main results
+        next_idx = add_results_to_sheet(parallels_results, 1, is_filtered=False)
+
+        # Add filtered results
+        if filtered_results:
+            add_results_to_sheet(filtered_results, next_idx, is_filtered=True)
 
         # Add credits at the bottom
         ws.append([])
@@ -712,45 +730,60 @@ def init_api_routes():
         from nicegui import app as nicegui_app
 
         parallels_results = nicegui_app.storage.user.get('parallels_results', [])
-        if not parallels_results:
+        filtered_results = nicegui_app.storage.user.get('parallels_filtered', [])
+
+        if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
 
         doc = Document()
         doc.add_heading('Genizah Parallels Search Results', 0)
 
-        for idx, item in enumerate(parallels_results, 1):
-            score = item.get('score', 0)
-            raw_header = item.get('raw_header', '')
+        def add_results_to_doc(results, start_idx, section_title=None):
+            if section_title:
+                doc.add_heading(section_title, 1)
 
-            # Extract metadata
-            shelfmark = 'Unknown'
-            title = ''
+            for idx, item in enumerate(results, start_idx):
+                score = item.get('score', 0)
+                raw_header = item.get('raw_header', '')
 
-            if raw_header and state.meta_mgr:
-                try:
-                    import re
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
-                    if sys_match:
-                        sys_id = sys_match.group(1)
-                        shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
-                        shelfmark = shelf_temp or shelfmark
-                        title = title_temp or ''
-                except Exception:
-                    pass
+                # Extract metadata
+                shelfmark = 'Unknown'
+                title = ''
 
-            p = doc.add_paragraph()
-            p.add_run(f"{idx}. {shelfmark}").bold = True
-            p.add_run(f" - Score: {score}")
-            if title:
-                doc.add_paragraph(title)
+                if raw_header and state.meta_mgr:
+                    try:
+                        import re
+                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        if sys_match:
+                            sys_id = sys_match.group(1)
+                            shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
+                            shelfmark = shelf_temp or shelfmark
+                            title = title_temp or ''
+                    except Exception:
+                        pass
 
-            doc.add_paragraph("Source Context:").bold = True
-            doc.add_paragraph(item.get('source_ctx', '').replace('*', ''))
+                p = doc.add_paragraph()
+                p.add_run(f"{idx}. {shelfmark}").bold = True
+                p.add_run(f" - Score: {score}")
+                if title:
+                    doc.add_paragraph(title)
 
-            doc.add_paragraph("Manuscript Match:").bold = True
-            doc.add_paragraph(item.get('text', '').replace('*', ''))
+                doc.add_paragraph("Source Context:").bold = True
+                doc.add_paragraph(item.get('source_ctx', '').replace('*', ''))
 
-            doc.add_paragraph("_" * 60)
+                doc.add_paragraph("Manuscript Match:").bold = True
+                doc.add_paragraph(item.get('text', '').replace('*', ''))
+
+                doc.add_paragraph("_" * 60)
+
+            return start_idx + len(results)
+
+        # Add main results
+        next_idx = add_results_to_doc(parallels_results, 1)
+
+        # Add filtered results
+        if filtered_results:
+            add_results_to_doc(filtered_results, next_idx, "Filtered Results (found in source texts)")
 
         # Add credits
         doc.add_page_break()

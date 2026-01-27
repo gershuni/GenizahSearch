@@ -3925,7 +3925,8 @@ class GenizahGUI(QMainWindow):
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
-        self.filter_text_content = ""
+        self.filter_sources = {}  # dict of {ref: cleaned_text}
+        self.filter_enabled_sources = set()  # set of enabled source refs
         self.results_filters = {}
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self.comp_filters = {}
@@ -11849,9 +11850,10 @@ class GenizahGUI(QMainWindow):
     def open_filter_dialog(self, col_idx=None):
         # If called from CheckBoxHeader, col_idx is passed
         # If called from Composition (filter text), no arg is passed (or handled differently)
+        # Note: button.clicked signal passes bool (checked state), so we need to filter that out
 
-        # Check if this is the Search Tab's results table callback
-        if isinstance(col_idx, int):
+        # Check if this is the Search Tab's results table callback (must be int but not bool)
+        if isinstance(col_idx, int) and not isinstance(col_idx, bool):
             if col_idx == 1:
                 self.open_list_filter_dialog()
                 return
@@ -11875,9 +11877,22 @@ class GenizahGUI(QMainWindow):
             return
 
         # Legacy/Composition text filter
-        dlg = FilterTextDialog(self, current_text=self.filter_text_content)
+        dlg = FilterTextDialog(self, current_sources=self.filter_sources)
+        # Restore enabled sources state
+        if self.filter_enabled_sources:
+            dlg.enabled_sources = self.filter_enabled_sources.copy()
+            dlg._refresh_sources_list()
         if dlg.exec():
-            self.filter_text_content = dlg.get_text()
+            self.filter_sources = dlg.get_sources()
+            self.filter_enabled_sources = dlg.get_enabled_sources()
+
+    def _get_filter_text(self):
+        """Get combined filter text from enabled sources."""
+        if not self.filter_sources or not self.filter_enabled_sources:
+            return ""
+        texts = [self.filter_sources[ref] for ref in self.filter_enabled_sources
+                 if ref in self.filter_sources]
+        return " ".join(texts)
 
     def _update_list_filter_cache(self):
         """Cache the set of system IDs for the currently selected lists to optimize filtering."""
@@ -12173,7 +12188,7 @@ class GenizahGUI(QMainWindow):
                 mode, 
                 chunk_size=chunk_size,
                 excluded_ids=final_excluded_ids,
-                filter_text=self.filter_text_content,
+                filter_text=self._get_filter_text(),
                 deep_scan=deep,
                 scan_limit=limit
             )
@@ -12193,7 +12208,7 @@ class GenizahGUI(QMainWindow):
                 chunk=chunk_size,
                 freq=self.spin_freq.value(),
                 mode=mode,
-                filter_text=self.filter_text_content,
+                filter_text=self._get_filter_text(),
                 threshold=self.spin_filter.value()
             )
             if hasattr(self.comp_thread, 'scan_finished_signal'):
