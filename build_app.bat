@@ -35,4 +35,4 @@ echo.
 echo Build complete! Output in dist\GenizahSearchPro
 echo.
 echo IMPORTANT: If antivirus software flags this application as a false positive,
-echo see ANTIVIRUS_INFO.md for instructions on submitting the app for whitelisting.
+echo see ANTIVIRUS_INFO.txt for instructions on submitting the app for whitelisting.
