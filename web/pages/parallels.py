@@ -234,22 +234,25 @@ def create_parallels_page(initial_text: str = None):
     # === Logic ===
 
     def update_ui():
-        if p_state.is_running:
-            run_btn.disable()
-            cancel_btn.style('display: block;')
-            progress_bar.classes(remove='opacity-0')
-            progress_bar.value = p_state.progress
-            status_label.text = p_state.status
-        else:
-            run_btn.enable()
-            cancel_btn.style('display: none;')
-            if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
-                progress_bar.value = 1.0
-                status_label.text = tr('Done')
-                p_state.finished_animation_shown = True
-                ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
+        try:
+            if p_state.is_running:
+                run_btn.disable()
+                cancel_btn.style('display: block;')
+                progress_bar.classes(remove='opacity-0')
+                progress_bar.value = p_state.progress
+                status_label.text = p_state.status
+            else:
+                run_btn.enable()
+                cancel_btn.style('display: none;')
+                if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
+                    progress_bar.value = 1.0
+                    status_label.text = tr('Done')
+                    p_state.finished_animation_shown = True
+                    progress_bar.classes(add='opacity-0')
+        except Exception:
+            pass  # Client may have been deleted
 
-    ui.timer(0.1, update_ui)
+    ui.timer(0.5, update_ui)
 
     def cancel_search():
         p_state.is_cancelled = True
