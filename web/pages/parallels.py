@@ -525,7 +525,10 @@ def create_parallels_page(initial_text: str = None):
             return
 
         if dialog:
-            dialog.close()
+            try:
+                dialog.close()
+            except Exception:
+                pass
 
         # Filter out already loaded refs
         new_refs = [r for r in refs if r not in filter_sources['loaded']]
@@ -534,21 +537,37 @@ def create_parallels_page(initial_text: str = None):
             return
 
         # Show progress
-        sefaria_progress.style('display: block;')
-        sefaria_status.style('display: block;')
-        sefaria_progress.value = 0
+        try:
+            sefaria_progress.style('display: block;')
+            sefaria_status.style('display: block;')
+            sefaria_progress.value = 0
+        except (RuntimeError, Exception):
+            return  # Client deleted
 
         total = len(new_refs)
         loaded_count = 0
         failed_count = 0
 
-        sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
+        try:
+            sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
+        except (RuntimeError, Exception):
+            return
 
         # Fetch one at a time with progress updates
         for i, ref in enumerate(new_refs):
+            # Check if client is still valid
+            try:
+                _ = sefaria_progress.client
+            except (RuntimeError, Exception):
+                print("[DEBUG] Client deleted during load, aborting")
+                return
+
             # Update progress before fetching
-            sefaria_status.text = tr('Loading: {}').format(f"{i}/{total} - {get_source_display_name(ref)[:30]}...")
-            sefaria_progress.value = i / total
+            try:
+                sefaria_status.text = tr('Loading: {}').format(f"{i}/{total} - {get_source_display_name(ref)[:30]}...")
+                sefaria_progress.value = i / total
+            except (RuntimeError, Exception):
+                return
 
             # Fetch in background thread to avoid blocking UI
             text = await run.io_bound(fetch_sefaria_text, ref)
@@ -561,26 +580,32 @@ def create_parallels_page(initial_text: str = None):
                 failed_count += 1
 
             # Update UI periodically (every item)
-            sefaria_progress.value = (i + 1) / total
+            try:
+                sefaria_progress.value = (i + 1) / total
+            except (RuntimeError, Exception):
+                return
 
         # Save to storage
         save_filter_sources()
 
         # Update UI
-        refresh_loaded_sources_ui()
+        try:
+            refresh_loaded_sources_ui()
 
-        # Notify user
-        if loaded_count > 0:
-            msg = f'{tr("Loaded")} {loaded_count} {tr("texts")}'
-            if failed_count > 0:
-                msg += f' ({failed_count} {tr("failed")})'
-            ui.notify(msg, type='positive')
-        elif failed_count > 0:
-            ui.notify(f'{tr("Failed to load")} {failed_count} {tr("texts")}', type='negative')
+            # Notify user
+            if loaded_count > 0:
+                msg = f'{tr("Loaded")} {loaded_count} {tr("texts")}'
+                if failed_count > 0:
+                    msg += f' ({failed_count} {tr("failed")})'
+                ui.notify(msg, type='positive')
+            elif failed_count > 0:
+                ui.notify(f'{tr("Failed to load")} {failed_count} {tr("texts")}', type='negative')
 
-        # Hide progress
-        sefaria_progress.style('display: none;')
-        sefaria_status.style('display: none;')
+            # Hide progress
+            sefaria_progress.style('display: none;')
+            sefaria_status.style('display: none;')
+        except (RuntimeError, Exception):
+            pass  # Client deleted
 
     # Connect Sefaria buttons
     btn_tanakh.on('click', lambda: show_sefaria_selection_dialog('tanakh'))
@@ -969,7 +994,15 @@ def create_parallels_page(initial_text: str = None):
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
     def render_results(results, filtered_results=None):
-        results_container.clear()
+        try:
+            _ = results_container.client
+        except (RuntimeError, Exception):
+            return  # Client deleted
+
+        try:
+            results_container.clear()
+        except (RuntimeError, Exception):
+            return
 
         if not results and not filtered_results:
             with results_container:
