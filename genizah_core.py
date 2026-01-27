@@ -938,6 +938,12 @@ class LabEngine:
                         clean_chunk = ' '.join(re.findall(r'[\u05D0-\u05EA]+', chunk_text))
                         if clean_chunk and clean_chunk in filter_text:
                             is_filtered_match = True
+                            # Debug: log first few filter matches
+                            if not hasattr(self, '_filter_match_count'):
+                                self._filter_match_count = 0
+                            self._filter_match_count += 1
+                            if self._filter_match_count <= 3:
+                                print(f"[DEBUG] Filter match #{self._filter_match_count}: '{clean_chunk[:60]}...'")
 
                     match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
                     
