@@ -931,8 +931,9 @@ class LabEngine:
                     uid = doc['unique_id'][0]
 
                     # --- Filter Text Logic ---
+                    # Check if the search chunk appears in the loaded source texts (e.g., Tanakh)
                     is_filtered_match = False
-                    if filter_text and filter_text in content:
+                    if filter_text and chunk_text in filter_text:
                         is_filtered_match = True
 
                     match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
