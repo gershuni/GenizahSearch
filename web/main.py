@@ -1200,17 +1200,8 @@ def create_layout():
         main_drawer.toggle()
         app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
 
-    async def nav_to(path):
-        """Navigate and close drawer on mobile only."""
-        # Check screen width - only close drawer on mobile (<768px)
-        try:
-            width = await ui.run_javascript('window.innerWidth', timeout=3.0)
-            if width and width < 768:
-                app.storage.user['drawer_open'] = False
-                main_drawer.hide()
-        except (TimeoutError, Exception):
-            # If JavaScript fails, just navigate without closing drawer
-            pass
+    def nav_to(path):
+        """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
         ui.navigate.to(path)
 
     # Connect menu button to toggle function

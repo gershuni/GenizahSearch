@@ -3909,10 +3909,23 @@ class SearchEngine:
         """
         Parses search syntax prefix from query string.
         Returns (mode, clean_query). If no prefix, returns (None, query).
+
+        Prefixes:
+        - ??? = variants_maximum (top 150 pairs)
+        - ?? = variants_extended (top 70 pairs)
+        - ? = variants (top 30 pairs, basic)
+        - = = exact
+        - ~ = fuzzy
+        - / = Regex
+        - $ = Title
+        - # = Shelfmark
         """
         if not query: return None, ""
 
+        # Check multi-character prefixes first (order matters: longer prefixes first)
         prefix_map = [
+            ('???', 'variants_maximum'),
+            ('??', 'variants_extended'),
             ('?', 'variants'),
             ('=', 'exact'),
             ('~', 'fuzzy'),
