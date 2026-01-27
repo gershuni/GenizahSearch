@@ -49,7 +49,7 @@ def flatten_sefaria_text(text_data):
 def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
     """Fetch a single text from Sefaria API (cleaned, no nikud/taamim)."""
     cache_dir = get_cache_dir()
-    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
+    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_v2.txt")
 
     if use_cache and os.path.exists(cache_file):
         try:
@@ -61,26 +61,47 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
             pass
 
     try:
-        url = f"https://www.sefaria.org/api/texts/{ref.replace(' ', '%20')}?context=0&pad=0"
+        # Try v3 API with "Text Only" version (no nikud/taamim)
+        encoded_ref = ref.replace(' ', '%20')
+        url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
         resp = requests.get(url, timeout=30)
+
+        raw_text = ""
         if resp.status_code == 200:
             data = resp.json()
-            he_text = data.get('he', [])
-            if isinstance(he_text, str):
-                raw_text = he_text
-            else:
-                raw_text = flatten_sefaria_text(he_text)
+            # v3 API returns versions array
+            versions = data.get('versions', [])
+            for ver in versions:
+                if ver.get('language') == 'he':
+                    ver_text = ver.get('text', [])
+                    if isinstance(ver_text, str):
+                        raw_text = ver_text
+                    else:
+                        raw_text = flatten_sefaria_text(ver_text)
+                    break
 
-            if raw_text:
-                # Clean the text (remove nikud, taamim, non-Hebrew)
-                cleaned = clean_hebrew_text(raw_text)
-                if cleaned:
-                    try:
-                        with open(cache_file, 'w', encoding='utf-8') as f:
-                            f.write(cleaned)
-                    except Exception:
-                        pass
-                    return cleaned
+        # Fallback to v2 API if v3 didn't work
+        if not raw_text:
+            url = f"https://www.sefaria.org/api/texts/{encoded_ref}?context=0&pad=0"
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                he_text = data.get('he', [])
+                if isinstance(he_text, str):
+                    raw_text = he_text
+                else:
+                    raw_text = flatten_sefaria_text(he_text)
+
+        if raw_text:
+            # Clean the text (remove any remaining nikud, taamim, non-Hebrew)
+            cleaned = clean_hebrew_text(raw_text)
+            if cleaned:
+                try:
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        f.write(cleaned)
+                except Exception:
+                    pass
+                return cleaned
     except Exception as e:
         print(f"Error fetching {ref}: {e}")
 
