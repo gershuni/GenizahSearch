@@ -891,6 +891,11 @@ def create_parallels_page(initial_text: str = None):
         p_state.status = tr('Cancelling...')
 
     async def execute_parallels():
+        # Prevent duplicate executions
+        if p_state.is_running:
+            print("[DEBUG] execute_parallels: already running, skipping")
+            return
+
         print("[DEBUG] execute_parallels called")
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
@@ -1102,30 +1107,49 @@ def create_parallels_page(initial_text: str = None):
 
         sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
 
+        # Limit displayed results to prevent browser slowdown
+        MAX_DISPLAYED_GROUPS = 50
+        display_groups = sorted_groups[:MAX_DISPLAYED_GROUPS]
+        display_filtered_groups = sorted_filtered_groups[:MAX_DISPLAYED_GROUPS]
+        truncated_main = len(sorted_groups) > MAX_DISPLAYED_GROUPS
+        truncated_filtered = len(sorted_filtered_groups) > MAX_DISPLAYED_GROUPS
+
         # Update header with manuscript count
         total_results = len(results)
         total_manuscripts = len(sorted_groups)
         filtered_count = len(filtered_results) if filtered_results else 0
-        if filtered_count > 0:
+
+        if total_results == 0 and filtered_count > 0:
+            # All results were filtered - explain this to user
+            results_header.text = f"{tr('All results filtered')} ({filtered_count} {tr('in filtered sources')})"
+        elif filtered_count > 0:
             results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')} ({filtered_count} {tr('filtered')})"
         else:
             results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
 
         with results_container:
             # Main results
-            for group_key, group_data in sorted_groups:
+            for group_key, group_data in display_groups:
                 create_manuscript_group(group_data)
 
+            if truncated_main:
+                with ui.row().classes('w-full justify-center py-4'):
+                    ui.label(f"{tr('Showing')} {MAX_DISPLAYED_GROUPS} {tr('of')} {len(sorted_groups)} {tr('manuscripts')}...").classes('text-sm').style('color: var(--text-muted);')
+
             # Filtered results section
-            if sorted_filtered_groups:
+            if display_filtered_groups:
                 ui.separator().classes('my-4')
                 with ui.row().classes('w-full items-center gap-2 py-2'):
                     ui.icon('filter_alt').classes('text-xl').style('color: var(--accent-amber);')
                     h3(tr('Filtered Results (found in source texts)'), classes='text-lg', style='color: var(--accent-amber);')
                     ui.badge(f"{filtered_count}", color='amber').classes('text-xs')
 
-                for group_key, group_data in sorted_filtered_groups:
+                for group_key, group_data in display_filtered_groups:
                     create_manuscript_group(group_data, is_filtered=True)
+
+                if truncated_filtered:
+                    with ui.row().classes('w-full justify-center py-4'):
+                        ui.label(f"{tr('Showing')} {MAX_DISPLAYED_GROUPS} {tr('of')} {len(sorted_filtered_groups)} {tr('filtered manuscripts')}...").classes('text-sm').style('color: var(--text-muted);')
 
     def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
