@@ -677,13 +677,18 @@ def create_parallels_page(initial_text: str = None):
 
         if result_data:
             main_results = result_data.get('main', [])
-            if main_results:
+            filtered_results = result_data.get('filtered', [])
+
+            if main_results or filtered_results:
                 p_state.results = main_results
+                p_state.filtered_results = filtered_results
                 try:
+                    # Store both main and filtered results for export
                     app.storage.user['parallels_results'] = main_results
+                    app.storage.user['parallels_filtered'] = filtered_results
                 except Exception:
                     pass
-                render_results(main_results)
+                render_results(main_results, filtered_results)
             else:
                 with results_container:
                     show_empty_state()
@@ -698,10 +703,10 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
-    def render_results(results):
+    def render_results(results, filtered_results=None):
         results_container.clear()
 
-        if not results:
+        if not results and not filtered_results:
             with results_container:
                 show_empty_state()
             return
@@ -755,16 +760,68 @@ def create_parallels_page(initial_text: str = None):
         # Sort groups by max score
         sorted_groups = sorted(grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
 
+        # Group filtered results similarly
+        filtered_grouped = {}
+        if filtered_results:
+            for item in filtered_results:
+                raw_header = item.get('raw_header', '')
+                sys_id = None
+                shelfmark = 'Unknown'
+
+                if raw_header and state.meta_mgr:
+                    try:
+                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        if sys_match:
+                            sys_id = sys_match.group(1)
+                            shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
+                            shelfmark = shelf_temp or shelfmark
+                    except Exception:
+                        pass
+
+                key = sys_id if sys_id else shelfmark
+                if key not in filtered_grouped:
+                    filtered_grouped[key] = {
+                        'sys_id': sys_id,
+                        'shelfmark': shelfmark,
+                        'items': [],
+                        'max_score': 0,
+                        'avg_score': 0
+                    }
+                filtered_grouped[key]['items'].append(item)
+                filtered_grouped[key]['max_score'] = max(filtered_grouped[key]['max_score'], item.get('score', 0))
+
+            for key in filtered_grouped:
+                scores = [item.get('score', 0) for item in filtered_grouped[key]['items']]
+                filtered_grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
+
+        sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+
         # Update header with manuscript count
         total_results = len(results)
         total_manuscripts = len(sorted_groups)
-        results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
+        filtered_count = len(filtered_results) if filtered_results else 0
+        if filtered_count > 0:
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')} ({filtered_count} {tr('filtered')})"
+        else:
+            results_header.text = f"{total_results} {tr('matches in')} {total_manuscripts} {tr('manuscripts')}"
 
         with results_container:
+            # Main results
             for group_key, group_data in sorted_groups:
                 create_manuscript_group(group_data)
 
-    def create_manuscript_group(group_data):
+            # Filtered results section
+            if sorted_filtered_groups:
+                ui.separator().classes('my-4')
+                with ui.row().classes('w-full items-center gap-2 py-2'):
+                    ui.icon('filter_alt').classes('text-xl').style('color: var(--accent-amber);')
+                    h3(tr('Filtered Results (found in source texts)'), classes='text-lg', style='color: var(--accent-amber);')
+                    ui.badge(f"{filtered_count}", color='amber').classes('text-xs')
+
+                for group_key, group_data in sorted_filtered_groups:
+                    create_manuscript_group(group_data, is_filtered=True)
+
+    def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
         shelfmark = group_data['shelfmark']
         sys_id = group_data['sys_id']
@@ -781,15 +838,19 @@ def create_parallels_page(initial_text: str = None):
             except Exception:
                 pass
 
-        with ui.card().classes('w-full p-0 overflow-hidden').style('border: 2px solid var(--border-light);'):
+        border_style = 'border: 2px solid var(--accent-amber);' if is_filtered else 'border: 2px solid var(--border-light);'
+        with ui.card().classes('w-full p-0 overflow-hidden').style(border_style):
             # Header (always visible)
             with ui.row().classes('w-full items-center justify-between p-4').style('background: var(--bg-card);'):
                 with ui.column().classes('gap-1 flex-grow'):
                     with ui.row().classes('items-center gap-3'):
-                        ui.icon('menu_book').classes('text-xl').style('color: var(--primary-600);')
+                        icon_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-600);'
+                        ui.icon('menu_book').classes('text-xl').style(icon_color)
                         # Changed to H3
-                        h3(shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
-                        ui.badge(f"{len(items)} {tr('matches')}", color='blue').classes('text-xs')
+                        shelfmark_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-700);'
+                        h3(shelfmark, classes='text-lg font-bold', style=shelfmark_color)
+                        badge_color = 'amber' if is_filtered else 'blue'
+                        ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
                     if title:
                         title_short = (title[:100] + '...') if len(title) > 100 else title
