@@ -496,6 +496,17 @@ TRANSLATIONS = {
     "Matches containing text from this field will be filtered out": "התאמות המכילות טקסט משדה זה יסוננו",
     "Paste text to exclude from results...": "הדבק טקסט להחרגה מהתוצאות...",
     "Filter text (exclude known sources)": "טקסט סינון (הסרת מקורות ידועים)",
+    "More Sources...": "עוד מקורות...",
+    "More Sources": "עוד מקורות",
+    "Browse all available Sefaria sources": "עיין בכל המקורות הזמינים מספריא",
+    "Source Type:": "סוג מקור:",
+    "Tosefta": "תוספתא",
+    "Jerusalem Talmud": "תלמוד ירושלמי",
+    "Midrash Rabbah": "מדרש רבה",
+    "Midrash Tanchuma": "מדרש תנחומא",
+    "Sifra": "ספרא",
+    "Sifrei": "ספרי",
+    "Mekhilta": "מכילתא",
 
     # --- Export Report Headers ---
     "Composition Search": "חיפוש חיבורים", 

@@ -130,6 +130,166 @@ SEFARIA_SOURCES = {
                 "he_names": ["נידה"]
             }
         }
+    },
+    "tosefta": {
+        "name": "תוספתא",
+        "books": {
+            "zeraim": {
+                "name": "זרעים",
+                "refs": ["Tosefta Berakhot", "Tosefta Peah", "Tosefta Demai", "Tosefta Kilayim",
+                        "Tosefta Sheviit", "Tosefta Terumot", "Tosefta Maasrot", "Tosefta Maaser Sheni",
+                        "Tosefta Challah", "Tosefta Orlah", "Tosefta Bikkurim"],
+                "he_names": ["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות",
+                            "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים"]
+            },
+            "moed": {
+                "name": "מועד",
+                "refs": ["Tosefta Shabbat", "Tosefta Eruvin", "Tosefta Pesachim", "Tosefta Shekalim",
+                        "Tosefta Yoma", "Tosefta Sukkah", "Tosefta Beitzah", "Tosefta Rosh Hashanah",
+                        "Tosefta Taanit", "Tosefta Megillah", "Tosefta Moed Katan", "Tosefta Chagigah"],
+                "he_names": ["שבת", "עירובין", "פסחים", "שקלים", "יומא", "סוכה",
+                            "ביצה", "ראש השנה", "תענית", "מגילה", "מועד קטן", "חגיגה"]
+            },
+            "nashim": {
+                "name": "נשים",
+                "refs": ["Tosefta Yevamot", "Tosefta Ketubot", "Tosefta Nedarim", "Tosefta Nazir",
+                        "Tosefta Sotah", "Tosefta Gittin", "Tosefta Kiddushin"],
+                "he_names": ["יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין"]
+            },
+            "nezikin": {
+                "name": "נזיקין",
+                "refs": ["Tosefta Bava Kamma", "Tosefta Bava Metzia", "Tosefta Bava Batra",
+                        "Tosefta Sanhedrin", "Tosefta Makkot", "Tosefta Shevuot", "Tosefta Eduyot",
+                        "Tosefta Avodah Zarah", "Tosefta Horayot"],
+                "he_names": ["בבא קמא", "בבא מציעא", "בבא בתרא", "סנהדרין", "מכות",
+                            "שבועות", "עדיות", "עבודה זרה", "הוריות"]
+            },
+            "kodashim": {
+                "name": "קדשים",
+                "refs": ["Tosefta Zevachim", "Tosefta Menachot", "Tosefta Chullin", "Tosefta Bekhorot",
+                        "Tosefta Arakhin", "Tosefta Temurah", "Tosefta Keritot", "Tosefta Meilah"],
+                "he_names": ["זבחים", "מנחות", "חולין", "בכורות", "ערכין",
+                            "תמורה", "כריתות", "מעילה"]
+            },
+            "tahorot": {
+                "name": "טהרות",
+                "refs": ["Tosefta Kelim Bava Kamma", "Tosefta Kelim Bava Metzia", "Tosefta Kelim Bava Batra",
+                        "Tosefta Oholot", "Tosefta Negaim", "Tosefta Parah", "Tosefta Tahorot",
+                        "Tosefta Mikvaot", "Tosefta Niddah", "Tosefta Makhshirin", "Tosefta Zavim",
+                        "Tosefta Tevul Yom", "Tosefta Yadayim", "Tosefta Oktzin"],
+                "he_names": ["כלים בבא קמא", "כלים בבא מציעא", "כלים בבא בתרא",
+                            "אהלות", "נגעים", "פרה", "טהרות", "מקוואות",
+                            "נידה", "מכשירין", "זבים", "טבול יום", "ידיים", "עוקצין"]
+            }
+        }
+    },
+    "yerushalmi": {
+        "name": "תלמוד ירושלמי",
+        "books": {
+            "zeraim": {
+                "name": "זרעים",
+                "refs": ["Jerusalem Talmud Berakhot", "Jerusalem Talmud Peah", "Jerusalem Talmud Demai",
+                        "Jerusalem Talmud Kilayim", "Jerusalem Talmud Sheviit", "Jerusalem Talmud Terumot",
+                        "Jerusalem Talmud Maasrot", "Jerusalem Talmud Maaser Sheni", "Jerusalem Talmud Challah",
+                        "Jerusalem Talmud Orlah", "Jerusalem Talmud Bikkurim"],
+                "he_names": ["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות",
+                            "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים"]
+            },
+            "moed": {
+                "name": "מועד",
+                "refs": ["Jerusalem Talmud Shabbat", "Jerusalem Talmud Eruvin", "Jerusalem Talmud Pesachim",
+                        "Jerusalem Talmud Shekalim", "Jerusalem Talmud Yoma", "Jerusalem Talmud Sukkah",
+                        "Jerusalem Talmud Beitzah", "Jerusalem Talmud Rosh Hashanah", "Jerusalem Talmud Taanit",
+                        "Jerusalem Talmud Megillah", "Jerusalem Talmud Moed Katan", "Jerusalem Talmud Chagigah"],
+                "he_names": ["שבת", "עירובין", "פסחים", "שקלים", "יומא", "סוכה",
+                            "ביצה", "ראש השנה", "תענית", "מגילה", "מועד קטן", "חגיגה"]
+            },
+            "nashim": {
+                "name": "נשים",
+                "refs": ["Jerusalem Talmud Yevamot", "Jerusalem Talmud Ketubot", "Jerusalem Talmud Nedarim",
+                        "Jerusalem Talmud Nazir", "Jerusalem Talmud Sotah", "Jerusalem Talmud Gittin",
+                        "Jerusalem Talmud Kiddushin"],
+                "he_names": ["יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין"]
+            },
+            "nezikin": {
+                "name": "נזיקין",
+                "refs": ["Jerusalem Talmud Bava Kamma", "Jerusalem Talmud Bava Metzia", "Jerusalem Talmud Bava Batra",
+                        "Jerusalem Talmud Sanhedrin", "Jerusalem Talmud Makkot", "Jerusalem Talmud Shevuot",
+                        "Jerusalem Talmud Avodah Zarah", "Jerusalem Talmud Horayot"],
+                "he_names": ["בבא קמא", "בבא מציעא", "בבא בתרא", "סנהדרין", "מכות",
+                            "שבועות", "עבודה זרה", "הוריות"]
+            },
+            "tahorot": {
+                "name": "טהרות",
+                "refs": ["Jerusalem Talmud Niddah"],
+                "he_names": ["נידה"]
+            }
+        }
+    },
+    "midrash_rabbah": {
+        "name": "מדרש רבה",
+        "books": {
+            "torah": {
+                "name": "תורה",
+                "refs": ["Bereishit Rabbah", "Shemot Rabbah", "Vayikra Rabbah", "Bamidbar Rabbah", "Devarim Rabbah"],
+                "he_names": ["בראשית רבה", "שמות רבה", "ויקרא רבה", "במדבר רבה", "דברים רבה"]
+            },
+            "megillot": {
+                "name": "מגילות",
+                "refs": ["Shir HaShirim Rabbah", "Ruth Rabbah", "Eichah Rabbah", "Kohelet Rabbah", "Esther Rabbah"],
+                "he_names": ["שיר השירים רבה", "רות רבה", "איכה רבה", "קהלת רבה", "אסתר רבה"]
+            }
+        }
+    },
+    "midrash_tanchuma": {
+        "name": "מדרש תנחומא",
+        "books": {
+            "torah": {
+                "name": "תורה",
+                "refs": ["Midrash Tanchuma, Bereshit", "Midrash Tanchuma, Noach", "Midrash Tanchuma, Lech Lecha",
+                        "Midrash Tanchuma, Vayera", "Midrash Tanchuma, Chayei Sara", "Midrash Tanchuma, Toldot",
+                        "Midrash Tanchuma, Vayetzei", "Midrash Tanchuma, Vayishlach", "Midrash Tanchuma, Vayeshev",
+                        "Midrash Tanchuma, Miketz", "Midrash Tanchuma, Vayigash", "Midrash Tanchuma, Vayechi",
+                        "Midrash Tanchuma, Shemot", "Midrash Tanchuma, Vaera", "Midrash Tanchuma, Bo",
+                        "Midrash Tanchuma, Beshalach", "Midrash Tanchuma, Yitro", "Midrash Tanchuma, Mishpatim",
+                        "Midrash Tanchuma, Terumah", "Midrash Tanchuma, Tetzaveh", "Midrash Tanchuma, Ki Tisa",
+                        "Midrash Tanchuma, Vayakhel", "Midrash Tanchuma, Pekudei"],
+                "he_names": ["בראשית", "נח", "לך לך", "וירא", "חיי שרה", "תולדות",
+                            "ויצא", "וישלח", "וישב", "מקץ", "ויגש", "ויחי",
+                            "שמות", "וארא", "בא", "בשלח", "יתרו", "משפטים",
+                            "תרומה", "תצוה", "כי תשא", "ויקהל", "פקודי"]
+            }
+        }
+    },
+    "sifra": {
+        "name": "ספרא",
+        "books": {
+            "all": {
+                "name": "ספרא",
+                "refs": ["Sifra"],
+                "he_names": ["ספרא"]
+            }
+        }
+    },
+    "sifrei": {
+        "name": "ספרי",
+        "books": {
+            "all": {
+                "name": "ספרי",
+                "refs": ["Sifrei Bamidbar", "Sifrei Devarim"],
+                "he_names": ["ספרי במדבר", "ספרי דברים"]
+            }
+        }
+    },
+    "mekhilta": {
+        "name": "מכילתא",
+        "books": {
+            "all": {
+                "name": "מכילתא",
+                "refs": ["Mekhilta d'Rabbi Yishmael"],
+                "he_names": ["מכילתא דרבי ישמעאל"]
+            }
+        }
     }
 }
 
@@ -326,6 +486,128 @@ class SourceSelectionDialog(QDialog):
         self.accept()
 
 
+class AllSourcesDialog(QDialog):
+    """Dialog for browsing all available Sefaria sources."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.selected_refs = []
+
+        self.setWindowTitle(tr("More Sources"))
+        self.resize(500, 600)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        layout = QVBoxLayout()
+
+        # Source type selector
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel(tr("Source Type:")))
+        self.type_combo = QComboBox()
+
+        for key, source_data in SEFARIA_SOURCES.items():
+            self.type_combo.addItem(source_data["name"], key)
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+        type_row.addWidget(self.type_combo)
+        type_row.addStretch()
+        layout.addLayout(type_row)
+
+        # Category selector
+        cat_row = QHBoxLayout()
+        cat_row.addWidget(QLabel(tr("Category:")))
+        self.cat_combo = QComboBox()
+        self.cat_combo.currentIndexChanged.connect(self._on_category_changed)
+        cat_row.addWidget(self.cat_combo)
+        cat_row.addStretch()
+        layout.addLayout(cat_row)
+
+        # Select all checkbox
+        self.chk_select_all = QCheckBox(tr("Select All"))
+        self.chk_select_all.toggled.connect(self._on_select_all_toggled)
+        layout.addWidget(self.chk_select_all)
+
+        # Book list
+        self.book_list = QListWidget()
+        self.book_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        layout.addWidget(self.book_list)
+
+        # Info label
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.info_label)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok = QPushButton(tr("Load Selected"))
+        btn_ok.clicked.connect(self._on_ok)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+        layout.addLayout(btn_row)
+
+        self.setLayout(layout)
+
+        # Initialize
+        self._on_type_changed(0)
+
+    def _on_type_changed(self, index):
+        self.cat_combo.clear()
+        source_key = self.type_combo.currentData()
+        source_data = SEFARIA_SOURCES.get(source_key, {})
+
+        self.cat_combo.addItem(tr("All"), "all")
+        for key, book_data in source_data.get("books", {}).items():
+            self.cat_combo.addItem(book_data["name"], key)
+
+        self._populate_list()
+
+    def _on_category_changed(self, index):
+        self._populate_list()
+
+    def _populate_list(self):
+        self.book_list.clear()
+        source_key = self.type_combo.currentData()
+        source_data = SEFARIA_SOURCES.get(source_key, {})
+        cat_key = self.cat_combo.currentData()
+
+        if cat_key == "all":
+            for book_key, book_data in source_data.get("books", {}).items():
+                for i, (ref, he_name) in enumerate(zip(book_data["refs"], book_data["he_names"])):
+                    item = QListWidgetItem(f"{book_data['name']} - {he_name}")
+                    item.setData(Qt.ItemDataRole.UserRole, ref)
+                    self.book_list.addItem(item)
+        else:
+            book_data = source_data.get("books", {}).get(cat_key, {})
+            for ref, he_name in zip(book_data.get("refs", []), book_data.get("he_names", [])):
+                item = QListWidgetItem(he_name)
+                item.setData(Qt.ItemDataRole.UserRole, ref)
+                self.book_list.addItem(item)
+
+        self._update_info()
+
+    def _on_select_all_toggled(self, checked):
+        for i in range(self.book_list.count()):
+            self.book_list.item(i).setSelected(checked)
+        self._update_info()
+
+    def _update_info(self):
+        count = len(self.book_list.selectedItems())
+        total = self.book_list.count()
+        self.info_label.setText(tr("Selected: {} / {}").format(count, total))
+
+    def _on_ok(self):
+        self.selected_refs = []
+        for item in self.book_list.selectedItems():
+            ref = item.data(Qt.ItemDataRole.UserRole)
+            if ref:
+                self.selected_refs.append(ref)
+        if not self.selected_refs:
+            QMessageBox.warning(self, tr("Warning"), tr("Please select at least one book."))
+            return
+        self.accept()
+
+
 class FilterTextDialog(QDialog):
     """Dialog to input or load text for filtering composition results."""
 
@@ -365,6 +647,11 @@ class FilterTextDialog(QDialog):
         btn_talmud.setToolTip(tr("Load Talmud Bavli text from Sefaria"))
         btn_talmud.clicked.connect(lambda: self._open_source_dialog("talmud"))
         sources_btn_row.addWidget(btn_talmud)
+
+        btn_more = QPushButton(tr("More Sources..."))
+        btn_more.setToolTip(tr("Browse all available Sefaria sources"))
+        btn_more.clicked.connect(self._open_all_sources_dialog)
+        sources_btn_row.addWidget(btn_more)
 
         sources_btn_row.addStretch()
         sources_layout.addLayout(sources_btn_row)
@@ -411,6 +698,12 @@ class FilterTextDialog(QDialog):
             return
 
         dlg = SourceSelectionDialog(self, source_type, source_data)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_refs:
+            self._start_fetch(dlg.selected_refs)
+
+    def _open_all_sources_dialog(self):
+        """Open dialog to browse all available Sefaria sources."""
+        dlg = AllSourcesDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_refs:
             self._start_fetch(dlg.selected_refs)
 
