@@ -516,16 +516,25 @@ def create_search_page(initial_query: str = None):
         search_state.is_cancelled = True
         search_state.status = tr('Stopping...')
 
+    # Track previous state to avoid unnecessary UI updates
+    prev_is_running = {'value': False}
+
     def update_progress_ui():
         if search_state.is_running:
             progress_bar.classes(remove='opacity-0')
             progress_bar.value = search_state.progress
             status_label.text = search_state.status
-            search_btn.set_visibility(False)
-            stop_btn.set_visibility(True)
+            # Only update visibility when state changes
+            if not prev_is_running['value']:
+                search_btn.set_visibility(False)
+                stop_btn.set_visibility(True)
+                prev_is_running['value'] = True
         else:
-            search_btn.set_visibility(True)
-            stop_btn.set_visibility(False)
+            # Only update visibility when state changes
+            if prev_is_running['value']:
+                search_btn.set_visibility(True)
+                stop_btn.set_visibility(False)
+                prev_is_running['value'] = False
             if search_state.is_cancelled:
                 status_label.text = tr('Search stopped')
                 ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
@@ -536,7 +545,7 @@ def create_search_page(initial_query: str = None):
             else:
                 progress_bar.classes(add='opacity-0')
 
-    ui.timer(0.1, update_progress_ui)
+    ui.timer(0.2, update_progress_ui)
 
     async def execute_search():
         query = query_input.value.strip() if query_input.value else ""
