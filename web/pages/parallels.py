@@ -61,29 +61,41 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
             pass
 
     try:
-        # Try v3 API with "Text Only" version (no nikud/taamim)
         encoded_ref = ref.replace(' ', '%20')
-        url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
-        resp = requests.get(url, timeout=30)
-
         raw_text = ""
-        if resp.status_code == 200:
-            data = resp.json()
-            # v3 API returns versions array
-            versions = data.get('versions', [])
-            for ver in versions:
-                if ver.get('language') == 'he':
-                    ver_text = ver.get('text', [])
-                    if isinstance(ver_text, str):
-                        raw_text = ver_text
-                    else:
-                        raw_text = flatten_sefaria_text(ver_text)
-                    break
 
-        # Fallback to v2 API if v3 didn't work
+        # Determine if this is a Tanakh ref (for v3 "Text Only" version)
+        is_tanakh = any(ref.startswith(book) for book in [
+            'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+            'Joshua', 'Judges', 'I Samuel', 'II Samuel', 'I Kings', 'II Kings',
+            'Isaiah', 'Jeremiah', 'Ezekiel', 'Hosea', 'Joel', 'Amos', 'Obadiah',
+            'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai',
+            'Zechariah', 'Malachi', 'Psalms', 'Proverbs', 'Job', 'Song of Songs',
+            'Ruth', 'Lamentations', 'Ecclesiastes', 'Esther', 'Daniel',
+            'Ezra', 'Nehemiah', 'I Chronicles', 'II Chronicles'
+        ])
+
+        if is_tanakh:
+            # Try v3 API with "Text Only" version (no nikud/taamim) for Tanakh
+            url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
+            resp = requests.get(url, timeout=15)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                versions = data.get('versions', [])
+                for ver in versions:
+                    if ver.get('language') == 'he':
+                        ver_text = ver.get('text', [])
+                        if isinstance(ver_text, str):
+                            raw_text = ver_text
+                        else:
+                            raw_text = flatten_sefaria_text(ver_text)
+                        break
+
+        # Use v2 API for non-Tanakh or as fallback
         if not raw_text:
             url = f"https://www.sefaria.org/api/texts/{encoded_ref}?context=0&pad=0"
-            resp = requests.get(url, timeout=30)
+            resp = requests.get(url, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 he_text = data.get('he', [])
@@ -102,6 +114,8 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
                 except Exception:
                     pass
                 return cleaned
+    except requests.Timeout:
+        print(f"Timeout fetching {ref}")
     except Exception as e:
         print(f"Error fetching {ref}: {e}")
 
@@ -288,7 +302,9 @@ def create_parallels_page(initial_text: str = None):
 
         # === Filter Text (Collapsible) ===
         # State for loaded sources: {ref: cleaned_text}
-        filter_sources = {'loaded': {}, 'enabled': set()}
+        # Only store refs in persistent storage (not the full text - too large for WebSocket)
+        # Full text is reloaded from cache files on page load (async)
+        filter_sources = {'loaded': {}, 'enabled': set(), 'pending_restore': True}
 
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
             with ui.column().classes('w-full p-4 gap-4'):
@@ -429,6 +445,15 @@ def create_parallels_page(initial_text: str = None):
 
         update_filter_info()
 
+    def save_filter_sources():
+        """Save filter source refs to persistent storage (not the full text - too large)."""
+        try:
+            # Only save refs (not full text) to avoid WebSocket issues with large data
+            app.storage.user['filter_sources_refs'] = list(filter_sources['loaded'].keys())
+            app.storage.user['filter_sources_enabled'] = list(filter_sources['enabled'])
+        except Exception as e:
+            print(f"[DEBUG] Error saving filter sources: {e}")
+
     def on_source_toggled(ref, checked):
         """Handle source checkbox toggle."""
         if checked:
@@ -436,6 +461,7 @@ def create_parallels_page(initial_text: str = None):
         else:
             filter_sources['enabled'].discard(ref)
         update_filter_info()
+        save_filter_sources()
 
     def update_filter_info():
         """Update the info label."""
@@ -446,16 +472,19 @@ def create_parallels_page(initial_text: str = None):
     def select_all_sources():
         filter_sources['enabled'] = set(filter_sources['loaded'].keys())
         refresh_loaded_sources_ui()
+        save_filter_sources()
 
     def deselect_all_sources():
         filter_sources['enabled'].clear()
         refresh_loaded_sources_ui()
+        save_filter_sources()
 
     def remove_unchecked_sources():
         to_remove = [ref for ref in filter_sources['loaded'].keys() if ref not in filter_sources['enabled']]
         for ref in to_remove:
             del filter_sources['loaded'][ref]
         refresh_loaded_sources_ui()
+        save_filter_sources()
 
     def get_filter_text():
         """Get combined text from all enabled sources."""
@@ -468,7 +497,7 @@ def create_parallels_page(initial_text: str = None):
     btn_remove_unchecked.on('click', remove_unchecked_sources)
 
     async def load_selected_refs(refs, dialog):
-        """Load selected refs from Sefaria."""
+        """Load selected refs from Sefaria with incremental progress."""
         if not refs:
             ui.notify(tr('Please select at least one book.'), type='warning')
             return
@@ -488,25 +517,44 @@ def create_parallels_page(initial_text: str = None):
         sefaria_progress.value = 0
 
         total = len(new_refs)
-
-        def fetch_all():
-            results = {}
-            for i, ref in enumerate(new_refs):
-                text = fetch_sefaria_text(ref)
-                if text:
-                    results[ref] = text
-            return results
+        loaded_count = 0
+        failed_count = 0
 
         sefaria_status.text = tr('Loading: {}').format(f"0/{total}")
 
-        results = await run.io_bound(fetch_all)
+        # Fetch one at a time with progress updates
+        for i, ref in enumerate(new_refs):
+            # Update progress before fetching
+            sefaria_status.text = tr('Loading: {}').format(f"{i}/{total} - {get_source_display_name(ref)[:30]}...")
+            sefaria_progress.value = i / total
 
-        # Add new sources
-        if results:
-            filter_sources['loaded'].update(results)
-            filter_sources['enabled'].update(results.keys())
-            refresh_loaded_sources_ui()
-            ui.notify(f'{tr("Loaded")} {len(results)} {tr("texts")}', type='positive')
+            # Fetch in background thread to avoid blocking UI
+            text = await run.io_bound(fetch_sefaria_text, ref)
+
+            if text:
+                filter_sources['loaded'][ref] = text
+                filter_sources['enabled'].add(ref)
+                loaded_count += 1
+            else:
+                failed_count += 1
+
+            # Update UI periodically (every item)
+            sefaria_progress.value = (i + 1) / total
+
+        # Save to storage
+        save_filter_sources()
+
+        # Update UI
+        refresh_loaded_sources_ui()
+
+        # Notify user
+        if loaded_count > 0:
+            msg = f'{tr("Loaded")} {loaded_count} {tr("texts")}'
+            if failed_count > 0:
+                msg += f' ({failed_count} {tr("failed")})'
+            ui.notify(msg, type='positive')
+        elif failed_count > 0:
+            ui.notify(f'{tr("Failed to load")} {failed_count} {tr("texts")}', type='negative')
 
         # Hide progress
         sefaria_progress.style('display: none;')
@@ -1211,3 +1259,37 @@ def create_parallels_page(initial_text: str = None):
     if p_state.results:
         results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
         render_results(p_state.results)
+
+    # Async function to restore filter sources from persistent storage
+    async def restore_filter_sources():
+        """Restore filter sources from cache files (async to avoid blocking)."""
+        stored_refs = app.storage.user.get('filter_sources_refs', [])
+        stored_enabled = set(app.storage.user.get('filter_sources_enabled', []))
+
+        if not stored_refs:
+            filter_sources['pending_restore'] = False
+            return
+
+        # Show loading indicator
+        sefaria_status.style('display: block;')
+        sefaria_status.text = tr('Loading: {}').format(f"0/{len(stored_refs)}")
+
+        # Load refs from cache (in background thread)
+        for i, ref in enumerate(stored_refs):
+            text = await run.io_bound(fetch_sefaria_text, ref, True)
+            if text:
+                filter_sources['loaded'][ref] = text
+                if ref in stored_enabled:
+                    filter_sources['enabled'].add(ref)
+            sefaria_status.text = tr('Loading: {}').format(f"{i+1}/{len(stored_refs)}")
+
+        # Update UI
+        filter_sources['pending_restore'] = False
+        sefaria_status.style('display: none;')
+        refresh_loaded_sources_ui()
+
+        if filter_sources['loaded']:
+            print(f"[DEBUG] Restored {len(filter_sources['loaded'])} filter sources from cache")
+
+    # Schedule async restore on page load
+    ui.timer(0.1, restore_filter_sources, once=True)
