@@ -105,63 +105,65 @@ def create_parallels_page(initial_text: str = None):
                     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
                         use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
-                    # Track current preset level
-                    current_preset = {'value': 70}  # Default: extended
+                    # Track current preset level (default: Basic=30)
+                    current_preset = {'value': 30}
 
                     # Variables for elements
-                    btn_basic = btn_extended = btn_maximum = None
-                    variant_slider = None
+                    variant_level_select = None
+                    variant_slider = variant_slider_label = None
 
                     # Variant Level Controls (visible only in Variants mode)
-                    with ui.column().classes('gap-1') as variant_slider_col:
-                        h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-
+                    with ui.row().classes('items-center gap-4') as variant_controls_col:
                         if not use_slider:
-                            # Preset buttons (default)
-                            with ui.row().classes('items-center gap-1'):
-                                btn_basic = ui.button('○ ' + tr('Basic')).classes('px-2 h-8')
-                                btn_basic.tooltip(tr('Basic variants (30 pairs)'))
-                                btn_extended = ui.button('◐ ' + tr('Extended')).classes('px-2 h-8')
-                                btn_extended.tooltip(tr('Extended variants (70 pairs)'))
-                                btn_maximum = ui.button('● ' + tr('Maximum')).classes('px-2 h-8')
-                                btn_maximum.tooltip(tr('Maximum variants (150 pairs) - slower'))
+                            # Dropdown selector (compact mode)
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                variant_level_select = ui.select(
+                                    {
+                                        30: '○ ' + tr('Basic'),
+                                        70: '◐ ' + tr('Extended'),
+                                        150: '● ' + tr('Maximum'),
+                                    },
+                                    value=current_preset['value']
+                                ).classes('w-36').props('outlined dense')
+
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
                         else:
-                            # Slider (alternative mode)
-                            with ui.row().classes('items-center gap-2'):
-                                variant_slider = ui.slider(min=10, max=300, value=70, step=10).classes('w-full').props('label-always')
+                            # Slider mode
+                            with ui.column().classes('gap-1 w-full'):
+                                h3(tr('Variant Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                with ui.row().classes('items-center gap-2 w-full'):
+                                    variant_slider = ui.slider(min=10, max=300, value=30, step=10).classes('flex-grow').props('label-always')
+                                    variant_slider_label = ui.label('30').classes('text-sm font-medium w-10').style('color: var(--primary-600);')
+                            with ui.column().classes('gap-1'):
+                                h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
 
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            ui.label(tr('Max changes:')).classes('text-xs').style('color: var(--text-muted);')
-                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-20').props('outlined dense')
-
-                    def update_preset_buttons():
-                        """Update preset button styles based on current selection."""
-                        if not btn_basic:
-                            return
-                        val = current_preset['value']
-                        for btn, v in [(btn_basic, 30), (btn_extended, 70), (btn_maximum, 150)]:
-                            if val == v:
-                                btn.classes(add='btn-primary', remove='btn-secondary')
-                            else:
-                                btn.classes(add='btn-secondary', remove='btn-primary')
-
-                    def set_preset(pairs_count):
-                        """Set variant level from preset button."""
-                        current_preset['value'] = pairs_count
+                    def set_level(level_value):
+                        """Set variant level."""
+                        current_preset['value'] = level_value
                         if state.var_mgr:
-                            state.var_mgr.set_variant_level(pairs_count)
-                        update_preset_buttons()
+                            state.var_mgr.set_variant_level(level_value)
 
-                    if btn_basic:
-                        btn_basic.on('click', lambda: set_preset(30))
-                        btn_extended.on('click', lambda: set_preset(70))
-                        btn_maximum.on('click', lambda: set_preset(150))
-                        # Initialize button styles
-                        update_preset_buttons()
+                    if variant_level_select:
+                        def on_level_change():
+                            set_level(int(variant_level_select.value))
+                        variant_level_select.on('update:model-value', on_level_change)
+
+                    if variant_slider:
+                        def on_slider_change():
+                            val = int(variant_slider.value)
+                            current_preset['value'] = val
+                            variant_slider_label.set_text(str(val))
+                            if state.var_mgr:
+                                state.var_mgr.set_variant_level(val)
+                        variant_slider.on('update:model-value', on_slider_change)
 
                     def on_mode_change():
                         is_variants = mode_select.value == 'variants'
-                        variant_slider_col.set_visibility(is_variants)
+                        variant_controls_col.set_visibility(is_variants)
 
                     mode_select.on('update:model-value', on_mode_change)
 
@@ -192,8 +194,8 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outline color=red').style('display: none;')
 
                     # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0')
-                    status_label = ui.label('').classes('text-xs text-center').style('color: var(--text-muted);')
+                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0').style('height: 8px;')
+                    status_label = ui.label('').classes('text-sm text-center font-medium').style('color: var(--text-secondary);')
 
         # === Filter Text (Collapsible) ===
         with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
@@ -232,22 +234,25 @@ def create_parallels_page(initial_text: str = None):
     # === Logic ===
 
     def update_ui():
-        if p_state.is_running:
-            run_btn.disable()
-            cancel_btn.style('display: block;')
-            progress_bar.classes(remove='opacity-0')
-            progress_bar.value = p_state.progress
-            status_label.text = p_state.status
-        else:
-            run_btn.enable()
-            cancel_btn.style('display: none;')
-            if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
-                progress_bar.value = 1.0
-                status_label.text = tr('Done')
-                p_state.finished_animation_shown = True
-                ui.timer(2.0, lambda: progress_bar.classes(add='opacity-0'), once=True)
+        try:
+            if p_state.is_running:
+                run_btn.disable()
+                cancel_btn.style('display: block;')
+                progress_bar.classes(remove='opacity-0')
+                progress_bar.value = p_state.progress
+                status_label.text = p_state.status
+            else:
+                run_btn.enable()
+                cancel_btn.style('display: none;')
+                if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
+                    progress_bar.value = 1.0
+                    status_label.text = tr('Done')
+                    p_state.finished_animation_shown = True
+                    progress_bar.classes(add='opacity-0')
+        except Exception:
+            pass  # Client may have been deleted
 
-    ui.timer(0.1, update_ui)
+    ui.timer(0.5, update_ui)
 
     def cancel_search():
         p_state.is_cancelled = True
