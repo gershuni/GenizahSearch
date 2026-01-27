@@ -307,11 +307,15 @@ def clean_hebrew_text(text):
     Keeps only Hebrew letters (א-ת) and basic whitespace.
     """
     import re
-    # Hebrew letter range: \u05D0-\u05EA (א-ת)
-    # Remove everything except Hebrew letters and whitespace
-    # First remove HTML tags
+    import html as html_module
+    # First decode HTML entities like &nbsp; {ס} etc.
+    text = html_module.unescape(text)
+    # Remove HTML tags
     text = re.sub(r'<[^>]+>', '', text)
-    # Keep only Hebrew letters and spaces
+    # Remove content in curly braces like {ס} {פ}
+    text = re.sub(r'\{[^}]*\}', '', text)
+    # Keep only Hebrew letters (א-ת) and spaces - this removes nikud, taamim, and everything else
+    # Hebrew letter range: \u05D0-\u05EA (א-ת)
     text = re.sub(r'[^\u05D0-\u05EA\s]', '', text)
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text)
