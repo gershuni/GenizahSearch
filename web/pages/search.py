@@ -76,69 +76,70 @@ def create_search_page(initial_query: str = None):
                         app.storage.user['search_query'] = query_input.value or ''
                     query_input.on('blur', save_query)
 
-                # Mode Selector - Restore from storage
+                # Check if user prefers slider or presets (default: presets/dropdown)
+                use_slider = False
+                if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
+                    use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+
+                # Mode Selector - includes variant levels when not using slider
                 with ui.column().classes('gap-1'):
-                    # Changed to H3 semantic label
                     h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    mode_select = ui.select(
-                        {
+
+                    if use_slider:
+                        # Slider mode: single variants option, level controlled by slider
+                        mode_options = {
                             'exact': tr('Exact') + ' (=)',
                             'variants': tr('Variants') + ' (?)',
                             'fuzzy': tr('Fuzzy') + ' (~)',
                             'Regex': tr('Regex') + ' (/)',
                             'Shelfmark': tr('Shelfmark') + ' (#)',
                             'Title': tr('Title') + ' ($)',
-                        },
-                        value=saved_mode
-                    ).classes('w-40').props('outlined dense')
-
-                # Check if user prefers slider or presets (default: presets/dropdown)
-                use_slider = False
-                if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-                    use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
-
-                # Track current preset level - restore from storage (default: Basic=30)
-                # When not using slider, round to nearest valid preset to avoid invalid value error
-                def round_to_preset(val):
-                    """Round to nearest valid preset (30, 70, 150)."""
-                    if val <= 50:
-                        return 30
-                    elif val <= 110:
-                        return 70
+                        }
                     else:
-                        return 150
+                        # Preset mode: separate variant levels in dropdown
+                        mode_options = {
+                            'exact': tr('Exact') + ' (=)',
+                            'variants': tr('Variants Basic') + ' (?)',
+                            'variants_extended': tr('Variants Extended') + ' (??)',
+                            'variants_maximum': tr('Variants Maximum') + ' (???)',
+                            'fuzzy': tr('Fuzzy') + ' (~)',
+                            'Regex': tr('Regex') + ' (/)',
+                            'Shelfmark': tr('Shelfmark') + ' (#)',
+                            'Title': tr('Title') + ' ($)',
+                        }
 
-                raw_preset = saved_preset if saved_preset else 30
-                current_preset = {'value': raw_preset if use_slider else round_to_preset(raw_preset)}
+                    mode_select = ui.select(
+                        mode_options,
+                        value=saved_mode
+                    ).classes('w-48').props('outlined dense')
+
+                # Track current preset level based on mode
+                def get_level_from_mode(mode):
+                    """Get variant level from mode name."""
+                    if mode == 'variants_extended':
+                        return 70
+                    elif mode == 'variants_maximum':
+                        return 150
+                    elif mode == 'variants':
+                        return 30
+                    return 30
+
+                raw_preset = saved_preset if saved_preset else get_level_from_mode(saved_mode)
+                current_preset = {'value': raw_preset}
 
                 # Create variables for elements (needed for callbacks)
-                variant_level_select = None
-                variant_slider = variant_slider_label = None
+                variant_slider = None
                 max_changes_select = None
 
-                # Variant Level Controls (visible only in Variants mode, non-slider)
-                with ui.row().classes('items-end gap-4') as variant_controls_row:
-                    if not use_slider:
-                        # Dropdown selector (compact mode)
-                        with ui.column().classes('gap-1'):
-                            h3(tr('Level'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                            variant_level_select = ui.select(
-                                {
-                                    30: '○ ' + tr('Basic'),
-                                    70: '◐ ' + tr('Extended'),
-                                    150: '● ' + tr('Maximum'),
-                                },
-                                value=current_preset['value']
-                            ).classes('w-36').props('outlined dense')
+                # Max Changes selector (visible for all variant modes in non-slider mode)
+                with ui.column().classes('gap-1') as max_changes_col:
+                    h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                    ui.tooltip(tr('Max character changes per word'))
 
-                        # Max changes selector - restore from storage
-                        with ui.column().classes('gap-1'):
-                            h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                            max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
-                            ui.tooltip(tr('Max character changes per word'))
-
-                # Show variant controls if mode was variants and not using slider
-                variant_controls_row.set_visibility(saved_mode == 'variants' and not use_slider)
+                # Show max changes only for variant modes when not using slider
+                is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
+                max_changes_col.set_visibility(is_variant_mode and not use_slider)
 
                 def set_level(level_value):
                     """Set variant level."""
@@ -146,11 +147,6 @@ def create_search_page(initial_query: str = None):
                     app.storage.user['search_preset'] = level_value
                     if state.var_mgr:
                         state.var_mgr.set_variant_level(level_value)
-
-                if variant_level_select:
-                    def on_level_change():
-                        set_level(int(variant_level_select.value))
-                    variant_level_select.on('update:model-value', on_level_change)
 
                 # Gap Control - restore from storage
                 with ui.column().classes('gap-1'):
@@ -175,10 +171,8 @@ def create_search_page(initial_query: str = None):
                 with variant_slider_row:
                     ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
-                    variant_slider_label = ui.label(str(current_preset['value'])).classes('text-sm font-medium w-10').style('color: var(--primary-600);')
-                    with ui.row().classes('items-center gap-2'):
-                        ui.label(tr('Num Changes')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                    max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-20').props('outlined dense')
+                    ui.tooltip(tr('Max character changes per word'))
                 variant_slider_row.set_visibility(saved_mode == 'variants')
 
                 # Slider change handler
@@ -186,7 +180,6 @@ def create_search_page(initial_query: str = None):
                     val = int(variant_slider.value)
                     current_preset['value'] = val
                     app.storage.user['search_preset'] = val
-                    variant_slider_label.set_text(str(val))
                     if state.var_mgr:
                         state.var_mgr.set_variant_level(val)
                 variant_slider.on('update:model-value', on_slider_change)
@@ -199,14 +192,21 @@ def create_search_page(initial_query: str = None):
 
             # Mode change handler (must be after variant_slider_row is defined)
             def on_mode_change():
-                is_variants = mode_select.value == 'variants'
+                mode = mode_select.value
+                is_variants = mode in ('variants', 'variants_extended', 'variants_maximum')
+
                 if use_slider:
+                    # Slider mode: show/hide slider row
                     if variant_slider_row:
                         variant_slider_row.set_visibility(is_variants)
                 else:
-                    variant_controls_row.set_visibility(is_variants)
+                    # Preset mode: show/hide max changes column, update level based on mode
+                    max_changes_col.set_visibility(is_variants)
+                    if is_variants:
+                        set_level(get_level_from_mode(mode))
+
                 # Save mode to storage
-                app.storage.user['search_mode'] = mode_select.value
+                app.storage.user['search_mode'] = mode
 
             mode_select.on('update:model-value', on_mode_change)
 
@@ -535,17 +535,21 @@ def create_search_page(initial_query: str = None):
         if mode_override:
             mode = mode_override
             clean_query = parsed_query
-            # Map old extended/maximum to variants (slider controls intensity)
-            if mode in ('variants_extended', 'variants_maximum'):
+            # In slider mode, map all variant modes to 'variants'
+            if use_slider and mode in ('variants', 'variants_extended', 'variants_maximum'):
                 mode = 'variants'
             mode_select.value = mode
         else:
             mode = mode_select.value
 
         # Update variant level and max changes from UI before search
-        if mode == 'variants' and state.var_mgr:
-            # Get pairs count from preset or slider
-            pairs_count = int(variant_slider.value) if variant_slider else current_preset['value']
+        is_variant_mode = mode in ('variants', 'variants_extended', 'variants_maximum')
+        if is_variant_mode and state.var_mgr:
+            # Get pairs count: from slider, or from mode name, or from current_preset
+            if variant_slider:
+                pairs_count = int(variant_slider.value)
+            else:
+                pairs_count = get_level_from_mode(mode)
             state.var_mgr.set_variant_level(pairs_count)
             # Update max_changes in settings
             if state.lab_engine and state.lab_engine.settings and max_changes_select:
