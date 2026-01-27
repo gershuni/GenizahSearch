@@ -1599,6 +1599,5 @@ if __name__ in {'__main__', '__mp_main__'}:
         port=APP_PORT,
         reload=reload_enabled,
         show=show_browser,
-        favicon=os.path.join(STATIC_DIR, 'favicon.ico'),
         storage_secret='genizah-secret-v5',
     )
