@@ -65,6 +65,18 @@ META_TAGS = '''
 <link rel="canonical" href="https://GenizahSearch.com/">
 '''
 
+# Google Analytics
+ANALYTICS_SCRIPT = '''
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-LXT1PTKG3E"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-LXT1PTKG3E');
+</script>
+'''
+
 # ============================================================================
 # Modern Theme System - Professional Research UI
 # ============================================================================
@@ -1459,6 +1471,7 @@ def dashboard_page():
     set_current_page('/')
     current_theme = app.storage.user.get('theme', 'light') if hasattr(app.storage, 'user') else 'light'
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1472,6 +1485,7 @@ def dashboard_page():
 def search_page_route(q: str = None):
     set_current_page('/search')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1484,6 +1498,7 @@ def search_page_route(q: str = None):
 def parallels_page_route(text: str = None):
     set_current_page('/parallels')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1496,6 +1511,7 @@ def parallels_page_route(text: str = None):
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None):
     set_current_page('/browse')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1508,6 +1524,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
 def lists_page_route():
     set_current_page('/lists')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1520,6 +1537,7 @@ def lists_page_route():
 def settings_page_route():
     set_current_page('/settings')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1532,6 +1550,7 @@ def settings_page_route():
 def help_page_route():
     set_current_page('/help')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1544,6 +1563,7 @@ def help_page_route():
 async def corrections_page_route():
     set_current_page('/corrections')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1556,6 +1576,7 @@ async def corrections_page_route():
 async def discoveries_page_route():
     set_current_page('/discoveries')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1568,6 +1589,7 @@ async def discoveries_page_route():
 async def admin_page_route():
     set_current_page('/admin')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1580,6 +1602,7 @@ async def admin_page_route():
 async def profile_page_route():
     set_current_page('/profile')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1592,6 +1615,7 @@ async def profile_page_route():
 def accessibility_page_route():
     set_current_page('/accessibility')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1605,6 +1629,7 @@ def accessibility_page_route():
 def download_page_route():
     set_current_page('/download')
     ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
