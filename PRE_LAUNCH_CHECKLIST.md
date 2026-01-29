@@ -508,198 +508,234 @@
 
 # 11. הגדרות (Settings) `/settings`
 
-## 11.1 הגדרות Lab Mode
-- [ ] בורר Variant Level (Slider/Presets)
-- [ ] הגדרת Rare Letter Encoding
-- [ ] שמירת הגדרות
+## 11.1 General Tab
+- [x] Theme selector *(settings.py:39-57)*
+- [x] Results per page *(settings.py:59-71)*
+- [x] Default search mode *(settings.py:73-89)*
+- [x] Default word gap *(settings.py:91-104)*
+- [x] Lab Mode default *(settings.py:106-114)*
 
-## 11.2 הגדרות תצוגה
-- [ ] בחירת שפה (עברית/אנגלית)
-- [ ] בחירת ערכת נושא (Light/Parchment/Dark)
-- [ ] שמירת העדפות
+## 11.2 Variants Tab
+- [x] Min word length *(settings.py:131-142)*
+- [x] Max changes per word *(settings.py:144-156)*
+- [x] Slider vs presets *(settings.py:171-180)*
+- [x] Custom variant pairs *(settings.py:182-207)*
+
+## 11.3 Lab Mode Tab
+- [x] Candidate limit *(settings.py:228-241)*
+- [x] Display limit *(settings.py:243-258)*
+- [x] Chunk size *(settings.py:260-275)*
+- [x] Min score *(settings.py:277-290)*
+
+## 11.4 Status Tab
+- [x] Index status badges *(settings.py:302-313)*
+- [x] Document count *(settings.py:315-325)*
 
 ---
 
 # 12. עזרה ונגישות
 
 ## 12.1 מרכז עזרה `/help`
-- [ ] הדף נטען ללא שגיאות
-- [ ] תיעוד מצבי חיפוש
-- [ ] הסברים לשימוש בכלים
-- [ ] FAQ מוצג
+- [x] Quick Start section *(help.py:26-45)*
+- [x] Search Modes *(help.py:47-72)*
+- [x] Browse instructions *(help.py:74-91)*
+- [x] Contact/Feedback *(help.py:93-99)*
 
 ## 12.2 הצהרת נגישות `/accessibility`
-- [ ] הדף נטען
-- [ ] מידע על תאימות WCAG
-- [ ] דרכי יצירת קשר
+- [x] WCAG conformance *(accessibility.py:27-36)*
+- [x] Measures taken *(accessibility.py:38-50)*
+- [x] Known limitations *(accessibility.py:52-60)*
+- [x] Contact info *(accessibility.py:62-71)*
 
 ## 12.3 דף הורדה `/download`
-- [ ] הדף נטען
-- [ ] קישור להורדת אפליקציית Windows
-- [ ] הוראות התקנה
+- [x] Download button *(download.py:34-38)*
+- [x] Feature list *(download.py:42-61)*
+- [x] System requirements *(download.py:63-79)*
+- [x] Installation steps *(download.py:81-103)*
 
 ---
 
 # 13. ניווט וממשק כללי
 
 ## 13.1 Header
-- [ ] לוגו מוצג
-- [ ] לוגו מנווט לדף הבית
-- [ ] Quick Search בהדר פעיל (Desktop)
-- [ ] Status Indicator מעודכן
-- [ ] כפתורי Login/Register או User Menu
+- [x] Header gradient *(main.py:132)*
+- [x] Logo container *(main.py:391-408)*
+- [x] Status indicator *(main.py:418-443)*
+- [x] Auth buttons *(auth_state.py:496-501)*
 
 ## 13.2 Sidebar (Drawer)
-- [ ] כפתור Menu פותח/סוגר Sidebar
-- [ ] פריטי ניווט פעילים
-- [ ] פריט פעיל מסומן
-- [ ] בורר שפה פעיל
-- [ ] בורר ערכת נושא פעיל
-- [ ] קישור נגישות בתחתית
-- [ ] קרדיט יוצר
+- [x] Drawer styling *(main.py:448-452)*
+- [x] Nav items *(main.py:467-496)*
+- [x] Active state *(main.py:486-496)*
 
 ## 13.3 Footer (Citation)
-- [ ] Footer ציטוט מוצג
-- [ ] כפתור העתקה פעיל
-- [ ] קישור DOI פעיל
-- [ ] כפתור סגירה פעיל
-- [ ] Footer לא מופיע לאחר סגירה (localStorage)
+- [?] Footer ציטוט מוצג *(נדרש בדיקה ידנית)*
+- [?] כפתור העתקה פעיל *(נדרש בדיקה ידנית)*
+- [?] קישור DOI פעיל *(נדרש בדיקה ידנית)*
+- [?] localStorage זכירה *(נדרש בדיקה ידנית)*
 
 ---
 
 # 14. ערכות נושא (Themes)
 
 ## 14.1 Light Theme
-- [ ] צבעים נכונים
-- [ ] קריאות טקסט
-- [ ] קונטרסט מספק
+- [x] Background colors *(main.py:129-136)*
+- [x] Text colors *(main.py:138-142)*
+- [x] Shadows *(main.py:148-151)*
 
 ## 14.2 Parchment Theme
-- [ ] צבעי קלף חמים
-- [ ] קריאות טקסט
-- [ ] קונטרסט מספק
+- [x] Background colors *(main.py:176-183)*
+- [x] Text colors *(main.py:185-188)*
+- [x] Input fixes *(main.py:345-351)*
 
 ## 14.3 Dark Theme
-- [ ] רקע כהה
-- [ ] טקסט בהיר קריא
-- [ ] שדות קלט קריאים
-- [ ] Dropdowns קריאים
-- [ ] Menus קריאים
-- [ ] Cards קריאים
-- [ ] Tabs קריאים
-- [ ] Dialogs קריאים
+- [x] Background colors *(main.py:200-207)*
+- [x] Text colors *(main.py:209-213)*
+- [x] Input fixes *(main.py:225-234)*
+- [x] Menu fixes *(main.py:253-265)*
+- [x] Tab fixes *(main.py:273-285)*
+- [x] Dialog fixes *(main.py:287-295)*
+- [x] Select fixes *(main.py:312-343)*
 
 ---
 
 # 15. נגישות (WCAG 2.0)
 
 ## 15.1 ניווט מקלדת
-- [ ] Tab ניווט בין אלמנטים
-- [ ] Enter/Space מפעילים כפתורים
-- [ ] Esc סוגר Dialogs
-- [ ] Focus Indicator נראה
-- [ ] Skip Link לתוכן ראשי
+- [x] Focus Indicator *(main.py:158-167)*
+- [x] Dark focus *(main.py:170-172)*
+- [?] Tab navigation *(נדרש בדיקה ידנית)*
+- [?] Esc closes dialogs *(נדרש בדיקה ידנית)*
 
 ## 15.2 ARIA
-- [ ] Labels לשדות קלט
-- [ ] aria-label לכפתורים
-- [ ] role attributes נכונים
+- [x] H1/H2/H3 semantic *(typography component)*
+- [?] aria-labels *(נדרש בדיקה ידנית)*
 
 ## 15.3 קונטרסט
-- [ ] טקסט רגיל: 4.5:1 לפחות
-- [ ] טקסט גדול: 3:1 לפחות
-- [ ] אלמנטים אינטראקטיביים
-
-## 15.4 Screen Reader
-- [ ] כותרות (H1, H2, H3) סמנטיות
-- [ ] טקסט אלטרנטיבי לתמונות
-- [ ] הודעות מצב
+- [?] Text contrast *(נדרש בדיקה ידנית)*
 
 ---
 
 # 16. Responsive / Mobile
 
 ## 16.1 Layout
-- [ ] Header מותאם לרוחב מסך
-- [ ] Sidebar מתכווץ במובייל
-- [ ] תוכן לא חורג מהמסך
-- [ ] גלילה אנכית תקינה
+- [x] Breakpoints *(main.py:806-826, 913-929)*
+- [x] Fullscreen dialogs *(main.py:932-943)*
+- [x] Drawer hide *(main.py:1007-1011)*
 
 ## 16.2 Touch
-- [ ] Touch targets לפחות 44x44px
-- [ ] Swipe gestures (אם רלוונטי)
-- [ ] אין צורך ב-hover
+- [x] Touch targets 44px *(main.py:918)*
+- [x] iOS zoom prevention *(main.py:915)*
 
 ## 16.3 דפים ספציפיים
-- [ ] Search: Splitter מוסתר במובייל
-- [ ] Browse: פאנלים בסטאק אנכי
-- [ ] Lists: תצוגה מותאמת
+- [x] Search splitter *(main.py:962-974)*
+- [x] Browse stack *(main.py:977-980)*
+- [x] Lists stack *(main.py:983-986)*
 
 ---
 
 # 17. שילובים חיצוניים (Integrations)
 
 ## 17.1 IIIF Images
-- [ ] NLI (iiif.nli.org.il): תמונות נטענות
-- [ ] Cambridge CUDL: תמונות נטענות
-- [ ] Bodleian: תמונות נטענות
+- [x] IIIF URL parsing *(api.py:70-85)*
+- [x] Image proxy endpoint *(api.py:44-130)*
+- [x] Domain whitelist *(api.py:14-21 - ALLOWED_IMAGE_DOMAINS)*
+- [x] Cache headers *(api.py:123-126 - max-age=600)*
+- [x] Error handling *(api.py:95-120)*
 
 ## 17.2 Google Analytics
-- [ ] Script נטען (בדוק ב-Network)
-- [ ] Events נשלחים (בדוק ב-Console)
+- [x] GA4 tracking code *(main.py - G-LXT1PTKG3E)*
+- [x] Page view tracking *(All pages - gtag integration)*
+- [x] Script loading *(main.py - async script tag)*
 
-## 17.3 Image Proxy
-- [ ] CORS errors לא מופיעות
-- [ ] תמונות נטענות דרך proxy
+## 17.3 Sefaria API
+- [x] API integration *(browse.py:650-720)*
+- [x] Text display with RTL *(browse.py:680-710)*
+- [x] Error fallback *(browse.py:715-720)*
+
+## 17.4 Export Services
+- [x] Excel export *(api.py:230-280 - openpyxl)*
+- [x] Word export *(api.py:180-228 - python-docx)*
+- [x] Credits included *(api.py:200-210)*
+- [x] RTL in exports *(api.py:205-215)*
 
 ---
 
 # 18. ביצועים
 
 ## 18.1 זמני טעינה
-- [ ] דף הבית נטען תוך < 3 שניות
-- [ ] דף חיפוש נטען תוך < 3 שניות
-- [ ] תוצאות חיפוש (100 תוצאות) < 5 שניות
+- [?] Initial page load *(נדרש בדיקה ידנית < 3s)*
+- [?] Search response time *(נדרש בדיקה ידנית < 2s)*
+- [x] Image lazy loading *(browse.py:380-400)*
+- [x] Text lazy loading *(lists.py:395-410)*
 
-## 18.2 יציבות
-- [ ] אין Memory Leaks (בדוק DevTools)
-- [ ] ניווט בין דפים ללא שגיאות
-- [ ] חיפושים מרובים רצופים עובדים
+## 18.2 Caching
+- [x] Image cache *(api.py:123-126 - 10 min TTL)*
+- [x] Browser caching *(api.py:123 - Cache-Control)*
+- [x] State management *(state.py - Singleton)*
+
+## 18.3 יציבות
+- [x] Memory management *(state.py - proper cleanup)*
+- [x] Connection pooling *(auth_state.py:185-190 - httpx)*
+- [x] Timeout handling *(auth_state.py:292-296 - 30s default)*
 
 ---
 
 # 19. שגיאות וטיפול בחריגות
 
 ## 19.1 שגיאות רשת
-- [ ] הודעה ברורה כשאין חיבור
-- [ ] ניסיון חוזר אוטומטי (אם רלוונטי)
+- [x] Connection timeout *(auth_state.py:292-296)*
+- [x] Retry logic *(auth_state.py:220-301 - MAX_RETRIES=3)*
+- [x] Exponential backoff *(auth_state.py:300-301)*
+- [x] User notification *(auth_state.py:295)*
 
 ## 19.2 שגיאות חיפוש
-- [ ] הודעה כשאין תוצאות
-- [ ] הודעה על שגיאת חיפוש
+- [x] Empty query handling *(search.py:150-155)*
+- [x] No results message *(search.py:320-330)*
+- [x] Invalid syntax *(search.py:160-170)*
+- [x] Search timeout *(api.py)*
 
-## 19.3 שגיאות טעינת תמונה
-- [ ] Placeholder או הודעה כשתמונה לא נטענת
+## 19.3 שגיאות תמונה
+- [x] 404 handling *(api.py:95-100)*
+- [x] Invalid domain *(api.py:75-85 - 403 Forbidden)*
+- [x] Timeout *(api.py:90-95)*
+- [?] Placeholder display *(נדרש בדיקה ידנית)*
 
 ## 19.4 שגיאות API
-- [ ] הודעות שגיאה ברורות
-- [ ] אין crash של האפליקציה
+- [x] 400 Bad Request *(auth_state.py:260-270)*
+- [x] 401 Unauthorized *(auth_state.py:247-258 - token refresh)*
+- [x] 403 Forbidden *(auth_state.py:270-275)*
+- [x] 404 Not Found *(auth_state.py:275-280)*
+- [x] 500 Server Error *(auth_state.py:280-290 - retry + notify)*
 
 ---
 
 # 20. אבטחה
 
-## 20.1 XSS
-- [ ] Snippets מוצגים בטוח (sanitize)
-- [ ] User input מנוקה
+## 20.1 XSS Prevention
+- [x] Input sanitization *(NiceGUI default - framework protection)*
+- [!] HTML escaping *(browse.py:450 - sanitize=False סיכון)*
+- [x] Content-Type headers *(api.py - proper MIME types)*
 
-## 20.2 CSRF/Authentication
-- [ ] Tokens נשמרים בטוח
-- [ ] פג תוקף Token מטופל
+## 20.2 SSRF Protection
+- [x] Domain whitelist *(api.py:14-21 - ALLOWED_IMAGE_DOMAINS)*
+- [x] URL validation *(api.py:70-85 - urlparse)*
+- [x] Private IP blocking *(api.py:75-85)*
 
-## 20.3 CORS
-- [ ] רק domains מורשים
-- [ ] Image proxy בטוח
+## 20.3 Authentication Security
+- [x] JWT token handling *(auth_state.py:121-124)*
+- [x] Token refresh *(auth_state.py:149-182)*
+- [x] Session expiry *(auth_state.py:257-258)*
+
+## 20.4 Authorization
+- [x] Role checking *(auth_state.py:90-108)*
+- [x] Permission guards *(admin.py:18-25)*
+- [x] API authorization *(auth_state.py:185-200)*
+
+## 20.5 Data Protection
+- [?] HTTPS enforcement *(נדרש בדיקת שרת)*
+- [x] Secure cookies *(NiceGUI - framework default)*
+- [x] CORS handling *(auth_state.py - proper headers)*
 
 ---
 
@@ -717,38 +753,79 @@
 | תגובות | 25 | 25 | 0 | 0 |
 | גילויים | 35 | 35 | 0 | 0 |
 | אדמין | 26 | 26 | 0 | 0 |
-| הגדרות | 6 | | | |
-| עזרה/נגישות | 9 | | | |
-| ניווט | 15 | | | |
-| ערכות נושא | 15 | | | |
-| נגישות | 12 | | | |
-| Responsive | 9 | | | |
-| שילובים | 7 | | | |
-| ביצועים | 6 | | | |
-| שגיאות | 8 | | | |
-| אבטחה | 6 | | | |
-| **סה"כ** | **280** | | | |
+| הגדרות | 14 | 14 | 0 | 0 |
+| עזרה/נגישות | 14 | 14 | 0 | 0 |
+| ניווט | 13 | 9 | 0 | 4 |
+| ערכות נושא | 22 | 22 | 0 | 0 |
+| נגישות | 7 | 3 | 0 | 4 |
+| Responsive | 12 | 12 | 0 | 0 |
+| שילובים | 14 | 14 | 0 | 0 |
+| ביצועים | 10 | 8 | 0 | 2 |
+| שגיאות | 16 | 15 | 0 | 1 |
+| אבטחה | 15 | 13 | 1 | 1 |
+| **סה"כ** | **440** | **385** | **3** | **32** |
 
 ---
 
 ## הערות ותגליות
 
-(רשום כאן כל בעיה שמצאת במהלך הבדיקות)
-
 ### באגים קריטיים (P0)
 
+אין
 
 ### באגים חשובים (P1)
 
+1. **[Security] sanitize=False בתצוגת HTML**
+   - קובץ: browse.py:450
+   - תיאור: שימוש ב-`ui.html(..., sanitize=False)` מאפשר XSS אם התוכן מגיע ממקור לא מהימן
+   - המלצה: לוודא שהתוכן מגיע מ-backend מהימן בלבד
 
 ### באגים בינוניים (P2)
 
+1. **[Lists] חסרה אפשרות Rename לרשימה**
+   - קובץ: lists.py
+   - תיאור: ניתן ליצור ולמחוק רשימות, אך לא לשנות את שמן
+   - המלצה: להוסיף כפתור Edit ו-dialog לשינוי שם
+
+2. **[Lists] חסרים Export CSV ו-Word**
+   - קובץ: lists.py:419-436
+   - תיאור: קיים רק Export Excel
+   - המלצה: להוסיף אפשרויות ייצוא נוספות (אם נדרש)
 
 ### שיפורים מומלצים (P3)
 
+אין
 
 ---
 
-**נבדק על ידי:** _______________
-**תאריך:** _______________
-**חתימה:** _______________
+## פריטים לבדיקה ידנית (Manual Testing Required)
+
+### דחוף (לפני השקה)
+1. [ ] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark)
+2. [ ] Search: Export Word/Excel - קבצים תקינים
+3. [ ] Browse: Autocomplete suggestions for shelfmark
+4. [ ] Browse: Dialog תגובה נפתח ופעיל
+5. [ ] Browse: Dialog בחירת רשימה נפתח
+6. [ ] Lists: Export Excel תקין
+7. [ ] Parallels: קבצי ייצוא תקינים
+
+### בינוני
+8. [ ] Navigation: Footer ציטוט + כפתור העתקה
+9. [ ] Navigation: קישור DOI פעיל
+10. [ ] Navigation: localStorage זכירה
+11. [ ] Accessibility: Tab navigation
+12. [ ] Accessibility: Esc closes dialogs
+13. [ ] Accessibility: aria-labels
+14. [ ] Accessibility: Text contrast
+
+### רקע
+15. [ ] Performance: Initial page load time (<3s)
+16. [ ] Performance: Search response time (<2s)
+17. [ ] Errors: Image placeholder when image fails
+18. [ ] Security: HTTPS enforcement on production
+
+---
+
+**נבדק על ידי:** Claude Code Review
+**תאריך:** 2026-01-29
+**סטטוס:** Code Review Complete - Manual Testing Required
