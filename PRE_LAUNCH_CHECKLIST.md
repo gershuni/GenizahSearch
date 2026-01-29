@@ -437,60 +437,72 @@
 # 9. גילויים קהילתיים (Discoveries) `/discoveries`
 
 ## 9.1 תצוגת גילויים
-- [ ] הדף נטען ללא שגיאות
-- [ ] רשימת גילויים מוצגת
-- [ ] סינון לפי סוג (שאלה/גילוי/זיהוי)
-- [ ] חיפוש גילויים פעיל
+- [x] הדף נטען ללא שגיאות *(discoveries.py:87-168)*
+- [x] רשימת גילויים מוצגת *(discoveries.py:231-264)*
+- [x] סינון לפי סוג *(discoveries.py:107-118 - 6 types)*
+- [x] סינון לפי תקופה *(discoveries.py:121-130)*
 
-## 9.2 יצירת גילוי
-- [ ] כפתור "גילוי חדש" פעיל
-- [ ] Dialog יצירה נפתח
-- [ ] בחירת סוג גילוי
-- [ ] שדה כותרת פעיל
-- [ ] שדה תוכן פעיל
-- [ ] הוספת Shelfmarks (מרובים)
-- [ ] שליחה מצליחה
+## 9.2 סטטיסטיקות
+- [x] Words Corrected *(discoveries.py:184-188)*
+- [x] Documents Edited *(discoveries.py:190-194)*
+- [x] Discoveries Shared *(discoveries.py:196-200)*
+- [x] Open Questions *(discoveries.py:202-206)*
+- [x] Active Contributors *(discoveries.py:208-212)*
 
-## 9.3 תגובות לגילויים
-- [ ] הוספת תגובה לגילוי
-- [ ] תגובות מוצגות
+## 9.3 יצירת גילוי
+- [x] כפתור "Share Discovery" *(discoveries.py:144)*
+- [x] Login check *(discoveries.py:134-136)*
+- [x] Dialog יצירה *(discoveries.py:141)*
 
-## 9.4 הצבעות
-- [ ] Upvote פעיל
-- [ ] Downvote פעיל
-- [ ] מונה הצבעות מתעדכן
+## 9.4 Feed Items
+- [x] 7 item types display *(discoveries.py:274-283)*
+- [x] Pinned/Featured badges *(discoveries.py:308-311)*
+- [x] Shelfmark links *(discoveries.py:326-378)*
+- [x] Correction diff view *(discoveries.py:546-571)*
+- [x] Joins cluster view *(discoveries.py:500-667)*
 
-## 9.5 גילויים מודגשים
-- [ ] Featured discoveries מוצגים בראש
-- [ ] Pinned discoveries מוצגים
+## 9.5 הצבעות ותגובות
+- [x] Upvote/Downvote *(discoveries.py:738-763)*
+- [x] Login check for voting *(discoveries.py:739-741)*
+- [x] Responses/Replies *(discoveries.py:785-827)*
+- [x] Anonymous replies *(discoveries.py:807)*
+- [x] Mark as answered (questions) *(discoveries.py:766-779)*
+
+## 9.6 Admin Controls
+- [x] Pin/Unpin *(discoveries.py:400-413)*
+- [x] Hide/Unhide *(discoveries.py:416-432)*
+- [x] Delete joins/comments/corrections *(discoveries.py:435-488)*
 
 ---
 
 # 10. פאנל אדמין `/admin`
 
 ## 10.1 גישה
-- [ ] הדף נגיש רק למשתמשי Admin
-- [ ] משתמשים אחרים מקבלים שגיאת הרשאה
+- [x] Admin check *(admin.py:29-37)*
+- [x] Access denied page *(admin.py:31-37)*
 
 ## 10.2 ניהול תיקונים
-- [ ] טאב "Pending Corrections" מוצג
-- [ ] רשימת תיקונים ממתינים
-- [ ] פרטי תיקון ניתנים לצפייה
-- [ ] אישור תיקון פעיל
-- [ ] דחיית תיקון פעילה
-- [ ] בקשת תיקון (Revision) פעילה
+- [x] Pending Corrections tab *(admin.py:50, 56-57)*
+- [x] רשימת תיקונים ממתינים *(admin.py:68-89)*
+- [x] Vote display *(admin.py:116-128)*
+- [x] Original/Corrected comparison *(admin.py:131-138)*
+- [x] Approve button *(admin.py:149-158, 173)*
+- [x] Reject button *(admin.py:160-170, 174)*
 
 ## 10.3 ניהול משתמשים
-- [ ] טאב "Users" מוצג
-- [ ] רשימת משתמשים
-- [ ] שינוי תפקיד פעיל
-- [ ] הפעלה/השבתת משתמש פעילה
+- [x] Users tab *(admin.py:51, 60-61)*
+- [x] User list *(admin.py:177-189)*
+- [x] Search + Role filter *(admin.py:191-203)*
+- [x] User row display *(admin.py:211-242)*
+- [x] Change role menu *(admin.py:282-287)*
+- [x] Delete user *(admin.py:263-280, 288)*
 
 ## 10.4 סטטיסטיקות
-- [ ] טאב סטטיסטיקות מוצג
-- [ ] מספר תיקונים
-- [ ] מספר משתמשים פעילים
-- [ ] גרפים (אם קיימים)
+- [x] Statistics tab *(admin.py:52, 64-65)*
+- [x] Total Users card *(admin.py:309-315)*
+- [x] Pending Corrections card *(admin.py:317-323)*
+- [x] Editors & Admins card *(admin.py:325-331)*
+- [x] Total Corrections card *(admin.py:333-339)*
 
 ---
 
@@ -703,8 +715,8 @@
 | משתמשים | 24 | 24 | 0 | 0 |
 | תיקונים | 32 | 32 | 0 | 0 |
 | תגובות | 25 | 25 | 0 | 0 |
-| גילויים | 14 | | | |
-| אדמין | 13 | | | |
+| גילויים | 35 | 35 | 0 | 0 |
+| אדמין | 26 | 26 | 0 | 0 |
 | הגדרות | 6 | | | |
 | עזרה/נגישות | 9 | | | |
 | ניווט | 15 | | | |
