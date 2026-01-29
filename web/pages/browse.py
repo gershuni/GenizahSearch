@@ -717,21 +717,71 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         update_content()
 
         try:
-            results = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
+            results, exact_match = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
 
-            if results:
+            if not results:
+                state.error = tr('No manuscript found')
+                state.is_loading = False
+                update_content()
+                return
+
+            # If exact match or single result, load directly
+            if exact_match or len(results) == 1:
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
                 load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
-                state.error = tr('No manuscript found')
+                # Multiple results - show selection dialog
                 state.is_loading = False
                 update_content()
+                show_shelfmark_suggestions(results)
 
         except Exception as e:
             state.error = str(e)
             state.is_loading = False
             update_content()
+
+    def show_shelfmark_suggestions(results):
+        """Show a dialog with shelfmark suggestions for user to select."""
+        with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
+            # Header
+            with ui.row().classes('w-full items-center justify-between mb-4'):
+                h3(tr('Select Manuscript'), classes='text-lg font-semibold m-0')
+                ui.button(icon='close', on_click=dialog.close).props('flat round dense')
+
+            ui.label(
+                f"{tr('Multiple matches found for')}: \"{state.shelfmark_query}\""
+            ).classes('mb-4').style('color: var(--text-secondary);')
+
+            # Results list
+            with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
+                for result in results:
+                    def select_result(r=result):
+                        dialog.close()
+                        state.sys_id = r.sys_id
+                        state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
+                        # Update the search input field if available
+                        if slider_refs.get('search_input'):
+                            slider_refs['search_input'].value = r.shelfmark
+                        state.current_page = None
+                        load_page(p_num=1)
+
+                    with ui.card().classes(
+                        'w-full p-3 cursor-pointer hover:bg-gray-100'
+                    ).style(
+                        'background: var(--bg-surface); border: 1px solid var(--border-subtle);'
+                    ).on('click', select_result):
+                        # Shelfmark (LTR)
+                        ui.label(result.shelfmark).classes('font-medium').style(
+                            'color: var(--text-primary); direction: ltr; text-align: left;'
+                        )
+                        # Title (RTL for Hebrew)
+                        if result.title:
+                            ui.label(result.title).classes('text-sm').style(
+                                'color: var(--text-secondary); direction: rtl; text-align: right;'
+                            )
+
+        dialog.open()
 
     def load_page(direction: int = 0, p_num: Optional[int] = None):
         """Load a page of the manuscript."""
@@ -2232,6 +2282,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     placeholder=tr('e.g. T-S 8J6.1'),
                     label=tr('Enter shelfmark')
                 ).classes('flex-1').props('outlined dense clearable color=green')
+
+                # Store reference for updates from other functions (e.g. suggestion dialog)
+                slider_refs['search_input'] = search_input
 
                 # Set initial value if we have one
                 if state.shelfmark_query:
