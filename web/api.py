@@ -8,6 +8,8 @@ from genizah_core import Config
 import io
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.cell.rich_text import TextBlock, CellRichText
+from openpyxl.cell.text import InlineFont
 from openpyxl.utils import get_column_letter
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
@@ -606,6 +608,10 @@ def init_api_routes():
         if not state.last_results:
             return Response("No results to export", status_code=400)
 
+        # Get search query for filename and highlighting
+        search_query = state.current_search_query or ""
+        search_terms = [t.strip() for t in search_query.split() if t.strip() and not t.startswith(('=', '?', '~', '/', '$', '#'))]
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Genizah Results"
@@ -639,28 +645,41 @@ def init_api_routes():
             ws.column_dimensions[col_letter].width = width
 
         # Alignments for different column types
-        # Hebrew text columns: RTL alignment
-        rtl_alignment = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
+        # Hebrew text columns: RTL alignment (no wrap for cleaner single-line display)
+        rtl_alignment = Alignment(horizontal="right", vertical="top", wrap_text=False, readingOrder=2)
         # LTR columns (System ID, Score)
         ltr_alignment = Alignment(horizontal="left", vertical="top")
         # Score column: number alignment
         score_alignment = Alignment(horizontal="center", vertical="top")
+        # Yellow highlight for cells containing search terms
+        highlight_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+        def clean_text_single_line(text):
+            """Replace line breaks with spaces and clean up."""
+            if not text:
+                return ""
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+            while '  ' in text:
+                text = text.replace('  ', ' ')
+            return text.strip()
+
+        def contains_search_term(text):
+            """Check if text contains any search term."""
+            if not text or not search_terms:
+                return False
+            text_lower = text.lower()
+            return any(term.lower() in text_lower for term in search_terms)
 
         for res in state.last_results:
             display = res.get('display', {})
 
-            # Clean snippet and full_text - remove highlighting markers and normalize line breaks
+            # Clean snippet - remove highlighting markers and line breaks
             snippet = res.get('snippet', '').replace('*', '')
-            # Replace line breaks with spaces for single-line display in snippet
-            snippet = snippet.replace('\n', ' ').replace('\r', ' ')
-            while '  ' in snippet:
-                snippet = snippet.replace('  ', ' ')
-            snippet = snippet.strip()
+            snippet = clean_text_single_line(snippet)
 
-            # For full text, keep line breaks but ensure proper formatting
+            # Clean full text - replace line breaks with spaces
             full_text = res.get('full_text', '')[:32000]  # Excel cell limit safety
-            # Normalize line breaks for Excel
-            full_text = full_text.replace('\r\n', '\n').replace('\r', '\n')
+            full_text = clean_text_single_line(full_text)
 
             row = [
                 display.get('shelfmark', ''),
@@ -674,8 +693,8 @@ def init_api_routes():
             clean_row = []
             for cell in row:
                 if isinstance(cell, str):
-                    # Remove illegal chars (XML 1.0 invalid chars), keep newlines for full text
-                    cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\n\r\t")
+                    # Remove illegal chars (XML 1.0 invalid chars)
+                    cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\t")
                 clean_row.append(cell)
             ws.append(clean_row)
 
@@ -689,10 +708,16 @@ def init_api_routes():
             ws.cell(row=current_row, column=3).alignment = ltr_alignment
             # Score (D) - centered
             ws.cell(row=current_row, column=4).alignment = score_alignment
-            # Snippet (E) - RTL Hebrew
-            ws.cell(row=current_row, column=5).alignment = rtl_alignment
-            # Full Text (F) - RTL Hebrew with wrap
-            ws.cell(row=current_row, column=6).alignment = rtl_alignment
+            # Snippet (E) - RTL Hebrew + highlight if contains search term
+            snippet_cell = ws.cell(row=current_row, column=5)
+            snippet_cell.alignment = rtl_alignment
+            if contains_search_term(snippet):
+                snippet_cell.fill = highlight_fill
+            # Full Text (F) - RTL Hebrew + highlight if contains search term
+            fulltext_cell = ws.cell(row=current_row, column=6)
+            fulltext_cell.alignment = rtl_alignment
+            if contains_search_term(full_text):
+                fulltext_cell.fill = highlight_fill
 
         # Add credits at the bottom
         ws.append([])
@@ -714,10 +739,15 @@ def init_api_routes():
         wb.save(stream)
         stream.seek(0)
 
+        # Use search query for filename, sanitized for filesystem
+        safe_query = re.sub(r'[\\/*?:"<>|]', '', search_query)[:50] if search_query else "genizah_results"
+        safe_query = safe_query.strip() or "genizah_results"
+        filename = f"{safe_query}.xlsx"
+
         return Response(
             content=stream.read(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=genizah_results.xlsx"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{requests.utils.quote(filename)}"}
         )
 
     @app.get('/api/export/word')
@@ -725,8 +755,36 @@ def init_api_routes():
         if not state.last_results:
             return Response("No results to export", status_code=400)
 
+        # Get search query for filename and title
+        search_query = state.current_search_query or ""
+
         doc = Document()
-        doc.add_heading('Genizah Search Results', 0)
+        title_text = f'Genizah Search Results: "{search_query}"' if search_query else 'Genizah Search Results'
+        doc.add_heading(title_text, 0)
+
+        def add_snippet_with_highlighting(paragraph, snippet_text):
+            """Add snippet text with highlighted search terms (marked with *)."""
+            # The snippet contains *highlighted* terms - parse and format them
+            parts = snippet_text.split('*')
+            is_highlighted = False
+            for i, part in enumerate(parts):
+                if not part:
+                    is_highlighted = not is_highlighted
+                    continue
+                run = paragraph.add_run(part)
+                _set_run_rtl_font(run)
+                if is_highlighted:
+                    # Highlight: bold + yellow background
+                    run.bold = True
+                    from docx.shared import RGBColor
+                    from docx.oxml.ns import qn as qn_ns
+                    from docx.oxml import OxmlElement
+                    # Add yellow highlight
+                    rPr = run._r.get_or_add_rPr()
+                    highlight = OxmlElement('w:highlight')
+                    highlight.set(qn_ns('w:val'), 'yellow')
+                    rPr.append(highlight)
+                is_highlighted = not is_highlighted
 
         for i, res in enumerate(state.last_results):
             display = res.get('display', {})
@@ -743,11 +801,10 @@ def init_api_routes():
                 _set_run_rtl_font(title_run)
             _set_paragraph_rtl(p)
 
-            # Snippet (Hebrew manuscript text)
+            # Snippet (Hebrew manuscript text) with highlighting
             if res.get('snippet'):
                 snippet_p = doc.add_paragraph()
-                snippet_run = snippet_p.add_run(res['snippet'].replace('*', ''))
-                _set_run_rtl_font(snippet_run)
+                add_snippet_with_highlighting(snippet_p, res['snippet'])
                 _set_paragraph_rtl(snippet_p)
 
             # System ID (LTR)
@@ -768,10 +825,15 @@ def init_api_routes():
         doc.save(stream)
         stream.seek(0)
 
+        # Use search query for filename, sanitized for filesystem
+        safe_query = re.sub(r'[\\/*?:"<>|]', '', search_query)[:50] if search_query else "genizah_results"
+        safe_query = safe_query.strip() or "genizah_results"
+        filename = f"{safe_query}.docx"
+
         return Response(
             content=stream.read(),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": "attachment; filename=genizah_results.docx"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{requests.utils.quote(filename)}"}
         )
 
     @app.get('/api/export/parallels/excel')
@@ -1099,7 +1161,8 @@ def init_api_routes():
         if not list_data:
             return Response("List not found", status_code=404)
 
-        items = list_data.get('items', [])
+        # Use get_items_in_list() - items are stored in data['items'] with list membership
+        items = state.lists_mgr.get_items_in_list(list_id)
         if not items:
             return Response("List is empty", status_code=400)
 
