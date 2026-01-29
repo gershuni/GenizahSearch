@@ -662,6 +662,9 @@ def create_search_page(initial_query: str = None):
         search_state.results = []
         search_btn.disable()
 
+        # Show loading spinner immediately
+        render_results([])
+
         def progress_cb(current, total):
             if total > 0:
                 search_state.progress = current / total
@@ -719,6 +722,14 @@ def create_search_page(initial_query: str = None):
 
     def render_results(results):
         results_container.clear()
+
+        # Show loading spinner when search is running
+        if search_state.is_running:
+            with results_container:
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr("Searching...")).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+            return
 
         if not results:
             with results_container:

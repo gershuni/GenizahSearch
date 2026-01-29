@@ -6,12 +6,16 @@ Provides a reusable dialog for adding items to personal lists with:
 - List selection dropdown
 - Option to create a new list inline
 - Optional note field (empty by default)
+- Per-user storage when logged in
+- Per-device storage for anonymous users
 """
 
 from nicegui import ui
 from web.translations import tr
 from web.components.typography import h3
+from web.auth_state import GlobalAuthState
 from typing import Optional, Callable
+import asyncio
 
 
 def show_add_to_list_dialog(
@@ -159,17 +163,33 @@ def show_add_to_list_dialog(
                 if list_options:
                     ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
 
-                def create_and_add():
+                async def create_and_add():
                     name = new_list_name.value.strip()
                     if not name:
                         ui.notify(tr('Please enter a list name'), type='warning')
                         return
 
-                    # Create the new list
-                    new_list_id = lists_mgr.create_list(name, color=selected_color['value'])
+                    # Create the new list - use async if authenticated
+                    if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'create_list'):
+                        try:
+                            new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
+                        except TypeError:
+                            # Fallback to sync
+                            new_list_id = lists_mgr.create_list(name, color=selected_color['value'])
+                    else:
+                        new_list_id = lists_mgr.create_list(name, color=selected_color['value'])
+
                     if new_list_id:
                         # Add item to the new list
-                        if lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id):
+                        if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'add_item'):
+                            try:
+                                result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                            except TypeError:
+                                result = lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                        else:
+                            result = lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+
+                        if result:
                             ui.notify(f"{tr('List created')}: {name}", type='positive')
                             ui.notify(tr('Added to list'), type='positive')
                             dialog.close()
@@ -186,7 +206,7 @@ def show_add_to_list_dialog(
         with ui.row().classes('w-full justify-end gap-2 mt-6') as action_row:
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-            def do_add():
+            async def do_add():
                 if not list_options or creating_new_list['active']:
                     return
 
@@ -198,7 +218,16 @@ def show_add_to_list_dialog(
                     creating_new_list['active'] = True
                     return
 
-                if lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id):
+                # Add item - use async if authenticated
+                if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'add_item'):
+                    try:
+                        result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+                    except TypeError:
+                        result = lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+                else:
+                    result = lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+
+                if result:
                     ui.notify(tr('Added to list'), type='positive')
                     dialog.close()
                     if on_success:

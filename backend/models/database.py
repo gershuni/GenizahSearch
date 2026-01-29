@@ -63,7 +63,7 @@ def init_db():
     Creates all tables defined in models.
     """
     # Import all models to ensure they're registered
-    from . import user, correction, comment, document_metadata, activity_log
+    from . import user, correction, comment, document_metadata, activity_log, user_list
 
     Base.metadata.create_all(bind=engine)
     print(f"Database initialized at: {DATABASE_URL}")

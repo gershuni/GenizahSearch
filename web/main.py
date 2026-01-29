@@ -1653,6 +1653,9 @@ async def initialize_engine():
             state.meta_mgr = MetadataManager()
             state.lists_mgr = ListsManager(state.meta_mgr)
 
+            # Initialize user lists manager (auth-aware wrapper)
+            state.init_user_lists_mgr()
+
             # 2. Lab Settings & Engine
             state.lab_engine = LabEngine(state.meta_mgr, None)
 

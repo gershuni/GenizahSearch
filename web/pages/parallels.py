@@ -952,6 +952,13 @@ def create_parallels_page(initial_text: str = None):
         p_state.filtered_results = []
         results_container.clear()
 
+        # Show loading spinner in results area
+        with results_container:
+            with ui.column().classes('w-full items-center py-12'):
+                ui.spinner('dots', size='lg', color='primary')
+                ui.label(tr('Searching for parallels...')).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+                ui.label(tr('This may take a moment...')).classes('text-sm').style('color: var(--text-muted);')
+
         # Show immediate feedback
         ui.notify(tr('Starting search...'), type='info', timeout=2000)
         progress_bar.style('opacity: 1;')

@@ -9,14 +9,18 @@ Features:
 - View list contents with metadata
 - Edit notes and tags for items
 - Export lists
+- Per-user storage (syncs across devices when logged in)
+- Per-device storage (for anonymous users)
 """
 
 from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
+from web.auth_state import GlobalAuthState
 from typing import Optional
 import time
+import asyncio
 
 
 def create_inline_edit_label(
@@ -117,6 +121,15 @@ def create_lists_page():
         render_lists_sidebar()
         render_list_content()
 
+    async def async_refresh_ui():
+        """Async version of refresh_ui - refreshes data from API if authenticated."""
+        if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'refresh_data'):
+            try:
+                await state.lists_mgr.refresh_data()
+            except Exception as e:
+                print(f"Error refreshing lists data: {e}")
+        refresh_ui()
+
     # --- Create New List Dialog ---
     def show_create_list_dialog():
         """Show dialog to create a new list."""
@@ -139,17 +152,26 @@ def create_lists_page():
                     )
                     btn.on('click', lambda c=color: selected_color.update({'value': c}))
 
-            def create_list():
+            async def create_list():
                 name = list_name.value.strip()
                 if not name:
                     ui.notify(tr('Please enter a list name'), type='warning')
                     return
 
                 if state.lists_mgr:
-                    list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+                    # Use async method if authenticated, sync otherwise
+                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'create_list'):
+                        try:
+                            list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
+                        except TypeError:
+                            # Fallback for sync method
+                            list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+                    else:
+                        list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+
                     ui.notify(f"{tr('List created')}: {name}", type='positive')
                     dialog.close()
-                    refresh_ui()
+                    await async_refresh_ui()
                 else:
                     ui.notify(tr('Lists manager not available'), type='negative')
 
@@ -168,13 +190,19 @@ def create_lists_page():
             ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('mb-4').style('color: var(--text-secondary);')
             ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
 
-            def delete_list():
+            async def delete_list():
                 if state.lists_mgr:
-                    state.lists_mgr.delete_list(list_id)
+                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'delete_list'):
+                        try:
+                            await state.lists_mgr.delete_list(list_id)
+                        except TypeError:
+                            state.lists_mgr.delete_list(list_id)
+                    else:
+                        state.lists_mgr.delete_list(list_id)
                     ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
                     dialog.close()
                     page_state.selected_list_id = None
-                    refresh_ui()
+                    await async_refresh_ui()
 
             with ui.row().classes('w-full justify-end gap-2'):
                 ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -494,12 +522,20 @@ def create_lists_page():
                                     on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
                                 ).props('flat dense size=sm').style('color: var(--text-tertiary);')
 
-    def remove_item_from_list(item_id: str, list_id: str):
+    async def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""
         if state.lists_mgr:
-            if state.lists_mgr.remove_item_from_list(item_id, list_id):
+            if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'remove_item_from_list'):
+                try:
+                    result = await state.lists_mgr.remove_item_from_list(item_id, list_id)
+                except TypeError:
+                    result = state.lists_mgr.remove_item_from_list_sync(item_id, list_id)
+            else:
+                result = state.lists_mgr.remove_item_from_list(item_id, list_id)
+
+            if result:
                 ui.notify(tr('Item removed from list'), type='info')
-                refresh_ui()
+                await async_refresh_ui()
 
     def export_list(list_id: str):
         """Export list to Excel."""
@@ -522,20 +558,74 @@ def create_lists_page():
             except Exception as e:
                 ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
 
+    # --- Migration Dialog ---
+    async def show_migration_dialog():
+        """Show dialog to migrate local lists to user account."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            h3(tr('Sync Your Lists'), classes='text-xl font-bold mb-4')
+            ui.label(tr('You have local lists that can be synced to your account.')).classes('mb-2')
+            ui.label(tr('This will make them available on all your devices.')).classes('mb-4').style('color: var(--text-secondary);')
+
+            async def do_migration():
+                if hasattr(state.lists_mgr, 'migrate_local_to_user'):
+                    result = await state.lists_mgr.migrate_local_to_user()
+                    if 'error' not in result:
+                        ui.notify(
+                            f"{tr('Migration complete')}: {result.get('lists_migrated', 0)} {tr('lists')}, "
+                            f"{result.get('items_migrated', 0)} {tr('items')}",
+                            type='positive'
+                        )
+                        dialog.close()
+                        await async_refresh_ui()
+                    else:
+                        ui.notify(f"{tr('Migration failed')}: {result.get('error')}", type='negative')
+                else:
+                    ui.notify(tr('Migration not available'), type='warning')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Later'), on_click=dialog.close).props('flat')
+                ui.button(tr('Sync Now'), on_click=do_migration).classes('bg-primary text-white')
+
+        dialog.open()
+
     # --- Main Layout ---
     with ui.column().classes('w-full h-[calc(100vh-120px)]'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
             # Changed to H1
             h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
-            ui.button(
-                tr('Create List'),
-                icon='add',
-                on_click=show_create_list_dialog
-            ).classes('bg-primary text-white')
+            with ui.row().classes('items-center gap-2'):
+                # Show sync status
+                if GlobalAuthState.is_logged_in():
+                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Synced to your account'))
+                else:
+                    ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
+                ui.button(
+                    tr('Create List'),
+                    icon='add',
+                    on_click=show_create_list_dialog
+                ).classes('bg-primary text-white')
 
-        # Description
-        ui.label(tr('Organize and save manuscripts for easy access')).classes('mb-4').style('color: var(--text-secondary);')
+        # Description with sync status
+        if GlobalAuthState.is_logged_in():
+            ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
+        else:
+            with ui.row().classes('items-center gap-2 mb-4'):
+                ui.label(tr('Lists are stored locally.')).style('color: var(--text-secondary);')
+                ui.link(tr('Log in to sync across devices'), '/').classes('text-primary underline')
+
+        # Check for migration opportunity (logged in with local lists)
+        if GlobalAuthState.is_logged_in():
+            local_mgr = state.get_local_lists_mgr()
+            if local_mgr and hasattr(state.lists_mgr, 'has_local_lists'):
+                if state.lists_mgr.has_local_lists():
+                    with ui.card().classes('w-full p-4 mb-4 bg-blue-50 border-l-4 border-blue-500'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.icon('sync', size='md').classes('text-blue-600')
+                            with ui.column().classes('flex-grow'):
+                                ui.label(tr('Local Lists Available')).classes('font-semibold text-blue-800')
+                                ui.label(tr('You have lists stored on this device. Sync them to your account?')).classes('text-sm text-blue-600')
+                            ui.button(tr('Sync Now'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:
