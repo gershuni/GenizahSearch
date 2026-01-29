@@ -714,7 +714,7 @@
 
 ## 20.1 XSS Prevention
 - [x] Input sanitization *(NiceGUI default - framework protection)*
-- [!] HTML escaping *(browse.py:450 - sanitize=False סיכון)*
+- [?] HTML escaping *(sanitize=False - נמצא html.escape() ברוב המקומות, לאמת 100%)*
 - [x] Content-Type headers *(api.py - proper MIME types)*
 
 ## 20.2 SSRF Protection
@@ -736,6 +736,11 @@
 - [?] HTTPS enforcement *(נדרש בדיקת שרת)*
 - [x] Secure cookies *(NiceGUI - framework default)*
 - [x] CORS handling *(auth_state.py - proper headers)*
+
+## 20.6 Injection Prevention (הוסף לאחר סקירת ג'ולס)
+- [!] **Path Traversal Windows** *(parallels.py:60 - backslash לא מטופל)*
+- [!] **JS Injection** *(text_editor.py:214-215 - escaping שבירי, להחליף ב-json.dumps)*
+- [?] **Rate Limiting** *(חסר - נדרש להוסיף)*
 
 ---
 
@@ -775,54 +780,58 @@
 
 ### באגים חשובים (P1) - Security
 
-1. **[Security] sanitize=False בכל האפליקציה (לא רק browse.py!)**
-   - מיקומים: **17 מופעים**
-     - `browse.py`: שורות 1635, 1895, 1992, 2077
-     - `search.py`: שורות 724, 858, 969
-     - `parallels.py`: שורות 1292, 1300, 1485, 1493
-     - `viewer.py`: שורות 186, 251
-     - `text_editor.py`: שורה 256
-     - `typography.py`: שורה 20
-   - סיכון: XSS אם תוכן מגיע ממקור לא מהימן
-   - המלצה: לוודא שכל התוכן מגיע מ-backend מהימן, או להוסיף sanitization
-
-2. **[Security] אין Rate Limiting**
+1. **[Security] אין Rate Limiting**
    - תיאור: לא נמצא rate limiting ב-API
    - סיכון: Brute force על login, DoS על search
-   - המלצה: להוסיף rate limiting ל-FastAPI
+   - המלצה: להוסיף rate limiting ל-FastAPI (slowapi או fastapi-limiter)
 
-3. **[Security] אין הגנת CSRF**
+2. **[Security] Path Traversal ב-Sefaria cache (כולל Windows)**
+   - קובץ: parallels.py:60
+   - קוד: `ref.replace(' ', '_').replace('/', '_')` - **לא מטפל ב-backslash!**
+   - סיכון: ב-Windows, `..\..\` יכול לגשת לקבצים מחוץ ל-cache
+   - המלצה: להשתמש ב-`werkzeug.utils.secure_filename` או whitelist של תווים
+
+3. **[Security] JS Injection ב-text_editor.py**
+   - קובץ: text_editor.py:214-215
+   - קוד: `safe_doc_id = (document_id or '').replace("'", "\\'").replace('"', '\\"')`
+   - סיכון: Escaping שבירי - לא מכסה backticks, backslashes, או event handlers
+   - המלצה: להחליף ב-`json.dumps()` ל-JS context escaping נכון
+
+4. **[Security] אין הגנת CSRF**
    - תיאור: לא נמצא CSRF token
    - סיכון: Cross-Site Request Forgery
-   - המלצה: NiceGUI משתמש ב-WebSocket (פחות רגיש), אבל יש לבדוק API endpoints
-
-4. **[Security] Path Traversal פוטנציאלי ב-Sefaria cache**
-   - קובץ: parallels.py:60
-   - קוד: `cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_v2.txt")`
-   - סיכון: ref עם `..` יכול לגשת לקבצים מחוץ ל-cache
-   - המלצה: להוסיף validation ל-ref
+   - הערה: NiceGUI משתמש ב-WebSocket (פחות רגיש), אבל יש לבדוק API endpoints
 
 ### באגים בינוניים (P2)
 
-1. **[Lists] חסרה אפשרות Rename לרשימה**
+1. **[Security] sanitize=False - לאמת html.escape() (הורד מ-P1)**
+   - מיקומים: **17 מופעים** ב-6 קבצים
+   - **עדכון לאחר סקירת ג'ולס:** רוב המקומות **כן** משתמשים ב-`html.escape()`:
+     - `genizah_core.py:3641` - `format_snippet()` קורא `html.escape(text)`
+     - `browse.py:1327` - `highlight_text()` קורא `html_module.escape(text)`
+     - `typography.py:28` - `SemanticHeading` קורא `html.escape(text)`
+     - `parallels.py:1257,1454` - קורא `html.escape()` לפני regex
+   - **פעולה נדרשת:** לאמת ש-100% מהמקומות מוגנים (לא רק רוב)
+
+2. **[Lists] חסרה אפשרות Rename לרשימה**
    - קובץ: lists.py
    - תיאור: ניתן ליצור ולמחוק רשימות, אך לא לשנות את שמן
 
-2. **[Lists] חסרים Export CSV ו-Word**
+3. **[Lists] חסרים Export CSV ו-Word**
    - קובץ: lists.py:419-436
 
-3. **[Comments] תגובות לא מוצגות ב-Browse**
+4. **[Comments] תגובות לא מוצגות ב-Browse**
    - קבצים: browse.py, notes_display.py
    - תיאור: תגובות נשמרות אבל לא תמיד מוצגות
    - נדרש: בדיקה ידנית של הזרימה
 
-4. **[Debug] הרבה DEBUG prints בקוד**
+5. **[Debug] הרבה DEBUG prints בקוד**
    - קובץ: genizah_app.py
    - תיאור: ~60 שורות `[DEBUG]` שנשארו בקוד
    - סיכון: Information leakage, performance
    - המלצה: להסיר או להפוך ל-logging
 
-5. **[Error] Error messages מודפסים ל-console**
+6. **[Error] Error messages מודפסים ל-console**
    - קבצים: services.py, api.py, browse.py, ועוד
    - תיאור: `print(f"...error: {e}")` ו-`traceback.print_exc()`
    - סיכון: Stack trace leakage
@@ -881,12 +890,21 @@
 - [ ] Lists: הוספה מחיפוש → תצוגה ברשימה → ניווט חזרה
 - [ ] Parallels: חיפוש → תוצאות → ניווט ל-Browse
 
+### Concurrency & Data Integrity (הוסף לאחר סקירת ג'ולס)
+- [ ] **Corrections:** משתמש A ומשתמש B עורכים את אותו תיקון במקביל - מה קורה? (Last write wins? Error? Merge?)
+- [ ] **Corrections:** משתמש A מאשר תיקון בזמן שמשתמש B עורך אותו - האם B מקבל הודעת שגיאה?
+- [ ] **Lists:** משתמש A מוחק רשימה בזמן שמשתמש B מוסיף פריט - מה קורה?
+
 ### תאימות דפדפנים
 - [ ] Chrome (Windows/Mac/Linux)
 - [ ] Firefox
 - [ ] Safari (Mac/iOS)
 - [ ] Edge
 - [ ] Mobile browsers (Android Chrome, iOS Safari)
+
+### Mixed LTR/RTL Content (הוסף לאחר סקירת ג'ולס)
+- [ ] **Comments:** הזנת תגובה באנגלית על כתב יד עברי - האם הסמן קופץ? האם סוגריים מוצגים נכון?
+- [ ] **Search:** שאילתות מעורבות עברית/אנגלית (לדוגמה: "Genizah קהיר") - תוצאות נכונות?
 
 ### מקרי קצה
 - [ ] שדות ריקים / Null values
@@ -896,12 +914,15 @@
 - [ ] Session timeout בזמן עריכה
 - [ ] Network disconnection recovery
 - [ ] Concurrent edits by multiple users
+- [ ] **Windows:** Path traversal עם backslash (`..\..\`) ב-Sefaria cache ו-Image API
 
 ### ביצועים
 - [ ] 1000+ תוצאות חיפוש
 - [ ] רשימות עם 100+ פריטים
 - [ ] תמונות IIIF גדולות
 - [ ] Memory leaks במעברים בין דפים
+- [ ] **Stress Test:** 10 חיפושי regex מקבילים - האם השרת נשאר רספונסיבי?
+- [ ] **Large List Export:** רשימה עם 500 פריטים - האם Export מתאים למספר?
 
 ---
 
