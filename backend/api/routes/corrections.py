@@ -21,6 +21,7 @@ from ..deps import (
     get_current_active_user, get_current_user_optional,
     require_reviewer, get_client_info
 )
+from ...rate_limiting import limiter
 
 router = APIRouter(prefix="/corrections", tags=["Corrections"])
 
@@ -112,7 +113,9 @@ async def create_correction(
 
 
 @router.get("/", response_model=CorrectionListResponse)
+@limiter.limit("30/minute")
 async def list_corrections(
+    request: Request,
     document_id: Optional[str] = None,
     shelfmark: Optional[str] = None,
     system_id: Optional[str] = None,

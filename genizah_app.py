@@ -2517,23 +2517,23 @@ class ResultDialog(QDialog):
             by_doc_id = joins_mgr.data.get('by_document_id', {})
             by_normalized = joins_mgr.data.get('by_normalized', {})
             total_joins = len(joins_mgr.data.get('joins', {}))
-            print(f"[DEBUG] ResultDialog joins: total_joins={total_joins}, by_document_id={len(by_doc_id)}, by_normalized={len(by_normalized)}", flush=True)
-            print(f"[DEBUG] Looking for doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}'", flush=True)
+            logger.debug("ResultDialog joins: total_joins=%s, by_document_id=%s, by_normalized=%s", total_joins, len(by_doc_id), len(by_normalized))
+            logger.debug("Looking for doc_id='%s', plain_shelfmark='%s'", document_id, plain_shelfmark)
 
             # First try document_id lookup
             if document_id in by_doc_id:
-                print(f"[DEBUG] Found in by_document_id with join_ids: {by_doc_id[document_id]}", flush=True)
+                logger.debug("Found in by_document_id with join_ids: %s", by_doc_id[document_id])
             connected = joins_mgr.get_connected_fragments_by_id(document_id)
 
             # If no results by document_id, try shelfmark
             if not connected or connected.get('total_fragments', 0) <= 1:
                 normalized = joins_mgr._normalize_shelfmark(plain_shelfmark)
-                print(f"[DEBUG] Not found by doc_id, trying normalized shelfmark: '{normalized}'", flush=True)
+                logger.debug("Not found by doc_id, trying normalized shelfmark: '%s'", normalized)
                 if normalized in by_normalized:
-                    print(f"[DEBUG] Found in by_normalized with join_ids: {by_normalized[normalized]}", flush=True)
+                    logger.debug("Found in by_normalized with join_ids: %s", by_normalized[normalized])
                 connected = joins_mgr.get_connected_fragments(plain_shelfmark)
 
-            print(f"[DEBUG] Final connected result: fragments={connected.get('fragments', []) if connected else 'None'}", flush=True)
+            logger.debug("Final connected result: fragments=%s", connected.get('fragments', []) if connected else 'None')
 
         if not connected or connected.get('total_fragments', 0) <= 1:
             action = self.rd_joins_menu.addAction(tr("No joined fragments"))
@@ -2575,7 +2575,7 @@ class ResultDialog(QDialog):
             if shelf and doc_id:
                 shelfmark_to_docid[shelf.upper()] = doc_id
 
-        print(f"[DEBUG] _rd_update_joins_menu: doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}', direct={direct_fragments}", flush=True)
+        logger.debug("_rd_update_joins_menu: doc_id='%s', plain_shelfmark='%s', direct=%s", document_id, plain_shelfmark, direct_fragments)
         for frag in fragments_list:
             # Compare with plain shelfmark (joins store plain shelfmarks)
             is_current = frag.upper() == plain_shelfmark.upper()
@@ -2709,9 +2709,9 @@ class ResultDialog(QDialog):
         try:
             versions_data = client.get_page_versions(doc_id, page_num)
             all_versions = versions_data.get('all_versions', [])
-            print(f"[DEBUG] _rd_refresh_versions: doc_id={doc_id}, page={page_num}, versions={len(all_versions)}", flush=True)
+            logger.debug("_rd_refresh_versions: doc_id=%s, page=%s, versions=%s", doc_id, page_num, len(all_versions))
             for v in all_versions:
-                print(f"[DEBUG]   version: source={v.get('source')}, user={v.get('user_name')}, id={v.get('id')}", flush=True)
+                logger.debug("version: source=%s, user=%s, id=%s", v.get('source'), v.get('user_name'), v.get('id'))
 
             # Filter to only latest version per user (use user_name as key for consistent deduplication)
             user_versions = [v for v in all_versions if v.get('source') == 'user']
@@ -2727,7 +2727,7 @@ class ResultDialog(QDialog):
                     if ver.get('created_at', '') > existing.get('created_at', ''):
                         latest_by_user[user_key] = ver
 
-            print(f"[DEBUG] After dedup: {len(latest_by_user)} unique users from {len(user_versions)} versions", flush=True)
+            logger.debug("After dedup: %s unique users from %s versions", len(latest_by_user), len(user_versions))
 
             # Add V0.7 if available
             for ver in all_versions:
@@ -2775,7 +2775,7 @@ class ResultDialog(QDialog):
                 users_with_versions.add(user_name)
 
         except Exception as e:
-            print(f"[DEBUG] Error refreshing versions: {e}", flush=True)
+            logger.debug("Error refreshing versions: %s", e)
 
         # Also fetch corrections from corrections API (separate from versions)
         # Only add corrections for users who don't already have a version entry
@@ -2783,9 +2783,9 @@ class ResultDialog(QDialog):
             corrections = client.get_corrections_for_document(doc_id, include_drafts=True)
             # Filter corrections by page number
             page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
-            print(f"[DEBUG] _rd_refresh_versions: corrections={len(corrections)}, page_corrections={len(page_corrections)}", flush=True)
+            logger.debug("_rd_refresh_versions: corrections=%s, page_corrections=%s", len(corrections), len(page_corrections))
             for c in corrections:
-                print(f"[DEBUG]   corr id={c.id}, status={c.status}, author={c.author_username}, page={c.page_number}", flush=True)
+                logger.debug("corr id=%s, status=%s, author=%s, page=%s", c.id, c.status, c.author_username, c.page_number)
 
             # Group by user, keep latest per user
             corrections_by_user = {}
@@ -2808,7 +2808,7 @@ class ResultDialog(QDialog):
 
                 # Skip if user already has a version entry (avoid duplicates)
                 if user_name in users_with_versions:
-                    print(f"[DEBUG]   correction: user={user_name} SKIPPED (has version)", flush=True)
+                    logger.debug("correction: user=%s SKIPPED (has version)", user_name)
                     continue
 
                 # Filter based on status and user permissions:
@@ -2820,12 +2820,12 @@ class ResultDialog(QDialog):
                 if status == 'rejected':
                     # Rejected corrections: only visible to author or admin
                     if not is_own_correction and not is_reviewer_or_admin:
-                        print(f"[DEBUG]   correction: user={user_name} SKIPPED (rejected, not authorized)", flush=True)
+                        logger.debug("correction: user=%s SKIPPED (rejected, not authorized)", user_name)
                         continue
                 elif status in ('draft', 'pending'):
                     # Draft/Pending: only visible to author or reviewer/admin
                     if not is_own_correction and not is_reviewer_or_admin:
-                        print(f"[DEBUG]   correction: user={user_name} SKIPPED ({status}, not authorized)", flush=True)
+                        logger.debug("correction: user=%s SKIPPED (%s, not authorized)", user_name, status)
                         continue
 
                 created_at = corr.created_at[:10] if corr.created_at else ''
@@ -2847,7 +2847,7 @@ class ResultDialog(QDialog):
                     if created_at:
                         label += f" ({created_at})"
 
-                print(f"[DEBUG]   correction: user={user_name}, status={status}, id={corr.id}", flush=True)
+                logger.debug("correction: user=%s, status=%s, id=%s", user_name, status, corr.id)
 
                 self.rd_version_combo.addItem(label, {
                     "source": "correction",
@@ -2862,7 +2862,7 @@ class ResultDialog(QDialog):
                     new_user_idx = self.rd_version_combo.count() - 1
 
         except Exception as e:
-            print(f"[DEBUG] Error fetching corrections: {e}", flush=True)
+            logger.debug("Error fetching corrections: %s", e)
 
         # Enable combo if we have versions/corrections
         if self.rd_version_combo.count() > 1:
@@ -2918,7 +2918,7 @@ class ResultDialog(QDialog):
                         self._rd_versions_cache[cache_key] = content
                         self._rd_display_text(content)
                 except Exception as e:
-                    print(f"[DEBUG] Error loading version: {e}", flush=True)
+                    logger.debug("Error loading version: %s", e)
 
     def _rd_display_text(self, text):
         """Display text in the manuscript viewer."""
@@ -4237,17 +4237,17 @@ class GenizahGUI(QMainWindow):
     def _on_tab_changed(self, index):
         """Handle tab change events."""
         import sys
-        print(f"[DEBUG] _on_tab_changed called with index={index}", flush=True)
+        logger.debug("_on_tab_changed called with index=%s", index)
         try:
             current_widget = self.tabs.widget(index)
-            print(f"[DEBUG] current_widget={current_widget}", flush=True)
+            logger.debug("current_widget=%s", current_widget)
             if hasattr(self, 'community_tab') and current_widget == self.community_tab:
-                print(f"[DEBUG] Matched community_tab, _community_data_loaded={getattr(self, '_community_data_loaded', False)}", flush=True)
+                logger.debug("Matched community_tab, _community_data_loaded=%s", getattr(self, '_community_data_loaded', False))
                 # Load community data when tab is first shown or refresh if needed
                 if not getattr(self, '_community_data_loaded', False):
-                    print("[DEBUG] About to call _refresh_community_panels", flush=True)
+                    logger.debug("About to call _refresh_community_panels")
                     self._refresh_community_panels()
-                    print("[DEBUG] _refresh_community_panels completed", flush=True)
+                    logger.debug("_refresh_community_panels completed")
                     self._community_data_loaded = True
         except Exception as e:
             import traceback
@@ -4622,7 +4622,7 @@ class GenizahGUI(QMainWindow):
                     if hasattr(self, 'browse_original_page_text'):
                         self._browse_display_version_text(self.browse_original_page_text)
             except Exception as e:
-                print(f"[DEBUG] Error loading version content: {e}", flush=True)
+                logger.debug("Error loading version content: %s", e)
                 if hasattr(self, 'browse_original_page_text'):
                     self._browse_display_version_text(self.browse_original_page_text)
 
@@ -4782,7 +4782,7 @@ class GenizahGUI(QMainWindow):
                         "corrected_text": corr.corrected_text
                     })
             except Exception as e:
-                print(f"[DEBUG] Error fetching corrections for browse: {e}", flush=True)
+                logger.debug("Error fetching corrections for browse: %s", e)
 
             # Enable combo if we have more than just V0.8
             if self.browse_version_combo.count() > 1:
@@ -4804,7 +4804,7 @@ class GenizahGUI(QMainWindow):
                 self.browse_version_combo.setEnabled(False)
 
         except Exception as e:
-            print(f"[DEBUG] Error fetching versions: {e}", flush=True)
+            logger.debug("Error fetching versions: %s", e)
             self.browse_version_combo.setEnabled(False)
 
     def _browse_add_comment(self):
@@ -7730,35 +7730,35 @@ class GenizahGUI(QMainWindow):
 
     def _open_document_result_dialog(self, shelfmark=None, sys_id=None, page_num=1):
         """Open ResultDialog for a document by shelfmark or sys_id."""
-        print(f"[DEBUG] _open_document_result_dialog called: shelfmark={shelfmark}, sys_id={sys_id}", flush=True)
+        logger.debug("_open_document_result_dialog called: shelfmark=%s, sys_id=%s", shelfmark, sys_id)
         try:
             if not self.searcher or not self.meta_mgr:
-                print("[DEBUG] searcher or meta_mgr not available", flush=True)
+                logger.debug("searcher or meta_mgr not available")
                 return
 
             # Get sys_id from shelfmark if needed
             if not sys_id and shelfmark:
-                print("[DEBUG] Looking up sys_id from shelfmark", flush=True)
+                logger.debug("Looking up sys_id from shelfmark")
                 self._ensure_shelf_map()
                 norm = self._normalize_shelfmark(shelfmark)
                 sys_id = self._shelf_to_sys.get(norm) if norm else None
-                print(f"[DEBUG] Normalized: {norm}, sys_id: {sys_id}", flush=True)
+                logger.debug("Normalized: %s, sys_id: %s", norm, sys_id)
 
             if not sys_id:
-                print("[DEBUG] No sys_id found", flush=True)
+                logger.debug("No sys_id found")
                 QMessageBox.warning(self, tr("Error"), tr("Document not found"))
                 return
 
             # Get page data
-            print(f"[DEBUG] Getting page data for sys_id={sys_id}", flush=True)
+            logger.debug("Getting page data for sys_id=%s", sys_id)
             page_data = self.searcher.get_browse_page(sys_id, p_num=page_num)
             if not page_data:
-                print("[DEBUG] No page data found", flush=True)
+                logger.debug("No page data found")
                 QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
                 return
 
             shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
-            print(f"[DEBUG] shelfmark_display={shelfmark_display}, title={title}", flush=True)
+            logger.debug("shelfmark_display=%s, title=%s", shelfmark_display, title)
 
             # Create result dict for ResultDialog
             result = {
@@ -7776,11 +7776,11 @@ class GenizahGUI(QMainWindow):
                 }
             }
 
-            print("[DEBUG] Opening ResultDialog", flush=True)
+            logger.debug("Opening ResultDialog")
             ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
-            print("[DEBUG] ResultDialog closed", flush=True)
+            logger.debug("ResultDialog closed")
         except Exception as e:
-            print(f"[DEBUG] Error in _open_document_result_dialog: {e}", flush=True)
+            logger.debug("Error in _open_document_result_dialog: %s", e)
             import traceback
             traceback.print_exc()
 
@@ -8587,48 +8587,48 @@ class GenizahGUI(QMainWindow):
             use_cache_first: If True, display cached data first for instant response,
                            then fetch fresh data in background.
         """
-        print("[DEBUG] _refresh_community_panels started", flush=True)
+        logger.debug("_refresh_community_panels started")
 
         # Quick connectivity check to avoid long timeouts when offline
         server_available = self.corrections_client.is_server_available()
-        print(f"[DEBUG] Server available: {server_available}", flush=True)
+        logger.debug("Server available: %s", server_available)
 
         # If offline, only use cached data - skip all API calls
         skip_api_calls = not server_available
 
         try:
-            print("[DEBUG] Calling _update_community_header...", flush=True)
+            logger.debug("Calling _update_community_header...")
             self._update_community_header()
-            print("[DEBUG] _update_community_header completed", flush=True)
+            logger.debug("_update_community_header completed")
         except Exception as e:
             print(f"Error in _update_community_header: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_discoveries_panel...", flush=True)
+            logger.debug("Calling _refresh_discoveries_panel...")
             self._refresh_discoveries_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_discoveries_panel completed", flush=True)
+            logger.debug("_refresh_discoveries_panel completed")
         except Exception as e:
             print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
             import traceback
             traceback.print_exc()
         try:
-            print("[DEBUG] Calling _refresh_corrections_panel...", flush=True)
+            logger.debug("Calling _refresh_corrections_panel...")
             self._refresh_corrections_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_corrections_panel completed", flush=True)
+            logger.debug("_refresh_corrections_panel completed")
         except Exception as e:
             print(f"Error in _refresh_corrections_panel: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_comments_panel...", flush=True)
+            logger.debug("Calling _refresh_comments_panel...")
             self._refresh_comments_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_comments_panel completed", flush=True)
+            logger.debug("_refresh_comments_panel completed")
         except Exception as e:
             print(f"Error in _refresh_comments_panel: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_joins_panel...", flush=True)
+            logger.debug("Calling _refresh_joins_panel...")
             self._refresh_joins_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_joins_panel completed", flush=True)
+            logger.debug("_refresh_joins_panel completed")
         except Exception as e:
             print(f"Error in _refresh_joins_panel: {e}", flush=True)
-        print("[DEBUG] _refresh_community_panels finished", flush=True)
+        logger.debug("_refresh_community_panels finished")
 
     def _update_community_header(self):
         """Update the community header with user info."""
@@ -8667,15 +8667,15 @@ class GenizahGUI(QMainWindow):
                 current_user = self.corrections_client.current_user
                 is_admin = current_user and current_user.role == 'admin'
 
-            print(f"[DEBUG] _refresh_discoveries_panel: is_admin={is_admin}, include_hidden={is_admin}", flush=True)
+            logger.debug("_refresh_discoveries_panel: is_admin=%s, include_hidden=%s", is_admin, is_admin)
 
             discoveries, total = self.corrections_client.get_discoveries(
                 page_size=20,
                 include_hidden=is_admin
             )
-            print(f"[DEBUG] Got {len(discoveries)} discoveries from API, total={total}", flush=True)
+            logger.debug("Got %s discoveries from API, total=%s", len(discoveries), total)
             for d in discoveries:
-                print(f"[DEBUG]   discovery id={d.id}, title={d.title[:30] if d.title else 'N/A'}, is_hidden={d.is_hidden}", flush=True)
+                logger.debug("discovery id=%s, title=%s, is_hidden=%s", d.id, d.title[:30] if d.title else 'N/A', d.is_hidden)
 
             # Convert to cacheable format with discovery_type, is_pinned, is_hidden
             cache_data = [{
@@ -8889,7 +8889,7 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_comments_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the comments list panels (My Comments + All Comments)."""
-        print("[DEBUG] _refresh_comments_panel started", flush=True)
+        logger.debug("_refresh_comments_panel started")
         self.my_comments_list.clear()
         self.all_comments_list.clear()
 
@@ -8897,19 +8897,19 @@ class GenizahGUI(QMainWindow):
         if self.corrections_client.is_logged_in():
             cached_my = self.corrections_client.get_cached_data('my_comments') if use_cache_first else None
             if cached_my:
-                print(f"[DEBUG] Using cached my comments: {len(cached_my)} items", flush=True)
+                logger.debug("Using cached my comments: %s items", len(cached_my))
                 self._populate_comments_list(cached_my, self.my_comments_list)
 
             if not skip_api_calls:
                 try:
                     comments, total = self.corrections_client.get_my_comments(page_size=20)
-                    print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
+                    logger.debug("Got %s my comments, total=%s", len(comments), total)
                     cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
                     self.corrections_client.set_cached_data('my_comments', cache_data)
                     self.my_comments_list.clear()
                     self._populate_comments_list(cache_data, self.my_comments_list)
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching my comments: {e}", flush=True)
+                    logger.debug("Error fetching my comments: %s", e)
                     if not cached_my:
                         item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                         self.my_comments_list.addItem(item)
@@ -8928,13 +8928,13 @@ class GenizahGUI(QMainWindow):
         if not skip_api_calls:
             try:
                 comments, total = self.corrections_client.get_all_comments(page_size=20)
-                print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
+                logger.debug("Got %s all comments, total=%s", len(comments), total)
                 cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
                 self.corrections_client.set_cached_data('all_comments', cache_data)
                 self.all_comments_list.clear()
                 self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
             except Exception as e:
-                print(f"[DEBUG] Error fetching all comments: {e}", flush=True)
+                logger.debug("Error fetching all comments: %s", e)
                 if not cached_all:
                     item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                     self.all_comments_list.addItem(item)
@@ -8942,7 +8942,7 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
             self.all_comments_list.addItem(item)
 
-        print("[DEBUG] Comments panel refresh completed", flush=True)
+        logger.debug("Comments panel refresh completed")
 
     def _populate_comments_list(self, comments_data, target_list, show_author=False):
         """Populate comments list from data."""
@@ -9115,9 +9115,9 @@ class GenizahGUI(QMainWindow):
                     page_data = self.searcher.get_browse_page(doc_id, p_num=page_num)
                     if page_data:
                         original_v08_text = page_data.get('text', '')
-                        print(f"[DEBUG] Got V0.8 text from searcher: {len(original_v08_text) if original_v08_text else 0} chars", flush=True)
+                        logger.debug("Got V0.8 text from searcher: %s chars", len(original_v08_text) if original_v08_text else 0)
             except Exception as e:
-                print(f"[DEBUG] Error fetching V0.8 text: {e}", flush=True)
+                logger.debug("Error fetching V0.8 text: %s", e)
 
             dialog = CorrectionDetailDialog(self, self.corrections_client, correction, original_v08_text)
             dialog.exec()
@@ -9151,18 +9151,18 @@ class GenizahGUI(QMainWindow):
 
     def _on_correction_clicked(self, item):
         """Handle correction item double-click - open ResultDialog."""
-        print(f"[DEBUG] _on_correction_clicked called", flush=True)
+        logger.debug("_on_correction_clicked called")
         try:
             corr_data = item.data(Qt.ItemDataRole.UserRole)
-            print(f"[DEBUG] corr_data={corr_data}", flush=True)
+            logger.debug("corr_data=%s", corr_data)
             if corr_data:
                 sys_id = corr_data.get('system_id')
                 shelfmark = corr_data.get('shelfmark')
                 page_num = corr_data.get('page_number') or 1
-                print(f"[DEBUG] sys_id={sys_id}, shelfmark={shelfmark}, page_num={page_num}", flush=True)
+                logger.debug("sys_id=%s, shelfmark=%s, page_num=%s", sys_id, shelfmark, page_num)
                 self._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id, page_num=page_num)
         except Exception as e:
-            print(f"[DEBUG] Error in _on_correction_clicked: {e}", flush=True)
+            logger.debug("Error in _on_correction_clicked: %s", e)
             import traceback
             traceback.print_exc()
 
@@ -9180,7 +9180,7 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_joins_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the joins list panels (My Joins + All Joins)."""
-        print("[DEBUG] _refresh_joins_panel started", flush=True)
+        logger.debug("_refresh_joins_panel started")
         self.my_joins_list.clear()
         self.all_joins_list.clear()
 
@@ -9188,13 +9188,13 @@ class GenizahGUI(QMainWindow):
         if self.corrections_client.is_logged_in():
             cached_my = self.corrections_client.get_cached_data('my_joins') if use_cache_first else None
             if cached_my:
-                print(f"[DEBUG] Using cached my joins: {len(cached_my)} items", flush=True)
+                logger.debug("Using cached my joins: %s items", len(cached_my))
                 self._populate_joins_list(cached_my, self.my_joins_list)
 
             if not skip_api_calls:
                 try:
                     joins, total = self.corrections_client.get_my_joins(limit=20)
-                    print(f"[DEBUG] Got {len(joins)} my joins, total={total}", flush=True)
+                    logger.debug("Got %s my joins, total=%s", len(joins), total)
                     cache_data = [{
                         'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
                         'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
@@ -9205,7 +9205,7 @@ class GenizahGUI(QMainWindow):
                     self.my_joins_list.clear()
                     self._populate_joins_list(cache_data, self.my_joins_list)
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching my joins: {e}", flush=True)
+                    logger.debug("Error fetching my joins: %s", e)
                     if not cached_my:
                         item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                         self.my_joins_list.addItem(item)
@@ -9224,7 +9224,7 @@ class GenizahGUI(QMainWindow):
         if not skip_api_calls:
             try:
                 joins, total = self.corrections_client.search_joins(source='user', limit=20)
-                print(f"[DEBUG] Got {len(joins)} all joins, total={total}", flush=True)
+                logger.debug("Got %s all joins, total=%s", len(joins), total)
                 cache_data = [{
                     'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
                     'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
@@ -9235,7 +9235,7 @@ class GenizahGUI(QMainWindow):
                 self.all_joins_list.clear()
                 self._populate_joins_list(cache_data, self.all_joins_list, show_author=True)
             except Exception as e:
-                print(f"[DEBUG] Error fetching all joins: {e}", flush=True)
+                logger.debug("Error fetching all joins: %s", e)
                 if not cached_all:
                     item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                     self.all_joins_list.addItem(item)
@@ -9243,7 +9243,7 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
             self.all_joins_list.addItem(item)
 
-        print("[DEBUG] Joins panel refresh completed", flush=True)
+        logger.debug("Joins panel refresh completed")
 
     def _populate_joins_list(self, joins_data, target_list, show_author=False):
         """Populate joins list from data."""

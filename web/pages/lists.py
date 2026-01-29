@@ -19,6 +19,83 @@ from typing import Optional
 import time
 
 
+def create_inline_edit_label(
+    current_name: str,
+    list_id: str,
+    is_system: bool,
+    lists_mgr,
+    tr_func,
+    classes: str = 'font-semibold',
+    on_save_callback=None
+):
+    """
+    Create an inline-editable label for list names.
+    Click to edit, Enter/blur to save, Escape to cancel.
+    """
+    if is_system:
+        # System lists cannot be renamed, just show a label
+        ui.label(current_name).classes(classes)
+        return
+
+    # Container to hold either the label or the input
+    container = ui.element('div').classes('inline-edit-container')
+
+    with container:
+        # State for editing mode
+        editing_state = {'active': False}
+
+        # The display label (shown when not editing)
+        label_el = ui.label(current_name).classes(classes + ' cursor-pointer hover:underline')
+
+        # The input field (hidden initially)
+        input_el = ui.input(value=current_name).classes('inline-edit-input').props('dense outlined')
+        input_el.set_visibility(False)
+
+        def start_editing():
+            """Switch to edit mode."""
+            if editing_state['active']:
+                return
+            editing_state['active'] = True
+            input_el.value = label_el.text
+            label_el.set_visibility(False)
+            input_el.set_visibility(True)
+            # Focus the input
+            ui.run_javascript(f'document.querySelector("[id=\\"{input_el.id}\\"] input")?.focus(); document.querySelector("[id=\\"{input_el.id}\\"] input")?.select();')
+
+        def save_edit():
+            """Save the new name and exit edit mode."""
+            if not editing_state['active']:
+                return
+            new_name = input_el.value.strip()
+            if new_name and new_name != label_el.text:
+                # Call API to update
+                if lists_mgr:
+                    lists_mgr.update_list(list_id, name=new_name)
+                    label_el.text = new_name
+                    ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
+                    if on_save_callback:
+                        on_save_callback()
+            cancel_edit()
+
+        def cancel_edit():
+            """Cancel editing and restore the label."""
+            editing_state['active'] = False
+            input_el.set_visibility(False)
+            label_el.set_visibility(True)
+
+        def handle_keydown(e):
+            """Handle keyboard events in the input."""
+            if e.args.get('key') == 'Enter':
+                save_edit()
+            elif e.args.get('key') == 'Escape':
+                cancel_edit()
+
+        # Attach event handlers
+        label_el.on('click', start_editing, [])
+        input_el.on('keydown', handle_keydown)
+        input_el.on('blur', save_edit)
+
+
 def create_lists_page():
     """Create the personal lists management page."""
 
@@ -239,16 +316,23 @@ def create_lists_page():
                 return
 
             # List Header
+            is_system = list_data.get('is_system', False)
             with ui.row().classes('w-full justify-between items-start mb-6 pb-4 border-b-2').style(
                 f'border-color: {list_data.get("color", "#999")};'
             ):
                 with ui.column().classes('gap-1'):
                     with ui.row().classes('items-center gap-3'):
                         ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 2rem;')
-                        # Changed to H2
-                        h2(list_data.get('name', 'Unnamed'), classes='text-3xl font-bold')
-
-                    is_system = list_data.get('is_system', False)
+                        # Inline-editable list name (click to rename)
+                        create_inline_edit_label(
+                            current_name=list_data.get('name', 'Unnamed'),
+                            list_id=list_id,
+                            is_system=is_system,
+                            lists_mgr=state.lists_mgr,
+                            tr_func=tr,
+                            classes='text-3xl font-bold',
+                            on_save_callback=refresh_ui
+                        )
                     if is_system:
                         ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
 

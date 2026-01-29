@@ -13,11 +13,13 @@ from ...schemas.common import SuccessResponse, ErrorResponse
 from ...services.auth_service import AuthService
 from ...services.user_service import UserService
 from ..deps import get_current_active_user, get_client_info
+from ...rate_limiting import limiter, get_ip_only
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute", key_func=get_ip_only)
 async def register(
     user_data: UserCreate,
     request: Request,
@@ -49,6 +51,7 @@ async def register(
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("5/minute", key_func=get_ip_only)
 async def login(
     credentials: UserLogin,
     request: Request,

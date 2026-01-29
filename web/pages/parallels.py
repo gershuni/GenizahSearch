@@ -22,6 +22,17 @@ from web.components.typography import h1, h2, h3, h4
 from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
 
 
+def _sanitize_cache_filename(ref: str) -> str:
+    """Sanitize a reference string to create a safe cache filename.
+
+    Uses a whitelist approach: only alphanumeric characters, underscores, and hyphens
+    are allowed. All other characters are replaced with underscores.
+    This prevents path traversal attacks (e.g., ../ or ..\\ on Windows).
+    """
+    # Replace any character that is not alphanumeric, underscore, or hyphen
+    return re.sub(r'[^a-zA-Z0-9_\-]', '_', ref)
+
+
 def get_source_display_name(ref: str) -> str:
     """Get a display name for a source reference."""
     # Handle custom sources
@@ -57,7 +68,9 @@ def flatten_sefaria_text(text_data):
 def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
     """Fetch a single text from Sefaria API (cleaned, no nikud/taamim)."""
     cache_dir = get_cache_dir()
-    cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_v2.txt")
+    # Use sanitized filename to prevent path traversal attacks
+    safe_filename = _sanitize_cache_filename(ref)
+    cache_file = os.path.join(cache_dir, f"{safe_filename}_v2.txt")
 
     if use_cache and os.path.exists(cache_file):
         try:

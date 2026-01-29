@@ -13,6 +13,8 @@ from pathlib import Path
 from .config import settings, setup_directories
 from .models.database import init_db
 from .api.routes import auth, users, corrections, comments, documents, versions, discoveries, admin, joins
+from .rate_limiting import setup_rate_limiting
+from slowapi.middleware import SlowAPIMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -79,6 +81,10 @@ app.add_middleware(
     allow_methods=settings.CORS_ALLOW_METHODS,
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
+
+# Rate limiting middleware
+setup_rate_limiting(app)
+app.add_middleware(SlowAPIMiddleware)
 
 
 # Global exception handler

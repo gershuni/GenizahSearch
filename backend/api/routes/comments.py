@@ -19,6 +19,7 @@ from ..deps import (
     get_current_active_user, get_current_user_optional,
     get_client_info
 )
+from ...rate_limiting import limiter
 
 router = APIRouter(prefix="/comments", tags=["Comments"])
 
@@ -370,7 +371,9 @@ async def get_comment_reactions(
 
 
 @router.get("/search/", response_model=CommentListResponse)
+@limiter.limit("30/minute")
 async def search_comments(
+    request: Request,
     query: str,
     document_id: Optional[str] = None,
     author_id: Optional[int] = None,

@@ -3,7 +3,7 @@ Joins Routes - CRUD for fragment joins
 """
 from typing import Optional
 from urllib.parse import unquote
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 
 from ...models.database import get_db
@@ -15,6 +15,7 @@ from ...schemas.join import (
 )
 from ...services.join_service import JoinService
 from ..deps import get_current_active_user, get_current_user_optional
+from ...rate_limiting import limiter
 
 
 router = APIRouter(prefix="/joins", tags=["Joins"])
@@ -287,7 +288,9 @@ async def delete_join(
 
 
 @router.get("/", response_model=JoinSearchResponse)
+@limiter.limit("30/minute")
 async def search_joins(
+    request: Request,
     q: Optional[str] = Query(None, description="Search shelfmarks"),
     source: Optional[str] = Query(None, description="Filter by source"),
     relationship_type: Optional[str] = Query(None, description="Filter by relationship type"),
