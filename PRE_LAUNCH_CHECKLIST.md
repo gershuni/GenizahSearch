@@ -801,23 +801,22 @@
    - תיאור: לא נמצא rate limiting ב-API
    - סיכון: Brute force על login, DoS על search
    - המלצה: להוסיף rate limiting ל-FastAPI (slowapi או fastapi-limiter)
+   - סטטוס: [ ] דחוי - לשקול הטמעה ברמת תשתית (nginx/cloudflare)
 
 2. **[Security] Path Traversal ב-Sefaria cache (כולל Windows)**
-   - קובץ: parallels.py:60
-   - קוד: `ref.replace(' ', '_').replace('/', '_')` - **לא מטפל ב-backslash!**
-   - סיכון: ב-Windows, `..\..\` יכול לגשת לקבצים מחוץ ל-cache
-   - המלצה: להשתמש ב-`werkzeug.utils.secure_filename` או whitelist של תווים
+   - קובץ: ~~parallels.py:60~~ → **תוקן!** משתמש ב-`_sanitize_cache_filename()` (whitelist)
+   - קובץ: filter_text_dialog.py:47 - **עדיין פגיע** (desktop app בלבד)
+   - סטטוס: [x] Web fixed, [ ] Desktop needs fix
 
 3. **[Security] JS Injection ב-text_editor.py**
    - קובץ: text_editor.py:214-215
-   - קוד: `safe_doc_id = (document_id or '').replace("'", "\\'").replace('"', '\\"')`
-   - סיכון: Escaping שבירי - לא מכסה backticks, backslashes, או event handlers
-   - המלצה: להחליף ב-`json.dumps()` ל-JS context escaping נכון
+   - סטטוס: [x] **תוקן!** - משתמש ב-`json.dumps()` לescaping נכון
 
 4. **[Security] אין הגנת CSRF**
    - תיאור: לא נמצא CSRF token
    - סיכון: Cross-Site Request Forgery
-   - הערה: NiceGUI משתמש ב-WebSocket (פחות רגיש), אבל יש לבדוק API endpoints
+   - הערה: NiceGUI משתמש ב-WebSocket (פחות רגיש), JWT מגן על API
+   - סטטוס: [ ] דחוי - סיכון נמוך
 
 ### באגים בינוניים (P2)
 
