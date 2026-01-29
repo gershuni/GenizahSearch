@@ -14,6 +14,9 @@ After investigation, several issues listed in the checklist are **already fixed*
 | Path traversal in `parallels.py` | ✅ Fixed | Uses `_sanitize_cache_filename()` at line 72 |
 | JS injection in `text_editor.py` | ✅ Fixed | Uses `json.dumps()` at lines 215-216 |
 | Add-to-list dialog colors | ✅ Fixed | Custom slot with color dots at lines 79-104 |
+| #8 Search Word export RTL | ✅ Fixed | User confirmed 2026-01-29 |
+| #9 Search Excel formatting | ✅ Fixed | User confirmed 2026-01-29 |
+| #16 Parallels export buttons | ✅ Fixed | User confirmed 2026-01-29 |
 
 ---
 
@@ -73,31 +76,8 @@ def search_api(...):
 
 ## P2 - Bug Fixes
 
-### Bug #16: Parallels Export Buttons Not Working
-**Symptom:** Clicking export buttons does nothing
-**Root Cause:** `state.parallels_results` might be empty when user clicks export
-
-**Investigation needed:**
-1. Check if results are stored in `state.parallels_results` after search
-2. The code at `parallels.py:1019` sets `state.parallels_results = main_results`
-3. API reads from `state.parallels_results` at `api.py:593`
-
-**Likely issue:** State is per-user session, but API runs in different context
-
-**Fix approach:**
-```python
-# In parallels.py, store results in user storage that API can access
-# At line 1019-1022, verify this code runs:
-state.parallels_results = main_results
-state.parallels_filtered = filtered_results
-app.storage.user['parallels_results'] = main_results
-```
-
-**Testing:**
-1. Go to /parallels
-2. Run a search with results
-3. Click Export Excel button
-4. Verify file downloads
+### ~~Bug #16: Parallels Export Buttons Not Working~~ ✅ FIXED
+User confirmed fixed on 2026-01-29.
 
 ---
 
@@ -161,32 +141,8 @@ print(f"[DEBUG] API result: {result}")
 
 ---
 
-### Bugs #8, #9: Export Word/Excel Formatting
-**Symptom:** Word needs RTL alignment, Excel needs line breaks fixed
-**File:** `web/export_service.py`
-
-**For Word RTL (search export_service.py for paragraph creation):**
-```python
-# Ensure RTL paragraphs have proper alignment
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-
-para = doc.add_paragraph(hebrew_text)
-para.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-para.paragraph_format.right_to_left = True
-```
-
-**For Excel line breaks:**
-```python
-# Replace newlines with spaces or use text wrapping
-text = text.replace('\n', ' ').replace('\r', '')
-# OR enable text wrap:
-cell.alignment = Alignment(wrap_text=True)
-```
-
-**Testing:**
-1. Run a Hebrew text search
-2. Export to Word - verify text is right-aligned
-3. Export to Excel - verify no broken lines in cells
+### ~~Bugs #8, #9: Export Word/Excel Formatting~~ ✅ FIXED
+User confirmed fixed on 2026-01-29.
 
 ---
 
@@ -195,17 +151,17 @@ cell.alignment = Alignment(wrap_text=True)
 When user returns, execute fixes in this order:
 
 1. **Quick wins (5 min each):**
-   - [ ] Fix `filter_text_dialog.py` path traversal
-   - [ ] Update checklist to mark already-fixed items
+   - [ ] Fix `filter_text_dialog.py` path traversal (desktop only)
+   - [x] Update checklist to mark already-fixed items ✅
 
 2. **Debug & fix (15-30 min each):**
-   - [ ] Debug parallels export (#16)
-   - [ ] Debug list export (#10)
+   - [x] ~~Debug parallels export (#16)~~ ✅ Fixed
+   - [ ] Debug list export (#10) - "List is empty" error
    - [ ] Debug comments display (#15)
 
-3. **Export formatting (30 min):**
-   - [ ] Word RTL alignment (#8)
-   - [ ] Excel line breaks (#9)
+3. **~~Export formatting~~ ✅ DONE:**
+   - [x] ~~Word RTL alignment (#8)~~ ✅ Fixed
+   - [x] ~~Excel line breaks (#9)~~ ✅ Fixed
 
 4. **Deferred:**
    - [ ] Rate limiting (post-launch or infrastructure)

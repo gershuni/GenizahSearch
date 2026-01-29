@@ -875,12 +875,12 @@
 ### דחוף - פונקציונלי (לפני השקה)
 4. [!] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse** - BUG: Dialog works but comment not shown (#15)
 5. [x] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark) ✅ All passed
-6. [!] Search: Export Word/Excel - Word needs RTL (#8), Excel formatting issues (#9)
+6. [x] Search: Export Word/Excel ✅ Fixed (#8, #9)
 7. [-] Browse: Autocomplete suggestions for shelfmark - Not implemented, nice-to-have
 8. [x] Browse: Dialog תגובה נפתח ופעיל ✅ Opens and submits
 9. [!] Browse: Dialog בחירת רשימה נפתח - Works but needs fixes (#13)
 10. [!] Lists: Export Excel תקין - BUG: "List is empty" error (#10)
-11. [!] Parallels: קבצי ייצוא תקינים - BUG: Export buttons don't work (#16)
+11. [x] Parallels: קבצי ייצוא תקינים ✅ Fixed (#16)
 
 ### בינוני
 12. [x] Navigation: Footer ציטוט + כפתור העתקה ✅
