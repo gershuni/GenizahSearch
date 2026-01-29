@@ -720,7 +720,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             results, exact_match = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
 
             if not results:
-                state.error = tr('No manuscript found')
+                state.error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
+                state.current_page = None  # Reset to show error
+                state.sys_id = None
                 state.is_loading = False
                 update_content()
                 return

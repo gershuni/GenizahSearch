@@ -3296,12 +3296,15 @@ class MetadataManager:
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots between digits."""
+        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots/slashes between digits."""
         if not shelfmark:
             return ""
 
-        # First, preserve dots that appear between digits (like 120.2) by replacing with a marker
-        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', shelfmark)
+        # Treat "/" as "." for consistency (192/23 -> 192.23)
+        temp = shelfmark.replace('/', '.')
+
+        # Preserve dots that appear between digits (like 120.2) by replacing with a marker
+        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
 
         # Remove all other non-alphanumeric characters
         cleaned = re.sub(r'\W+', '', temp).casefold()
@@ -3344,6 +3347,7 @@ class MetadataManager:
 
         exact_matches = []
         partial_matches = []
+        fuzzy_matches = []  # For digit-only queries that might match with dots
         seen = set()
 
         def shelf_sort_key(entry):
@@ -3352,6 +3356,11 @@ class MetadataManager:
             sid_val = entry.get('sys_id', '')
             return (natural_sort_key(shelf), natural_sort_key(title), natural_sort_key(sid_val))
 
+        # For pure digit queries without dots (e.g., "19234"), also match with various dot positions
+        # This allows "19234" to match "19.234", "192.34", "1923.4"
+        norm_query_no_dots = norm_query.replace('.', '')
+        query_is_pure_digits = norm_query_no_dots.isdigit() and '.' not in norm_query
+
         for sys_id, shelf, title in self._iter_shelfmark_sources():
             norm_shelf = self._normalize_shelfmark(shelf)
             if not norm_shelf or (sys_id, norm_shelf) in seen:
@@ -3359,10 +3368,21 @@ class MetadataManager:
             seen.add((sys_id, norm_shelf))
 
             entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
+
+            # Standard matching
             if norm_shelf == norm_query:
                 exact_matches.append(entry)
             elif norm_query in norm_shelf:
                 partial_matches.append(entry)
+            # Fuzzy matching for pure digit queries - compare without dots
+            elif query_is_pure_digits:
+                norm_shelf_no_dots = norm_shelf.replace('.', '')
+                if norm_shelf_no_dots == norm_query_no_dots:
+                    # Exact match ignoring dots (19234 == 192.34)
+                    exact_matches.append(entry)
+                elif norm_query_no_dots in norm_shelf_no_dots:
+                    # Partial match ignoring dots
+                    fuzzy_matches.append(entry)
 
         if len(exact_matches) == 1:
             result['sys_id'] = exact_matches[0]['sys_id']
@@ -3371,9 +3391,10 @@ class MetadataManager:
 
         exact_matches.sort(key=shelf_sort_key)
         partial_matches.sort(key=shelf_sort_key)
+        fuzzy_matches.sort(key=shelf_sort_key)
 
-        # Aggregate suggestions (exact first, then partial), capped at limit
-        suggestions = exact_matches + partial_matches
+        # Aggregate suggestions (exact first, then partial, then fuzzy), capped at limit
+        suggestions = exact_matches + partial_matches + fuzzy_matches
         result['options'] = suggestions[:limit]
         return result
 
