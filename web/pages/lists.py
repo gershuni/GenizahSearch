@@ -391,7 +391,8 @@ def create_lists_page():
 
                                 # Note
                                 if note:
-                                    with ui.card().classes('p-2 mt-2').style('background: var(--bg-tertiary);'):
+                                    with ui.row().classes('items-start gap-2 p-2 mt-2 rounded').style('background: var(--bg-tertiary);'):
+                                        ui.icon('note', size='xs').style('color: var(--text-muted);')
                                         ui.label(note).classes('text-xs').style('color: var(--text-secondary);')
 
                                 # Tags

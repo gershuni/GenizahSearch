@@ -438,6 +438,9 @@ def create_search_page(initial_query: str = None):
             ui.notify(tr('No valid selections'), type='warning')
             return
 
+        # State for inline list creation
+        creating_new_list = {'active': False}
+
         # Show list selection dialog
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
             # Changed to H3 semantic heading
@@ -448,13 +451,102 @@ def create_search_page(initial_query: str = None):
                 lists = state.lists_mgr.data.get('lists', {})
                 list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
 
-                if not list_options:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-                else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                # Container for list selection form
+                form_container = ui.column().classes('w-full mt-4 gap-3')
+                # Container for new list creation form
+                new_list_container = ui.column().classes('w-full mt-4 gap-3')
+                new_list_container.set_visibility(False)
+
+                with form_container:
+                    if not list_options:
+                        ui.label(tr('No lists yet. Create your first list!')).style('color: var(--text-muted);')
+                    else:
+                        # List selection with "Create new list" option
+                        list_options_with_new = {'__new__': f"+ {tr('Create new list')}", **list_options}
+                        selected_list = ui.select(
+                            list_options_with_new,
+                            label=tr('Select List'),
+                            value=list(list_options.keys())[0] if list_options else '__new__'
+                        ).classes('w-full').props('outlined').style('color: var(--text-primary);')
+
+                        def on_list_change():
+                            if selected_list.value == '__new__':
+                                form_container.set_visibility(False)
+                                new_list_container.set_visibility(True)
+                                creating_new_list['active'] = True
+
+                        selected_list.on('update:model-value', on_list_change)
+
+                    # Create New List button (shown when no lists exist)
+                    if not list_options:
+                        ui.button(
+                            tr('Create new list'),
+                            icon='add',
+                            on_click=lambda: (form_container.set_visibility(False), new_list_container.set_visibility(True))
+                        ).classes('btn-primary')
+
+                # New list creation form
+                with new_list_container:
+                    ui.label(tr('Create New List')).classes('font-semibold').style('color: var(--text-primary);')
+                    new_list_name = ui.input(label=tr('List Name')).classes('w-full').props('outlined')
+
+                    # Color picker
+                    ui.label(tr('Color')).classes('text-sm mt-2').style('color: var(--text-secondary);')
+                    selected_color = {'value': '#4CAF50'}
+
+                    with ui.row().classes('gap-2 flex-wrap'):
+                        colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
+                                  '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
+                        for color in colors:
+                            btn = ui.button(icon='circle').props('flat round dense').style(
+                                f'color: {color}; font-size: 1.5rem;'
+                            )
+                            btn.on('click', lambda c=color: selected_color.update({'value': c}))
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                        def back_to_list_selection():
+                            new_list_container.set_visibility(False)
+                            form_container.set_visibility(True)
+                            creating_new_list['active'] = False
+
+                        if list_options:
+                            ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
+
+                        def create_and_add_all():
+                            name = new_list_name.value.strip()
+                            if not name:
+                                ui.notify(tr('Please enter a list name'), type='warning')
+                                return
+
+                            new_list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+                            if new_list_id:
+                                added_count = 0
+                                for res in selected_results:
+                                    display = res.get('display', {})
+                                    sys_id = display.get('id')
+                                    if sys_id and state.lists_mgr.add_item(sys_id, new_list_id):
+                                        added_count += 1
+
+                                ui.notify(f"{tr('List created')}: {name}", type='positive')
+                                ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
+                                dialog.close()
+
+                        ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
+
+                # Action buttons for existing list selection
+                with ui.row().classes('w-full justify-end gap-2 mt-6') as action_row:
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
                     def add_all():
+                        if not list_options or creating_new_list['active']:
+                            return
+
+                        if selected_list.value == '__new__':
+                            form_container.set_visibility(False)
+                            new_list_container.set_visibility(True)
+                            creating_new_list['active'] = True
+                            return
+
                         added_count = 0
                         for res in selected_results:
                             display = res.get('display', {})
@@ -465,9 +557,9 @@ def create_search_page(initial_query: str = None):
                         ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
                         dialog.close()
 
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+                    add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+                    if not list_options:
+                        add_btn.set_visibility(False)
             else:
                 ui.label(tr('Lists manager not available')).style('color: var(--error);')
 
@@ -688,12 +780,12 @@ def create_search_page(initial_query: str = None):
 
                     def make_star_handler(r):
                         def handler():
-                            show_add_to_list_dialog(r)
+                            show_add_to_list_dialog_local(r)
                         return handler
                     ui.button(
                         icon='star_border',
                         on_click=make_star_handler(result)
-                    ).props('flat round dense size=sm').style('color: var(--accent-amber);')
+                    ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
 
                     # Edit and Comment buttons
                     sys_id = display.get('id', '')
@@ -1078,45 +1170,18 @@ def create_search_page(initial_query: str = None):
                     search_state.selected_result['display']['img'] = str(page_data.p_num)
                     load_in_viewer(search_state.selected_result)
 
-    def show_add_to_list_dialog(result):
+    def show_add_to_list_dialog_local(result):
+        from web.components import show_add_to_list_dialog as show_dialog
         display = result.get('display', {})
         sys_id = display.get('id')
         shelfmark = display.get('shelfmark', 'Unknown')
-
-        if not sys_id:
-            ui.notify(tr('Cannot add: missing system ID'), type='warning')
-            return
-
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
-
-            if state.lists_mgr:
-                lists = state.lists_mgr.data.get('lists', {})
-                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-                if not list_options:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-                else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                    def add_to_list():
-                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                        else:
-                            ui.notify(tr('Already in list'), type='info')
-
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
-            else:
-                ui.label(tr('Lists manager not available')).style('color: var(--error);')
-
-        dialog.open()
+        show_dialog(
+            sys_id=sys_id,
+            shelfmark=shelfmark,
+            lists_mgr=state.lists_mgr,
+            note_default='',  # Empty by default
+            fl_id=None
+        )
 
     # Initialize with restored results or initial query
     if initial_query:

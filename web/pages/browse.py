@@ -923,37 +923,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             return
 
         from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {state.current_page.shelfmark}").style('color: var(--text-secondary);')
-
-            lists = app_state.lists_mgr.data.get('lists', {})
-            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-            if list_options:
-                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                def do_add():
-                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value):
-                        ui.notify(tr('Added to list'), type='positive')
-                        dialog.close()
-                    else:
-                        ui.notify(tr('Already in list'), type='info')
-
-                with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
-            else:
-                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-
-        dialog.open()
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=state.current_page.shelfmark,
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default
+            fl_id=None
+        )
 
     def add_page_to_list():
         """Add specific page/image to a list."""
@@ -961,44 +942,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             return
 
         from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
         # Use FL ID if available for specific page reference
         fl_id = state.current_page.fl_id
-        note_text = f"Page {state.current_page.p_num}"
-        if fl_id:
-            note_text += f" (FL{fl_id})"
 
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}").style('color: var(--text-secondary);')
-
-            lists = app_state.lists_mgr.data.get('lists', {})
-            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-            if list_options:
-                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                note_input = ui.input(label=tr('Note (optional)'), value=note_text).classes('w-full mt-2').props('outlined')
-
-                def do_add():
-                    # Add with FL ID if available
-                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value, fl_id=fl_id):
-                        ui.notify(tr('Added to list'), type='positive')
-                        dialog.close()
-                    else:
-                        ui.notify(tr('Already in list'), type='info')
-
-                with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
-            else:
-                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-
-        dialog.open()
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=f"{state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}",
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default (user requested)
+            fl_id=fl_id
+        )
 
     def zoom_in():
         """Increase zoom level."""
@@ -1504,7 +1462,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             icon='star_border',
                             on_click=add_manuscript_to_list
-                        ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').style('color: #ffffff !important;').tooltip(tr('Add to Favorites'))
+                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('Add to List'))
 
                     # Next Shelfmark Button
                     ui.button(
@@ -1775,7 +1733,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='star_border',
                                 on_click=add_page_to_list
-                            ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').classes('text-green-700').tooltip(tr('Add to Favorites'))
+                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('Add to List'))
 
                             # Image toggle button - placeholder, will be connected later
                             image_toggle_btn = None

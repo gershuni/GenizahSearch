@@ -1341,7 +1341,14 @@ def create_parallels_page(initial_text: str = None):
 
                         # Add to list button
                         def show_add_dialog(sid=sys_id, shelf=shelfmark):
-                            show_add_to_list_dialog_parallel(sid, shelf)
+                            from web.components import show_add_to_list_dialog
+                            show_add_to_list_dialog(
+                                sys_id=sid,
+                                shelfmark=shelf,
+                                lists_mgr=state.lists_mgr,
+                                note_default='',
+                                fl_id=None
+                            )
 
                         ui.button(
                             tr('Add to List'),
@@ -1402,40 +1409,14 @@ def create_parallels_page(initial_text: str = None):
 
     def show_add_to_list_dialog_parallel(sys_id, shelfmark):
         """Show add to list dialog for a parallel result."""
-        if not sys_id:
-            ui.notify(tr('Cannot add: missing system ID'), type='warning')
-            return
-
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
-
-            if state.lists_mgr:
-                lists = state.lists_mgr.data.get('lists', {})
-                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-                if not list_options:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-                else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                    def do_add():
-                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                        else:
-                            ui.notify(tr('Already in list'), type='info')
-
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
-            else:
-                ui.label(tr('Lists manager not available')).style('color: var(--error);')
-
-        dialog.open()
+        from web.components import show_add_to_list_dialog
+        show_add_to_list_dialog(
+            sys_id=sys_id,
+            shelfmark=shelfmark,
+            lists_mgr=state.lists_mgr,
+            note_default='',
+            fl_id=None
+        )
 
     def extract_shelfmark(item):
         raw_header = item.get('raw_header', '')
@@ -1524,7 +1505,7 @@ def create_parallels_page(initial_text: str = None):
                 ui.button(
                     icon='star_border',
                     on_click=lambda i=item, s=shelfmark, t=title, sid=sys_id: add_to_list(i, s, t, sid)
-                ).props('flat round dense').style('color: var(--accent-amber);').tooltip(tr('Add to Favorites'))
+                ).props('flat round dense').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
 
                 # Edit and Comment buttons
                 ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
@@ -1545,38 +1526,14 @@ def create_parallels_page(initial_text: str = None):
                     )
 
     def add_to_list(item, shelfmark, title, sys_id):
-        if not sys_id:
-            ui.notify(tr('Cannot add: missing system ID'), type='warning')
-            return
-
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
-
-            if state.lists_mgr:
-                lists = state.lists_mgr.data.get('lists', {})
-                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-                if list_options:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                    def do_add():
-                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                        else:
-                            ui.notify(tr('Already in list'), type='info')
-
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
-                else:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-
-        dialog.open()
+        from web.components import show_add_to_list_dialog
+        show_add_to_list_dialog(
+            sys_id=sys_id,
+            shelfmark=shelfmark,
+            lists_mgr=state.lists_mgr,
+            note_default='',
+            fl_id=None
+        )
 
     # Sort change handler
     sort_select.on('update:model-value', lambda: render_results(p_state.results) if p_state.results else None)

@@ -7,8 +7,66 @@ import re
 from genizah_core import Config
 import io
 import openpyxl
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from docx import Document
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Pt
 from urllib.parse import urlparse
+
+
+# Hebrew font name - David is widely available on Windows/Mac and designed for Hebrew
+HEBREW_FONT_NAME = "David"
+
+
+def _set_paragraph_rtl(paragraph):
+    """Set RTL direction and right alignment for a paragraph containing Hebrew text."""
+    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+    paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+    ppr = paragraph._p.get_or_add_pPr()
+    bidi = ppr.find(qn("w:bidi"))
+    if bidi is None:
+        bidi = OxmlElement("w:bidi")
+        ppr.append(bidi)
+    bidi.set(qn("w:val"), "1")
+
+
+def _set_run_rtl_font(run, font_size=None):
+    """Set Hebrew-compatible font for a run and mark it as RTL."""
+    run.font.name = HEBREW_FONT_NAME
+    # Set complex script font (for Hebrew/Arabic)
+    r = run._r
+    rPr = r.get_or_add_rPr()
+    # Set cs (complex script) font
+    cs_font = rPr.find(qn("w:rFonts"))
+    if cs_font is None:
+        cs_font = OxmlElement("w:rFonts")
+        rPr.insert(0, cs_font)
+    cs_font.set(qn("w:cs"), HEBREW_FONT_NAME)
+    cs_font.set(qn("w:ascii"), HEBREW_FONT_NAME)
+    cs_font.set(qn("w:hAnsi"), HEBREW_FONT_NAME)
+    # Mark as RTL text
+    rtl = rPr.find(qn("w:rtl"))
+    if rtl is None:
+        rtl = OxmlElement("w:rtl")
+        rPr.append(rtl)
+    if font_size:
+        run.font.size = Pt(font_size)
+
+
+def _apply_rtl_to_document(doc):
+    """Apply RTL formatting to all paragraphs in a document."""
+    # Set default paragraph style to RTL
+    style = doc.styles['Normal']
+    style.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+
+    # Apply RTL to all paragraphs
+    for p in doc.paragraphs:
+        _set_paragraph_rtl(p)
+        for run in p.runs:
+            _set_run_rtl_font(run)
 
 # Import corrections API components
 from backend.models.database import init_db
@@ -552,36 +610,105 @@ def init_api_routes():
         ws = wb.active
         ws.title = "Genizah Results"
 
+        # Enable RTL for the sheet (Hebrew content)
+        ws.sheet_view.rightToLeft = True
+
         headers = ["Shelfmark", "Title", "System ID", "Score", "Snippet", "Full Text"]
         ws.append(headers)
 
+        # Style header row
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Define column widths
+        column_widths = {
+            'A': 25,   # Shelfmark
+            'B': 35,   # Title
+            'C': 18,   # System ID
+            'D': 10,   # Score
+            'E': 50,   # Snippet
+            'F': 80,   # Full Text
+        }
+        for col_letter, width in column_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
+        # Alignments for different column types
+        # Hebrew text columns: RTL alignment
+        rtl_alignment = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
+        # LTR columns (System ID, Score)
+        ltr_alignment = Alignment(horizontal="left", vertical="top")
+        # Score column: number alignment
+        score_alignment = Alignment(horizontal="center", vertical="top")
+
         for res in state.last_results:
             display = res.get('display', {})
+
+            # Clean snippet and full_text - remove highlighting markers and normalize line breaks
+            snippet = res.get('snippet', '').replace('*', '')
+            # Replace line breaks with spaces for single-line display in snippet
+            snippet = snippet.replace('\n', ' ').replace('\r', ' ')
+            while '  ' in snippet:
+                snippet = snippet.replace('  ', ' ')
+            snippet = snippet.strip()
+
+            # For full text, keep line breaks but ensure proper formatting
+            full_text = res.get('full_text', '')[:32000]  # Excel cell limit safety
+            # Normalize line breaks for Excel
+            full_text = full_text.replace('\r\n', '\n').replace('\r', '\n')
+
             row = [
                 display.get('shelfmark', ''),
                 display.get('title', ''),
                 display.get('id', ''),
                 str(res.get('sort_score', '')),
-                res.get('snippet', '').replace('*', ''),
-                res.get('full_text', '')[:32000] # Excel cell limit safety
+                snippet,
+                full_text
             ]
             # Sanitize for illegal chars
             clean_row = []
             for cell in row:
                 if isinstance(cell, str):
-                    # Remove illegal chars (XML 1.0 invalid chars)
+                    # Remove illegal chars (XML 1.0 invalid chars), keep newlines for full text
                     cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\n\r\t")
                 clean_row.append(cell)
             ws.append(clean_row)
 
+            # Apply alignment to the row just added
+            current_row = ws.max_row
+            # Shelfmark (A) - RTL Hebrew
+            ws.cell(row=current_row, column=1).alignment = rtl_alignment
+            # Title (B) - RTL Hebrew
+            ws.cell(row=current_row, column=2).alignment = rtl_alignment
+            # System ID (C) - LTR
+            ws.cell(row=current_row, column=3).alignment = ltr_alignment
+            # Score (D) - centered
+            ws.cell(row=current_row, column=4).alignment = score_alignment
+            # Snippet (E) - RTL Hebrew
+            ws.cell(row=current_row, column=5).alignment = rtl_alignment
+            # Full Text (F) - RTL Hebrew with wrap
+            ws.cell(row=current_row, column=6).alignment = rtl_alignment
+
         # Add credits at the bottom
         ws.append([])
         ws.append([])
+        credits_start_row = ws.max_row + 1
         ws.append(['Credits'])
         ws.append(['Generated by Dicta Genizah Search (Web Version)'])
         ws.append(['Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)'])
         ws.append(['Dataset: https://doi.org/10.5281/zenodo.17734473'])
         ws.append(['Citation: Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'])
+
+        # Style credits section
+        credits_font = Font(italic=True, color="555555")
+        for row_idx in range(credits_start_row, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=1)
+            cell.font = credits_font
 
         stream = io.BytesIO()
         wb.save(stream)
@@ -606,14 +733,24 @@ def init_api_routes():
             shelf = display.get('shelfmark', 'Unknown')
             title = display.get('title', '')
 
+            # Header paragraph with shelfmark and title
             p = doc.add_paragraph()
-            p.add_run(f"{i+1}. {shelf}").bold = True
+            run = p.add_run(f"{i+1}. {shelf}")
+            run.bold = True
+            _set_run_rtl_font(run)
             if title:
-                p.add_run(f" - {title}")
+                title_run = p.add_run(f" - {title}")
+                _set_run_rtl_font(title_run)
+            _set_paragraph_rtl(p)
 
+            # Snippet (Hebrew manuscript text)
             if res.get('snippet'):
-                doc.add_paragraph(res['snippet'].replace('*', ''))
+                snippet_p = doc.add_paragraph()
+                snippet_run = snippet_p.add_run(res['snippet'].replace('*', ''))
+                _set_run_rtl_font(snippet_run)
+                _set_paragraph_rtl(snippet_p)
 
+            # System ID (LTR)
             doc.add_paragraph(f"System ID: {display.get('id', '')}")
             doc.add_paragraph("_" * 40)
 
@@ -651,8 +788,39 @@ def init_api_routes():
         ws = wb.active
         ws.title = "Parallels Results"
 
+        # Enable RTL for the sheet (Hebrew content)
+        ws.sheet_view.rightToLeft = True
+
         headers = ["#", "Shelfmark", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
         ws.append(headers)
+
+        # Style header row
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Define column widths
+        column_widths = {
+            'A': 6,    # #
+            'B': 25,   # Shelfmark
+            'C': 35,   # Title
+            'D': 10,   # Score
+            'E': 50,   # Source Context
+            'F': 60,   # Manuscript Match
+            'G': 10,   # Filtered
+        }
+        for col_letter, width in column_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
+        # Alignments for different column types
+        rtl_alignment = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
+        ltr_alignment = Alignment(horizontal="left", vertical="top")
+        center_alignment = Alignment(horizontal="center", vertical="top")
 
         def add_results_to_sheet(results, start_idx, is_filtered=False):
             for idx, item in enumerate(results, start_idx):
@@ -677,6 +845,12 @@ def init_api_routes():
                         pass
 
                 source_ctx = item.get('source_ctx', '').replace('*', '')
+                # Remove line breaks so text flows continuously in Excel cell
+                source_ctx = source_ctx.replace('\n', ' ').replace('\r', ' ')
+                while '  ' in source_ctx:
+                    source_ctx = source_ctx.replace('  ', ' ')
+                source_ctx = source_ctx.strip()
+
                 # Use longer text context - prefer full_text if available, fall back to text
                 # Remove line breaks so text flows continuously in Excel cell
                 ms_text = item.get('text', '').replace('*', '').replace('\n', ' ').replace('\r', ' ')
@@ -695,6 +869,17 @@ def init_api_routes():
                         cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch == "\t")
                     clean_row.append(cell)
                 ws.append(clean_row)
+
+                # Apply alignment to the row just added
+                current_row = ws.max_row
+                ws.cell(row=current_row, column=1).alignment = center_alignment  # #
+                ws.cell(row=current_row, column=2).alignment = rtl_alignment     # Shelfmark
+                ws.cell(row=current_row, column=3).alignment = rtl_alignment     # Title
+                ws.cell(row=current_row, column=4).alignment = center_alignment  # Score
+                ws.cell(row=current_row, column=5).alignment = rtl_alignment     # Source Context
+                ws.cell(row=current_row, column=6).alignment = rtl_alignment     # Manuscript Match
+                ws.cell(row=current_row, column=7).alignment = center_alignment  # Filtered
+
             return start_idx + len(results)
 
         # Add main results
@@ -707,11 +892,18 @@ def init_api_routes():
         # Add credits at the bottom
         ws.append([])
         ws.append([])
+        credits_start_row = ws.max_row + 1
         ws.append(['Credits'])
         ws.append(['Generated by Dicta Genizah Search (Web Version)'])
         ws.append(['Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)'])
         ws.append(['Dataset: https://doi.org/10.5281/zenodo.17734473'])
         ws.append(['Citation: Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'])
+
+        # Style credits section
+        credits_font = Font(italic=True, color="555555")
+        for row_idx in range(credits_start_row, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=1)
+            cell.font = credits_font
 
         stream = io.BytesIO()
         wb.save(stream)
@@ -725,7 +917,7 @@ def init_api_routes():
 
     @app.get('/api/export/parallels/word')
     def export_parallels_word():
-        """Export parallels results to Word."""
+        """Export parallels results to Word with RTL support for Hebrew content."""
         # Read from global state (accessible from HTTP requests without session context)
         parallels_results = state.parallels_results or []
         filtered_results = state.parallels_filtered or []
@@ -760,17 +952,42 @@ def init_api_routes():
                     except Exception:
                         pass
 
+                # Header with shelfmark and score
                 p = doc.add_paragraph()
-                p.add_run(f"{idx}. {shelfmark}").bold = True
+                shelf_run = p.add_run(f"{idx}. {shelfmark}")
+                shelf_run.bold = True
+                _set_run_rtl_font(shelf_run)
                 p.add_run(f" - Score: {score}")
+                _set_paragraph_rtl(p)
+
+                # Title (Hebrew)
                 if title:
-                    doc.add_paragraph(title)
+                    title_p = doc.add_paragraph()
+                    title_run = title_p.add_run(title)
+                    _set_run_rtl_font(title_run)
+                    _set_paragraph_rtl(title_p)
 
-                doc.add_paragraph("Source Context:").bold = True
-                doc.add_paragraph(item.get('source_ctx', '').replace('*', ''))
+                # Source Context label
+                label_p1 = doc.add_paragraph()
+                label_run1 = label_p1.add_run("Source Context:")
+                label_run1.bold = True
 
-                doc.add_paragraph("Manuscript Match:").bold = True
-                doc.add_paragraph(item.get('text', '').replace('*', ''))
+                # Source Context text (Hebrew)
+                source_p = doc.add_paragraph()
+                source_run = source_p.add_run(item.get('source_ctx', '').replace('*', ''))
+                _set_run_rtl_font(source_run)
+                _set_paragraph_rtl(source_p)
+
+                # Manuscript Match label
+                label_p2 = doc.add_paragraph()
+                label_run2 = label_p2.add_run("Manuscript Match:")
+                label_run2.bold = True
+
+                # Manuscript Match text (Hebrew)
+                match_p = doc.add_paragraph()
+                match_run = match_p.add_run(item.get('text', '').replace('*', ''))
+                _set_run_rtl_font(match_run)
+                _set_paragraph_rtl(match_p)
 
                 doc.add_paragraph("_" * 60)
 
@@ -805,7 +1022,7 @@ def init_api_routes():
 
     @app.get('/api/export/browse/word')
     def export_browse_word():
-        """Export current browse page to Word."""
+        """Export current browse page to Word with RTL support for Hebrew content."""
         from nicegui import app as nicegui_app
 
         browse_data = nicegui_app.storage.user.get('browse_export_data')
@@ -815,27 +1032,42 @@ def init_api_routes():
         doc = Document()
         doc.add_heading('Genizah Manuscript', 0)
 
-        # Manuscript info
+        # Manuscript info - shelfmark (Hebrew)
         if browse_data.get('shelfmark'):
-            doc.add_heading(browse_data['shelfmark'], 1)
-        if browse_data.get('title'):
-            doc.add_paragraph(browse_data['title'])
+            shelf_heading = doc.add_heading(browse_data['shelfmark'], 1)
+            _set_paragraph_rtl(shelf_heading)
+            for run in shelf_heading.runs:
+                _set_run_rtl_font(run)
 
+        # Title (Hebrew)
+        if browse_data.get('title'):
+            title_p = doc.add_paragraph()
+            title_run = title_p.add_run(browse_data['title'])
+            _set_run_rtl_font(title_run)
+            _set_paragraph_rtl(title_p)
+
+        # System ID (LTR)
         if browse_data.get('sys_id'):
             doc.add_paragraph(f"System ID: {browse_data['sys_id']}")
 
         doc.add_paragraph("_" * 60)
 
-        # Text content
+        # Text content (Hebrew manuscript text)
         if browse_data.get('view_all') and browse_data.get('pages'):
             doc.add_heading('Full Manuscript', 2)
             for page_data in browse_data['pages']:
                 doc.add_heading(f"Page {page_data.get('p_num', '?')}", 3)
                 if page_data.get('text'):
-                    doc.add_paragraph(page_data['text'])
+                    text_p = doc.add_paragraph()
+                    text_run = text_p.add_run(page_data['text'])
+                    _set_run_rtl_font(text_run)
+                    _set_paragraph_rtl(text_p)
         elif browse_data.get('text'):
             doc.add_heading(f"Page {browse_data.get('p_num', '?')}", 2)
-            doc.add_paragraph(browse_data['text'])
+            text_p = doc.add_paragraph()
+            text_run = text_p.add_run(browse_data['text'])
+            _set_run_rtl_font(text_run)
+            _set_paragraph_rtl(text_p)
 
         # Add credits
         doc.add_page_break()
@@ -875,8 +1107,39 @@ def init_api_routes():
         ws = wb.active
         ws.title = list_data.get('name', 'List')[:31]  # Excel sheet name limit
 
+        # Enable RTL for the sheet (Hebrew content)
+        ws.sheet_view.rightToLeft = True
+
         headers = ["#", "Shelfmark", "Title", "System ID", "FL ID", "Notes", "Added"]
         ws.append(headers)
+
+        # Style header row
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Define column widths
+        column_widths = {
+            'A': 6,    # #
+            'B': 25,   # Shelfmark
+            'C': 35,   # Title
+            'D': 18,   # System ID
+            'E': 12,   # FL ID
+            'F': 40,   # Notes
+            'G': 18,   # Added
+        }
+        for col_letter, width in column_widths.items():
+            ws.column_dimensions[col_letter].width = width
+
+        # Alignments for different column types
+        rtl_alignment = Alignment(horizontal="right", vertical="top", wrap_text=True, readingOrder=2)
+        ltr_alignment = Alignment(horizontal="left", vertical="top")
+        center_alignment = Alignment(horizontal="center", vertical="top")
 
         for idx, item in enumerate(items, 1):
             sys_id = item.get('sys_id', '')
@@ -891,13 +1154,19 @@ def init_api_routes():
                 except Exception:
                     pass
 
+            # Clean notes - remove line breaks for single line display
+            notes = item.get('note', '').replace('\n', ' ').replace('\r', ' ')
+            while '  ' in notes:
+                notes = notes.replace('  ', ' ')
+            notes = notes.strip()
+
             row = [
                 idx,
                 shelfmark,
                 title,
                 sys_id,
                 item.get('fl_id', ''),
-                item.get('note', ''),
+                notes,
                 item.get('added', '')
             ]
 
@@ -905,18 +1174,35 @@ def init_api_routes():
             clean_row = []
             for cell in row:
                 if isinstance(cell, str):
-                    cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\n\r\t")
+                    cell = "".join(ch for ch in cell if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\t")
                 clean_row.append(cell)
             ws.append(clean_row)
+
+            # Apply alignment to the row just added
+            current_row = ws.max_row
+            ws.cell(row=current_row, column=1).alignment = center_alignment  # #
+            ws.cell(row=current_row, column=2).alignment = rtl_alignment     # Shelfmark
+            ws.cell(row=current_row, column=3).alignment = rtl_alignment     # Title
+            ws.cell(row=current_row, column=4).alignment = ltr_alignment     # System ID
+            ws.cell(row=current_row, column=5).alignment = ltr_alignment     # FL ID
+            ws.cell(row=current_row, column=6).alignment = rtl_alignment     # Notes (could be Hebrew)
+            ws.cell(row=current_row, column=7).alignment = ltr_alignment     # Added
 
         # Add credits at the bottom
         ws.append([])
         ws.append([])
+        credits_start_row = ws.max_row + 1
         ws.append(['Credits'])
         ws.append(['Generated by Dicta Genizah Search (Web Version)'])
         ws.append(['Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)'])
         ws.append(['Dataset: https://doi.org/10.5281/zenodo.17734473'])
         ws.append(['Citation: Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'])
+
+        # Style credits section
+        credits_font = Font(italic=True, color="555555")
+        for row_idx in range(credits_start_row, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=1)
+            cell.font = credits_font
 
         stream = io.BytesIO()
         wb.save(stream)
