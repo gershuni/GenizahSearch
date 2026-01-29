@@ -1,130 +1,218 @@
-# הקשר לסקירת הצ'קליסט
-## Context for Checklist Review
+# Checklist Review Context
+## Pre-Launch Testing for Genizah Search Web Application
 
-**מטרה:** בדיקת Pre-Launch לאתר חיפוש גניזה (Genizah Search)
-**טכנולוגיות:** Python, NiceGUI (Vue.js/Quasar), FastAPI, SQLite
-**שפת ממשק:** עברית (RTL)
+**Purpose:** Pre-launch QA testing for Genizah manuscript search website
+**Stack:** Python, NiceGUI (Vue.js/Quasar), FastAPI, SQLite
+**Interface:** Hebrew (RTL), English supported
 
 ---
 
-## קבצים לסקירה
+## Files for Review
 
-### 1. הצ'קליסט הראשי
-- `PRE_LAUNCH_CHECKLIST.md` - 440 פריטי בדיקה ב-20 תחומים
+### 1. Main Checklist
+- `PRE_LAUNCH_CHECKLIST.md` - 440 test items across 20 areas
 
-### 2. דוחות בדיקה מפורטים
-| קובץ | תחומים |
-|------|--------|
-| `TEST_REPORT_AREAS_1_2.md` | דף הבית, חיפוש |
-| `TEST_REPORT_AREAS_3_4.md` | דפדוף (Browse), מקבילות |
-| `TEST_REPORT_AREAS_5_6.md` | רשימות, משתמשים/אימות |
-| `TEST_REPORT_AREAS_7_8.md` | תיקונים, תגובות |
-| `TEST_REPORT_AREAS_9_10.md` | גילויים, אדמין |
-| `TEST_REPORT_AREAS_11_14.md` | הגדרות, עזרה, ניווט, ערכות נושא |
-| `TEST_REPORT_AREAS_17_20.md` | שילובים, ביצועים, שגיאות, אבטחה |
+### 2. Detailed Test Reports
+| File | Areas Covered |
+|------|---------------|
+| `TEST_REPORT_AREAS_1_2.md` | Home page, Search |
+| `TEST_REPORT_AREAS_3_4.md` | Browse (document viewer), Parallels |
+| `TEST_REPORT_AREAS_5_6.md` | Lists, Users/Authentication |
+| `TEST_REPORT_AREAS_7_8.md` | Corrections, Comments |
+| `TEST_REPORT_AREAS_9_10.md` | Discoveries (community), Admin |
+| `TEST_REPORT_AREAS_11_14.md` | Settings, Help, Navigation, Themes |
+| `TEST_REPORT_AREAS_17_20.md` | Integrations, Performance, Errors, Security |
 
-### 3. קבצי קוד מרכזיים (לרפרנס)
+### 3. Key Source Files (Reference)
 ```
 web/
-├── main.py              # App entry, routing, themes, responsive
-├── auth_state.py        # Authentication, API calls, tokens
-├── state.py             # Global state management
-├── api.py               # Image proxy, exports, IIIF
-├── services.py          # Search services
-├── translations.py      # i18n
+├── main.py              # App entry, routing, themes, responsive CSS
+├── auth_state.py        # Authentication, API calls, JWT tokens
+├── state.py             # Global state management (singleton)
+├── api.py               # Image proxy, exports (Word/Excel), IIIF
+├── services.py          # Search services wrapper
+├── translations.py      # i18n (Hebrew/English)
 ├── pages/
-│   ├── home.py          # Landing page
-│   ├── search.py        # Search interface
-│   ├── browse.py        # Document viewer (2300+ lines)
-│   ├── parallels.py     # Parallel text finder
-│   ├── lists.py         # Personal lists
-│   ├── corrections.py   # Corrections system
-│   ├── discoveries.py   # Community discoveries
-│   ├── admin.py         # Admin panel
-│   ├── profile.py       # User profile
-│   ├── settings.py      # Settings page
+│   ├── home.py          # Landing page with stats
+│   ├── search.py        # Search interface (variants, fuzzy, regex)
+│   ├── browse.py        # Document viewer (2300+ lines, IIIF images)
+│   ├── parallels.py     # Parallel text finder (Sefaria integration)
+│   ├── lists.py         # Personal lists management
+│   ├── corrections.py   # Corrections submission/review system
+│   ├── discoveries.py   # Community discoveries feed
+│   ├── admin.py         # Admin panel (users, corrections)
+│   ├── profile.py       # User profile editing
+│   ├── settings.py      # User preferences (themes, variants)
 │   ├── help.py          # Help center
-│   └── accessibility.py # Accessibility statement
+│   └── accessibility.py # WCAG accessibility statement
 └── components/
-    ├── comment_dialog.py   # Comment creation
-    ├── notes_display.py    # Comment display
-    ├── joins_panel.py      # Fragment joins
-    ├── text_editor.py      # Text editing
-    └── typography.py       # H1/H2/H3 components
+    ├── comment_dialog.py   # Comment creation with mentions
+    ├── notes_display.py    # Comment display (async loading)
+    ├── joins_panel.py      # Fragment joins management
+    ├── text_editor.py      # Transcription text editor
+    └── typography.py       # Semantic H1/H2/H3 components
 
 backend/
-├── api/routes/          # FastAPI endpoints
-│   ├── auth.py, users.py, comments.py, corrections.py,
-│   ├── discoveries.py, versions.py, joins.py, documents.py
-├── services/            # Business logic
-└── models/              # SQLAlchemy models
+├── api/routes/          # FastAPI REST endpoints
+│   ├── auth.py          # Login, register, token refresh
+│   ├── users.py         # User CRUD, profile
+│   ├── comments.py      # Comments CRUD, reactions, threading
+│   ├── corrections.py   # Corrections workflow
+│   ├── discoveries.py   # Community feed
+│   ├── versions.py      # Text versions management
+│   ├── joins.py         # Fragment joins
+│   └── documents.py     # Document metadata
+├── services/            # Business logic layer
+└── models/              # SQLAlchemy ORM models
 ```
 
 ---
 
-## מבנה האפליקציה
+## Application Structure
 
-### דפים ציבוריים (ללא התחברות)
-- `/` - דף הבית
-- `/search` - חיפוש טקסט
-- `/browse` - צפייה בכתבי יד
-- `/parallels` - חיפוש מקבילות
-- `/help` - מרכז עזרה
-- `/accessibility` - הצהרת נגישות
-- `/download` - הורדת אפליקציית דסקטופ
+### Public Pages (No Login Required)
+| Route | Description |
+|-------|-------------|
+| `/` | Home page with statistics and quick links |
+| `/search` | Full-text search with variants, fuzzy, regex |
+| `/browse` | Document viewer with IIIF images |
+| `/parallels` | Parallel text finder (Sefaria/Tanakh/Mishna) |
+| `/help` | Help center |
+| `/accessibility` | WCAG 2.0 accessibility statement |
+| `/download` | Desktop app download page |
 
-### דפים למשתמשים מחוברים
-- `/lists` - רשימות אישיות
-- `/profile` - פרופיל משתמש
-- `/corrections` - התיקונים שלי
-- `/discoveries` - גילויים קהילתיים
-- `/settings` - הגדרות
+### Authenticated Pages
+| Route | Description |
+|-------|-------------|
+| `/lists` | Personal document lists |
+| `/profile` | User profile management |
+| `/corrections` | My corrections dashboard |
+| `/discoveries` | Community discoveries feed |
+| `/settings` | User preferences |
 
-### דפים לאדמין
-- `/admin` - פאנל ניהול
+### Admin Pages
+| Route | Description |
+|-------|-------------|
+| `/admin` | Admin panel (users, corrections, stats) |
 
 ---
 
-## תפקידי משתמשים (Role Hierarchy)
+## User Role Hierarchy
 ```
-GUEST        → צפייה בלבד
-CONTRIBUTOR  → תגובות, הגשת תיקונים
-REVIEWER     → סקירת תיקונים
-EDITOR       → אישור/דחיית תיקונים
-ADMIN        → גישה מלאה + ניהול
+GUEST        → View only (search, browse)
+CONTRIBUTOR  → Can comment, submit corrections
+REVIEWER     → Can review/vote on corrections
+EDITOR       → Can approve/reject corrections
+ADMIN        → Full access + user management
 ```
 
 ---
 
-## שאלות לסוקר
+## Review Questions for AI Reviewer
 
-1. **שלמות:** האם יש פונקציונליות שלא נבדקה?
-2. **עדיפויות:** האם סדר העדיפויות (P0-P3) נכון?
-3. **אבטחה:** האם זיהיתי את כל סיכוני האבטחה?
-4. **מקרי קצה:** אילו edge cases חסרים?
-5. **אינטגרציה:** האם יש זרימות E2E שחסרות?
-6. **תאימות:** האם יש בעיות RTL/Hebrew שלא נבדקו?
+### Completeness
+1. Are there any features/pages not covered by the checklist?
+2. Are there missing user flows or scenarios?
+3. Should any areas have more detailed test items?
+
+### Prioritization
+4. Is the P0-P3 severity classification correct?
+5. Should any P2 items be elevated to P1?
+6. Are "manual testing required" items properly identified?
+
+### Security
+7. Did I identify all security risks?
+8. Are the 17 `sanitize=False` instances properly assessed?
+9. Are there other XSS/injection vectors I missed?
+10. Is the SSRF protection (image proxy whitelist) sufficient?
+
+### Edge Cases
+11. What edge cases are missing from the checklist?
+12. Are RTL/Hebrew text handling scenarios covered?
+13. Are concurrent user scenarios addressed?
+
+### Integration
+14. Are all E2E user flows documented?
+15. Are third-party integrations (IIIF, Sefaria, GA) properly tested?
+
+### Methodology
+16. Is the test structure logical and complete?
+17. Are the code references accurate and useful?
+18. Is there redundancy that should be consolidated?
 
 ---
 
-## ממצאים עיקריים מהסקירה
+## Key Findings from Initial Review
 
-### נמצאו כבעיות:
-- 17 מופעי `sanitize=False` (XSS risk)
-- אין Rate Limiting
-- אין CSRF protection
-- Path Traversal potential בקובץ parallels.py
-- ~60 DEBUG prints בקוד
-- תגובות לא מוצגות כראוי ב-Browse
+### Critical Issues Found (P1)
+| Issue | Locations | Risk |
+|-------|-----------|------|
+| `sanitize=False` (XSS) | 17 instances across 6 files | High |
+| No Rate Limiting | All API endpoints | Medium-High |
+| No CSRF Protection | API endpoints | Medium |
+| Path Traversal | parallels.py:60 (Sefaria cache) | Medium |
 
-### לא נבדקו:
-- Backend DB queries לעומק
-- Production server config
-- SSL/TLS configuration
-- Browser compatibility (רק code review)
-- E2E integration tests
+### Medium Issues Found (P2)
+| Issue | Location |
+|-------|----------|
+| List rename missing | lists.py |
+| Comments not displaying in Browse | notes_display.py |
+| ~60 DEBUG prints in code | genizah_app.py |
+| Error stack traces printed | Multiple files |
+
+### Not Tested (Gaps)
+- Backend database queries (SQL injection depth)
+- Production server configuration
+- SSL/TLS certificate validation
+- Browser compatibility (code review only)
+- Load/stress testing
+- Mobile device testing
 
 ---
 
-**נוצר:** 2026-01-29
-**מטרה:** סקירת עמיתים (Peer Review) של הצ'קליסט
+## Test Results Summary
+
+| Area | Total | Passed | Failed | Manual |
+|------|-------|--------|--------|--------|
+| Home | 18 | 18 | 0 | 0 |
+| Search | 50 | 40 | 0 | 10 |
+| Browse | 32 | 25 | 0 | 7 |
+| Parallels | 21 | 19 | 0 | 2 |
+| Lists | 20 | 17 | 2 | 1 |
+| Users/Auth | 24 | 24 | 0 | 0 |
+| Corrections | 32 | 32 | 0 | 0 |
+| Comments | 25 | 25 | 0 | 0 |
+| Discoveries | 35 | 35 | 0 | 0 |
+| Admin | 26 | 26 | 0 | 0 |
+| Settings | 14 | 14 | 0 | 0 |
+| Help/A11y | 14 | 14 | 0 | 0 |
+| Navigation | 13 | 9 | 0 | 4 |
+| Themes | 22 | 22 | 0 | 0 |
+| Accessibility | 7 | 3 | 0 | 4 |
+| Responsive | 12 | 12 | 0 | 0 |
+| Integrations | 14 | 14 | 0 | 0 |
+| Performance | 10 | 8 | 0 | 2 |
+| Errors | 16 | 15 | 0 | 1 |
+| Security | 15 | 13 | 1 | 1 |
+| **TOTAL** | **440** | **385** | **3** | **32** |
+
+---
+
+## Reviewer Instructions
+
+1. **Read** `REVIEW_CONTEXT.md` (this file) for overview
+2. **Review** `PRE_LAUNCH_CHECKLIST.md` for test structure and completeness
+3. **Check** individual `TEST_REPORT_AREAS_*.md` files for detailed findings
+4. **Optionally** read key source files for context
+5. **Provide** feedback on:
+   - Missing tests
+   - Incorrect priorities
+   - Overlooked security issues
+   - Methodology improvements
+   - Redundancies to remove
+
+---
+
+**Created:** 2026-01-29
+**Purpose:** Peer review of pre-launch testing checklist
+**Original Reviewer:** Claude Code Review
