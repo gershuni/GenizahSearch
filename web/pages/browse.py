@@ -664,6 +664,7 @@ class BrowseState:
         self.sys_id: Optional[str] = None
         self.is_loading: bool = False
         self.error: Optional[str] = None
+        self.search_error: Optional[str] = None  # Inline error for shelfmark not found
         self.zoom_level: float = 1.0
         self.rotation: int = 0
         self.is_fullscreen: bool = False
@@ -707,6 +708,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # Add custom styles
     ui.add_head_html(VIEWER_STYLES)
 
+    def update_search_error():
+        """Update the inline search error display below the search bar."""
+        error_container = slider_refs.get('search_error_container')
+        if error_container:
+            error_container.clear()
+            if state.search_error:
+                with error_container:
+                    ui.icon('error_outline', size='sm').classes('text-red-500')
+                    ui.label(state.search_error).classes('text-red-500 text-sm ml-1')
+
     def search_shelfmark():
         """Search for manuscripts by shelfmark."""
         if not state.shelfmark_query.strip():
@@ -714,18 +725,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         state.is_loading = True
         state.error = None
+        state.search_error = None  # Clear inline error
+        update_search_error()  # Clear the error display
         update_content()
 
         try:
             results, exact_match = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
 
             if not results:
-                state.error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
-                state.current_page = None  # Reset to show error
-                state.sys_id = None
+                # Show inline error below search bar instead of full-page error
+                state.search_error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
                 state.is_loading = False
+                update_search_error()
                 update_content()
                 return
+
+            # Clear any previous inline error on success
+            state.search_error = None
+            update_search_error()
 
             # If exact match or single result, load directly
             if exact_match or len(results) == 1:
@@ -2295,6 +2312,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 def do_search():
                     state.shelfmark_query = search_input.value or ''
+                    state.search_error = None  # Clear previous error
                     if state.shelfmark_query.strip():
                         search_shelfmark()
 
@@ -2306,6 +2324,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     icon='arrow_forward',
                     on_click=do_search
                 ).props('color=green').classes('px-6')
+
+            # Error notice area (below search bar)
+            search_error_container = ui.row().classes('w-full mt-2 items-center')
+            slider_refs['search_error_container'] = search_error_container
 
         # Service status warning
         if not service.is_ready:
