@@ -113,7 +113,8 @@ def create_notes_panel(
         shelfmark: Display name for the document
 
     Returns:
-        The panel container element
+        Tuple of (panel element, refresh function)
+        The refresh function can be called to reload notes and expand the panel
     """
     panel = ui.expansion(
         text=tr('Notes & Comments'),
@@ -137,6 +138,11 @@ def create_notes_panel(
                     for comment in comments:
                         create_comment_card(comment)
 
+        async def refresh_and_expand():
+            """Refresh notes and expand the panel to show new content."""
+            panel.value = True  # Expand the panel
+            await load_notes()
+
         # Load on expansion - use background task for async
         async def on_expand(e):
             if e.args:
@@ -144,7 +150,7 @@ def create_notes_panel(
 
         panel.on('update:model-value', on_expand)
 
-    return panel
+    return panel, refresh_and_expand
 
 
 def create_comment_card(comment: dict):

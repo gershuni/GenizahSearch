@@ -1402,6 +1402,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             page = state.current_page
 
+            # Reference to hold the notes panel refresh function
+            # Will be set after the notes panel is created
+            notes_refresh_ref = {'refresh': None}
+
+            async def refresh_notes_after_comment():
+                """Refresh the notes panel after a comment is submitted."""
+                if notes_refresh_ref['refresh']:
+                    await notes_refresh_ref['refresh']()
+
             # === Compact Metadata Header ===
             with ui.card().classes('w-full p-3 mb-3').style(
                 'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important; '
@@ -1798,7 +1807,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id,
-                                    on_submit=refresh_page
+                                    on_submit=refresh_notes_after_comment
                                 )
                                 create_notes_button(
                                     document_id=page.sys_id,
@@ -2027,11 +2036,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 # Comments section - below panels
                 from web.components import create_notes_panel
-                create_notes_panel(
+                _, notes_refresh_fn = create_notes_panel(
                     document_id=page.sys_id,
                     page_number=page.p_num,
                     shelfmark=page.shelfmark or page.sys_id
                 )
+                # Store the refresh function so comment dialog can call it
+                notes_refresh_ref['refresh'] = notes_refresh_fn
 
                 # === FULLSCREEN EDIT OVERLAY ===
                 if state.fullscreen_edit and state.edit_mode:

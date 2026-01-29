@@ -509,7 +509,9 @@ def create_lists_page():
                     ui.notify(tr('List not found'), type='warning')
                     return
 
-                items = list_data.get('items', [])
+                # Use get_items_in_list to correctly fetch items
+                # Items are stored in data['items'] with list membership in each item's 'lists' field
+                items = state.lists_mgr.get_items_in_list(list_id)
                 if not items:
                     ui.notify(tr('This list is empty'), type='warning')
                     return

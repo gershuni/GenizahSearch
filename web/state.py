@@ -22,6 +22,10 @@ class AppState:
         self.last_results: List[Dict[str, Any]] = []
         self.current_search_query: str = ""
 
+        # Parallels results (for export functionality)
+        self.parallels_results: List[Dict[str, Any]] = []
+        self.parallels_filtered: List[Dict[str, Any]] = []
+
     def is_ready(self):
         return self.searcher is not None and self.meta_mgr is not None
 

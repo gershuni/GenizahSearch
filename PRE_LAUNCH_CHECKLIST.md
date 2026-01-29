@@ -852,33 +852,38 @@
 ## פריטים לבדיקה ידנית (Manual Testing Required)
 
 ### קריטי - בטיחות (לפני השקה)
-1. [ ] **Security: בדוק שכל התוכן ב-sanitize=False מגיע ממקור מהימן**
+1. [x] **Security: בדוק שכל התוכן ב-sanitize=False מגיע ממקור מהימן** ✅ Audited - 14/16 safe, 2 fixed
 2. [ ] **Security: בדוק HTTPS enforcement על Production**
 3. [ ] **Security: בדוק שאין information leakage בהודעות שגיאה למשתמש**
 
 ### דחוף - פונקציונלי (לפני השקה)
-4. [ ] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse (לא רק ב-Lists)**
-5. [ ] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark)
-6. [ ] Search: Export Word/Excel - קבצים תקינים
-7. [ ] Browse: Autocomplete suggestions for shelfmark
-8. [ ] Browse: Dialog תגובה נפתח ופעיל
-9. [ ] Browse: Dialog בחירת רשימה נפתח
-10. [ ] Lists: Export Excel תקין
-11. [ ] Parallels: קבצי ייצוא תקינים
+4. [!] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse** - BUG: Dialog works but comment not shown (#15)
+5. [x] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark) ✅ All passed
+6. [!] Search: Export Word/Excel - Word needs RTL (#8), Excel formatting issues (#9)
+7. [-] Browse: Autocomplete suggestions for shelfmark - Not implemented, nice-to-have
+8. [x] Browse: Dialog תגובה נפתח ופעיל ✅ Opens and submits
+9. [!] Browse: Dialog בחירת רשימה נפתח - Works but needs fixes (#13)
+10. [!] Lists: Export Excel תקין - BUG: "List is empty" error (#10)
+11. [!] Parallels: קבצי ייצוא תקינים - BUG: Export buttons don't work (#16)
 
 ### בינוני
-12. [ ] Navigation: Footer ציטוט + כפתור העתקה
-13. [ ] Navigation: קישור DOI פעיל
+12. [x] Navigation: Footer ציטוט + כפתור העתקה ✅
+13. [x] Navigation: קישור DOI פעיל ✅
 14. [ ] Navigation: localStorage זכירה
-15. [ ] Accessibility: Tab navigation
-16. [ ] Accessibility: Esc closes dialogs
+15. [x] Accessibility: Tab navigation ✅
+16. [x] Accessibility: Esc closes dialogs ✅
 17. [ ] Accessibility: aria-labels
 18. [ ] Accessibility: Text contrast
 
 ### רקע
-19. [ ] Performance: Initial page load time (<3s)
-20. [ ] Performance: Search response time (<2s)
+19. [x] Performance: Initial page load time (<3s) ✅
+20. [x] Performance: Search response time (<2s) ✅
 21. [ ] Errors: Image placeholder when image fails
+
+### Additional Issues Found (2026-01-29 Manual Testing)
+- [ ] Shelfmark input matching - handle format variations (#11)
+- [ ] Loading spinners needed across website (#12)
+- [ ] Lists should be per-user not per-device (#14)
 
 ---
 

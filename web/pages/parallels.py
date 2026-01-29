@@ -162,6 +162,9 @@ def create_parallels_page(initial_text: str = None):
     if 'parallels_results' in app.storage.user:
         try:
             p_state.results = app.storage.user.get('parallels_results', [])
+            # Also restore to global state for export functionality
+            state.parallels_results = p_state.results
+            state.parallels_filtered = app.storage.user.get('parallels_filtered', [])
         except Exception:
             pass
 
@@ -1005,6 +1008,10 @@ def create_parallels_page(initial_text: str = None):
                 p_state.filtered_results = filtered_results
                 try:
                     # Store both main and filtered results for export
+                    # Store in global state (for API export endpoints)
+                    state.parallels_results = main_results
+                    state.parallels_filtered = filtered_results
+                    # Also store in user storage (for UI persistence across page reloads)
                     app.storage.user['parallels_results'] = main_results
                     app.storage.user['parallels_filtered'] = filtered_results
                 except Exception:

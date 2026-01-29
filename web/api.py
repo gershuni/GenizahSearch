@@ -640,10 +640,9 @@ def init_api_routes():
     @app.get('/api/export/parallels/excel')
     def export_parallels_excel():
         """Export parallels results to Excel."""
-        from nicegui import app as nicegui_app
-
-        parallels_results = nicegui_app.storage.user.get('parallels_results', [])
-        filtered_results = nicegui_app.storage.user.get('parallels_filtered', [])
+        # Read from global state (accessible from HTTP requests without session context)
+        parallels_results = state.parallels_results or []
+        filtered_results = state.parallels_filtered or []
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -727,10 +726,9 @@ def init_api_routes():
     @app.get('/api/export/parallels/word')
     def export_parallels_word():
         """Export parallels results to Word."""
-        from nicegui import app as nicegui_app
-
-        parallels_results = nicegui_app.storage.user.get('parallels_results', [])
-        filtered_results = nicegui_app.storage.user.get('parallels_filtered', [])
+        # Read from global state (accessible from HTTP requests without session context)
+        parallels_results = state.parallels_results or []
+        filtered_results = state.parallels_filtered or []
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
