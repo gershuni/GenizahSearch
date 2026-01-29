@@ -49,7 +49,9 @@ def show_add_to_list_dialog(
         ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
 
         lists = lists_mgr.data.get('lists', {})
-        list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
+        # Store list data with colors for display
+        list_data = {lid: lst for lid, lst in lists.items() if not lst.get('is_system')}
+        list_options = {lid: lst['name'] for lid, lst in list_data.items()}
 
         # Container for the main form
         form_container = ui.column().classes('w-full mt-4 gap-3')
@@ -70,22 +72,58 @@ def show_add_to_list_dialog(
                     value=list(list_options.keys())[0] if list_options else '__new__'
                 ).classes('w-full').props('outlined').style('color: var(--text-primary);')
 
+                # Add colored dots to dropdown options using custom slot
+                with selected_list.add_slot('option', '''
+                    <q-item v-bind="scope.itemProps">
+                        <q-item-section avatar style="min-width: auto; padding-right: 8px;" v-if="scope.opt.value !== '__new__'">
+                            <div :style="{
+                                width: '12px',
+                                height: '12px',
+                                borderRadius: '50%',
+                                backgroundColor: scope.opt.color || '#888'
+                            }"></div>
+                        </q-item-section>
+                        <q-item-section>
+                            <q-item-label>{{ scope.opt.label }}</q-item-label>
+                        </q-item-section>
+                    </q-item>
+                '''):
+                    pass
+
+                # Update options to include color data
+                options_with_colors = [
+                    {'value': '__new__', 'label': f"+ {tr('Create new list')}"}
+                ] + [
+                    {'value': lid, 'label': name, 'color': list_data[lid].get('color', '#888')}
+                    for lid, name in list_options.items()
+                ]
+                selected_list.set_options(options_with_colors, value_key='value', label_key='label')
+                # Set initial value after updating options
+                if list_options:
+                    selected_list.value = list(list_options.keys())[0]
+
                 note_input = ui.input(label=tr('Note (optional)'), value=note_default).classes('w-full').props('outlined')
 
                 def on_list_change():
                     if selected_list.value == '__new__':
                         form_container.set_visibility(False)
                         new_list_container.set_visibility(True)
+                        action_row.set_visibility(False)
                         creating_new_list['active'] = True
 
                 selected_list.on('update:model-value', on_list_change)
 
             # Create New List button (shown when no lists exist)
             if not list_options:
+                def show_new_list_form():
+                    form_container.set_visibility(False)
+                    new_list_container.set_visibility(True)
+                    action_row.set_visibility(False)
+
                 ui.button(
                     tr('Create new list'),
                     icon='add',
-                    on_click=lambda: (form_container.set_visibility(False), new_list_container.set_visibility(True))
+                    on_click=show_new_list_form
                 ).classes('btn-primary')
 
         # New list creation form
@@ -114,6 +152,7 @@ def show_add_to_list_dialog(
                 def back_to_list_selection():
                     new_list_container.set_visibility(False)
                     form_container.set_visibility(True)
+                    action_row.set_visibility(True)
                     creating_new_list['active'] = False
 
                 # Only show back button if there are existing lists
@@ -155,6 +194,7 @@ def show_add_to_list_dialog(
                     # Switch to new list creation
                     form_container.set_visibility(False)
                     new_list_container.set_visibility(True)
+                    action_row.set_visibility(False)
                     creating_new_list['active'] = True
                     return
 
