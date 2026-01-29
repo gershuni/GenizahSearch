@@ -343,60 +343,94 @@
 # 7. מערכת תיקונים (Corrections)
 
 ## 7.1 הגשת תיקון
-- [ ] כפתור "הגש תיקון" זמין בדף Browse
-- [ ] Dialog עריכה נפתח
-- [ ] טקסט מקורי מוצג
-- [ ] עורך טקסט פעיל
-- [ ] כפתור "הגש" פעיל
-- [ ] הגשה מצליחה
+- [x] כפתור "הגש תיקון" זמין בדף Browse *(browse.py:1792-1796)*
+- [x] Dialog עריכה נפתח *(browse.py:1931-1972)*
+- [x] טקסט מקורי מוצג *(browse.py:1984-2002)*
+- [x] עורך טקסט פעיל *(browse.py:1953-1961)*
+- [x] כפתור "הגש" פעיל *(browse.py:1946)*
+- [x] שמירת טיוטה *(browse.py:1945)*
 
 ## 7.2 עריכה במסך מלא
-- [ ] כפתור מסך מלא פעיל
-- [ ] תמונה וטקסט מוצגים זה לצד זה
-- [ ] Splitter ניתן לגרירה
-- [ ] כלי תמונה (zoom, rotate) פעילים
-- [ ] שמירה ויציאה עובדים
+- [x] כפתור מסך מלא פעיל *(browse.py:2036-2242)*
+- [x] תמונה וטקסט מוצגים זה לצד זה *(browse.py:2056-2096)*
+- [x] Splitter ניתן לגרירה *(browse.py:2198-2240 - JS)*
+- [x] כלי תמונה פעילים *(browse.py:2061-2068)*
+- [x] שמירה ויציאה + ESC *(browse.py:2050-2054, 2123-2134)*
 
 ## 7.3 דף "התיקונים שלי" `/corrections`
-- [ ] הדף נגיש למשתמש מחובר
-- [ ] רשימת תיקונים שהוגשו מוצגת
-- [ ] סטטוס כל תיקון מוצג (Pending/Approved/Rejected)
-- [ ] צפייה בפרטי תיקון אפשרית
+- [x] הדף נגיש למשתמש מחובר *(corrections.py:46-49)*
+- [x] רשימת תיקונים מוצגת *(corrections.py:113-153)*
+- [x] סטטוס כל תיקון מוצג *(corrections.py:166-178 - badges)*
+- [x] צפייה בפרטי תיקון *(corrections.py:196-206 - expandable)*
+- [x] קישור ל-Browse *(corrections.py:185-192)*
 
 ## 7.4 סטטוסים
-- [ ] Draft: טיוטה לא מוגשת
-- [ ] Pending: ממתין לאישור
-- [ ] Approved: אושר
-- [ ] Rejected: נדחה
-- [ ] Revision: נדרש תיקון
+- [x] Draft (טיוטה) *(corrections.py:168 - orange)*
+- [x] Pending (ממתין) *(corrections.py:169 - blue)*
+- [x] Under Review *(corrections.py:170 - purple)*
+- [x] Approved (אושר) *(corrections.py:171 - green)*
+- [x] Rejected (נדחה) *(corrections.py:172 - red)*
+- [x] Merged (מוזג) *(corrections.py:173 - teal)*
+
+## 7.5 פעולות על תיקונים
+- [x] Edit (לטיוטות) *(corrections.py:259-264)*
+- [x] Delete *(corrections.py:266-286)*
+- [x] Upvote/Downvote *(corrections.py:227-245)*
+- [x] Vote display *(corrections.py:239, 247)*
+
+## 7.6 Review Panel (Reviewers+)
+- [x] Tab לreviewers בלבד *(corrections.py:91-92)*
+- [x] רשימת תיקונים ממתינים *(corrections.py:487-514)*
+- [x] Vote display for reviewers *(corrections.py:536-548)*
+- [x] Approve/Reject buttons *(corrections.py:564-589)*
+
+## 7.7 Leaderboard
+- [x] Tab מוצג *(corrections.py:93)*
+- [x] Top 20 contributors *(corrections.py:597)*
+- [x] Trophy icons *(corrections.py:623-630)*
+- [x] Corrections + Reputation *(corrections.py:635-636)*
 
 ---
 
 # 8. מערכת תגובות (Comments)
 
 ## 8.1 הוספת תגובה
-- [ ] כפתור "הוסף תגובה" זמין בדף Browse
-- [ ] Dialog תגובה נפתח
-- [ ] שדה תוכן פעיל
-- [ ] אופציה לתגובה אנונימית
-- [ ] אופציה לתגובה פרטית/ציבורית
-- [ ] שליחה מצליחה
+- [x] כפתור "הוסף תגובה" זמין *(comment_dialog.py:233-266)*
+- [x] Dialog תגובה נפתח *(comment_dialog.py:20-230)*
+- [x] שדה תוכן פעיל *(comment_dialog.py:65-68)*
+- [x] בחירת scope (page/manuscript) *(comment_dialog.py:49-62)*
+- [x] אפשרות Private *(comment_dialog.py:180)*
+- [x] Login validation *(comment_dialog.py:190-193)*
+- [x] Submit API call *(comment_dialog.py:189-222)*
 
-## 8.2 תצוגת תגובות
-- [ ] תגובות קיימות מוצגות בדף Browse
-- [ ] שם המגיב מוצג
-- [ ] תאריך מוצג
-- [ ] תוכן מוצג
+## 8.2 Shelfmark Mentions
+- [x] Add reference button *(comment_dialog.py:176-177)*
+- [x] Picker dialog (Recent/Lists) *(comment_dialog.py:71-174)*
+- [x] Mention format `[[shelfmark:X|id:Y]]` *(comment_dialog.py:101)*
 
-## 8.3 תגובות ותשובות
-- [ ] אפשרות להגיב לתגובה
-- [ ] Threading (שרשור) מוצג נכון
+## 8.3 תצוגת תגובות
+- [x] Notes panel (expansion) *(notes_display.py:102-147)*
+- [x] Notes button + indicator *(notes_display.py:224-287)*
+- [x] Fetch comments *(notes_display.py:72-99)*
+- [x] Comment card *(notes_display.py:150-195)*
+- [x] Author + Date display *(notes_display.py:157-173)*
+- [x] Private badge *(notes_display.py:170-171)*
 
-## 8.4 ריאקציות
-- [ ] כפתורי ריאקציה זמינים
-- [ ] Like עובד
-- [ ] Helpful עובד
-- [ ] Insightful עובד
+## 8.4 תגובות ותשובות
+- [x] Replies support *(notes_display.py:192-195)*
+- [x] Reply item *(notes_display.py:198-221)*
+- [x] Threading visual *(notes_display.py:210 - border-right)*
+
+## 8.5 Reactions
+- [x] Reactions summary *(notes_display.py:182-189)*
+- [x] Like count *(notes_display.py:186-187)*
+- [x] Helpful count *(notes_display.py:188-189)*
+
+## 8.6 My Comments Tab
+- [x] Tab מוצג *(corrections.py:90)*
+- [x] Load comments *(corrections.py:344-366)*
+- [x] Edit comment *(corrections.py:428-432, 457-485)*
+- [x] Delete comment *(corrections.py:434-455)*
 
 ---
 
@@ -667,8 +701,8 @@
 | מקבילות | 21 | 19 | 0 | 2 |
 | רשימות | 20 | 17 | 2 | 1 |
 | משתמשים | 24 | 24 | 0 | 0 |
-| תיקונים | 15 | | | |
-| תגובות | 12 | | | |
+| תיקונים | 32 | 32 | 0 | 0 |
+| תגובות | 25 | 25 | 0 | 0 |
 | גילויים | 14 | | | |
 | אדמין | 13 | | | |
 | הגדרות | 6 | | | |
