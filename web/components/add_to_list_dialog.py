@@ -169,25 +169,18 @@ def show_add_to_list_dialog(
                         ui.notify(tr('Please enter a list name'), type='warning')
                         return
 
-                    # Create the new list - use async if authenticated
-                    if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'create_list'):
-                        try:
-                            new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
-                        except TypeError:
-                            # Fallback to sync
-                            new_list_id = lists_mgr.create_list(name, color=selected_color['value'])
+                    # Create the new list - use async if authenticated, sync otherwise
+                    if GlobalAuthState.is_logged_in():
+                        new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
                     else:
-                        new_list_id = lists_mgr.create_list(name, color=selected_color['value'])
+                        new_list_id = lists_mgr.create_list_sync(name, color=selected_color['value'])
 
                     if new_list_id:
                         # Add item to the new list
-                        if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'add_item'):
-                            try:
-                                result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                            except TypeError:
-                                result = lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                        if GlobalAuthState.is_logged_in():
+                            result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
                         else:
-                            result = lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                            result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
 
                         if result:
                             ui.notify(f"{tr('List created')}: {name}", type='positive')
@@ -218,14 +211,11 @@ def show_add_to_list_dialog(
                     creating_new_list['active'] = True
                     return
 
-                # Add item - use async if authenticated
-                if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'add_item'):
-                    try:
-                        result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
-                    except TypeError:
-                        result = lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+                # Add item - use async if authenticated, sync otherwise
+                if GlobalAuthState.is_logged_in():
+                    result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
                 else:
-                    result = lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+                    result = lists_mgr.add_item_sync(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
 
                 if result:
                     ui.notify(tr('Added to list'), type='positive')

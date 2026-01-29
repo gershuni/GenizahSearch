@@ -827,7 +827,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     try:
                         from web.state import state as app_state
                         if app_state.lists_mgr:
-                            app_state.lists_mgr.add_to_recent(state.sys_id, fl_id=page.fl_id)
+                            # Use sync version to avoid async/await issues
+                            app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
                     except Exception as track_err:
                         print(f"Failed to track recent item: {track_err}")
             else:

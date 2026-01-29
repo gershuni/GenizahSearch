@@ -1059,7 +1059,7 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
 
                                 def make_list_click(lid=list_id, lname=list_name):
                                     def click():
-                                        items = state.lists_mgr.get_items_in_list(lid)
+                                        items = state.lists_mgr.get_items_in_list_sync(lid)
                                         show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                     return click
 
@@ -1393,7 +1393,7 @@ def create_new_discovery_dialog(on_success=None):
 
                                         def make_list_click(lid=list_id, lname=list_name):
                                             def click():
-                                                items = state.lists_mgr.get_items_in_list(lid)
+                                                items = state.lists_mgr.get_items_in_list_sync(lid)
                                                 show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                             return click
 

@@ -518,13 +518,13 @@ def create_search_page(initial_query: str = None):
                                 ui.notify(tr('Please enter a list name'), type='warning')
                                 return
 
-                            new_list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+                            new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
                             if new_list_id:
                                 added_count = 0
                                 for res in selected_results:
                                     display = res.get('display', {})
                                     sys_id = display.get('id')
-                                    if sys_id and state.lists_mgr.add_item(sys_id, new_list_id):
+                                    if sys_id and state.lists_mgr.add_item_sync(sys_id, new_list_id):
                                         added_count += 1
 
                                 ui.notify(f"{tr('List created')}: {name}", type='positive')
@@ -551,7 +551,7 @@ def create_search_page(initial_query: str = None):
                         for res in selected_results:
                             display = res.get('display', {})
                             sys_id = display.get('id')
-                            if sys_id and state.lists_mgr.add_item(sys_id, selected_list.value):
+                            if sys_id and state.lists_mgr.add_item_sync(sys_id, selected_list.value):
                                 added_count += 1
 
                         ui.notify(f"{added_count} {tr('items added to list')}", type='positive')

@@ -160,14 +160,10 @@ def create_lists_page():
 
                 if state.lists_mgr:
                     # Use async method if authenticated, sync otherwise
-                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'create_list'):
-                        try:
-                            list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
-                        except TypeError:
-                            # Fallback for sync method
-                            list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+                    if GlobalAuthState.is_logged_in():
+                        list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
                     else:
-                        list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+                        list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
 
                     ui.notify(f"{tr('List created')}: {name}", type='positive')
                     dialog.close()
@@ -373,7 +369,7 @@ def create_lists_page():
                     ).props('flat').classes('text-primary')
 
             # Get items
-            items_list = state.lists_mgr.get_items_in_list(list_id)
+            items_list = state.lists_mgr.get_items_in_list_sync(list_id)
             items_data = [(item.get('item_id'), item) for item in items_list]
 
             if not items_data:
@@ -548,7 +544,7 @@ def create_lists_page():
 
                 # Use get_items_in_list to correctly fetch items
                 # Items are stored in data['items'] with list membership in each item's 'lists' field
-                items = state.lists_mgr.get_items_in_list(list_id)
+                items = state.lists_mgr.get_items_in_list_sync(list_id)
                 if not items:
                     ui.notify(tr('This list is empty'), type='warning')
                     return

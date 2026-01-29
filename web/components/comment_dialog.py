@@ -90,7 +90,7 @@ def create_comment_dialog(
                                 recent_container.clear()
                                 if state.lists_mgr:
                                     # Use get_items_in_list to get proper item dicts
-                                    recent_items = state.lists_mgr.get_items_in_list('recent')
+                                    recent_items = state.lists_mgr.get_items_in_list_sync('recent')
                                     if recent_items:
                                         with recent_container:
                                             for item in recent_items[:20]:
@@ -133,7 +133,7 @@ def create_comment_dialog(
                                                 def make_show_list(lid=list_id, lname=list_name):
                                                     def show_list():
                                                         lists_container.clear()
-                                                        items = state.lists_mgr.get_items_in_list(lid)
+                                                        items = state.lists_mgr.get_items_in_list_sync(lid)
                                                         with lists_container:
                                                             # Back button
                                                             ui.button(tr('Back'), icon='arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')

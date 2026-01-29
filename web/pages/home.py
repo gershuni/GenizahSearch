@@ -231,8 +231,8 @@ def create_page():
                 recent_container.clear()
                 with recent_container:
                     if state.lists_mgr:
-                        # Use get_items_in_list to get properly structured data
-                        recent_items = state.lists_mgr.get_items_in_list('recent')[:6]
+                        # Use sync version to avoid async/await issues
+                        recent_items = state.lists_mgr.get_items_in_list_sync('recent')[:6]
                         if recent_items:
                             for item in recent_items:
                                 item_id = item.get('item_id', '')

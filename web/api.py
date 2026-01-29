@@ -671,7 +671,7 @@ def init_api_routes():
             return Response("List not found", status_code=404)
 
         # Use get_items_in_list() - items are stored in data['items'] with list membership
-        items = state.lists_mgr.get_items_in_list(list_id)
+        items = state.lists_mgr.get_items_in_list_sync(list_id)
         if not items:
             return Response("List is empty", status_code=400)
 
