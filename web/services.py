@@ -103,31 +103,6 @@ class ImageInfo:
 
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 
-# ============================================================================
-# Shelfmark Normalization Helper
-# ============================================================================
-
-def normalize_shelfmark(text: str) -> str:
-    """
-    Normalize a shelfmark for comparison.
-
-    Based on desktop app's ShelfmarkCompleter.normalize():
-    - Removes "M.S.", "Ms.", "ms " prefix variations
-    - Removes non-word characters except . and /
-    - Lowercases everything
-
-    Examples:
-        "T-S 12.1" -> "ts12.1"
-        "MS. Heb. d. 29" -> "hebd29"
-        "ms heb d 29" -> "hebd29"
-    """
-    if not text:
-        return ''
-    # Remove M.S./Ms./ms prefix variations
-    t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-    # Remove non-word characters except . and /
-    return re.sub(r"[^\w\./]", "", t).lower()
-
 
 def get_thumbnail_url(fl_id: str, size: int = 400) -> str:
     if not fl_id: return ''
@@ -171,50 +146,53 @@ class GenizahService:
         # Initialization is handled by main.py startup thread
         return True
 
-    def search_by_shelfmark(self, shelfmark_query: str, limit: int = 50) -> Tuple[List[ManuscriptInfo], bool]:
+    def search_by_shelfmark(self, shelfmark_query: str, limit: int = 100) -> Tuple[List[ManuscriptInfo], bool]:
         """
-        Search for manuscripts by shelfmark.
+        Search for manuscripts by shelfmark using MetadataManager.resolve_system_by_shelfmark().
+
+        This uses the same logic as the desktop app:
+        - Normalizes query and all shelfmarks for comparison
+        - Finds exact matches first, then partial matches
+        - Sorts using natural_sort_key (100.1, 100.2, 100.10 not 100.1, 100.10, 100.2)
 
         Returns:
             Tuple of (list of ManuscriptInfo, exact_match_found boolean)
-            If exact match is found, returns single-item list with that match.
-            Otherwise returns results sorted by similarity (startswith first, then contains).
+            If single exact match is found, returns that match with exact_match=True.
+            Otherwise returns sorted suggestions with exact_match=False.
         """
-        if not self.is_ready: return [], False
+        if not self.is_ready or not state.meta_mgr:
+            return [], False
+
         try:
-            results = state.searcher.execute_search(shelfmark_query, 'Shelfmark', 0)
-            manuscripts = []
-            seen_ids = set()
-            normalized_query = normalize_shelfmark(shelfmark_query)
+            # Use the same resolution logic as desktop app
+            result = state.meta_mgr.resolve_system_by_shelfmark(shelfmark_query, limit=limit)
 
-            for r in results[:limit]:
-                sys_id = r['display']['id']
-                if sys_id and sys_id not in seen_ids:
-                    seen_ids.add(sys_id)
-                    shelfmark = r['display'].get('shelfmark', '')
-                    manuscripts.append(ManuscriptInfo(
-                        sys_id=sys_id,
-                        shelfmark=shelfmark,
-                        title=r['display'].get('title', '')
-                    ))
+            # Single exact match found
+            if result.get('sys_id'):
+                return [ManuscriptInfo(
+                    sys_id=result['sys_id'],
+                    shelfmark=result.get('selected_shelfmark', ''),
+                    title=''  # Title fetched later if needed
+                )], True
 
-            # Check for exact match
-            for m in manuscripts:
-                if normalize_shelfmark(m.shelfmark) == normalized_query:
-                    return [m], True
+            # Multiple options - already sorted by natural_sort_key in genizah_core
+            options = result.get('options', [])
+            if not options:
+                return [], False
 
-            # No exact match - sort by similarity
-            # Priority: startswith > contains > other
-            def sort_key(m: ManuscriptInfo) -> tuple:
-                norm = normalize_shelfmark(m.shelfmark)
-                if norm.startswith(normalized_query):
-                    return (0, len(norm), m.shelfmark.lower())  # Shorter matches first
-                elif normalized_query in norm:
-                    return (1, len(norm), m.shelfmark.lower())
-                else:
-                    return (2, len(norm), m.shelfmark.lower())
+            manuscripts = [
+                ManuscriptInfo(
+                    sys_id=opt['sys_id'],
+                    shelfmark=opt['shelfmark'],
+                    title=opt.get('title', '')
+                )
+                for opt in options
+            ]
 
-            manuscripts.sort(key=sort_key)
+            # If there's only one option, treat it as exact match
+            if len(manuscripts) == 1:
+                return manuscripts, True
+
             return manuscripts, False
 
         except Exception as e:
