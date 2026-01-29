@@ -146,6 +146,9 @@
 - [?] הקלדת `T-S` מציגה הצעות *(נדרש בדיקה ידנית)*
 - [?] בחירת הצעה טוענת כתב יד *(נדרש בדיקה ידנית)*
 - [x] הקלדה ו-Enter טוענת כתב יד *(browse.py:2276)*
+- [x] "/" מטופל כ-"." (192/23 → 192.23) *(genizah_core.py:3303)*
+- [x] שגיאה מוצגת inline מתחת לשדה החיפוש *(browse.py:711-719)*
+- [x] חיפוש ספרות בלבד מציע מיקומי נקודה (19234 → 192.34) *(genizah_core.py:3359-3385)*
 
 ## 3.3 פאנל תמונה (שמאל)
 - [x] תמונת IIIF נטענת *(browse.py:1681-1695 - NLI + Oxford)*
@@ -750,7 +753,7 @@
 |------|-------------|------|-------|--------------|
 | דף הבית | 18 | 18 | 0 | 0 |
 | חיפוש | 50 | 40 | 0 | 10 |
-| דפדוף | 32 | 25 | 0 | 7 |
+| דפדוף | 35 | 28 | 0 | 7 |
 | מקבילות | 21 | 19 | 0 | 2 |
 | רשימות | 20 | 17 | 2 | 1 |
 | משתמשים | 24 | 24 | 0 | 0 |
@@ -768,7 +771,7 @@
 | ביצועים | 10 | 8 | 0 | 2 |
 | שגיאות | 16 | 15 | 0 | 1 |
 | אבטחה | 15 | 13 | 1 | 1 |
-| **סה"כ** | **440** | **385** | **3** | **32** |
+| **סה"כ** | **443** | **388** | **3** | **32** |
 
 ---
 
@@ -777,6 +780,20 @@
 ### באגים קריטיים (P0)
 
 אין
+
+### תיקונים שבוצעו (2026-01-29)
+
+1. **[Browse] Shelfmark Matching Improvements** *(ec68d64, 3a0dbc3)*
+   - "/" treated as "." in shelfmark normalization (192/23 → 192.23)
+   - Pure digit queries match with any dot position (19234 → 192.34, 19.234)
+   - Inline red error below search bar instead of full-page error card
+   - Files: `genizah_core.py`, `web/pages/browse.py`
+
+2. **[Lists] Per-User Storage** *(f12fc83)*
+   - Lists now stored per-user when logged in (via API)
+   - Falls back to per-device (localStorage) for anonymous users
+   - Fixed async/await issues with UserListsManager
+   - Files: `web/user_lists.py`, multiple pages
 
 ### באגים חשובים (P1) - Security
 
@@ -881,9 +898,9 @@
 21. [ ] Errors: Image placeholder when image fails
 
 ### Additional Issues Found (2026-01-29 Manual Testing)
-- [ ] Shelfmark input matching - handle format variations (#11)
+- [x] Shelfmark input matching - handle format variations (#11) ✅ Fixed: "/" as ".", pure digit matching, inline error
 - [ ] Loading spinners needed across website (#12)
-- [ ] Lists should be per-user not per-device (#14)
+- [x] Lists should be per-user not per-device (#14) ✅ Fixed: Auth-aware UserListsManager
 
 ---
 
