@@ -773,59 +773,145 @@
 
 אין
 
-### באגים חשובים (P1)
+### באגים חשובים (P1) - Security
 
-1. **[Security] sanitize=False בתצוגת HTML**
-   - קובץ: browse.py:450
-   - תיאור: שימוש ב-`ui.html(..., sanitize=False)` מאפשר XSS אם התוכן מגיע ממקור לא מהימן
-   - המלצה: לוודא שהתוכן מגיע מ-backend מהימן בלבד
+1. **[Security] sanitize=False בכל האפליקציה (לא רק browse.py!)**
+   - מיקומים: **17 מופעים**
+     - `browse.py`: שורות 1635, 1895, 1992, 2077
+     - `search.py`: שורות 724, 858, 969
+     - `parallels.py`: שורות 1292, 1300, 1485, 1493
+     - `viewer.py`: שורות 186, 251
+     - `text_editor.py`: שורה 256
+     - `typography.py`: שורה 20
+   - סיכון: XSS אם תוכן מגיע ממקור לא מהימן
+   - המלצה: לוודא שכל התוכן מגיע מ-backend מהימן, או להוסיף sanitization
+
+2. **[Security] אין Rate Limiting**
+   - תיאור: לא נמצא rate limiting ב-API
+   - סיכון: Brute force על login, DoS על search
+   - המלצה: להוסיף rate limiting ל-FastAPI
+
+3. **[Security] אין הגנת CSRF**
+   - תיאור: לא נמצא CSRF token
+   - סיכון: Cross-Site Request Forgery
+   - המלצה: NiceGUI משתמש ב-WebSocket (פחות רגיש), אבל יש לבדוק API endpoints
+
+4. **[Security] Path Traversal פוטנציאלי ב-Sefaria cache**
+   - קובץ: parallels.py:60
+   - קוד: `cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_v2.txt")`
+   - סיכון: ref עם `..` יכול לגשת לקבצים מחוץ ל-cache
+   - המלצה: להוסיף validation ל-ref
 
 ### באגים בינוניים (P2)
 
 1. **[Lists] חסרה אפשרות Rename לרשימה**
    - קובץ: lists.py
    - תיאור: ניתן ליצור ולמחוק רשימות, אך לא לשנות את שמן
-   - המלצה: להוסיף כפתור Edit ו-dialog לשינוי שם
 
 2. **[Lists] חסרים Export CSV ו-Word**
    - קובץ: lists.py:419-436
-   - תיאור: קיים רק Export Excel
-   - המלצה: להוסיף אפשרויות ייצוא נוספות (אם נדרש)
+
+3. **[Comments] תגובות לא מוצגות ב-Browse**
+   - קבצים: browse.py, notes_display.py
+   - תיאור: תגובות נשמרות אבל לא תמיד מוצגות
+   - נדרש: בדיקה ידנית של הזרימה
+
+4. **[Debug] הרבה DEBUG prints בקוד**
+   - קובץ: genizah_app.py
+   - תיאור: ~60 שורות `[DEBUG]` שנשארו בקוד
+   - סיכון: Information leakage, performance
+   - המלצה: להסיר או להפוך ל-logging
+
+5. **[Error] Error messages מודפסים ל-console**
+   - קבצים: services.py, api.py, browse.py, ועוד
+   - תיאור: `print(f"...error: {e}")` ו-`traceback.print_exc()`
+   - סיכון: Stack trace leakage
 
 ### שיפורים מומלצים (P3)
 
-אין
+1. **[Code] Exception handling רחב מדי**
+   - תיאור: הרבה `except Exception` שעלולים להסתיר באגים
+   - המלצה: לתפוס exceptions ספציפיים
+
+2. **[UX] Async timing issues**
+   - קובץ: notes_display.py:285
+   - תיאור: `ui.timer(0.2, check_comments, once=True)` עם async
+   - עלול לא לעבוד תמיד
 
 ---
 
 ## פריטים לבדיקה ידנית (Manual Testing Required)
 
-### דחוף (לפני השקה)
-1. [ ] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark)
-2. [ ] Search: Export Word/Excel - קבצים תקינים
-3. [ ] Browse: Autocomplete suggestions for shelfmark
-4. [ ] Browse: Dialog תגובה נפתח ופעיל
-5. [ ] Browse: Dialog בחירת רשימה נפתח
-6. [ ] Lists: Export Excel תקין
-7. [ ] Parallels: קבצי ייצוא תקינים
+### קריטי - בטיחות (לפני השקה)
+1. [ ] **Security: בדוק שכל התוכן ב-sanitize=False מגיע ממקור מהימן**
+2. [ ] **Security: בדוק HTTPS enforcement על Production**
+3. [ ] **Security: בדוק שאין information leakage בהודעות שגיאה למשתמש**
+
+### דחוף - פונקציונלי (לפני השקה)
+4. [ ] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse (לא רק ב-Lists)**
+5. [ ] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark)
+6. [ ] Search: Export Word/Excel - קבצים תקינים
+7. [ ] Browse: Autocomplete suggestions for shelfmark
+8. [ ] Browse: Dialog תגובה נפתח ופעיל
+9. [ ] Browse: Dialog בחירת רשימה נפתח
+10. [ ] Lists: Export Excel תקין
+11. [ ] Parallels: קבצי ייצוא תקינים
 
 ### בינוני
-8. [ ] Navigation: Footer ציטוט + כפתור העתקה
-9. [ ] Navigation: קישור DOI פעיל
-10. [ ] Navigation: localStorage זכירה
-11. [ ] Accessibility: Tab navigation
-12. [ ] Accessibility: Esc closes dialogs
-13. [ ] Accessibility: aria-labels
-14. [ ] Accessibility: Text contrast
+12. [ ] Navigation: Footer ציטוט + כפתור העתקה
+13. [ ] Navigation: קישור DOI פעיל
+14. [ ] Navigation: localStorage זכירה
+15. [ ] Accessibility: Tab navigation
+16. [ ] Accessibility: Esc closes dialogs
+17. [ ] Accessibility: aria-labels
+18. [ ] Accessibility: Text contrast
 
 ### רקע
-15. [ ] Performance: Initial page load time (<3s)
-16. [ ] Performance: Search response time (<2s)
-17. [ ] Errors: Image placeholder when image fails
-18. [ ] Security: HTTPS enforcement on production
+19. [ ] Performance: Initial page load time (<3s)
+20. [ ] Performance: Search response time (<2s)
+21. [ ] Errors: Image placeholder when image fails
 
 ---
 
-**נבדק על ידי:** Claude Code Review
+## בעיות שלא נבדקו (פערים בבדיקה)
+
+### אינטגרציה End-to-End
+- [ ] תזרימים מלאים: Search → View → Edit → Submit → Approve
+- [ ] Comments: יצירה → תצוגה → עריכה → מחיקה
+- [ ] Lists: הוספה מחיפוש → תצוגה ברשימה → ניווט חזרה
+- [ ] Parallels: חיפוש → תוצאות → ניווט ל-Browse
+
+### תאימות דפדפנים
+- [ ] Chrome (Windows/Mac/Linux)
+- [ ] Firefox
+- [ ] Safari (Mac/iOS)
+- [ ] Edge
+- [ ] Mobile browsers (Android Chrome, iOS Safari)
+
+### מקרי קצה
+- [ ] שדות ריקים / Null values
+- [ ] טקסט ארוך מאוד
+- [ ] תווים מיוחדים (< > & " ')
+- [ ] Unicode/RTL edge cases
+- [ ] Session timeout בזמן עריכה
+- [ ] Network disconnection recovery
+- [ ] Concurrent edits by multiple users
+
+### ביצועים
+- [ ] 1000+ תוצאות חיפוש
+- [ ] רשימות עם 100+ פריטים
+- [ ] תמונות IIIF גדולות
+- [ ] Memory leaks במעברים בין דפים
+
+---
+
+**נבדק על ידי:** Claude Code Review (סקירה ביקורתית שנייה)
 **תאריך:** 2026-01-29
-**סטטוס:** Code Review Complete - Manual Testing Required
+**סטטוס:** Code Review Complete - **נדרשת בדיקה ידנית מקיפה**
+
+**הערה חשובה:** הסקירה התמקדה בקוד קיים. לא נבדקו:
+- Backend database queries לעומק
+- Production server configuration
+- Network/firewall settings
+- SSL certificates
+- Backup/recovery procedures
