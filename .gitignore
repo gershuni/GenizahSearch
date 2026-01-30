@@ -32,3 +32,4 @@ data/
 app.log
 server.log
 app.pid
+/big_data_files
