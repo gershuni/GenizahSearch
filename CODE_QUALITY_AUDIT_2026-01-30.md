@@ -1,102 +1,103 @@
-# דוח סקירת איכות קוד מקיפה
-## GenizahSearch - ביקורת טרום-השקה
+# Comprehensive Code Quality Audit Report
+## GenizahSearch - Pre-Launch Review
 
-**תאריך:** 2026-01-30
-**סוקר:** Claude Code Review
-**גרסה:** 5.1
-**ענף:** `claude/audit-code-quality-XlqzC`
-
----
-
-## תוכן עניינים
-
-1. [סיכום מנהלים](#1-סיכום-מנהלים)
-2. [באגים קריטיים](#2-באגים-קריטיים-p0-p1)
-3. [אי-עקביויות בקוד](#3-אי-עקביויות-בקוד)
-4. [יתירות וכפילויות](#4-יתירות-וכפילויות)
-5. [מודולים לייצוא משותף](#5-מודולים-לייצוא-משותף)
-6. [בעיות Backend](#6-בעיות-backend)
-7. [בעיות Web Frontend](#7-בעיות-web-frontend)
-8. [המלצות לפעולה](#8-המלצות-לפעולה)
-9. [מטריצת עדיפויות](#9-מטריצת-עדיפויות)
+**Date:** 2026-01-30
+**Reviewer:** Claude Code Review
+**Version:** 5.1
+**Branch:** `claude/audit-code-quality-XlqzC`
 
 ---
 
-## 1. סיכום מנהלים
+## Table of Contents
 
-### סטטיסטיקות כלליות
-
-| קטגוריה | כמות |
-|---------|------|
-| באגים קריטיים (P0-P1) | 12 |
-| באגים בינוניים (P2) | 24 |
-| אי-עקביויות | 18 |
-| כפילויות קוד | 15 |
-| שדות מיותרים במודלים | 11 |
-| בעיות אבטחה | 5 |
-| **סה"כ ממצאים** | **85** |
-
-### מצב נוכחי
-
-הפרויקט במצב טוב יחסית לאחר תיקונים קודמים. הבעיות העיקריות שנותרו:
-
-1. **כפילויות קוד** בין אפליקציית הדסקטופ לאתר (ייצוא, נורמליזציה)
-2. **טיפול בשגיאות** חסר או שקט מדי
-3. **בעיות N+1 queries** ב-Backend
-4. **אי-עקביות** בנורמליזציית shelfmark (4 מימושים שונים!)
+1. [Executive Summary](#1-executive-summary)
+2. [Critical Bugs (P0-P1)](#2-critical-bugs-p0-p1)
+3. [Code Inconsistencies](#3-code-inconsistencies)
+4. [Redundancy and Duplication](#4-redundancy-and-duplication)
+5. [Proposed Shared Modules](#5-proposed-shared-modules)
+6. [Backend Issues](#6-backend-issues)
+7. [Web Frontend Issues](#7-web-frontend-issues)
+8. [Action Recommendations](#8-action-recommendations)
+9. [Priority Matrix](#9-priority-matrix)
+10. [Review Meeting Decisions](#10-review-meeting-decisions-2026-01-30)
 
 ---
 
-## 2. באגים קריטיים (P0-P1)
+## 1. Executive Summary
 
-### 2.1 Security: Authorization Check חסר
+### General Statistics
 
-**קובץ:** `backend/api/routes/documents.py:146-158`
-**חומרה:** P1 - גבוהה
+| Category | Count |
+|----------|-------|
+| Critical bugs (P0-P1) | 12 |
+| Medium bugs (P2) | 24 |
+| Inconsistencies | 18 |
+| Code duplications | 15 |
+| Unused model fields | 11 |
+| Security issues | 5 |
+| **Total findings** | **85** |
+
+### Current State
+
+The project is in relatively good shape after previous fixes. Main remaining issues:
+
+1. **Code duplication** between desktop and web apps (export, normalization)
+2. **Error handling** missing or too silent
+3. **N+1 query issues** in Backend
+4. **Inconsistency** in shelfmark normalization (4 different implementations!)
+
+---
+
+## 2. Critical Bugs (P0-P1)
+
+### 2.1 Security: Missing Authorization Check
+
+**File:** `backend/api/routes/documents.py:146-158`
+**Severity:** P1 - High
 
 ```python
 @router.put("/{document_id}/metadata", response_model=DocumentMetadataResponse)
 async def update_document_metadata(
     document_id: str,
     data: DocumentMetadataUpdate,
-    current_user: User = Depends(get_current_user_optional),  # OPTIONAL - צריך להיות REQUIRED
+    current_user: User = Depends(get_current_user_optional),  # OPTIONAL - should be REQUIRED
 ```
 
-**בעיה:** כל משתמש מחובר יכול לעדכן metadata של מסמכים.
-**תיקון:** שנה ל-`get_current_user` והוסף בדיקת תפקיד.
+**Issue:** Any logged-in user can update document metadata.
+**Fix:** Change to `get_current_user` and add role check.
 
 ---
 
-### 2.2 Security: String Comparison במקום Enum
+### 2.2 Security: String Comparison Instead of Enum
 
-**קובץ:** `backend/api/routes/discoveries.py:98`
-**חומרה:** P1 - גבוהה
+**File:** `backend/api/routes/discoveries.py:98`
+**Severity:** P1 - High
 
 ```python
-is_admin = current_user and current_user.role == 'admin'  # שגוי
-# צריך להיות:
+is_admin = current_user and current_user.role == 'admin'  # Wrong
+# Should be:
 is_admin = current_user and current_user.role == UserRole.ADMIN
 ```
 
-**בעיה:** אם ערכי ה-Enum משתנים, הבדיקה תיכשל בשקט.
+**Issue:** If Enum values change, the check will silently fail.
 
 ---
 
-### 2.3 Data Integrity: Reply Count לא מתעדכן במחיקה
+### 2.3 Data Integrity: Reply Count Not Updated on Delete
 
-**קובץ:** `backend/services/comment_service.py`
-**חומרה:** P1 - גבוהה
+**File:** `backend/services/comment_service.py`
+**Severity:** P1 - High
 
 ```python
-# יצירת תגובה מעלה את המונה:
+# Creating a reply increments the counter:
 if data.parent_id:
     parent.reply_count = (parent.reply_count or 0) + 1
 
-# אבל מחיקה לא מורידה!
-# חסר בפונקציית delete_comment
+# But deletion doesn't decrement!
+# Missing in delete_comment function
 ```
 
-**תיקון:** להוסיף ב-`delete_comment`:
+**Fix:** Add to `delete_comment`:
 ```python
 if comment.parent_id:
     parent = db.query(Comment).get(comment.parent_id)
@@ -106,21 +107,21 @@ if comment.parent_id:
 
 ---
 
-### 2.4 Performance: N+1 Queries ב-Feed
+### 2.4 Performance: N+1 Queries in Feed
 
-**קובץ:** `backend/services/discovery_service.py:353-434`
-**חומרה:** P1 - גבוהה
+**File:** `backend/services/discovery_service.py:353-434`
+**Severity:** P1 - High
 
 ```python
-for d in disc_query.all():  # שורה 353
-    author=AuthorInfo.from_user(d.user, d.is_anonymous),  # N+1 על relationship
+for d in disc_query.all():  # line 353
+    author=AuthorInfo.from_user(d.user, d.is_anonymous),  # N+1 on relationship
 
-for c in corr_query.all():  # שורה 387
-    response_count=len(c.comments) if c.comments else 0,  # N+1 נוסף
+for c in corr_query.all():  # line 387
+    response_count=len(c.comments) if c.comments else 0,  # Another N+1
 ```
 
-**השפעה:** Feed עם 20 פריטים יוצר 60+ שאילתות נוספות.
-**תיקון:** להשתמש ב-`joinedload()` או `selectinload()`:
+**Impact:** A feed with 20 items creates 60+ additional queries.
+**Fix:** Use `joinedload()` or `selectinload()`:
 ```python
 disc_query = db.query(Discovery).options(
     joinedload(Discovery.user),
@@ -130,184 +131,166 @@ disc_query = db.query(Discovery).options(
 
 ---
 
-### 2.5 Logic Bug: rejection_reason לא נשלח מהאתר
+### 2.5 Auto-save Not Actually Working
 
-**קובץ:** `web/pages/corrections.py:509-518`
-**חומרה:** P1 - גבוהה
-
-```python
-async def reject(c=corr, notes=review_notes):
-    result = await api_call("POST", f"/corrections/{c['id']}/review", {
-        "action": "reject",
-        "notes": notes.value or None  # שולח notes במקום rejection_reason
-    })
-```
-
-**בעיה:** השרת מצפה ל-`rejection_reason` אבל האתר שולח `notes`.
-**תיקון:** לשנות ל-`"rejection_reason": notes.value or None`
-
----
-
-### 2.6 Auto-save לא עובד בפועל
-
-**קובץ:** `web/components/text_editor.py:374`
-**חומרה:** P1 - בינונית-גבוהה
+**File:** `web/components/text_editor.py:374`
+**Severity:** P1 - Medium-High
 
 ```python
 # Start auto-save in background
-ui.timer(AUTO_SAVE_INTERVAL, lambda: None)  # Placeholder - לא עושה כלום!
+ui.timer(AUTO_SAVE_INTERVAL, lambda: None)  # Placeholder - does nothing!
 ```
 
-**בעיה:** פיצ'ר ה-auto-save מפורסם אבל לא מיושם.
-**תיקון:** ליישם את הטיימר בצורה נכונה עם קריאה ל-`auto_save()`.
+**Issue:** Auto-save feature is advertised but not implemented.
+**Fix:** Implement the timer properly with a call to `auto_save()`.
 
 ---
 
-### 2.7 Orphaned Data: מחיקת משתמש
+### 2.6 Orphaned Data: User Deletion
 
-**קובץ:** `backend/api/routes/admin.py:104-105`
-**חומרה:** P1 - גבוהה
+**File:** `backend/api/routes/admin.py:104-105`
+**Severity:** P1 - High
 
 ```python
-db.delete(user)  # התיקונים של המשתמש נשארים יתומים
+db.delete(user)  # User's corrections remain orphaned
 ```
 
-**בעיה:** מחיקת משתמש לא מטפלת בתיקונים, תגובות וגילויים שלו.
-**תיקון:** להוסיף `CASCADE` למודלים או לטפל ידנית.
+**Issue:** User deletion doesn't handle their corrections, comments, and discoveries.
+**Fix:** Add `CASCADE` to models or handle manually.
 
 ---
 
-### 2.8 Desktop: Path Traversal
+### 2.7 Desktop: Path Traversal
 
-**קובץ:** `filter_text_dialog.py:47`
-**חומרה:** P2 (Desktop בלבד)
+**File:** `filter_text_dialog.py:47`
+**Severity:** P2 (Desktop only)
 
 ```python
 cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
-# לא מטפל ב-backslash (Windows)
+# Doesn't handle backslash (Windows)
 ```
 
-**תיקון:** להוסיף פונקציית sanitization כמו ב-`parallels.py:25-33`.
+**Fix:** Add sanitization function like in `parallels.py:25-33`.
 
 ---
 
-## 3. אי-עקביויות בקוד
+## 3. Code Inconsistencies
 
-### 3.1 נורמליזציית Shelfmark - 4 מימושים!
+### 3.1 Shelfmark Normalization - 4 Implementations!
 
-**זו הבעיה המרכזית** - ארבעה מימושים שונים שנותנים תוצאות שונות:
+**This is the main issue** - four different implementations giving different results:
 
-| מיקום | גישה | בעיה |
-|-------|------|------|
-| `genizah_app.py:791` | מסיר non-word characters | פשוט מדי |
-| `genizah_app.py:11985` | מסיר **הכל** חוץ מ-alphanumeric | אגרסיבי מדי |
-| `genizah_core.py:3298` | שומר נקודות בין מספרים | טוב אבל חלקי |
-| `backend/models/fragment_join.py:23` | מטפל ב-T-S, Roman numerals | **הכי מלא** |
+| Location | Approach | Problem |
+|----------|----------|---------|
+| `genizah_app.py:791` | Removes non-word characters | Too simple |
+| `genizah_app.py:11985` | Removes **everything** except alphanumeric | Too aggressive |
+| `genizah_core.py:3298` | Preserves dots between numbers | Good but partial |
+| `backend/models/fragment_join.py:23` | Handles T-S, Roman numerals | **Most complete** |
 
-**השפעה:** Joins עלולים להיכשל כי shelfmark אחד מתאים במקום אחד ולא במקום אחר.
+**Impact:** Joins may fail because the same shelfmark matches in one place but not another.
 
-**המלצה:** להעביר את המימוש מ-`fragment_join.py` ל-`genizah_core.py` ולהשתמש בו בכל מקום.
-
----
-
-### 3.2 הדגשת טקסט - צבעים שונים
-
-| פלטפורמה | צבע הדגשה |
-|----------|----------|
-| Desktop (Word) | אדום |
-| Web (Word) | צהוב |
-| Desktop (Excel) | אדום עם InlineFont |
-| Web (Excel) | פשוט יותר |
-
-**המלצה:** לאחד לצבע אחד (צהוב מומלץ - סטנדרטי יותר).
+**Recommendation:** Move the implementation from `fragment_join.py` to `genizah_core.py` and use it everywhere.
 
 ---
 
-### 3.3 Exception Handling - 50+ מופעים בעייתיים
+### 3.2 Text Highlighting - Different Colors
 
-**bare except:** (תופס הכל כולל KeyboardInterrupt)
-- `web/pages/discoveries.py`: שורות 81, 973, 1013, 1057, 1120...
-- `web/components/joins_panel.py`: שורות 183, 277, 458, 523
-- `web/pages/parallels.py`: 12+ מופעים
+| Platform | Highlight Color |
+|----------|-----------------|
+| Desktop (Word) | Red |
+| Web (Word) | Yellow |
+| Desktop (Excel) | Red with InlineFont |
+| Web (Excel) | Simpler |
+
+**Recommendation:** Unify to one color (red preferred per product manager).
+
+---
+
+### 3.3 Exception Handling - 50+ Problematic Instances
+
+**bare except:** (catches everything including KeyboardInterrupt)
+- `web/pages/discoveries.py`: lines 81, 973, 1013, 1057, 1120...
+- `web/components/joins_panel.py`: lines 183, 277, 458, 523
+- `web/pages/parallels.py`: 12+ instances
 
 **overly broad Exception:**
-- `web/api.py`: שורות 31, 84, 104, 135... (16 מופעים)
-- `web/services.py`: שורות 198, 217, 322, 340... (8 מופעים)
+- `web/api.py`: lines 31, 84, 104, 135... (16 instances)
+- `web/services.py`: lines 198, 217, 322, 340... (8 instances)
 
-**תבנית בעייתית:**
+**Problematic pattern:**
 ```python
 try:
     # something
 except:
-    pass  # שקט מוחלט - המשתמש לא יודע שנכשל
+    pass  # Complete silence - user doesn't know it failed
 ```
 
 ---
 
 ### 3.4 Async/Await Issues
 
-**קובץ:** `web/pages/discoveries.py:91-92`
+**File:** `web/pages/discoveries.py:91-92`
 ```python
 type_filter.on('update:model-value', lambda: refresh_feed())
-# refresh_feed היא async אבל נקראת בלי await!
+# refresh_feed is async but called without await!
 ```
 
-**תיקון:**
+**Fix:**
 ```python
 type_filter.on('update:model-value', lambda e: asyncio.create_task(refresh_feed()))
 ```
 
 ---
 
-### 3.5 שדות מיותרים במודלים
+### 3.5 Unused Model Fields
 
 #### User Model
-| שדה | סיבה |
-|-----|------|
-| `avatar_url` | אין UI שמציג |
-| `api_key` | אין authentication מבוסס API key |
-| `settings` | לא בשימוש |
+| Field | Reason |
+|-------|--------|
+| `avatar_url` | No UI displays it |
+| `api_key` | No API key-based authentication |
+| `settings` | Not in use |
 
 #### Correction Model
-| שדה | סיבה |
-|-----|------|
-| `char_start`, `char_end` | נדיר בשימוש |
-| `relevance_score` | לעולם לא מחושב |
-| `applied_at` | כפול עם `reviewed_at` |
+| Field | Reason |
+|-------|--------|
+| `char_start`, `char_end` | Rarely used |
+| `relevance_score` | Never calculated |
+| `applied_at` | Duplicate of `reviewed_at` |
 
 #### Discovery Model
-| שדה | סיבה |
-|-----|------|
-| `view_count` | לא מתעדכן |
-| `is_featured` | כפול עם `status=FEATURED` |
-| `downvotes` | לא בשימוש בפועל |
+| Field | Reason |
+|-------|--------|
+| `view_count` | Not updated |
+| `is_featured` | Duplicate of `status=FEATURED` |
+| `downvotes` | Not actually used |
 
 ---
 
-## 4. יתירות וכפילויות
+## 4. Redundancy and Duplication
 
-### 4.1 ייצוא Excel - כפילות מלאה
+### 4.1 Excel Export - Full Duplication
 
 **Desktop:** `genizah_app.py:10946-11015`
 **Web:** `web/export_service.py:322-385`
 
-שתי פונקציות שעושות אותו דבר:
-- יצירת workbook עם RTL
-- הגדרת headers כחולים
-- עיצוב תאים
+Two functions doing the same thing:
+- Create workbook with RTL
+- Set blue headers
+- Format cells
 
-**מידת הכפילות:** ~80%
+**Duplication level:** ~80%
 
 ---
 
-### 4.2 ייצוא Word - כפילות מלאה
+### 4.2 Word Export - Full Duplication
 
 **Desktop:** `genizah_app.py:11051-11097`
 **Web:** `web/export_service.py:387-431`
 
-כפילות בהגדרות RTL:
+Duplication in RTL settings:
 ```python
-# שני הקבצים מגדירים:
+# Both files define:
 ppr = paragraph._p.get_or_add_pPr()
 bidi = OxmlElement("w:bidi")
 bidi.set(qn("w:val"), "1")
@@ -315,25 +298,25 @@ bidi.set(qn("w:val"), "1")
 
 ---
 
-### 4.3 Text Sanitization - שתי גישות
+### 4.3 Text Sanitization - Two Approaches
 
-**Desktop:** `genizah_app.py:11189` - מסיר control characters
-**Web:** `web/export_service.py:43` - שומר רק printable XML 1.0
+**Desktop:** `genizah_app.py:11189` - removes control characters
+**Web:** `web/export_service.py:43` - keeps only printable XML 1.0
 
-**בעיה:** התנהגות שונה על אותו input.
-
----
-
-### 4.4 Filename Sanitization - שתי גישות
-
-**Desktop:** `genizah_app.py:9582` - שומר עברית Unicode
-**Web:** `web/export_service.py:78` - גנרי יותר
+**Issue:** Different behavior on the same input.
 
 ---
 
-## 5. מודולים לייצוא משותף
+### 4.4 Filename Sanitization - Two Approaches
 
-### 5.1 מודול מוצע: `shared/export_utils.py`
+**Desktop:** `genizah_app.py:9582` - preserves Hebrew Unicode
+**Web:** `web/export_service.py:78` - more generic
+
+---
+
+## 5. Proposed Shared Modules
+
+### 5.1 Proposed Module: `shared/export_utils.py`
 
 ```python
 """
@@ -350,21 +333,21 @@ def style_header_row(ws, headers: List[str]): ...
 def sanitize_for_excel(text: str) -> str: ...
 
 # Word Helpers
-def add_highlighted_paragraph(doc, text: str, highlight_color=WD_COLOR_INDEX.YELLOW): ...
+def add_highlighted_paragraph(doc, text: str, highlight_color=WD_COLOR_INDEX.RED): ...
 def create_rtl_document(): ...
 
 # Common
 def sanitize_filename(name: str, preserve_hebrew: bool = True) -> str: ...
 ```
 
-**יתרונות:**
-- מקום אחד לתחזוקה
-- עקביות בין פלטפורמות
-- קל יותר לבדיקות
+**Benefits:**
+- Single place for maintenance
+- Consistency across platforms
+- Easier to test
 
 ---
 
-### 5.2 מודול מוצע: `shared/shelfmark_utils.py`
+### 5.2 Proposed Module: `shared/shelfmark_utils.py`
 
 ```python
 """
@@ -396,7 +379,7 @@ def match_shelfmarks(query: str, candidates: List[str]) -> List[str]:
 
 ---
 
-### 5.3 מודול מוצע: `shared/highlighting_utils.py`
+### 5.3 Proposed Module: `shared/highlighting_utils.py`
 
 ```python
 """
@@ -404,7 +387,7 @@ Text highlighting utilities.
 """
 
 # Unified highlight color
-HIGHLIGHT_COLOR = WD_COLOR_INDEX.YELLOW
+HIGHLIGHT_COLOR = WD_COLOR_INDEX.RED
 
 def highlight_search_terms(text: str, terms: List[str]) -> str:
     """Add markers around search terms."""
@@ -421,29 +404,29 @@ def markers_to_docx_runs(text: str, paragraph) -> None:
 
 ---
 
-## 6. בעיות Backend
+## 6. Backend Issues
 
 ### 6.1 N+1 Queries
 
-| מיקום | סוג | השפעה |
-|-------|-----|-------|
-| `discovery_service.py:353` | Feed discoveries | גבוהה |
-| `discovery_service.py:387` | Feed corrections | גבוהה |
-| `discovery_service.py:434` | Comments list | בינונית |
-| `comments.py:105` | Comment reactions | בינונית |
-| `correction_service.py:353` | Author lookup | נמוכה |
+| Location | Type | Impact |
+|----------|------|--------|
+| `discovery_service.py:353` | Feed discoveries | High |
+| `discovery_service.py:387` | Feed corrections | High |
+| `discovery_service.py:434` | Comments list | Medium |
+| `comments.py:105` | Comment reactions | Medium |
+| `correction_service.py:353` | Author lookup | Low |
 
-**תיקון כללי:** להוסיף `joinedload` לכל relationships שנגישים בלולאה.
+**General fix:** Add `joinedload` to all relationships accessed in loops.
 
 ---
 
 ### 6.2 Missing Indexes
 
 ```python
-# backend/models/correction.py - חסר:
+# backend/models/correction.py - missing:
 Index('ix_corrections_author', 'author_id')
 
-# backend/models/comment.py - חסר:
+# backend/models/comment.py - missing:
 Index('ix_comments_author', 'author_id')
 ```
 
@@ -451,150 +434,148 @@ Index('ix_comments_author', 'author_id')
 
 ### 6.3 Vote Count Race Condition
 
-**קובץ:** `backend/services/correction_service.py:474-520`
+**File:** `backend/services/correction_service.py:474-520`
 
 ```python
 if vote_value == 1:
     correction.upvotes = (correction.upvotes or 0) + 1
-# אין lock - שני משתמשים יכולים להצביע במקביל ולאבד הצבעה
+# No lock - two users can vote in parallel and lose a vote
 ```
 
-**תיקון:** להשתמש ב-atomic update:
+**Fix:** Use atomic update:
 ```python
 correction.upvotes = Correction.upvotes + 1  # SQLAlchemy atomic
 ```
 
 ---
 
-## 7. בעיות Web Frontend
+## 7. Web Frontend Issues
 
-### 7.1 Debug Statements בקוד Production
+### 7.1 Debug Statements in Production Code
 
-~60 שורות `print("[DEBUG]")` נמצאו ב:
-- `web/pages/parallels.py`: 14 מופעים
-- `web/pages/viewer.py`: 2 מופעים
-- `web/api.py`: 6 מופעים
-- `genizah_app.py`: ~40 מופעים
+~60 lines of `print("[DEBUG]")` found in:
+- `web/pages/parallels.py`: 14 instances
+- `web/pages/viewer.py`: 2 instances
+- `web/api.py`: 6 instances
+- `genizah_app.py`: ~40 instances
 
-**המלצה:** להחליף ב-logging module או להסיר.
+**Recommendation:** Replace with logging module or remove.
 
 ---
 
-### 7.2 Race Conditions ב-UI Timers
+### 7.2 Race Conditions in UI Timers
 
-**קובץ:** `web/components/joins_panel.py:139`
+**File:** `web/components/joins_panel.py:139`
 ```python
 ui.timer(0.1, load_count, once=True)
-# מספר timers יכולים לרוץ במקביל
+# Multiple timers can run in parallel
 ```
 
-**קובץ:** `web/pages/parallels.py:920-924`
+**File:** `web/pages/parallels.py:920-924`
 ```python
 if state.parallels_loading:
-    return  # לא atomic - race condition
+    return  # Not atomic - race condition
 ```
 
 ---
 
 ### 7.3 Cache Thread-Safety
 
-**קובץ:** `web/components/joins_panel.py:17-19`
+**File:** `web/components/joins_panel.py:17-19`
 ```python
-_joins_cache: Dict[str, Tuple[int, int]] = {}  # Global dict בלי lock
+_joins_cache: Dict[str, Tuple[int, int]] = {}  # Global dict without lock
 _CACHE_TTL = 30
 ```
 
-**בעיה:** במצב multi-threaded, הגישה ל-cache לא בטוחה.
+**Issue:** In multi-threaded mode, cache access is not safe.
 
 ---
 
 ### 7.4 Hardcoded Values
 
-| קובץ | ערך | המלצה |
-|------|-----|-------|
+| File | Value | Recommendation |
+|------|-------|----------------|
 | `joins_panel.py:19` | `_CACHE_TTL = 30` | Environment variable |
 | `api.py:46` | `CACHE_TTL = 300` | Environment variable |
 | `auth_state.py:17-20` | Timeouts & retries | Config file |
-| `parallels.py:89-96` | רשימת ספרי תנ"ך | External file |
+| `parallels.py:89-96` | List of Bible books | External file |
 
 ---
 
-## 8. המלצות לפעולה
+## 8. Action Recommendations
 
-### 8.1 לפני השקה (P0-P1)
+### 8.1 Before Launch (P0-P1)
 
-1. [ ] **תקן authorization** ב-documents.py
-2. [ ] **תקן string enum comparison** ב-discoveries.py
-3. [ ] **תקן reply_count decrement** ב-comment_service.py
-4. [ ] **תקן N+1 queries** ב-discovery_service.py
-5. [ ] **תקן rejection_reason** ב-corrections.py
-6. [ ] **תקן או הסר auto-save** ב-text_editor.py
+1. [ ] **Fix authorization** in documents.py
+2. [ ] **Fix string enum comparison** in discoveries.py
+3. [ ] **Fix reply_count decrement** in comment_service.py
+4. [ ] **Fix N+1 queries** in discovery_service.py
+5. [ ] **Fix or remove auto-save** in text_editor.py
 
-### 8.2 לאחר השקה (P2)
+### 8.2 After Launch (P2)
 
-7. [ ] **צור מודול משותף לייצוא** - `shared/export_utils.py`
-8. [ ] **אחד נורמליזציית shelfmark** - `shared/shelfmark_utils.py`
-9. [ ] **הסר debug prints** או המר ל-logging
-10. [ ] **הוסף indexes חסרים** לDB
-11. [ ] **טפל ב-orphaned data** כשמוחקים משתמש
-12. [ ] **תקן bare except:** ל-specific exceptions
+6. [ ] **Create shared export module** - `shared/export_utils.py`
+7. [ ] **Unify shelfmark normalization** - `shared/shelfmark_utils.py`
+8. [ ] **Remove debug prints** or convert to logging
+9. [ ] **Add missing indexes** to DB
+10. [ ] **Handle orphaned data** when deleting users
+11. [ ] **Fix bare except:** to specific exceptions
 
-### 8.3 שיפור מתמשך (P3)
+### 8.3 Continuous Improvement (P3)
 
-13. [ ] **הוסף race condition protection** לcaches
-14. [ ] **העבר hardcoded values** לconfig
-15. [ ] **הסר שדות מיותרים** מהמודלים
-16. [ ] **הוסף user feedback** לכל exception handler
+12. [ ] **Add race condition protection** to caches
+13. [ ] **Move hardcoded values** to config
+14. [ ] **Remove unused fields** from models
+15. [ ] **Add user feedback** to all exception handlers
 
 ---
 
-## 9. מטריצת עדיפויות
+## 9. Priority Matrix
 
-### P0 - חוסם השקה
-אין כרגע.
+### P0 - Launch Blocker
+None currently.
 
-### P1 - קריטי לאיכות
+### P1 - Critical for Quality
 
-| # | בעיה | קובץ | זמן משוער |
-|---|------|------|-----------|
-| 1 | Authorization missing | documents.py | 15 דקות |
-| 2 | Enum string comparison | discoveries.py | 5 דקות |
-| 3 | Reply count bug | comment_service.py | 15 דקות |
-| 4 | N+1 queries | discovery_service.py | 45 דקות |
-| 5 | rejection_reason | corrections.py | 5 דקות |
-| 6 | Auto-save broken | text_editor.py | 30 דקות |
-| 7 | Orphaned data | admin.py | 30 דקות |
+| # | Issue | File | Est. Time |
+|---|-------|------|-----------|
+| 1 | Authorization missing | documents.py | 15 min |
+| 2 | Enum string comparison | discoveries.py | 5 min |
+| 3 | Reply count bug | comment_service.py | 15 min |
+| 4 | N+1 queries | discovery_service.py | 45 min |
+| 5 | Auto-save broken | text_editor.py | 30 min |
+| 6 | Orphaned data | admin.py | 30 min |
 
-**סה"כ P1:** ~2.5 שעות
+**Total P1:** ~2.5 hours
 
-### P2 - חשוב
+### P2 - Important
 
-| # | בעיה | השפעה |
-|---|------|-------|
-| 1 | Export code duplication | תחזוקה קשה |
-| 2 | Shelfmark inconsistency | Joins שבורים |
+| # | Issue | Impact |
+|---|-------|--------|
+| 1 | Export code duplication | Hard to maintain |
+| 2 | Shelfmark inconsistency | Broken joins |
 | 3 | Debug prints | Info leakage |
-| 4 | Missing indexes | ביצועים |
-| 5 | Bare except | Debugging קשה |
+| 4 | Missing indexes | Performance |
+| 5 | Bare except | Hard debugging |
 
-**סה"כ P2:** ~8 שעות
+**Total P2:** ~8 hours
 
-### P3 - שיפור
+### P3 - Improvement
 
-| # | בעיה | השפעה |
-|---|------|-------|
+| # | Issue | Impact |
+|---|-------|--------|
 | 1 | Race conditions | Edge cases |
 | 2 | Hardcoded values | Flexibility |
 | 3 | Unused fields | DB bloat |
 | 4 | Error feedback | UX |
 
-**סה"כ P3:** ~4 שעות
+**Total P3:** ~4 hours
 
 ---
 
-## נספחים
+## Appendices
 
-### נספח א': רשימת קבצים לעיון
+### Appendix A: Files to Review
 
 ```
 backend/
@@ -619,65 +600,63 @@ shared/ (to create)
 └── highlighting_utils.py
 ```
 
-### נספח ב': פקודות בדיקה
+### Appendix B: Search Commands
 
 ```bash
-# מצא bare except:
+# Find bare except:
 grep -rn "except:" --include="*.py" web/ backend/
 
-# מצא debug prints:
+# Find debug prints:
 grep -rn '\[DEBUG\]' --include="*.py" .
 
-# מצא כפילויות נורמליזציה:
+# Find normalization duplicates:
 grep -rn "def normalize" --include="*.py" .
 
-# מצא כפילויות ייצוא:
+# Find export duplicates:
 grep -rn "def export" --include="*.py" .
 ```
 
 ---
 
----
+## 10. Review Meeting Decisions (2026-01-30)
 
-## 10. החלטות מפגישת סקירה (2026-01-30)
+Following discussion with the product manager, the following decisions were made:
 
-לאחר שיחה עם מנהל המוצר, התקבלו ההחלטות הבאות:
+### Approved for Fixing
 
-### אושר לתיקון
+| Topic | Decision | Priority |
+|-------|----------|----------|
+| sys_id as base | Migrate all Joins to use sys_id instead of shelfmark | P1 |
+| N+1 queries | Clean up - even if not noticeable now | P2 |
+| Unused fields | Remove all (api_key, avatar_url, settings, view_count, is_featured, relevance_score, char_start/end) | P3 |
 
-| נושא | החלטה | עדיפות |
-|------|-------|--------|
-| sys_id כבסיס | להעביר את כל ה-Joins להשתמש ב-sys_id במקום shelfmark | P1 |
-| N+1 queries | לנקות - גם אם לא מורגש כרגע | P2 |
-| שדות לא בשימוש | להסיר את כולם (api_key, avatar_url, settings, view_count, is_featured, relevance_score, char_start/end) | P3 |
+### Clarified - Not a Bug
 
-### הוברר - לא באג
+| Topic | Clarification |
+|-------|---------------|
+| rejection_reason | **Not a bug** - Users should not receive any explanation for correction rejection |
 
-| נושא | הבהרה |
-|------|-------|
-| rejection_reason | **לא באג** - המשתמש לא אמור לקבל הסבר כלשהו על דחיית תיקון |
+### New Tasks Identified
 
-### משימות חדשות שזוהו
+| Task | Description | Priority |
+|------|-------------|----------|
+| Comments not displayed in Browse | Comment saves but doesn't display on page (does display in Community Center) | P1 |
+| Unified terminology | 3 names exist: Discoveries/Innovations/Community - choose one | P2 |
+| Desktop lists sync | Add bidirectional cloud sync for lists in desktop app | P2 |
+| Projects on web | Transfer Projects logic (list grouping) from desktop to web | P2 |
+| Deleted user handling | Assign deleted users' content to "Deleted User" instead of deleting | P2 |
+| Google Login | Add as additional option (not replacement). Sync by matching email. No automatic role | P3 |
 
-| משימה | תיאור | עדיפות |
-|-------|-------|--------|
-| תגובות לא מוצגות ב-Browse | התגובה נשמרת אבל לא מוצגת בדף (כן מוצגת במרכז הקהילה) | P1 |
-| טרמינולוגיה אחידה | יש 3 שמות: גילויים/חידושים/קהילה - לבחור אחד | P2 |
-| סנכרון רשימות Desktop | להוסיף סנכרון דו-כיווני של רשימות לענן באפליקציית הדסקטופ | P2 |
-| פרויקטים באתר | להעביר את לוגיקת הפרויקטים (קיבוץ רשימות) מדסקטופ לאתר | P2 |
-| טיפול במשתמש שנמחק | לשייך תוכן של משתמשים שנמחקו ל"משתמש שנמחק" במקום למחוק | P2 |
-| Google Login | להוסיף כאופציה נוספת (לא במקום). סנכרון לפי דוא"ל זהה. ללא תפקיד אוטומטי | P3 |
+### Additional Notes
 
-### הערות נוספות
-
-- **Discovery Center** - לא בשימוש עדיין, נמתין לפידבק מהשטח
-- **פורמט Shelfmark הנכון**: `T-S NS 12.123` - הנורמליזציה נועדה לתפוס הקלדות שגויות
-- **צבע הדגשה**: אדום עדיף על צהוב - לאחד בכל הייצוא
-- **CSV באתר**: לא נדרש
-- **Auto-save**: נשאיר כ-P3, לא קריטי
+- **Discovery Center** - Not in use yet, waiting for field feedback
+- **Correct Shelfmark format**: `T-S NS 12.123` - Normalization is meant to catch incorrect inputs
+- **Highlight color**: Red preferred over yellow - unify across all exports
+- **CSV on web**: Not required
+- **Auto-save**: Keep as P3, not critical
 
 ---
 
-**סוף הדוח**
+**End of Report**
 
-*הדוח נוצר אוטומטית על ידי Claude Code Review*
+*Report generated by Claude Code Review*
