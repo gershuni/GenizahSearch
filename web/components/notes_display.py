@@ -11,6 +11,7 @@ Supports:
 """
 
 import re
+import asyncio
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
@@ -285,11 +286,14 @@ def create_notes_button(
 
         # Check for comments and show indicator
         async def check_comments():
-            comments = await fetch_document_comments(document_id, page_number)
-            if comments:
-                indicator.style(add='display: block;')
-                btn.style(add='color: #f59e0b;')
+            try:
+                comments = await fetch_document_comments(document_id, page_number)
+                if comments:
+                    indicator.style(add='display: block;')
+                    btn.style(add='color: #f59e0b;')
+            except Exception as e:
+                pass  # Silently ignore errors in background check
 
-        ui.timer(0.2, check_comments, once=True)
+        asyncio.create_task(check_comments())
 
     return container
