@@ -405,7 +405,7 @@ def create_login_dialog():
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
                         else:
-                            ui.notify(tr('Login successful'), type='positive')
+                            # Close dialog and reload - skip notify since reload destroys context
                             dialog.close()
                             ui.navigate.reload()
 
@@ -449,7 +449,7 @@ def create_login_dialog():
                             reg_error.text = result["error"]
                             reg_error.classes('visible', remove='hidden')
                         else:
-                            ui.notify(tr('Registration successful'), type='positive')
+                            # Close dialog and reload - skip notify since reload destroys context
                             dialog.close()
                             ui.navigate.reload()
 
