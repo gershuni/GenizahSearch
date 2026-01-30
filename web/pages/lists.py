@@ -147,8 +147,8 @@ def create_lists_page():
                 colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
                           '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
                 for color in colors:
-                    btn = ui.button(icon='circle').props('flat round').style(
-                        f'color: {color}; font-size: 2rem;'
+                    btn = ui.button().props('flat round dense').style(
+                        f'background-color: {color}; width: 32px; height: 32px; min-width: 32px;'
                     )
                     btn.on('click', lambda c=color: selected_color.update({'value': c}))
 

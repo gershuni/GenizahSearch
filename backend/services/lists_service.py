@@ -452,7 +452,9 @@ class ListsService:
         # Ensure default lists exist
         default_list, _ = ListsService.ensure_default_lists(db, user_id)
 
-        # Create lists
+        # Create lists (skip if list with same name already exists)
+        existing_lists = {lst.name: lst for lst in ListsService.get_all_lists(db, user_id)}
+
         for list_data in data.lists:
             # Map project if specified
             project_id = None
@@ -462,6 +464,9 @@ class ListsService:
             if list_data.is_default:
                 # Merge with existing default list
                 target_list = default_list
+            elif list_data.name in existing_lists:
+                # Use existing list with same name (skip creation)
+                target_list = existing_lists[list_data.name]
             else:
                 # Create new list
                 create_data = UserListCreate(

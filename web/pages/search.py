@@ -1332,6 +1332,12 @@ def create_search_page(initial_query: str = None):
         from web.components import show_add_to_list_dialog as show_dialog
         display = result.get('display', {})
         sys_id = display.get('id')
+        if not sys_id:
+            ui.notify(tr('Cannot add: missing system ID'), type='warning')
+            return
+        if not state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
         shelfmark = display.get('shelfmark', 'Unknown')
         show_dialog(
             sys_id=sys_id,

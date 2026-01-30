@@ -5462,6 +5462,11 @@ class ListsManager:
         except Exception as e:
             LOGGER.error(f"Failed to save lists: {e}")
 
+    def clear_all(self):
+        """Clear all lists and reset to default state. Used after migration."""
+        self.data = self._get_default_data()
+        self.save()
+
     # --- List Management ---
 
     def get_all_lists(self, include_recent=True):

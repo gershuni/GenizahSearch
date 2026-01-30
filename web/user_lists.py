@@ -559,6 +559,9 @@ class UserListsManager:
 
         if "error" not in result:
             self.invalidate_cache()
+            # Clear local lists after successful migration
+            if self.local_mgr:
+                self.local_mgr.clear_all()
 
         return result
 

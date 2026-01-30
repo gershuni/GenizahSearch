@@ -990,6 +990,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def add_manuscript_to_list():
         """Add entire manuscript to a list."""
         if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
@@ -1009,6 +1010,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def add_page_to_list():
         """Add specific page/image to a list."""
         if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state

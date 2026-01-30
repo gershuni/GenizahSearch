@@ -144,8 +144,8 @@ def show_add_to_list_dialog(
                 colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
                           '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
                 for color in colors:
-                    btn = ui.button(icon='circle').props('flat round dense').style(
-                        f'color: {color}; font-size: 1.5rem;'
+                    btn = ui.button().props('flat round dense').style(
+                        f'background-color: {color}; width: 28px; height: 28px; min-width: 28px;'
                     )
                     btn.on('click', lambda c=color: selected_color.update({'value': c}))
 
