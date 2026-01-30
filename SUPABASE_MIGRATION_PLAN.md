@@ -3,7 +3,7 @@
 
 **Date:** 2026-01-30
 **Goal:** Replace self-hosted backend with Supabase for reliability and simplicity
-**Status:** Planning
+**Status:** ALL PHASES COMPLETE (Web App + Desktop App Migrated)
 
 ---
 
@@ -666,46 +666,54 @@ class UserListsManager:
 
 ## Migration Steps
 
-### Phase 1: Setup (1 hour)
-1. [ ] Create Supabase project
-2. [ ] Run SQL to create tables
-3. [ ] Run SQL to set up RLS policies
-4. [ ] Run SQL to create functions/triggers
-5. [ ] Test in Supabase dashboard
+### Phase 1: Setup - COMPLETE
+1. [x] Create Supabase project
+2. [x] Run SQL to create tables
+3. [x] Run SQL to set up RLS policies
+4. [x] Run SQL to create functions/triggers
+5. [x] Test in Supabase dashboard
 
-### Phase 2: Python Client (2 hours)
-1. [ ] Install supabase-py: `pip install supabase`
-2. [ ] Create `web/supabase_client.py`
-3. [ ] Update `web/auth_state.py` for Supabase auth
-4. [ ] Update `web/user_lists.py` for Supabase
-5. [ ] Test auth flow (register, login, logout)
-6. [ ] Test lists CRUD
+### Phase 2: Python Client - COMPLETE
+1. [x] Install supabase-py: `pip install supabase`
+2. [x] Create `web/supabase_client.py`
+3. [x] Update `web/auth_state.py` for Supabase auth
+4. [x] Update `web/user_lists.py` for Supabase
+5. [x] Test auth flow (register, login, logout)
+6. [x] Test lists CRUD
 
-### Phase 3: Migrate Other Features (3 hours)
-1. [ ] Update corrections to use Supabase
-2. [ ] Update comments to use Supabase
-3. [ ] Update discoveries to use Supabase
-4. [ ] Update fragment joins to use Supabase
-5. [ ] Test all features
+### Phase 3: Migrate Other Features - COMPLETE
+1. [x] Update corrections to use Supabase
+2. [x] Update comments to use Supabase
+3. [x] Update discoveries to use Supabase
+4. [x] Update fragment joins to use Supabase
+5. [x] Test all features
 
-### Phase 4: Data Migration (1 hour)
-1. [ ] Export data from SQLite
-2. [ ] Transform to Supabase format
-3. [ ] Import to Supabase
-4. [ ] Verify data integrity
+### Phase 4: Data Migration - COMPLETE
+1. [x] Export data from SQLite
+2. [x] Transform to Supabase format
+3. [x] Import to Supabase
+4. [x] Verify data integrity
 
-### Phase 5: Desktop App (2 hours)
-1. [ ] Add supabase-py to desktop app
-2. [ ] Create desktop Supabase client
-3. [ ] Update desktop auth
-4. [ ] Update desktop lists to use Supabase
-5. [ ] Test cross-device sync
+### Phase 5: Desktop App - COMPLETE
+1. [x] Add supabase-py to desktop app
+2. [x] Create desktop Supabase client (`supabase_corrections_client.py`)
+3. [x] Update desktop auth (uses Supabase auth via SupabaseCorrectionsClient)
+4. [x] Update desktop lists to use Supabase (`lists_sync.py` + ListsManager integration)
+5. [x] Cross-device sync enabled (bidirectional sync between desktop and web)
 
-### Phase 6: Cleanup (1 hour)
-1. [ ] Remove FastAPI backend code (or keep for reference)
-2. [ ] Update deployment scripts
-3. [ ] Update documentation
-4. [ ] Remove debug prints
+**Implementation Notes:**
+- Created `supabase_corrections_client.py` - Drop-in replacement for REST API client
+- Created `lists_sync.py` - Handles bidirectional list sync with cloud
+- Updated `corrections_client.py` to use Supabase client by default (with REST fallback)
+- Updated `genizah_core.py` ListsManager with cloud sync methods
+- Updated `genizah_app.py` login/logout to enable/disable cloud sync
+- Desktop app now connects directly to Supabase (no backend server needed)
+
+### Phase 6: Cleanup - COMPLETE
+1. [x] Archive FastAPI backend code (renamed to backend_legacy/)
+2. [x] Update deployment scripts (.env.production.example)
+3. [x] Update documentation
+4. [x] Remove backend imports from web/api.py
 
 ---
 
@@ -791,26 +799,63 @@ For GenizahSearch's expected usage, **free tier should be sufficient**.
 
 ## Testing Checklist
 
-- [ ] User can register
-- [ ] User can login
-- [ ] User can logout
-- [ ] User can create list
-- [ ] User can add items to list
-- [ ] User can view their lists
-- [ ] User cannot view other users' lists
-- [ ] User can create project
-- [ ] List inherits project color
-- [ ] Corrections work
-- [ ] Comments work
-- [ ] Discoveries work
-- [ ] Desktop app syncs with web
-- [ ] Offline mode works (with local cache)
+### Web App (Phase 3)
+- [x] User can register
+- [x] User can login
+- [x] User can logout
+- [x] User can create list
+- [x] User can add items to list
+- [x] User can view their lists
+- [x] User cannot view other users' lists
+- [x] User can create project
+- [x] List inherits project color
+- [x] Corrections work
+- [x] Comments work
+- [x] Discoveries work
+
+### Desktop App (Phase 5)
+- [x] Desktop app connects to Supabase directly
+- [x] Desktop app auth works (login/register/logout)
+- [x] Desktop lists sync to cloud on login
+- [x] Desktop lists sync from cloud on login
+- [x] Changes sync bidirectionally between web and desktop
+- [x] Offline mode works (with local cache)
 
 ---
 
-**Total Estimated Time:** 10-12 hours
-**Complexity:** Medium
-**Risk:** Low (Supabase is mature, RLS provides security)
+## Files Created/Modified in Migration
+
+### New Files
+```
+web/supabase_client.py          # Web app Supabase client (Phase 2-3)
+supabase_corrections_client.py  # Desktop app Supabase client (Phase 5)
+lists_sync.py                   # Desktop lists cloud sync (Phase 5)
+supabase_setup.sql              # Database setup SQL
+migrate_to_supabase.py          # Data migration script
+```
+
+### Modified Files
+```
+web/auth_state.py               # Updated for Supabase auth
+web/user_lists.py               # Updated for Supabase lists
+web/api.py                      # Removed backend dependencies
+corrections_client.py           # Uses Supabase client by default
+genizah_core.py                 # Added cloud sync to ListsManager
+genizah_app.py                  # Added cloud sync on login/logout
+.env.production.example         # Added Supabase config
+.gitignore                      # Updated for new files
+```
+
+### Deleted Files (moved to backend_legacy/)
+```
+backend/                        # Entire FastAPI backend (no longer needed)
+```
+
+---
+
+**Total Time:** Migration completed
+**Status:** ALL PHASES COMPLETE
+**Architecture:** Direct Supabase connection (no backend server needed)
 
 ---
 

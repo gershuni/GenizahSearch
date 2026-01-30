@@ -8,9 +8,8 @@ import re
 from genizah_core import Config
 from urllib.parse import urlparse
 
-# Import corrections API components
-from backend.models.database import init_db
-from backend.api.routes import auth, users, corrections, comments, documents, versions, discoveries
+# NOTE: Backend API routes removed - now using Supabase directly
+# Auth, users, corrections, comments, discoveries all go through Supabase
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -22,23 +21,9 @@ ALLOWED_IMAGE_DOMAINS = [
 ]
 
 def init_api_routes():
-    """Register API routes."""
-
-    # Initialize corrections database
-    try:
-        init_db()
-        print("Corrections database initialized")
-    except Exception as e:
-        print(f"Warning: Could not initialize corrections database: {e}")
-
-    # Include corrections API routers
-    app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
-    app.include_router(users.router, prefix="/api/v1", tags=["users"])
-    app.include_router(corrections.router, prefix="/api/v1", tags=["corrections"])
-    app.include_router(comments.router, prefix="/api/v1", tags=["comments"])
-    app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
-    app.include_router(versions.router, prefix="/api/v1", tags=["versions"])
-    app.include_router(discoveries.router, prefix="/api/v1", tags=["discoveries"])
+    """Register API routes for image proxy and exports."""
+    # NOTE: Backend database and routers removed - using Supabase now
+    print("API routes initialized (Supabase mode)")
 
     def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached for 5 min."""

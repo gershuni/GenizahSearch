@@ -17,6 +17,7 @@ from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
+from web.components.project_tree import create_project_tree
 from web.auth_state import GlobalAuthState
 from typing import Optional
 import time
@@ -249,64 +250,15 @@ def create_lists_page():
 
     # --- Render Lists Sidebar ---
     def render_lists_sidebar():
-        """Render the left sidebar with list of lists."""
-        lists_sidebar_container.clear()
-
-        with lists_sidebar_container:
-            # Header with Create button
-            with ui.row().classes('w-full justify-between items-center mb-4 pb-2 border-b'):
-                # Changed to H2
-                h2(tr('My Lists'), classes='text-lg font-bold')
-                ui.button(
-                    icon='add',
-                    on_click=show_create_list_dialog
-                ).props('flat round dense').tooltip(tr('Create new list'))
-
-            if not state.lists_mgr:
-                ui.label(tr('Lists manager not available')).classes('text-red-500')
-                return
-
-            lists = state.lists_mgr.data.get('lists', {})
-            if not lists:
-                ui.label(tr('No lists yet. Create your first list!')).classes('text-center mt-4').style('color: var(--text-muted);')
-                return
-
-            # Render each list
-            with ui.column().classes('w-full gap-1'):
-                for list_id, list_data in lists.items():
-                    is_selected = page_state.selected_list_id == list_id
-                    is_system = list_data.get('is_system', False)
-
-                    card_class = 'w-full p-3 cursor-pointer transition-all'
-                    if is_selected:
-                        card_class += ' bg-green-100 border-l-4 border-green-600'
-                    else:
-                        card_class += ' hover:shadow-sm'
-
-                    with ui.card().classes(card_class).on('click', lambda lid=list_id: select_list(lid)):
-                        with ui.row().classes('w-full items-center justify-between gap-2'):
-                            # Color indicator + Name
-                            with ui.row().classes('items-center gap-2 flex-grow'):
-                                ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 1.2rem;')
-                                ui.label(list_data.get('name', 'Unnamed')).classes('font-semibold')
-
-                            # Item count
-                            if list_id == 'recent':
-                                count = len(state.lists_mgr.data.get('recent_items', []))
-                            else:
-                                count = state.lists_mgr._get_list_item_count(list_id)
-                            ui.label(str(count)).classes('text-xs px-2 py-1 rounded-full').style('background: var(--bg-tertiary); color: var(--text-secondary);')
-
-                            # Delete button (only for non-system lists)
-                            if not is_system:
-                                def make_delete_handler(lid, lname):
-                                    def handler():
-                                        show_delete_list_dialog(lid, lname)
-                                    return handler
-                                ui.button(
-                                    icon='delete',
-                                    on_click=make_delete_handler(list_id, list_data.get('name'))
-                                ).props('flat round dense size=sm stop-propagation').classes('text-red-400').tooltip(tr('Delete list'))
+        """Render the left sidebar with project tree."""
+        # Use the new project tree component
+        create_project_tree(
+            lists_mgr=state.lists_mgr,
+            container=lists_sidebar_container,
+            on_select=select_list,
+            selected_list_id=page_state.selected_list_id,
+            on_refresh=lambda: asyncio.create_task(async_refresh_ui())
+        )
 
     # --- Select List ---
     def select_list(list_id: str):
@@ -341,12 +293,18 @@ def create_lists_page():
 
             # List Header
             is_system = list_data.get('is_system', False)
+            # Use project-inherited color if available
+            display_color = (
+                state.lists_mgr.get_list_display_color(list_id)
+                if hasattr(state.lists_mgr, 'get_list_display_color')
+                else list_data.get('color', '#FFD700')
+            )
             with ui.row().classes('w-full justify-between items-start mb-6 pb-4 border-b-2').style(
-                f'border-color: {list_data.get("color", "#999")};'
+                f'border-color: {display_color};'
             ):
                 with ui.column().classes('gap-1'):
                     with ui.row().classes('items-center gap-3'):
-                        ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 2rem;')
+                        ui.icon('circle').style(f'color: {display_color}; font-size: 2rem;')
                         # Inline-editable list name (click to rename)
                         create_inline_edit_label(
                             current_name=list_data.get('name', 'Unnamed'),

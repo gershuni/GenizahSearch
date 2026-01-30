@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-User Lists Manager - Auth-aware lists management for the web interface.
+User Lists Manager - Supabase-backed lists management for the web interface.
 
 This module provides a lists manager that:
-- Uses the backend API when user is logged in (per-user storage)
+- Uses Supabase when user is logged in (cloud storage)
 - Falls back to local ListsManager when user is not logged in (per-device storage)
 - Handles migration of local lists to user account on login
 
@@ -15,21 +15,46 @@ Usage:
 """
 
 import time
-import httpx
 from typing import Optional, Dict, List, Any
 from nicegui import app
-from web.auth_state import GlobalAuthState, api_call, get_api_base
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+from web.auth_state import GlobalAuthState
+from web.supabase_client import (
+    get_client, get_user_lists, create_list as sb_create_list,
+    update_list as sb_update_list, delete_list as sb_delete_list,
+    get_list_items, add_list_item, update_list_item, delete_list_item,
+    get_recent_items, add_recent_item, get_projects, create_project as sb_create_project,
+    update_project as sb_update_project, delete_project as sb_delete_project, get_profile
+)
 from genizah_core import ListsManager
 
 import logging
 LOGGER = logging.getLogger(__name__)
 
+# Project color palette (same as desktop app)
+PROJECT_COLORS = [
+    '#4CAF50',  # Green
+    '#2196F3',  # Blue
+    '#9C27B0',  # Purple
+    '#FF5722',  # Deep Orange
+    '#00BCD4',  # Cyan
+    '#E91E63',  # Pink
+    '#795548',  # Brown
+    '#607D8B',  # Blue Gray
+    '#FF9800',  # Orange
+    '#009688',  # Teal
+]
+
 
 class UserListsManager:
     """
-    Auth-aware lists manager that wraps both API calls and local storage.
+    Auth-aware lists manager that wraps both Supabase and local storage.
 
-    When a user is logged in, all operations go through the backend API.
+    When a user is logged in, all operations go through Supabase.
     When not logged in, operations use the local ListsManager (pkl file).
     """
 
@@ -43,9 +68,9 @@ class UserListsManager:
         """
         self.local_mgr = local_mgr
         self.meta_mgr = meta_mgr
-        self._api_data_cache = None
+        self._cache = None
         self._cache_time = 0
-        self._cache_ttl = 5  # Cache for 5 seconds
+        self._cache_ttl = 10  # Cache for 10 seconds
 
     @property
     def is_authenticated(self) -> bool:
@@ -53,19 +78,17 @@ class UserListsManager:
         return GlobalAuthState.is_logged_in()
 
     @property
-    def user_id(self) -> Optional[int]:
+    def user_id(self) -> Optional[str]:
         """Get current user ID if logged in."""
-        user = GlobalAuthState.get_user()
-        return user.get('id') if user else None
+        return GlobalAuthState.get_user_id()
 
     @property
     def data(self) -> Dict:
         """
         Get lists data - for compatibility with existing code.
-        This property provides direct access to data structure.
         """
         if self.is_authenticated:
-            return self._get_api_data_sync()
+            return self._get_cached_data()
         elif self.local_mgr:
             return self.local_mgr.data
         return self._get_default_data()
@@ -81,155 +104,156 @@ class UserListsManager:
                     'is_default': True,
                     'is_system': False,
                     'project_id': None
-                },
-                'recent': {
-                    'name': 'Recently Viewed',
-                    'name_en': 'Recently Viewed',
-                    'color': '#9E9E9E',
-                    'is_system': True,
-                    'max_items': 50,
-                    'project_id': None
                 }
             },
             'projects': {},
-            'lists_order': ['default', 'recent'],
+            'lists_order': ['default'],
             'projects_order': [],
             'items': {},
             'recent_items': [],
             'all_tags': []
         }
 
-    def _get_api_data_sync(self) -> Dict:
-        """
-        Get data from API cache.
-        Uses cached data if available and fresh.
-        """
+    def _get_cached_data(self) -> Dict:
+        """Get data from cache or fetch from Supabase."""
         now = time.time()
-        cache_age = now - self._cache_time if self._cache_time else float('inf')
-        print(f"[DEBUG] _get_api_data_sync: cache exists={self._api_data_cache is not None}, cache_age={cache_age:.1f}s, ttl={self._cache_ttl}s")
-        if self._api_data_cache and cache_age < self._cache_ttl:
-            print(f"[DEBUG] _get_api_data_sync: returning cached data with {len(self._api_data_cache.get('lists', {}))} lists")
-            return self._api_data_cache
+        if self._cache and (now - self._cache_time) < self._cache_ttl:
+            return self._cache
 
-        # Return cached data or default - actual refresh happens asynchronously
-        result = self._api_data_cache or self._get_default_data()
-        print(f"[DEBUG] _get_api_data_sync: returning {'cached' if self._api_data_cache else 'default'} data with {len(result.get('lists', {}))} lists")
-        return result
+        # Fetch fresh data
+        if self.is_authenticated:
+            user_id = self.user_id
+            lists = get_user_lists(user_id)
+            projects = get_projects(user_id)
 
-    async def refresh_data(self):
-        """Refresh data from API."""
-        if not self.is_authenticated:
-            return
+            data = self._get_default_data()
+            data['lists'] = {}
+            data['projects'] = {}
 
-        result = await api_call("GET", "/lists/")
-        if "error" not in result:
-            self._api_data_cache = self._transform_api_response(result)
-            self._cache_time = time.time()
+            for lst in lists:
+                list_id = str(lst['id'])
+                data['lists'][list_id] = {
+                    'name': lst.get('name', ''),
+                    'name_en': lst.get('name_en', ''),
+                    'color': lst.get('color', '#FFD700'),
+                    'is_default': lst.get('is_default', False),
+                    'is_system': lst.get('is_system', False),
+                    'project_id': lst.get('project_id'),
+                    'created': lst.get('created_at')
+                }
 
-    def _transform_api_response(self, response: Dict) -> Dict:
-        """Transform API response to match local data structure."""
-        data = self._get_default_data()
+            for proj in projects:
+                proj_id = str(proj['id'])
+                data['projects'][proj_id] = {
+                    'name': proj.get('name', ''),
+                    'color': proj.get('color', '#4CAF50'),
+                    'created': proj.get('created_at')
+                }
 
-        # Transform lists
-        data['lists'] = {}
-        for lst in response.get('lists', []):
-            list_id = lst.get('id', 'default')
-            data['lists'][list_id] = {
-                'name': lst.get('name', ''),
-                'name_en': lst.get('name_en', ''),
-                'color': lst.get('color', '#FFD700'),
-                'is_default': lst.get('is_default', False),
-                'is_system': lst.get('is_system', False),
-                'project_id': lst.get('project_id'),
-                'created': lst.get('created')
-            }
+            data['lists_order'] = list(data['lists'].keys())
+            data['projects_order'] = list(data['projects'].keys())
 
-        # Ensure default lists exist
-        if not any(lst.get('is_default') for lst in data['lists'].values()):
-            data['lists']['default'] = {
-                'name': 'General',
-                'name_en': 'General',
-                'color': '#FFD700',
-                'is_default': True,
-                'is_system': False,
-                'project_id': None
-            }
+            self._cache = data
+            self._cache_time = now
+            return data
 
-        # Transform projects
-        data['projects'] = {}
-        for proj in response.get('projects', []):
-            data['projects'][str(proj['id'])] = {
-                'name': proj.get('name', ''),
-                'color': proj.get('color', '#4CAF50'),
-                'created': proj.get('created')
-            }
-
-        data['lists_order'] = response.get('lists_order', list(data['lists'].keys()))
-        data['projects_order'] = [str(p) for p in response.get('projects_order', [])]
-        data['all_tags'] = response.get('all_tags', [])
-
-        return data
+        return self._get_default_data()
 
     def invalidate_cache(self):
-        """Invalidate the API cache to force refresh."""
+        """Invalidate the cache to force refresh."""
+        self._cache = None
         self._cache_time = 0
 
     # === List Operations ===
 
+    def _get_list_item_count(self, list_id: str) -> int:
+        """Get item count for a list."""
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+                items = get_list_items(list_id_int)
+                return len(items)
+            except (ValueError, Exception):
+                return 0
+        elif self.local_mgr:
+            return len(self.local_mgr.get_items_in_list(list_id))
+        return 0
+
     def get_all_lists(self, include_recent: bool = True) -> List[Dict]:
         """Get all lists sorted by order."""
         if self.is_authenticated:
-            data = self._get_api_data_sync()
+            data = self._get_cached_data()
             lists = []
-            for list_id in data.get('lists_order', []):
-                if list_id not in data.get('lists', {}):
+            for list_id, lst in data.get('lists', {}).items():
+                if not include_recent and lst.get('is_system'):
                     continue
-                if list_id == 'recent' and not include_recent:
-                    continue
-                lst = data['lists'][list_id]
                 lists.append({
                     'id': list_id,
                     **lst,
-                    'count': self._get_list_item_count(list_id)
+                    'count': 0  # Count loaded on demand
                 })
             return lists
         elif self.local_mgr:
             return self.local_mgr.get_all_lists(include_recent)
         return []
 
-    def _get_list_item_count(self, list_id: str) -> int:
-        """Get item count for a list."""
-        # For now return 0 - actual counts come from API
-        # This is a performance optimization to avoid loading items
-        return 0
+    async def create_list(self, name: str, color: str = None, project_id: str = None) -> Optional[str]:
+        """
+        Create a new list, optionally inside a project.
 
-    async def create_list(self, name: str, color: str = None) -> Optional[str]:
-        """Create a new list (async for authenticated users)."""
-        print(f"[DEBUG] UserListsManager.create_list: name={name}, color={color}, is_authenticated={self.is_authenticated}")
+        Args:
+            name: List name
+            color: Color (ignored if project_id is set - will inherit from project)
+            project_id: Optional project to add list to
+        """
         if self.is_authenticated:
-            result = await api_call("POST", "/lists/", {
-                "name": name,
-                "color": color
-            })
-            print(f"[DEBUG] API response: {result}")
-            if "error" not in result:
+            # If in a project, get project color
+            if project_id:
+                data = self._get_cached_data()
+                project = data.get('projects', {}).get(str(project_id), {})
+                color = project.get('color', '#FFD700')
+
+            result = sb_create_list(
+                self.user_id, name,
+                name_en=name,
+                color=color or '#FFD700',
+                project_id=int(project_id) if project_id else None
+            )
+            if result.get('success'):
                 self.invalidate_cache()
-                list_id = result.get('id')
-                print(f"[DEBUG] Returning list_id={list_id}")
-                return list_id
-            print(f"[DEBUG] API returned error: {result.get('error')}")
+                return str(result['list']['id'])
+            LOGGER.error(f"Failed to create list: {result.get('error')}")
             return None
         elif self.local_mgr:
-            result = self.local_mgr.create_list(name, color)
-            print(f"[DEBUG] Local manager returned: {result}")
-            return result
-        print(f"[DEBUG] No auth and no local_mgr, returning None")
+            list_id = self.local_mgr.create_list(name, color)
+            if list_id and project_id:
+                self.local_mgr.update_list_project(list_id, project_id)
+            return list_id
         return None
 
-    def create_list_sync(self, name: str, color: str = None) -> Optional[str]:
-        """Synchronous version of create_list - uses local manager only."""
-        if self.local_mgr:
-            return self.local_mgr.create_list(name, color)
+    def create_list_sync(self, name: str, color: str = None, project_id: str = None) -> Optional[str]:
+        """Synchronous version of create_list."""
+        if self.is_authenticated:
+            if project_id:
+                data = self._get_cached_data()
+                project = data.get('projects', {}).get(str(project_id), {})
+                color = project.get('color', '#FFD700')
+
+            result = sb_create_list(
+                self.user_id, name,
+                name_en=name,
+                color=color or '#FFD700',
+                project_id=int(project_id) if project_id else None
+            )
+            if result.get('success'):
+                self.invalidate_cache()
+                return str(result['list']['id'])
+            return None
+        elif self.local_mgr:
+            list_id = self.local_mgr.create_list(name, color)
+            if list_id and project_id:
+                self.local_mgr.update_list_project(list_id, project_id)
+            return list_id
         return None
 
     async def update_list(self, list_id: str, name: str = None, color: str = None) -> bool:
@@ -238,6 +262,7 @@ class UserListsManager:
             data = {}
             if name is not None:
                 data['name'] = name
+                data['name_en'] = name
             if color is not None:
                 data['color'] = color
 
@@ -246,8 +271,8 @@ class UserListsManager:
             except ValueError:
                 return False
 
-            result = await api_call("PUT", f"/lists/{list_id_int}", data)
-            if "error" not in result:
+            result = sb_update_list(list_id_int, data)
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -263,8 +288,8 @@ class UserListsManager:
             except ValueError:
                 return False
 
-            result = await api_call("DELETE", f"/lists/{list_id_int}")
-            if "error" not in result:
+            result = sb_delete_list(list_id_int)
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -279,23 +304,19 @@ class UserListsManager:
                        source: str = '', fl_id: str = None, img: str = None) -> bool:
         """Add an item to a list."""
         if self.is_authenticated:
+            # Find the actual list ID
+            actual_list_id = list_id
+            if list_id == 'default':
+                data = self._get_cached_data()
+                for lid, ldata in data.get('lists', {}).items():
+                    if ldata.get('is_default'):
+                        actual_list_id = lid
+                        break
+
             try:
-                list_id_int = int(list_id)
+                list_id_int = int(actual_list_id)
             except ValueError:
-                # For 'default' or other string IDs, we need to find the actual ID
-                if list_id == 'default':
-                    data = self._get_api_data_sync()
-                    for lid, ldata in data.get('lists', {}).items():
-                        if ldata.get('is_default'):
-                            try:
-                                list_id_int = int(lid)
-                                break
-                            except ValueError:
-                                continue
-                    else:
-                        return False
-                else:
-                    return False
+                return False
 
             # Get metadata for the item
             shelfmark = None
@@ -303,15 +324,15 @@ class UserListsManager:
             if self.meta_mgr:
                 shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
 
-            result = await api_call("POST", f"/lists/{list_id_int}/items", {
-                "sys_id": sys_id,
-                "shelfmark": shelfmark,
-                "title": title,
-                "fl_id": fl_id,
-                "note": note,
-                "tags": tags or []
-            })
-            if "error" not in result:
+            result = add_list_item(
+                list_id_int, sys_id,
+                shelfmark=shelfmark,
+                title=title,
+                fl_id=fl_id,
+                note=note,
+                tags=tags
+            )
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -322,8 +343,36 @@ class UserListsManager:
     def add_item_sync(self, sys_id: str, list_id: str = 'default',
                       note: str = '', tags: List[str] = None,
                       source: str = '', fl_id: str = None, img: str = None) -> bool:
-        """Synchronous version of add_item - uses local manager only."""
-        if self.local_mgr:
+        """Synchronous version of add_item."""
+        if self.is_authenticated:
+            actual_list_id = list_id
+            if list_id == 'default':
+                data = self._get_cached_data()
+                for lid, ldata in data.get('lists', {}).items():
+                    if ldata.get('is_default'):
+                        actual_list_id = lid
+                        break
+
+            try:
+                list_id_int = int(actual_list_id)
+            except ValueError:
+                return False
+
+            shelfmark = None
+            title = None
+            if self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+            result = add_list_item(
+                list_id_int, sys_id,
+                shelfmark=shelfmark,
+                title=title,
+                fl_id=fl_id,
+                note=note,
+                tags=tags
+            )
+            return result.get('success', False)
+        elif self.local_mgr:
             return self.local_mgr.add_item(sys_id, list_id, note, tags, source, fl_id, img)
         return False
 
@@ -331,13 +380,12 @@ class UserListsManager:
         """Remove an item from a list."""
         if self.is_authenticated:
             try:
-                list_id_int = int(list_id)
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = await api_call("DELETE", f"/lists/{list_id_int}/items/{item_id_int}")
-            if "error" not in result:
+            result = delete_list_item(item_id_int)
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -348,7 +396,15 @@ class UserListsManager:
     def remove_item_from_list_sync(self, item_id: str, list_id: str) -> bool:
         """Synchronous version of remove_item_from_list."""
         if self.is_authenticated:
-            LOGGER.warning("remove_item_from_list_sync called in authenticated mode")
+            try:
+                item_id_int = int(item_id)
+            except ValueError:
+                return False
+
+            result = delete_list_item(item_id_int)
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
             return False
         elif self.local_mgr:
             return self.local_mgr.remove_item_from_list(item_id, list_id)
@@ -357,19 +413,13 @@ class UserListsManager:
     async def update_item_note(self, item_id: str, note: str, list_id: str = None) -> bool:
         """Update an item's note."""
         if self.is_authenticated:
-            if not list_id:
-                # Need to find which list the item is in
-                return False
             try:
-                list_id_int = int(list_id)
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = await api_call("PUT", f"/lists/{list_id_int}/items/{item_id_int}", {
-                "note": note
-            })
-            if "error" not in result:
+            result = update_list_item(item_id_int, {'note': note})
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -380,18 +430,13 @@ class UserListsManager:
     async def update_item_tags(self, item_id: str, tags: List[str], list_id: str = None) -> bool:
         """Update an item's tags."""
         if self.is_authenticated:
-            if not list_id:
-                return False
             try:
-                list_id_int = int(list_id)
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = await api_call("PUT", f"/lists/{list_id_int}/items/{item_id_int}", {
-                "tags": tags
-            })
-            if "error" not in result:
+            result = update_list_item(item_id_int, {'tags': tags})
+            if result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -406,37 +451,19 @@ class UserListsManager:
                 list_id_int = int(list_id)
             except ValueError:
                 return []
-
-            result = await api_call("GET", f"/lists/{list_id_int}/items")
-            if "error" not in result:
-                return result
-            return []
+            return get_list_items(list_id_int)
         elif self.local_mgr:
             return self.local_mgr.get_items_in_list(list_id)
         return []
 
     def get_items_in_list_sync(self, list_id: str) -> List[Dict]:
-        """Synchronous version - uses sync API call for authenticated users, local manager otherwise."""
+        """Synchronous version of get_items_in_list."""
         if self.is_authenticated:
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return []
-
-            # Make synchronous API call
-            try:
-                base_url = get_api_base()
-                headers = GlobalAuthState.get_headers()
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get(
-                        f"{base_url}/lists/{list_id_int}/items",
-                        headers=headers
-                    )
-                    if response.status_code == 200:
-                        return response.json()
-            except Exception as e:
-                LOGGER.warning(f"Sync API call failed for list {list_id}: {e}")
-            return []
+            return get_list_items(list_id_int)
         elif self.local_mgr:
             return self.local_mgr.get_items_in_list(list_id)
         return []
@@ -463,28 +490,27 @@ class UserListsManager:
             if self.meta_mgr:
                 shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
 
-            await api_call("POST", "/lists/recent/items", {
-                "sys_id": sys_id,
-                "shelfmark": shelfmark,
-                "title": title,
-                "fl_id": fl_id
-            })
+            add_recent_item(self.user_id, sys_id, shelfmark, title, fl_id)
         elif self.local_mgr:
             self.local_mgr.add_to_recent(sys_id, fl_id, img)
 
     def add_to_recent_sync(self, sys_id: str, fl_id: str = None, img: str = None):
         """Synchronous version of add_to_recent."""
-        if self.local_mgr:
+        if self.is_authenticated:
+            shelfmark = None
+            title = None
+            if self.meta_mgr:
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+
+            add_recent_item(self.user_id, sys_id, shelfmark, title, fl_id)
+        elif self.local_mgr:
             self.local_mgr.add_to_recent(sys_id, fl_id, img)
 
     # === Tags ===
 
     def get_all_tags(self) -> List[str]:
         """Get all tags."""
-        if self.is_authenticated:
-            data = self._get_api_data_sync()
-            return data.get('all_tags', [])
-        elif self.local_mgr:
+        if self.local_mgr:
             return self.local_mgr.get_all_tags()
         return []
 
@@ -493,15 +519,193 @@ class UserListsManager:
     def get_projects(self) -> List[Dict]:
         """Get all projects."""
         if self.is_authenticated:
-            data = self._get_api_data_sync()
+            data = self._get_cached_data()
             projects = []
-            for pid in data.get('projects_order', []):
-                if pid in data.get('projects', {}):
-                    projects.append({'id': pid, **data['projects'][pid]})
+            for pid, pdata in data.get('projects', {}).items():
+                projects.append({'id': pid, **pdata})
             return projects
         elif self.local_mgr:
             return self.local_mgr.get_projects()
         return []
+
+    def get_next_project_color(self) -> str:
+        """Get the next available project color from the palette."""
+        projects = self.get_projects()
+        used_colors = {p.get('color') for p in projects}
+
+        for color in PROJECT_COLORS:
+            if color not in used_colors:
+                return color
+
+        # Cycle if all colors used
+        return PROJECT_COLORS[len(projects) % len(PROJECT_COLORS)]
+
+    async def create_project(self, name: str, color: str = None) -> Optional[str]:
+        """Create a new project with auto-assigned color if not specified."""
+        if color is None:
+            color = self.get_next_project_color()
+
+        if self.is_authenticated:
+            result = sb_create_project(self.user_id, name, color)
+            if result.get('success'):
+                self.invalidate_cache()
+                return str(result['project']['id'])
+            return None
+        elif self.local_mgr:
+            return self.local_mgr.create_project(name, color)
+        return None
+
+    def create_project_sync(self, name: str, color: str = None) -> Optional[str]:
+        """Synchronous version of create_project."""
+        if color is None:
+            color = self.get_next_project_color()
+
+        if self.is_authenticated:
+            result = sb_create_project(self.user_id, name, color)
+            if result.get('success'):
+                self.invalidate_cache()
+                return str(result['project']['id'])
+            return None
+        elif self.local_mgr:
+            return self.local_mgr.create_project(name, color)
+        return None
+
+    async def update_project(self, project_id: str, name: str = None) -> bool:
+        """Update a project's name. Color is auto-assigned and not editable."""
+        if self.is_authenticated:
+            data = {}
+            if name is not None:
+                data['name'] = name
+
+            if not data:
+                return True  # Nothing to update
+
+            try:
+                project_id_int = int(project_id)
+            except ValueError:
+                return False
+
+            result = sb_update_project(project_id_int, data)
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.update_project(project_id, name)
+        return False
+
+    async def delete_project(self, project_id: str, delete_lists: bool = False) -> bool:
+        """
+        Delete a project.
+
+        Args:
+            project_id: Project to delete
+            delete_lists: If True, delete lists in project. If False, lists become standalone.
+        """
+        if self.is_authenticated:
+            try:
+                project_id_int = int(project_id)
+            except ValueError:
+                return False
+
+            # If not deleting lists, first unlink them from the project
+            if not delete_lists:
+                data = self._get_cached_data()
+                for list_id, list_data in data.get('lists', {}).items():
+                    if str(list_data.get('project_id')) == project_id:
+                        try:
+                            sb_update_list(int(list_id), {'project_id': None})
+                        except:
+                            pass
+
+            result = sb_delete_project(project_id_int)
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.delete_project(project_id, delete_lists)
+        return False
+
+    async def move_list_to_project(self, list_id: str, project_id: Optional[str]) -> bool:
+        """
+        Move a list to a project (or remove from project if project_id is None).
+        The list's display color will change to match the project.
+        """
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+                project_id_int = int(project_id) if project_id else None
+            except ValueError:
+                return False
+
+            result = sb_update_list(list_id_int, {'project_id': project_id_int})
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.update_list_project(list_id, project_id)
+        return False
+
+    def get_list_display_color(self, list_id: str) -> str:
+        """
+        Get the display color for a list, considering project inheritance.
+
+        Color priority:
+        1. System lists (Recently Viewed) -> gray
+        2. Lists in projects -> project's color
+        3. Standalone lists -> gold
+        """
+        data = self._get_cached_data() if self.is_authenticated else (
+            self.local_mgr.data if self.local_mgr else self._get_default_data()
+        )
+
+        list_data = data.get('lists', {}).get(str(list_id), {})
+
+        # System lists use gray
+        if list_data.get('is_system'):
+            return '#9E9E9E'
+
+        # Lists in projects inherit project color
+        project_id = list_data.get('project_id')
+        if project_id:
+            project = data.get('projects', {}).get(str(project_id), {})
+            if project:
+                return project.get('color', '#FFD700')
+
+        # Standalone lists use gold
+        return '#FFD700'
+
+    def get_lists_by_project(self) -> Dict[Optional[str], List[Dict]]:
+        """
+        Get lists organized by project.
+
+        Returns:
+            Dict mapping project_id (or None for standalone) to list of lists
+        """
+        data = self._get_cached_data() if self.is_authenticated else (
+            self.local_mgr.data if self.local_mgr else self._get_default_data()
+        )
+
+        by_project: Dict[Optional[str], List[Dict]] = {None: []}
+
+        # Initialize project groups
+        for pid in data.get('projects', {}).keys():
+            by_project[pid] = []
+
+        # Assign lists to projects
+        for list_id, list_data in data.get('lists', {}).items():
+            project_id = list_data.get('project_id')
+            if project_id:
+                project_id = str(project_id)
+                if project_id not in by_project:
+                    by_project[project_id] = []
+                by_project[project_id].append({'id': list_id, **list_data})
+            else:
+                by_project[None].append({'id': list_id, **list_data})
+
+        return by_project
 
     # === Migration ===
 
@@ -509,111 +713,74 @@ class UserListsManager:
         """
         Migrate local lists to user account.
         Should be called after user logs in if they have local lists.
-
-        Returns migration result with counts.
         """
         if not self.is_authenticated or not self.local_mgr:
             return {"error": "Not authenticated or no local lists"}
 
         local_data = self.local_mgr.data
+        migrated_lists = 0
+        migrated_items = 0
 
-        # Prepare migration data
-        lists_to_migrate = []
+        # Migrate each list
         for list_id, list_data in local_data.get('lists', {}).items():
             if list_data.get('is_system'):
-                continue  # Skip system lists
+                continue
 
-            items = self.local_mgr.get_items_in_list(list_id)
-            items_data = []
-            for item in items:
-                items_data.append({
-                    "sys_id": item.get('sys_id'),
-                    "shelfmark": item.get('shelfmark'),
-                    "title": item.get('title'),
-                    "fl_id": item.get('fl_id'),
-                    "note": item.get('note', ''),
-                    "tags": item.get('tags', [])
-                })
+            # Create the list in Supabase
+            result = sb_create_list(
+                self.user_id,
+                list_data.get('name', 'Imported List'),
+                name_en=list_data.get('name_en'),
+                color=list_data.get('color', '#FFD700'),
+                is_default=list_data.get('is_default', False)
+            )
 
-            lists_to_migrate.append({
-                "name": list_data.get('name', 'Imported List'),
-                "name_en": list_data.get('name_en'),
-                "color": list_data.get('color', '#FFD700'),
-                "is_default": list_data.get('is_default', False),
-                "project_id": list_data.get('project_id'),
-                "items": items_data
-            })
+            if result.get('success'):
+                new_list_id = result['list']['id']
+                migrated_lists += 1
 
-        # Prepare projects
-        projects_to_migrate = []
-        for proj_id, proj_data in local_data.get('projects', {}).items():
-            projects_to_migrate.append({
-                "name": proj_data.get('name', 'Project'),
-                "color": proj_data.get('color', '#4CAF50')
-            })
+                # Migrate items in this list
+                items = self.local_mgr.get_items_in_list(list_id)
+                for item in items:
+                    item_result = add_list_item(
+                        new_list_id,
+                        item.get('sys_id'),
+                        shelfmark=item.get('shelfmark'),
+                        title=item.get('title'),
+                        fl_id=item.get('fl_id'),
+                        note=item.get('note', ''),
+                        tags=item.get('tags', [])
+                    )
+                    if item_result.get('success'):
+                        migrated_items += 1
 
-        # Prepare recent items
-        recent_to_migrate = []
-        for sys_id in local_data.get('recent_items', [])[:50]:
-            item = local_data.get('items', {}).get(sys_id, {})
-            recent_to_migrate.append({
-                "sys_id": item.get('sys_id', sys_id),
-                "shelfmark": item.get('shelfmark'),
-                "title": item.get('title'),
-                "fl_id": item.get('fl_id')
-            })
-
-        # Call migration API
-        result = await api_call("POST", "/lists/migrate", {
-            "lists": lists_to_migrate,
-            "projects": projects_to_migrate,
-            "recent_items": recent_to_migrate
-        })
-
-        if "error" not in result:
-            print(f"[DEBUG] Migration successful, invalidating cache")
+        # Clear local lists after successful migration
+        if migrated_lists > 0:
+            self.local_mgr.clear_all()
             self.invalidate_cache()
-            # Clear local lists after successful migration
-            if self.local_mgr:
-                print(f"[DEBUG] Calling local_mgr.clear_all()")
-                self.local_mgr.clear_all()
-                print(f"[DEBUG] After clear_all, local lists: {list(self.local_mgr.data.get('lists', {}).keys())}")
-                print(f"[DEBUG] After clear_all, items count: {len(self.local_mgr.data.get('items', {}))}")
-        else:
-            print(f"[DEBUG] Migration returned error: {result}")
 
-        return result
+        return {
+            "success": True,
+            "migrated_lists": migrated_lists,
+            "migrated_items": migrated_items
+        }
 
     def has_local_lists(self) -> bool:
         """Check if there are local lists that could be migrated."""
-        print(f"[DEBUG] has_local_lists called, local_mgr={self.local_mgr}")
         if not self.local_mgr:
             return False
 
         data = self.local_mgr.data
-        print(f"[DEBUG] has_local_lists: lists={list(data.get('lists', {}).keys())}")
-        print(f"[DEBUG] has_local_lists: items count={len(data.get('items', {}))}")
 
-        # Check for user-created lists (not just default/system)
+        # Check for user-created lists
         for list_id, list_data in data.get('lists', {}).items():
             if not list_data.get('is_system') and not list_data.get('is_default'):
-                print(f"[DEBUG] has_local_lists: found user list '{list_id}' -> returning True")
                 return True
 
-        # Check for items in any list
-        items = data.get('items', {})
-        if items:
-            print(f"[DEBUG] has_local_lists: checking {len(items)} items...")
-            for item_id, item_data in items.items():
-                print(f"[DEBUG]   item '{item_id}': {item_data}")
-                if item_data.get('lists'):
-                    print(f"[DEBUG] has_local_lists: found item '{item_id}' in lists -> returning True")
-                    return True
-            # If there are items but none have 'lists' attribute, still consider them as local data
-            print(f"[DEBUG] has_local_lists: {len(items)} items exist -> returning True")
+        # Check for items
+        if data.get('items'):
             return True
 
-        print(f"[DEBUG] has_local_lists: no user lists or items -> returning False")
         return False
 
     # === Export ===
@@ -635,6 +802,12 @@ class UserListsManager:
         """Load data - for local manager compatibility."""
         if self.local_mgr:
             self.local_mgr.load()
+
+    async def refresh_data(self):
+        """Refresh data from Supabase."""
+        self.invalidate_cache()
+        if self.is_authenticated:
+            self._get_cached_data()
 
 
 def get_lists_manager(local_mgr: Optional[ListsManager] = None,

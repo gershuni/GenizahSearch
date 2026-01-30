@@ -117,32 +117,31 @@ def show_add_to_list_dialog(
 
             new_list_name = ui.input(label=tr('List Name')).classes('w-full').props('outlined')
 
-            # Color picker with visual selection indicator
-            ui.label(tr('Color')).classes('text-sm mt-2').style('color: var(--text-secondary);')
-            selected_color = {'value': '#4CAF50'}
-            color_buttons = {}
+            # Project selector (optional - lists can be standalone or in a project)
+            selected_project = {'value': None}
+            projects = lists_mgr.data.get('projects', {}) if lists_mgr else {}
 
-            def select_color(color):
-                selected_color['value'] = color
-                # Update visual indicator for all buttons
-                for c, btn in color_buttons.items():
-                    if c == color:
-                        btn.style(f'background-color: {c}; width: 28px; height: 28px; min-width: 28px; border: 3px solid white; box-shadow: 0 0 0 2px {c};')
-                    else:
-                        btn.style(f'background-color: {c}; width: 28px; height: 28px; min-width: 28px;')
+            if projects:
+                project_options = {None: tr('(No project - standalone)')}
+                for pid, pdata in projects.items():
+                    project_options[pid] = pdata.get('name', 'Unnamed')
 
-            with ui.row().classes('gap-2 flex-wrap'):
-                colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
-                          '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
-                for color in colors:
-                    # Default style, with selection indicator for initial color
-                    is_selected = color == selected_color['value']
-                    style = f'background-color: {color}; width: 28px; height: 28px; min-width: 28px;'
-                    if is_selected:
-                        style = f'background-color: {color}; width: 28px; height: 28px; min-width: 28px; border: 3px solid white; box-shadow: 0 0 0 2px {color};'
-                    btn = ui.button().props('flat round dense').style(style)
-                    btn.on('click', lambda c=color: select_color(c))
-                    color_buttons[color] = btn
+                ui.label(tr('Add to project (optional)')).classes('text-sm mt-2').style('color: var(--text-secondary);')
+                project_select = ui.select(
+                    project_options,
+                    value=None,
+                    label=tr('Project')
+                ).classes('w-full').props('outlined')
+
+                def on_project_change():
+                    selected_project['value'] = project_select.value
+
+                project_select.on('update:model-value', on_project_change)
+
+            # Color hint - no picker, colors come from projects
+            ui.label(tr('Color is inherited from project, or gold for standalone lists.')).classes(
+                'text-xs mt-2'
+            ).style('color: var(--text-muted);')
 
             # Note field for new list creation
             new_list_note_input = ui.input(label=tr('Note (optional)'), value=note_default).classes('w-full mt-3').props('outlined')
@@ -160,21 +159,23 @@ def show_add_to_list_dialog(
 
                 async def create_and_add():
                     name = new_list_name.value.strip()
-                    print(f"[DEBUG] create_and_add called, name={name}, color={selected_color['value']}")
+                    project_id = selected_project['value']
+                    print(f"[DEBUG] create_and_add called, name={name}, project_id={project_id}")
                     if not name:
                         ui.notify(tr('Please enter a list name'), type='warning')
                         return
 
                     # Create the new list - use async if authenticated, sync otherwise
+                    # Color is inherited from project or defaults to gold for standalone
                     is_logged_in = GlobalAuthState.is_logged_in()
                     print(f"[DEBUG] is_logged_in={is_logged_in}")
                     try:
                         if is_logged_in:
                             print(f"[DEBUG] Calling lists_mgr.create_list (async)")
-                            new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
+                            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
                         else:
                             print(f"[DEBUG] Calling lists_mgr.create_list_sync")
-                            new_list_id = lists_mgr.create_list_sync(name, color=selected_color['value'])
+                            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
                         print(f"[DEBUG] new_list_id={new_list_id}")
                     except Exception as e:
                         print(f"[DEBUG] Exception creating list: {e}")

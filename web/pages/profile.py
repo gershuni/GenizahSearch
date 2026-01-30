@@ -187,7 +187,13 @@ async def create_profile_page():
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Member Since')).classes('text-sm').style('color: var(--text-muted);')
                     created_at = user.get('created_at', '')
-                    if created_at and len(created_at) >= 10:
-                        ui.label(created_at[:10]).classes('font-medium')
+                    if created_at:
+                        # Handle both datetime objects and strings
+                        if hasattr(created_at, 'strftime'):
+                            ui.label(created_at.strftime('%Y-%m-%d')).classes('font-medium')
+                        elif isinstance(created_at, str) and len(created_at) >= 10:
+                            ui.label(created_at[:10]).classes('font-medium')
+                        else:
+                            ui.label('-').classes('font-medium')
                     else:
                         ui.label('-').classes('font-medium')

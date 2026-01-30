@@ -33,3 +33,5 @@ app.log
 server.log
 app.pid
 /big_data_files
+.env
+backend_legacy/

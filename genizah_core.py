@@ -5457,6 +5457,18 @@ class ListsManager:
         """Save lists to file."""
         try:
             os.makedirs(Config.INDEX_DIR, exist_ok=True)
+            # Create backup before saving (keep last 3 backups)
+            if os.path.exists(self.LISTS_FILE):
+                import shutil
+                for i in range(2, 0, -1):
+                    old_backup = f"{self.LISTS_FILE}.bak{i}"
+                    new_backup = f"{self.LISTS_FILE}.bak{i+1}"
+                    if os.path.exists(old_backup):
+                        if os.path.exists(new_backup):
+                            os.remove(new_backup)
+                        shutil.move(old_backup, new_backup)
+                backup_file = f"{self.LISTS_FILE}.bak1"
+                shutil.copy2(self.LISTS_FILE, backup_file)
             with open(self.LISTS_FILE, 'wb') as f:
                 pickle.dump(self.data, f)
         except Exception as e:
@@ -5470,6 +5482,83 @@ class ListsManager:
         print(f"[DEBUG] After reset: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
         self.save()
         print(f"[DEBUG] Data saved to {self.LISTS_FILE}")
+
+    # --- Cloud Sync Integration ---
+
+    def enable_cloud_sync(self, user_id: str, supabase_client=None):
+        """Enable cloud sync for the given user (call after login).
+
+        Args:
+            user_id: The user's UUID from Supabase auth
+            supabase_client: Optional authenticated Supabase client for RLS
+        """
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.set_user(user_id)
+            if supabase_client:
+                sync.set_client(supabase_client)
+            LOGGER.info(f"Cloud sync enabled for user")
+        except ImportError:
+            LOGGER.debug("lists_sync module not available")
+        except Exception as e:
+            LOGGER.warning(f"Failed to enable cloud sync: {e}")
+
+    def disable_cloud_sync(self):
+        """Disable cloud sync (call on logout)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.clear_user()
+        except Exception:
+            pass
+
+    def sync_from_cloud(self):
+        """Pull lists from cloud and merge with local data."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_from_cloud()
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def sync_to_cloud(self):
+        """Push local lists to cloud."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_to_cloud()
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def get_cloud_lists_preview(self):
+        """Get preview of cloud lists without syncing (for dialog display)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.get_cloud_lists_preview()
+        except ImportError:
+            return {'success': False, 'lists': [], 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'lists': [], 'error': str(e)}
+
+    def get_local_lists_summary(self):
+        """Get summary of local lists for dialog display."""
+        lists = []
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_data.get('is_system'):
+                continue
+            lists.append({
+                'id': list_id,
+                'name': list_data.get('name', 'Unnamed'),
+                'color': list_data.get('color', '#FFD700'),
+                'item_count': self._get_list_item_count(list_id)
+            })
+        return lists
 
     # --- List Management ---
 

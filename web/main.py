@@ -13,6 +13,10 @@ Run with: python -m web.main (from project root)
 import os
 import sys
 
+# Load environment variables first (for Supabase configuration)
+from dotenv import load_dotenv
+load_dotenv()
+
 # Ensure we can import from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

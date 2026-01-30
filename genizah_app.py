@@ -4267,6 +4267,8 @@ class GenizahGUI(QMainWindow):
         if dialog.exec():
             self._update_corner_login_state()
             self._refresh_community_panels()
+            # Enable cloud sync for lists after successful login
+            self._enable_lists_cloud_sync()
 
     def _show_register_dialog(self):
         dialog = RegisterDialog(self, self.corrections_client)
@@ -4275,10 +4277,253 @@ class GenizahGUI(QMainWindow):
             self._refresh_community_panels()
 
     def _do_logout(self):
+        # Disable cloud sync before logout
+        self._disable_lists_cloud_sync()
         self.corrections_client.logout()
         self._update_corner_login_state()
         self._refresh_community_panels()
         QMessageBox.information(self, tr("Logged Out"), tr("You have been logged out."))
+
+    def _enable_lists_cloud_sync(self):
+        """Enable cloud sync for user lists after login - shows sync dialog."""
+        try:
+            user = self.corrections_client.current_user
+            logger.debug(f"Cloud sync: user={user}")
+
+            # Get user UUID - try multiple approaches
+            user_uuid = None
+            if user:
+                # Try _uuid attribute (supabase_corrections_client)
+                if hasattr(user, '_uuid') and user._uuid:
+                    user_uuid = user._uuid
+                    logger.debug(f"Cloud sync: Got UUID from _uuid: {user_uuid[:8]}...")
+                # Try getting from supabase auth session directly
+                elif hasattr(self.corrections_client, '_client') and self.corrections_client._client:
+                    try:
+                        session = self.corrections_client._client.auth.get_session()
+                        if session and session.user:
+                            user_uuid = str(session.user.id)
+                            logger.debug(f"Cloud sync: Got UUID from session: {user_uuid[:8]}...")
+                    except Exception as e:
+                        logger.debug(f"Could not get UUID from session: {e}")
+
+            if not user_uuid:
+                logger.warning("Cloud sync: No user UUID available - cannot sync")
+                return
+
+            # Enable cloud sync connection (but don't sync yet)
+            # Pass the authenticated Supabase client for RLS to work
+            logger.info(f"Enabling cloud sync for user UUID: {user_uuid}")
+            supabase_client = None
+            if hasattr(self.corrections_client, '_client'):
+                supabase_client = self.corrections_client._client
+                logger.debug("Using authenticated client from corrections system")
+            self.lists_mgr.enable_cloud_sync(user_uuid, supabase_client=supabase_client)
+
+            # Get preview of what's in cloud vs local
+            cloud_preview = self.lists_mgr.get_cloud_lists_preview()
+            logger.info(f"Cloud preview returned: {cloud_preview}")
+            local_lists = self.lists_mgr.get_local_lists_summary()
+
+            logger.debug(f"Cloud preview result: success={cloud_preview.get('success')}, "
+                        f"lists_count={len(cloud_preview.get('lists', []))}, "
+                        f"error={cloud_preview.get('error')}")
+
+            cloud_lists = cloud_preview.get('lists', []) if cloud_preview.get('success') else []
+
+            # If preview failed, show error but still allow upload
+            cloud_error = None
+            if not cloud_preview.get('success'):
+                cloud_error = cloud_preview.get('error', 'Unknown error')
+                logger.warning(f"Cloud preview failed: {cloud_error}")
+
+            # If both are empty (and no error), nothing to sync
+            if not cloud_lists and not local_lists and not cloud_error:
+                logger.info("Cloud sync: No lists to sync (both empty)")
+                return
+
+            # Show sync dialog
+            self._show_lists_sync_dialog(local_lists, cloud_lists, cloud_error)
+
+        except Exception as e:
+            logger.warning(f"Cloud sync dialog error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
+        """Show dialog to let user choose how to sync lists."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Sync Your Lists"))
+        dialog.setMinimumWidth(500)
+        layout = QVBoxLayout(dialog)
+
+        # Header
+        if cloud_error:
+            header = QLabel(tr("Could not load cloud lists. You can still upload your local lists."))
+        elif cloud_lists:
+            header = QLabel(tr("Your account has lists in the cloud. How would you like to sync?"))
+        else:
+            header = QLabel(tr("Upload your local lists to the cloud?"))
+        header.setWordWrap(True)
+        header.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(header)
+
+        # Show error if any
+        if cloud_error:
+            error_label = QLabel(f"Error: {cloud_error}")
+            error_label.setStyleSheet("color: #f44336; font-size: 12px; margin-bottom: 10px;")
+            error_label.setWordWrap(True)
+            layout.addWidget(error_label)
+
+        # Two columns: Local vs Cloud
+        columns = QHBoxLayout()
+
+        # Local lists column
+        local_group = QGroupBox(tr("Local Lists (this device)"))
+        local_layout = QVBoxLayout(local_group)
+        if local_lists:
+            for lst in local_lists[:10]:  # Show max 10
+                item_label = QLabel(f"• {lst['name']} ({lst['item_count']} items)")
+                local_layout.addWidget(item_label)
+            if len(local_lists) > 10:
+                local_layout.addWidget(QLabel(f"... and {len(local_lists) - 10} more"))
+        else:
+            local_layout.addWidget(QLabel(tr("No local lists")))
+        local_layout.addStretch()
+        columns.addWidget(local_group)
+
+        # Cloud lists column
+        cloud_group = QGroupBox(tr("Cloud Lists (your account)"))
+        cloud_layout = QVBoxLayout(cloud_group)
+        if cloud_lists:
+            for lst in cloud_lists[:10]:  # Show max 10
+                item_label = QLabel(f"• {lst['name']} ({lst['item_count']} items)")
+                cloud_layout.addWidget(item_label)
+            if len(cloud_lists) > 10:
+                cloud_layout.addWidget(QLabel(f"... and {len(cloud_lists) - 10} more"))
+        else:
+            cloud_layout.addWidget(QLabel(tr("No cloud lists")))
+        cloud_layout.addStretch()
+        columns.addWidget(cloud_group)
+
+        layout.addLayout(columns)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+
+        # Download from cloud button
+        if cloud_lists:
+            download_btn = QPushButton(tr("Download from Cloud"))
+            download_btn.setToolTip(tr("Add cloud lists to this device (keeps both)"))
+            download_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px;")
+            download_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'download'))
+            btn_layout.addWidget(download_btn)
+
+        # Upload to cloud button
+        if local_lists:
+            upload_btn = QPushButton(tr("Upload to Cloud"))
+            upload_btn.setToolTip(tr("Push local lists to your account"))
+            upload_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px;")
+            upload_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'upload'))
+            btn_layout.addWidget(upload_btn)
+
+        # Merge both (if both have lists)
+        if cloud_lists and local_lists:
+            merge_btn = QPushButton(tr("Merge Both"))
+            merge_btn.setToolTip(tr("Download cloud AND upload local (combine everything)"))
+            merge_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px 16px;")
+            merge_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'merge'))
+            btn_layout.addWidget(merge_btn)
+
+        # Skip button
+        skip_btn = QPushButton(tr("Skip"))
+        skip_btn.setToolTip(tr("Don't sync now - you can sync later from Settings"))
+        skip_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(skip_btn)
+
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
+    def _do_sync_action(self, dialog, action):
+        """Execute the chosen sync action."""
+        dialog.accept()
+
+        progress = QProgressDialog(tr("Syncing lists..."), None, 0, 0, self)
+        progress.setWindowTitle(tr("Sync"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+
+        try:
+            if action == 'download':
+                # Download cloud lists to local (merge)
+                result = self.lists_mgr.sync_from_cloud()
+                if result.get('success'):
+                    added = result.get('lists_added', 0)
+                    items = result.get('items_added', 0)
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Downloaded {lists} lists and {items} items from cloud.").format(
+                            lists=added, items=items
+                        )
+                    )
+                else:
+                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+
+            elif action == 'upload':
+                # Upload local lists to cloud
+                result = self.lists_mgr.sync_to_cloud()
+                if result.get('success'):
+                    pushed = result.get('lists_pushed', 0)
+                    items = result.get('items_pushed', 0)
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Uploaded {lists} lists and {items} items to cloud.").format(
+                            lists=pushed, items=items
+                        )
+                    )
+                else:
+                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+
+            elif action == 'merge':
+                # Both directions
+                download_result = self.lists_mgr.sync_from_cloud()
+                upload_result = self.lists_mgr.sync_to_cloud()
+
+                if download_result.get('success') and upload_result.get('success'):
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
+                            dl=download_result.get('lists_added', 0),
+                            ul=upload_result.get('lists_pushed', 0)
+                        )
+                    )
+                else:
+                    errors = []
+                    if not download_result.get('success'):
+                        errors.append(f"Download: {download_result.get('error')}")
+                    if not upload_result.get('success'):
+                        errors.append(f"Upload: {upload_result.get('error')}")
+                    QMessageBox.warning(self, tr("Sync Error"), "\n".join(errors))
+
+            # Refresh the lists UI if it exists
+            if hasattr(self, 'lists_tree'):
+                self._refresh_lists_tree()
+
+        except Exception as e:
+            QMessageBox.critical(self, tr("Sync Error"), str(e))
+        finally:
+            progress.close()
+
+    def _disable_lists_cloud_sync(self):
+        """Disable cloud sync on logout."""
+        try:
+            # Push local changes to cloud before logout
+            self.lists_mgr.sync_to_cloud()
+            self.lists_mgr.disable_cloud_sync()
+        except Exception as e:
+            logger.debug(f"Cloud sync disable: {e}")
 
     def _show_discoveries_dialog(self):
         dialog = DiscoveriesDialog(
