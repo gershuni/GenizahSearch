@@ -873,13 +873,13 @@
 3. [ ] **Security: בדוק שאין information leakage בהודעות שגיאה למשתמש**
 
 ### דחוף - פונקציונלי (לפני השקה)
-4. [!] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse** - BUG: Dialog works but comment not shown (#15)
+4. [x] **Comments: תגובה שנוספת ב-Browse מופיעה ב-Browse** ✅ Fixed (#15) - async timing issue
 5. [x] Search: קיצורי תחביר (=מילה, ?מילה, ~מילה, #shelfmark) ✅ All passed
 6. [x] Search: Export Word/Excel ✅ Fixed (#8, #9)
 7. [-] Browse: Autocomplete suggestions for shelfmark - Not implemented, nice-to-have
 8. [x] Browse: Dialog תגובה נפתח ופעיל ✅ Opens and submits
-9. [!] Browse: Dialog בחירת רשימה נפתח - Works but needs fixes (#13)
-10. [!] Lists: Export Excel תקין - BUG: "List is empty" error (#10)
+9. [x] Browse: Dialog בחירת רשימה נפתח ✅ Fixed (#13) - colors and visibility
+10. [x] Lists: Export Excel תקין ✅ Fixed (#10) - authenticated user API call
 11. [x] Parallels: קבצי ייצוא תקינים ✅ Fixed (#16)
 
 ### בינוני

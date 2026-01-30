@@ -81,63 +81,22 @@ User confirmed fixed on 2026-01-29.
 
 ---
 
-### Bug #10: List Export "List is empty" Error
-**Symptom:** Export fails with "List is empty" message
-**Files:** `web/api.py:674-676`, `web/pages/lists.py:547-549`
+### ~~Bug #10: List Export "List is empty" Error~~ ✅ FIXED
+**Root cause:** `get_items_in_list_sync()` only checked local storage, not server API.
+For authenticated users, items are stored on server, not locally.
 
-**Investigation:**
-1. `lists.py:547` calls `get_items_in_list_sync(list_id)`
-2. If items exist, triggers download via `/api/export/list/{list_id}/excel`
-3. API at `api.py:674` also calls `get_items_in_list_sync(list_id)`
+**Fix:** Added synchronous httpx call in `web/user_lists.py:get_items_in_list_sync()` to fetch items from API when user is authenticated.
 
-**Possible causes:**
-- List ID mismatch between page and API
-- Items stored differently for logged-in vs anonymous users
-- Race condition between check and export
-
-**Fix approach:** Add debug logging to trace the issue
-```python
-# In api.py around line 674:
-print(f"[DEBUG] Exporting list {list_id}, items count: {len(items) if items else 0}")
-print(f"[DEBUG] Lists data keys: {list(state.lists_mgr.data.get('lists', {}).keys())}")
-```
-
-**Testing:**
-1. Create a list and add items
-2. Click Export Excel
-3. Check console for debug output
-4. Verify file downloads
+Commit: `030d9ea`
 
 ---
 
-### Bug #15: Comments Not Shown in Browse
-**Symptom:** Comments added but not displayed
-**Files:** `web/components/notes_display.py`, `web/pages/browse.py:2065-2070`
+### ~~Bug #15: Comments Not Shown in Browse~~ ✅ FIXED
+**Root cause:** `ui.timer(0.2, check_comments, once=True)` doesn't properly await async functions in NiceGUI. The coroutine was created but never executed.
 
-**Code flow:**
-1. `browse.py:2067` creates notes panel with `create_notes_panel()`
-2. Panel calls `fetch_document_comments()` at `notes_display.py:72-99`
-3. API call to `/comments/document/{document_id}`
+**Fix:** Changed to use `asyncio.create_task(check_comments())` in `web/components/notes_display.py:299` for proper async execution.
 
-**Possible causes:**
-- API endpoint not returning comments
-- Comments stored with different document_id format
-- Panel not expanded by default (user must click to see)
-
-**Fix approach:** Verify API returns data
-```python
-# Add debug in notes_display.py around line 83:
-print(f"[DEBUG] Fetching comments for doc {document_id}, page {page_number}")
-result = await api_call(...)
-print(f"[DEBUG] API result: {result}")
-```
-
-**Testing:**
-1. Go to /browse with a manuscript
-2. Add a comment via the comment button
-3. Refresh page
-4. Click "Notes & Comments" expansion panel
-5. Verify comment appears
+Commit: `ddcf254`
 
 ---
 
@@ -148,16 +107,16 @@ User confirmed fixed on 2026-01-29.
 
 ## Execution Order
 
-When user returns, execute fixes in this order:
+All critical fixes completed!
 
-1. **Quick wins (5 min each):**
-   - [ ] Fix `filter_text_dialog.py` path traversal (desktop only)
+1. **Quick wins:**
+   - [x] Fix `filter_text_dialog.py` path traversal ✅ (commit `030d9ea`)
    - [x] Update checklist to mark already-fixed items ✅
 
-2. **Debug & fix (15-30 min each):**
+2. **Bug fixes:**
    - [x] ~~Debug parallels export (#16)~~ ✅ Fixed
-   - [ ] Debug list export (#10) - "List is empty" error
-   - [ ] Debug comments display (#15)
+   - [x] ~~List export (#10)~~ ✅ Fixed (commit `030d9ea`)
+   - [x] ~~Comments display (#15)~~ ✅ Fixed (commit `ddcf254`)
 
 3. **~~Export formatting~~ ✅ DONE:**
    - [x] ~~Word RTL alignment (#8)~~ ✅ Fixed
