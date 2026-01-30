@@ -989,16 +989,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def add_manuscript_to_list():
         """Add entire manuscript to a list."""
+        print(f"[DEBUG] add_manuscript_to_list called, sys_id={state.sys_id}, current_page={state.current_page}")
         if not state.sys_id or not state.current_page:
             ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
         from web.components import show_add_to_list_dialog
+        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
+        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, shelfmark={state.current_page.shelfmark}")
         show_add_to_list_dialog(
             sys_id=state.sys_id,
             shelfmark=state.current_page.shelfmark,
@@ -1006,6 +1009,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             note_default='',  # Empty by default
             fl_id=None
         )
+        print(f"[DEBUG] Dialog should have opened")
 
     def add_page_to_list():
         """Add specific page/image to a list."""
