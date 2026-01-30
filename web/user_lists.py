@@ -15,9 +15,10 @@ Usage:
 """
 
 import time
+import httpx
 from typing import Optional, Dict, List, Any
 from nicegui import app
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState, api_call, get_api_base
 from genizah_core import ListsManager
 
 import logging
@@ -402,8 +403,28 @@ class UserListsManager:
         return []
 
     def get_items_in_list_sync(self, list_id: str) -> List[Dict]:
-        """Synchronous version - uses local manager only."""
-        if self.local_mgr:
+        """Synchronous version - uses sync API call for authenticated users, local manager otherwise."""
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+            except ValueError:
+                return []
+
+            # Make synchronous API call
+            try:
+                base_url = get_api_base()
+                headers = GlobalAuthState.get_headers()
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get(
+                        f"{base_url}/lists/{list_id_int}/items",
+                        headers=headers
+                    )
+                    if response.status_code == 200:
+                        return response.json()
+            except Exception as e:
+                LOGGER.warning(f"Sync API call failed for list {list_id}: {e}")
+            return []
+        elif self.local_mgr:
             return self.local_mgr.get_items_in_list(list_id)
         return []
 
