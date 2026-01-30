@@ -128,6 +128,68 @@ All critical fixes completed!
 
 ---
 
+## NEW Issues Found (2026-01-30)
+
+### Bug #20: Lists Sync Creates Duplicates (P1)
+**Symptom:** Clicking "Sync Now" creates duplicate lists; banner keeps appearing
+**Status:** Partially fixed - code updated but not fully working
+
+**Root causes:**
+1. Backend migration doesn't properly deduplicate (fix attempted but may need review)
+2. Local lists not cleared after migration (fix attempted)
+3. Existing duplicates in database need manual cleanup
+
+**Files:**
+- `backend/services/lists_service.py:456-474` - Migration dedup logic
+- `web/user_lists.py:560-565` - Local list clearing
+- `genizah_core.py:5460-5464` - clear_all() method
+
+**Immediate fix for user:**
+```sql
+-- Run in SQLite to remove duplicate lists:
+-- First backup: cp corrections.db corrections.db.bak
+DELETE FROM user_lists WHERE id NOT IN (
+    SELECT MIN(id) FROM user_lists GROUP BY user_id, name
+);
+```
+
+**Investigation needed:**
+1. Check if `clear_all()` is actually being called
+2. Verify `has_local_lists()` returns False after clearing
+3. Add logging to migration flow
+
+---
+
+### Bug #21: Add-to-List Button Not Working (P1)
+**Symptom:** Clicking star button in Browse/Search does nothing (no dialog, no notification)
+**Files:**
+- `web/pages/browse.py:990-1007` - add_manuscript_to_list()
+- `web/pages/search.py:1331-1350` - show_add_to_list_dialog_local()
+- `web/components/add_to_list_dialog.py:21-235` - show_add_to_list_dialog()
+
+**Possible causes:**
+1. Button click not registering (NiceGUI event binding issue)
+2. state.sys_id or state.current_page is None/falsy
+3. state.lists_mgr is None
+4. Dialog creation fails silently
+
+**Debug approach:**
+```python
+# Add to browse.py add_manuscript_to_list():
+def add_manuscript_to_list():
+    print(f"[DEBUG] add_manuscript_to_list called")
+    print(f"[DEBUG] state.sys_id = {state.sys_id}")
+    print(f"[DEBUG] state.current_page = {state.current_page}")
+    # ... rest of function
+```
+
+**Testing:**
+1. Open browser console (F12) for JavaScript errors
+2. Check server console for Python errors
+3. Verify state.lists_mgr is initialized in web/state.py
+
+---
+
 ## Quick Commands
 
 ```bash

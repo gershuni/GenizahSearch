@@ -901,6 +901,15 @@
 - [ ] Loading spinners needed across website (#12)
 - [x] Lists should be per-user not per-device (#14) ✅ Fixed: Auth-aware UserListsManager
 
+### Issues Found (2026-01-30 Testing)
+- [ ] **P1 - Lists sync duplicates**: Clicking "Sync Now" creates duplicate lists instead of merging (#20)
+  - Need to: Delete existing duplicates from database, fix migration to truly check for existing names
+  - Local lists not cleared after migration (sync banner keeps showing)
+- [ ] **P1 - Add-to-list button not working**: Star button in Browse and Search pages doesn't open dialog (#21)
+  - Possibly: Button click not registering, or dialog not opening due to async/context issues
+- [x] **P2 - Color picker**: All colors appeared the same ✅ Fixed: Changed to background-color style
+- [x] **P2 - Translations**: Added Hebrew translations for sync-related UI text ✅
+
 ---
 
 ## בעיות שלא נבדקו (פערים בבדיקה)
