@@ -47,9 +47,15 @@ CLEANING_RULES_FILE = os.path.join(BASE_DIR, 'corpus_mapper', 'cleaning_rules.js
 SYMBOL_REPORT_FILE = os.path.join(OUTPUT_DIR, 'symbol_report.json')
 
 # Search settings
-DEFAULT_MIN_SCORE = 300
-DEFAULT_CHUNK_SIZE = 15
-DEFAULT_BATCH_SIZE = 100  # Files per checkpoint
+DEFAULT_MIN_SCORE = 500      # Higher threshold for small chunks
+DEFAULT_CHUNK_SIZE = 5       # Small chunks = more matches
+DEFAULT_CHUNK_OVERLAP = 2    # Overlap between chunks
+DEFAULT_BATCH_SIZE = 50      # Files per checkpoint
+DEFAULT_NUM_WORKERS = 4      # Parallel processes
+DEFAULT_VARIANT_MODE = 'variants'  # 'variants', 'variants_extended', 'variants_maximum'
+
+# Libraries CSV for title matching
+LIBRARIES_CSV = os.path.join(BASE_DIR, 'libraries.csv')
 
 # Ensure directories exist
 def ensure_dirs():
