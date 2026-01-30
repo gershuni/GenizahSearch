@@ -1013,12 +1013,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def add_page_to_list():
         """Add specific page/image to a list."""
+        print(f"[DEBUG] add_page_to_list called")
+        print(f"[DEBUG] state.sys_id = {state.sys_id}")
+        print(f"[DEBUG] state.current_page = {state.current_page}")
         if not state.sys_id or not state.current_page:
             ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
         from web.components import show_add_to_list_dialog
+        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
@@ -1026,6 +1030,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Use FL ID if available for specific page reference
         fl_id = state.current_page.fl_id
 
+        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, fl_id={fl_id}")
         show_add_to_list_dialog(
             sys_id=state.sys_id,
             shelfmark=f"{state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}",
@@ -1033,6 +1038,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             note_default='',  # Empty by default (user requested)
             fl_id=fl_id
         )
+        print(f"[DEBUG] Dialog function returned")
 
     def zoom_in():
         """Increase zoom level."""

@@ -37,6 +37,8 @@ def show_add_to_list_dialog(
         fl_id: Optional FL ID for page-specific additions
         on_success: Optional callback after successful addition
     """
+    print(f"[DEBUG] show_add_to_list_dialog called: sys_id={sys_id}, shelfmark={shelfmark}")
+    print(f"[DEBUG] lists_mgr={lists_mgr}, fl_id={fl_id}")
     if not sys_id:
         ui.notify(tr('Cannot add: missing system ID'), type='warning')
         return
@@ -53,9 +55,12 @@ def show_add_to_list_dialog(
         ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
 
         lists = lists_mgr.data.get('lists', {})
+        print(f"[DEBUG] lists_mgr.data = {lists_mgr.data}")
         # Store list data with colors for display
         list_data = {lid: lst for lid, lst in lists.items() if not lst.get('is_system')}
         list_options = {lid: lst['name'] for lid, lst in list_data.items()}
+        print(f"[DEBUG] list_data = {list_data}")
+        print(f"[DEBUG] list_options = {list_options}")
 
         # Container for the main form
         form_container = ui.column().classes('w-full mt-4 gap-3')
@@ -68,43 +73,19 @@ def show_add_to_list_dialog(
             if not list_options:
                 ui.label(tr('No lists yet. Create your first list!')).style('color: var(--text-muted);')
             else:
-                # List selection with "Create new list" option
-                list_options_with_new = {'__new__': f"+ {tr('Create new list')}", **list_options}
+                # Simple dict format: {value: label} - most reliable in NiceGUI
+                simple_options = {'__new__': f"+ {tr('Create new list')}"}
+                simple_options.update(list_options)
+
+                initial_value = list(list_options.keys())[0] if list_options else '__new__'
+                print(f"[DEBUG] simple_options = {simple_options}")
+                print(f"[DEBUG] initial_value = {initial_value}")
+
                 selected_list = ui.select(
-                    list_options_with_new,
+                    simple_options,
                     label=tr('Select List'),
-                    value=list(list_options.keys())[0] if list_options else '__new__'
+                    value=initial_value
                 ).classes('w-full').props('outlined').style('color: var(--text-primary);')
-
-                # Add colored dots to dropdown options using custom slot
-                with selected_list.add_slot('option', '''
-                    <q-item v-bind="scope.itemProps">
-                        <q-item-section avatar style="min-width: auto; padding-right: 8px;" v-if="scope.opt.value !== '__new__'">
-                            <div :style="{
-                                width: '12px',
-                                height: '12px',
-                                borderRadius: '50%',
-                                backgroundColor: scope.opt.color || '#888'
-                            }"></div>
-                        </q-item-section>
-                        <q-item-section>
-                            <q-item-label>{{ scope.opt.label }}</q-item-label>
-                        </q-item-section>
-                    </q-item>
-                '''):
-                    pass
-
-                # Update options to include color data
-                options_with_colors = [
-                    {'value': '__new__', 'label': f"+ {tr('Create new list')}"}
-                ] + [
-                    {'value': lid, 'label': name, 'color': list_data[lid].get('color', '#888')}
-                    for lid, name in list_options.items()
-                ]
-                selected_list.set_options(options_with_colors, value_key='value', label_key='label')
-                # Set initial value after updating options
-                if list_options:
-                    selected_list.value = list(list_options.keys())[0]
 
                 note_input = ui.input(label=tr('Note (optional)'), value=note_default).classes('w-full').props('outlined')
 
@@ -136,18 +117,32 @@ def show_add_to_list_dialog(
 
             new_list_name = ui.input(label=tr('List Name')).classes('w-full').props('outlined')
 
-            # Color picker
+            # Color picker with visual selection indicator
             ui.label(tr('Color')).classes('text-sm mt-2').style('color: var(--text-secondary);')
             selected_color = {'value': '#4CAF50'}
+            color_buttons = {}
+
+            def select_color(color):
+                selected_color['value'] = color
+                # Update visual indicator for all buttons
+                for c, btn in color_buttons.items():
+                    if c == color:
+                        btn.style(f'background-color: {c}; width: 28px; height: 28px; min-width: 28px; border: 3px solid white; box-shadow: 0 0 0 2px {c};')
+                    else:
+                        btn.style(f'background-color: {c}; width: 28px; height: 28px; min-width: 28px;')
 
             with ui.row().classes('gap-2 flex-wrap'):
                 colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
                           '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
                 for color in colors:
-                    btn = ui.button().props('flat round dense').style(
-                        f'background-color: {color}; width: 28px; height: 28px; min-width: 28px;'
-                    )
-                    btn.on('click', lambda c=color: selected_color.update({'value': c}))
+                    # Default style, with selection indicator for initial color
+                    is_selected = color == selected_color['value']
+                    style = f'background-color: {color}; width: 28px; height: 28px; min-width: 28px;'
+                    if is_selected:
+                        style = f'background-color: {color}; width: 28px; height: 28px; min-width: 28px; border: 3px solid white; box-shadow: 0 0 0 2px {color};'
+                    btn = ui.button().props('flat round dense').style(style)
+                    btn.on('click', lambda c=color: select_color(c))
+                    color_buttons[color] = btn
 
             # Note field for new list creation
             new_list_note_input = ui.input(label=tr('Note (optional)'), value=note_default).classes('w-full mt-3').props('outlined')
@@ -165,22 +160,43 @@ def show_add_to_list_dialog(
 
                 async def create_and_add():
                     name = new_list_name.value.strip()
+                    print(f"[DEBUG] create_and_add called, name={name}, color={selected_color['value']}")
                     if not name:
                         ui.notify(tr('Please enter a list name'), type='warning')
                         return
 
                     # Create the new list - use async if authenticated, sync otherwise
-                    if GlobalAuthState.is_logged_in():
-                        new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
-                    else:
-                        new_list_id = lists_mgr.create_list_sync(name, color=selected_color['value'])
+                    is_logged_in = GlobalAuthState.is_logged_in()
+                    print(f"[DEBUG] is_logged_in={is_logged_in}")
+                    try:
+                        if is_logged_in:
+                            print(f"[DEBUG] Calling lists_mgr.create_list (async)")
+                            new_list_id = await lists_mgr.create_list(name, color=selected_color['value'])
+                        else:
+                            print(f"[DEBUG] Calling lists_mgr.create_list_sync")
+                            new_list_id = lists_mgr.create_list_sync(name, color=selected_color['value'])
+                        print(f"[DEBUG] new_list_id={new_list_id}")
+                    except Exception as e:
+                        print(f"[DEBUG] Exception creating list: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        ui.notify(f"Error: {e}", type='negative')
+                        return
 
                     if new_list_id:
                         # Add item to the new list
-                        if GlobalAuthState.is_logged_in():
-                            result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                        else:
-                            result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                        try:
+                            if is_logged_in:
+                                result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                            else:
+                                result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
+                            print(f"[DEBUG] add_item result={result}")
+                        except Exception as e:
+                            print(f"[DEBUG] Exception adding item: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            ui.notify(f"Error: {e}", type='negative')
+                            return
 
                         if result:
                             ui.notify(f"{tr('List created')}: {name}", type='positive')
@@ -231,7 +247,9 @@ def show_add_to_list_dialog(
             if not list_options:
                 add_btn.set_visibility(False)
 
+    print(f"[DEBUG] About to open dialog")
     dialog.open()
+    print(f"[DEBUG] Dialog opened")
     return dialog
 
 

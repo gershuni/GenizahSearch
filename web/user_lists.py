@@ -105,11 +105,16 @@ class UserListsManager:
         Uses cached data if available and fresh.
         """
         now = time.time()
-        if self._api_data_cache and (now - self._cache_time) < self._cache_ttl:
+        cache_age = now - self._cache_time if self._cache_time else float('inf')
+        print(f"[DEBUG] _get_api_data_sync: cache exists={self._api_data_cache is not None}, cache_age={cache_age:.1f}s, ttl={self._cache_ttl}s")
+        if self._api_data_cache and cache_age < self._cache_ttl:
+            print(f"[DEBUG] _get_api_data_sync: returning cached data with {len(self._api_data_cache.get('lists', {}))} lists")
             return self._api_data_cache
 
         # Return cached data or default - actual refresh happens asynchronously
-        return self._api_data_cache or self._get_default_data()
+        result = self._api_data_cache or self._get_default_data()
+        print(f"[DEBUG] _get_api_data_sync: returning {'cached' if self._api_data_cache else 'default'} data with {len(result.get('lists', {}))} lists")
+        return result
 
     async def refresh_data(self):
         """Refresh data from API."""
@@ -200,17 +205,25 @@ class UserListsManager:
 
     async def create_list(self, name: str, color: str = None) -> Optional[str]:
         """Create a new list (async for authenticated users)."""
+        print(f"[DEBUG] UserListsManager.create_list: name={name}, color={color}, is_authenticated={self.is_authenticated}")
         if self.is_authenticated:
             result = await api_call("POST", "/lists/", {
                 "name": name,
                 "color": color
             })
+            print(f"[DEBUG] API response: {result}")
             if "error" not in result:
                 self.invalidate_cache()
-                return result.get('id')
+                list_id = result.get('id')
+                print(f"[DEBUG] Returning list_id={list_id}")
+                return list_id
+            print(f"[DEBUG] API returned error: {result.get('error')}")
             return None
         elif self.local_mgr:
-            return self.local_mgr.create_list(name, color)
+            result = self.local_mgr.create_list(name, color)
+            print(f"[DEBUG] Local manager returned: {result}")
+            return result
+        print(f"[DEBUG] No auth and no local_mgr, returning None")
         return None
 
     def create_list_sync(self, name: str, color: str = None) -> Optional[str]:
@@ -558,29 +571,49 @@ class UserListsManager:
         })
 
         if "error" not in result:
+            print(f"[DEBUG] Migration successful, invalidating cache")
             self.invalidate_cache()
             # Clear local lists after successful migration
             if self.local_mgr:
+                print(f"[DEBUG] Calling local_mgr.clear_all()")
                 self.local_mgr.clear_all()
+                print(f"[DEBUG] After clear_all, local lists: {list(self.local_mgr.data.get('lists', {}).keys())}")
+                print(f"[DEBUG] After clear_all, items count: {len(self.local_mgr.data.get('items', {}))}")
+        else:
+            print(f"[DEBUG] Migration returned error: {result}")
 
         return result
 
     def has_local_lists(self) -> bool:
         """Check if there are local lists that could be migrated."""
+        print(f"[DEBUG] has_local_lists called, local_mgr={self.local_mgr}")
         if not self.local_mgr:
             return False
 
         data = self.local_mgr.data
+        print(f"[DEBUG] has_local_lists: lists={list(data.get('lists', {}).keys())}")
+        print(f"[DEBUG] has_local_lists: items count={len(data.get('items', {}))}")
+
         # Check for user-created lists (not just default/system)
         for list_id, list_data in data.get('lists', {}).items():
             if not list_data.get('is_system') and not list_data.get('is_default'):
+                print(f"[DEBUG] has_local_lists: found user list '{list_id}' -> returning True")
                 return True
 
-        # Check for items in default list
-        for item_id, item_data in data.get('items', {}).items():
-            if item_data.get('lists'):
-                return True
+        # Check for items in any list
+        items = data.get('items', {})
+        if items:
+            print(f"[DEBUG] has_local_lists: checking {len(items)} items...")
+            for item_id, item_data in items.items():
+                print(f"[DEBUG]   item '{item_id}': {item_data}")
+                if item_data.get('lists'):
+                    print(f"[DEBUG] has_local_lists: found item '{item_id}' in lists -> returning True")
+                    return True
+            # If there are items but none have 'lists' attribute, still consider them as local data
+            print(f"[DEBUG] has_local_lists: {len(items)} items exist -> returning True")
+            return True
 
+        print(f"[DEBUG] has_local_lists: no user lists or items -> returning False")
         return False
 
     # === Export ===

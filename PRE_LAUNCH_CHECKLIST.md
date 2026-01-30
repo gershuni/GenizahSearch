@@ -863,6 +863,11 @@
    - תיאור: `ui.timer(0.2, check_comments, once=True)` עם async
    - עלול לא לעבוד תמיד
 
+3. **[UX] Star button visual feedback**
+   - קבצים: browse.py, search.py, add_to_list_dialog.py
+   - תיאור: Star button should show filled (★) when item is already in a list, empty (☆) when not
+   - המלצה: Check if sys_id exists in any list and update icon accordingly
+
 ---
 
 ## פריטים לבדיקה ידנית (Manual Testing Required)
@@ -905,8 +910,9 @@
 - [ ] **P1 - Lists sync duplicates**: Clicking "Sync Now" creates duplicate lists instead of merging (#20)
   - Need to: Delete existing duplicates from database, fix migration to truly check for existing names
   - Local lists not cleared after migration (sync banner keeps showing)
-- [ ] **P1 - Add-to-list button not working**: Star button in Browse and Search pages doesn't open dialog (#21)
-  - Possibly: Button click not registering, or dialog not opening due to async/context issues
+- [x] **P1 - Add-to-list button not working**: Star button in Browse and Search pages doesn't open dialog (#21)
+  - **FIXED**: Root cause was backend server not running + NiceGUI select API issue
+  - Remaining: Star should be filled/colored when item is already in a list (P3 enhancement)
 - [x] **P2 - Color picker**: All colors appeared the same ✅ Fixed: Changed to background-color style
 - [x] **P2 - Translations**: Added Hebrew translations for sync-related UI text ✅
 
@@ -959,6 +965,21 @@
 **נבדק על ידי:** Claude Code Review (סקירה ביקורתית שנייה)
 **תאריך:** 2026-01-29
 **סטטוס:** Code Review Complete - **נדרשת בדיקה ידנית מקיפה**
+
+---
+
+## Future Architecture Plans (2026-01-30)
+
+See `PLANS_INDEX.md` for full documentation.
+
+**Key Decision:** Moving to Supabase cloud backend
+- Replaces self-hosted FastAPI backend
+- Automatic backups, no server maintenance
+- See `SUPABASE_MIGRATION_PLAN.md` for details
+
+**Lists/Projects Unification:** After Supabase migration
+- Projects determine list colors (no user color picker)
+- See `LISTS_UNIFICATION_PLAN.md` for details
 
 **הערה חשובה:** הסקירה התמקדה בקוד קיים. לא נבדקו:
 - Backend database queries לעומק

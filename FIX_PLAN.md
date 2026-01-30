@@ -160,33 +160,27 @@ DELETE FROM user_lists WHERE id NOT IN (
 
 ---
 
-### Bug #21: Add-to-List Button Not Working (P1)
+### ~~Bug #21: Add-to-List Button Not Working~~ ✅ FIXED
 **Symptom:** Clicking star button in Browse/Search does nothing (no dialog, no notification)
-**Files:**
-- `web/pages/browse.py:990-1007` - add_manuscript_to_list()
-- `web/pages/search.py:1331-1350` - show_add_to_list_dialog_local()
-- `web/components/add_to_list_dialog.py:21-235` - show_add_to_list_dialog()
 
-**Possible causes:**
-1. Button click not registering (NiceGUI event binding issue)
-2. state.sys_id or state.current_page is None/falsy
-3. state.lists_mgr is None
-4. Dialog creation fails silently
+**Root Causes Found:**
+1. `ui.select.set_options()` was called with invalid arguments (`value_key`, `label_key`)
+2. Backend server was not running (ConnectError when creating lists)
 
-**Debug approach:**
-```python
-# Add to browse.py add_manuscript_to_list():
-def add_manuscript_to_list():
-    print(f"[DEBUG] add_manuscript_to_list called")
-    print(f"[DEBUG] state.sys_id = {state.sys_id}")
-    print(f"[DEBUG] state.current_page = {state.current_page}")
-    # ... rest of function
-```
+**Fixes Applied:**
+1. Changed `add_to_list_dialog.py` to use simple dict format for select options
+2. Added color picker visual feedback
+3. Added comprehensive debug logging
 
-**Testing:**
-1. Open browser console (F12) for JavaScript errors
-2. Check server console for Python errors
-3. Verify state.lists_mgr is initialized in web/state.py
+**Files Modified:**
+- `web/components/add_to_list_dialog.py` - Fixed select options format
+- `web/pages/browse.py` - Added debug logging
+- `web/user_lists.py` - Added debug logging
+
+**Remaining Enhancement (P3):**
+- Star button should show filled/colored when item is already in a list
+
+Commit: (pending)
 
 ---
 

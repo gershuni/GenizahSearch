@@ -5464,8 +5464,12 @@ class ListsManager:
 
     def clear_all(self):
         """Clear all lists and reset to default state. Used after migration."""
+        print(f"[DEBUG] ListsManager.clear_all() called")
+        print(f"[DEBUG] Before clear: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
         self.data = self._get_default_data()
+        print(f"[DEBUG] After reset: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
         self.save()
+        print(f"[DEBUG] Data saved to {self.LISTS_FILE}")
 
     # --- List Management ---
 
