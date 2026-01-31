@@ -93,6 +93,43 @@ pytest tests/
 2. **User data not syncing** - Check Supabase connection and credentials
 3. **Images not loading** - NLI/Cambridge IIIF APIs may be down
 
+## Documentation Maintenance (Important!)
+
+**AI agents working on this codebase should keep documentation updated.**
+
+### When to Update Docs
+
+| If you change... | Update these docs |
+|------------------|-------------------|
+| Architecture/infrastructure | `CLAUDE.md`, `docs/guides/DEPLOYMENT_TECHNICAL.md` |
+| Supabase schema (tables, RLS) | `docs/guides/SUPABASE_GUIDE.md` |
+| Web app pages/components | `docs/CODE_INDEX.md` |
+| Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
+| Major features | `CHANGELOG.md`, `README.md` |
+
+### Before Finishing a Session
+
+Run the documentation health check:
+```bash
+python scripts/check_docs.py
+```
+
+If it reports issues, fix them before committing.
+
+### Key Docs to Keep Updated
+
+1. **`CLAUDE.md`** - This file! Update if architecture changes
+2. **`docs/guides/DEPLOYMENT_TECHNICAL.md`** - Server/deployment info
+3. **`docs/guides/SUPABASE_GUIDE.md`** - Database schema and queries
+
+### Outdated Terms to Avoid
+
+These terms indicate outdated documentation:
+- `FastAPI` / `backend server` - Removed in Jan 2026
+- `genizah-backend` service - No longer exists
+- `DATABASE_URL` - Replaced by `SUPABASE_URL`
+- `port 8000` - Backend port no longer used
+
 ## Recently Changed
 
 - January 2026: Migrated from FastAPI to Supabase
