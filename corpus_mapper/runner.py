@@ -49,6 +49,7 @@ SEARCH_CONFIG = {
     'mode': 'variants',        # 'variants', 'variants_extended', 'variants_maximum'
     'num_workers': 4,          # Number of parallel processes
     'batch_size': 50,          # Files per checkpoint
+    'max_ms_matches': 20,      # Filter out chunks matching too many MSs (likely biblical)
 }
 
 
@@ -349,6 +350,64 @@ class ResultsDatabase:
             'top_title_matches': top_title_matches
         }
 
+    def get_unique_parallels(self, max_ms_matches: int = 10, min_score: int = 5000,
+                             limit: int = 100) -> List[Dict]:
+        """
+        Get unique parallels - chunks that match few manuscripts (not common biblical texts).
+
+        Args:
+            max_ms_matches: Maximum number of distinct manuscripts a chunk can match
+            min_score: Minimum score threshold
+            limit: Maximum results to return
+
+        Returns:
+            List of unique parallel matches with manuscript details
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT
+                    source_corpus, source_file, source_author, source_title,
+                    source_ref, source_text,
+                    GROUP_CONCAT(DISTINCT ms_id) as ms_ids,
+                    GROUP_CONCAT(DISTINCT ms_shelfmark) as ms_shelfmarks,
+                    GROUP_CONCAT(DISTINCT ms_title) as ms_titles,
+                    COUNT(DISTINCT ms_id) as ms_count,
+                    MAX(score) as max_score,
+                    AVG(score) as avg_score
+                FROM corpus_matches
+                WHERE score >= ?
+                GROUP BY source_corpus, source_file, source_ref, source_text
+                HAVING COUNT(DISTINCT ms_id) <= ?
+                ORDER BY max_score DESC
+                LIMIT ?
+            ''', (min_score, max_ms_matches, limit))
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    def export_unique_parallels(self, output_path: str, max_ms_matches: int = 10,
+                                min_score: int = 5000):
+        """Export unique parallels to a text file."""
+        results = self.get_unique_parallels(max_ms_matches, min_score, limit=1000)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"=== UNIQUE PARALLELS (max {max_ms_matches} MS matches, min score {min_score}) ===\n")
+            f.write(f"Total: {len(results)} unique chunks\n\n")
+
+            for i, r in enumerate(results, 1):
+                f.write(f"--- #{i} ({r['ms_count']} MSs, Score: {r['max_score']:,.0f}) ---\n")
+                f.write(f"Source: {r['source_title']} by {r['source_author']}\n")
+                f.write(f"File: {r['source_file']}, {r['source_ref']}\n")
+                f.write(f"Text: {r['source_text']}\n")
+                f.write(f"Matching MSs:\n")
+                for shelfmark in (r['ms_shelfmarks'] or '').split(',')[:5]:
+                    f.write(f"  - {shelfmark[:80]}\n")
+                if r['ms_titles']:
+                    f.write(f"MS Titles: {r['ms_titles'][:100]}\n")
+                f.write("\n")
+
+        return output_path
+
 
 # ============================================================================
 # Worker Functions (for multiprocessing)
@@ -363,8 +422,10 @@ def _init_worker():
     """Initialize search engine in worker process."""
     global _worker_engine, _worker_libs_db
 
-    from genizah_core import LabEngine
-    _worker_engine = LabEngine()
+    from genizah_core import LabEngine, MetadataManager, VariantManager
+    meta_mgr = MetadataManager()
+    var_mgr = VariantManager()
+    _worker_engine = LabEngine(meta_mgr, var_mgr)
     _worker_libs_db = LibrariesDB()
 
 
@@ -590,31 +651,128 @@ class CorpusRunner:
 # ============================================================================
 
 def run_test(corpus_id: str = 'ja', limit: int = 2):
-    """Quick test run on a few files."""
+    """Quick test run on a few files - SINGLE THREADED for faster startup."""
     print(f"\n{'='*60}")
     print(f"  TEST RUN: {corpus_id} corpus, {limit} files")
-    print(f"  Config: chunk_size=5, min_score=400, workers=2")
+    print(f"  Mode: Single-threaded (no multiprocessing)")
     print('='*60)
 
-    config = SEARCH_CONFIG.copy()
-    config['min_score'] = 400  # Lower for testing
-    config['num_workers'] = 2
+    # Import and initialize engine once (faster than multiprocessing)
+    from genizah_core import LabEngine, MetadataManager, VariantManager
+    print("\nLoading Lab Engine...")
+    meta_mgr = MetadataManager()
+    var_mgr = VariantManager()
+    engine = LabEngine(meta_mgr, var_mgr)
+    libs_db = LibrariesDB()
+    print("Engine ready!")
 
-    runner = CorpusRunner(config=config)
-    result = runner.run_corpus(corpus_id, limit=limit, resume=False)
+    # Get parser
+    if corpus_id == 'ja':
+        parser = JAParser()
+    else:
+        parser = MaagarimParser()
 
-    print(f"\nResults: {result}")
-    print(f"Database: {RESULTS_DB}")
+    config = {
+        'chunk_size': 5,
+        'min_score': 300,  # Lower for testing
+        'mode': 'variants',
+    }
 
-    # Show some results
     db = ResultsDatabase()
-    stats = db.get_stats()
-    print(f"\nTotal matches in DB: {stats['total_matches']}")
+    total_matches = 0
+    files_processed = 0
 
+    # Load canonical filter for pre-screening
+    try:
+        from .canonical_filter import get_canonical_filter
+        canonical_filter = get_canonical_filter()
+        print(f"Canonical filter loaded: {len(canonical_filter.fingerprints):,} fingerprints")
+    except Exception as e:
+        print(f"Warning: Could not load canonical filter: {e}")
+        canonical_filter = None
+
+    for doc in parser.iter_documents(limit=limit):
+        files_processed += 1
+        print(f"\n[{files_processed}] Processing: {os.path.basename(doc.file_path)}")
+        print(f"    Author: {getattr(doc, 'author', 'N/A')}")
+        print(f"    Title: {getattr(doc, 'title', getattr(doc, 'composition', 'N/A'))}")
+
+        file_matches = 0
+        results = []
+        chunks_skipped = 0
+
+        # Process chunks
+        chunk_count = 0
+        for chunk in doc.iter_chunks(chunk_size=config['chunk_size'], overlap=2):
+            chunk_count += 1
+            chunk_text = chunk['text']
+
+            if len(chunk_text) < 10:
+                continue
+
+            # Pre-screen against canonical texts (Bible/Mishnah/Talmud)
+            if canonical_filter and canonical_filter.is_canonical(chunk_text):
+                chunks_skipped += 1
+                continue
+
+            # Search
+            try:
+                search_results = engine.lab_composition_search(
+                    chunk_text,
+                    chunk_size=config['chunk_size'],
+                    mode=config['mode']
+                )
+
+                for item in search_results.get('main', []):
+                    score = item.get('score', 0)
+                    if score < config['min_score']:
+                        continue
+
+                    ms_id = item.get('uid', '')
+                    ms_info = libs_db.get_info(ms_id)
+                    title_match = libs_db.match_title(ms_id, getattr(doc, 'title', ''))
+
+                    result = SearchResult(
+                        source_corpus=corpus_id,
+                        source_file=os.path.basename(doc.file_path),
+                        source_author=getattr(doc, 'author', ''),
+                        source_title=getattr(doc, 'title', getattr(doc, 'composition', '')),
+                        source_ref=f"chunk {chunk_count}",
+                        source_text=chunk_text[:500],
+                        ms_id=ms_id,
+                        ms_shelfmark=item.get('raw_header', ''),
+                        ms_snippet=item.get('ms_snippet', '')[:500] if item.get('ms_snippet') else '',
+                        ms_title=ms_info.get('title', ''),
+                        score=score,
+                        title_match_score=title_match or 0.0,
+                    )
+                    results.append(result)
+                    file_matches += 1
+                    total_matches += 1
+
+            except Exception as e:
+                print(f"    Error on chunk {chunk_count}: {e}")
+
+        print(f"    Chunks: {chunk_count}, Skipped (canonical): {chunks_skipped}, Matches: {file_matches}")
+
+        # Save results
+        if results:
+            db.save_results(results)
+
+    print(f"\n{'='*60}")
+    print(f"  TEST COMPLETE")
+    print(f"  Files: {files_processed}, Total matches: {total_matches}")
+    print(f"  Database: {RESULTS_DB}")
+    print('='*60)
+
+    # Show stats
+    stats = db.get_stats()
     if stats.get('top_title_matches'):
         print("\nTop title matches:")
         for m in stats['top_title_matches'][:5]:
-            print(f"  {m['source_title'][:30]} -> {m['ms_title'][:30]} ({m['title_match']:.2f})")
+            src = m['source_title'][:30] if m['source_title'] else 'N/A'
+            ms = m['ms_title'][:30] if m['ms_title'] else 'N/A'
+            print(f"  {src} -> {ms} ({m['title_match']:.2f})")
 
 
 if __name__ == '__main__':

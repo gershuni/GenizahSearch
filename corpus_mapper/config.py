@@ -22,7 +22,7 @@ CORPORA = {
         'name': 'Judeo-Arabic (Friedberg)',
         'name_he': 'ערבית יהודית (פרידברג)',
         'path': os.path.join(BASE_DIR, 'big_data_files', 'JA'),
-        'pattern': '*.JSON',
+        'pattern': '*.json',
         'format': 'json',
         'description': 'Judeo-Arabic texts from Friedberg Genizah Project'
     },

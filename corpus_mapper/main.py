@@ -133,6 +133,35 @@ def cmd_export(args):
     print(f"Exported {len(rows)} matches to: {output_file}")
 
 
+def cmd_unique(args):
+    """Export unique parallels (filtering out common biblical/rabbinic texts)."""
+    from corpus_mapper.runner import ResultsDatabase
+    from corpus_mapper.config import OUTPUT_DIR
+
+    db = ResultsDatabase()
+
+    output_file = os.path.join(OUTPUT_DIR, f"unique_parallels.txt")
+    db.export_unique_parallels(
+        output_file,
+        max_ms_matches=args.max_ms,
+        min_score=args.min_score
+    )
+
+    # Also show summary
+    results = db.get_unique_parallels(args.max_ms, args.min_score, limit=10)
+
+    print(f"\n{'='*60}")
+    print(f"  UNIQUE PARALLELS (max {args.max_ms} MS matches)")
+    print(f"  Filtering out common texts (biblical, rabbinic, etc.)")
+    print('='*60)
+    print(f"\nExported to: {output_file}")
+    print(f"\nTop 10 unique parallels:")
+
+    for i, r in enumerate(results, 1):
+        print(f"\n  #{i} ({r['ms_count']} MSs, score {r['max_score']:,.0f})")
+        print(f"     {r['source_text'][:60]}...")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Corpus Mapper - Map text corpora to Genizah manuscripts',
@@ -186,6 +215,13 @@ Examples:
     export_parser.add_argument('--format', choices=['json', 'csv'], default='json')
     export_parser.add_argument('--limit', type=int, help='Limit rows to export')
 
+    # Unique parallels command
+    unique_parser = subparsers.add_parser('unique', help='Export unique parallels (filter common texts)')
+    unique_parser.add_argument('--max-ms', type=int, default=10,
+                               help='Max MS matches (higher = more common, default 10)')
+    unique_parser.add_argument('--min-score', type=int, default=5000,
+                               help='Minimum score threshold (default 5000)')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -199,6 +235,7 @@ Examples:
         'run': cmd_run,
         'stats': cmd_stats,
         'export': cmd_export,
+        'unique': cmd_unique,
     }
 
     commands[args.command](args)
