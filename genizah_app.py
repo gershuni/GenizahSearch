@@ -4509,7 +4509,7 @@ class GenizahGUI(QMainWindow):
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):
-                self._refresh_lists_tree()
+                self.lists_refresh_all()
 
         except Exception as e:
             QMessageBox.critical(self, tr("Sync Error"), str(e))
