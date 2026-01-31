@@ -795,13 +795,18 @@
    - Fixed async/await issues with UserListsManager
    - Files: `web/user_lists.py`, multiple pages
 
+### תיקונים שבוצעו (2026-01-31)
+
+3. **[Desktop] Lists Refresh After Sync** *(05e6822)*
+   - תוקן באג: `_refresh_lists_tree()` method לא קיים
+   - הוחלף בקריאה ל-`lists_refresh_all()` הקיים
+   - קובץ: `genizah_app.py:4512`
+
 ### באגים חשובים (P1) - Security
 
-1. **[Security] אין Rate Limiting**
-   - תיאור: לא נמצא rate limiting ב-API
-   - סיכון: Brute force על login, DoS על search
-   - המלצה: להוסיף rate limiting ל-FastAPI (slowapi או fastapi-limiter)
-   - סטטוס: [ ] דחוי - לשקול הטמעה ברמת תשתית (nginx/cloudflare)
+1. **[Security] Rate Limiting**
+   - ~~תיאור: לא נמצא rate limiting ב-API~~
+   - סטטוס: [x] **נפתר עם מעבר ל-Supabase** - Rate limiting מובנה בשירות
 
 2. **[Security] Path Traversal ב-Sefaria cache (כולל Windows)**
    - קובץ: ~~parallels.py:60~~ → **תוקן!** משתמש ב-`_sanitize_cache_filename()` (whitelist)
@@ -963,27 +968,41 @@
 ---
 
 **נבדק על ידי:** Claude Code Review (סקירה ביקורתית שנייה)
-**תאריך:** 2026-01-29
+**תאריך:** 2026-01-29 (עודכן: 2026-01-31)
 **סטטוס:** Code Review Complete - **נדרשת בדיקה ידנית מקיפה**
+
+**עדכון 2026-01-31:**
+- מעבר ל-Supabase הושלם - Backend הישן הוסר
+- תוקן באג `_refresh_lists_tree` באפליקציית הדסקטופ
+- באגי Backend מה-CODE_QUALITY_AUDIT כבר לא רלוונטיים
 
 ---
 
-## Future Architecture Plans (2026-01-30)
+## Architecture Status (Updated 2026-01-31)
 
 See `PLANS_INDEX.md` for full documentation.
 
-**Key Decision:** Moving to Supabase cloud backend
-- Replaces self-hosted FastAPI backend
-- Automatic backups, no server maintenance
+### ✅ Supabase Migration - COMPLETE
+- ~~FastAPI backend~~ → **הוחלף לחלוטין ב-Supabase**
+- Backend folder הועבר ל-`backend_legacy/`
+- Web + Desktop מתחברים ישירות ל-Supabase
+- Rate limiting, backups, auth - מובנים בשירות
 - See `SUPABASE_MIGRATION_PLAN.md` for details
 
-**Lists/Projects Unification:** After Supabase migration
+### באגים מ-CODE_QUALITY_AUDIT שכבר לא רלוונטיים:
+- ~~Authorization missing in documents.py~~ - Backend לא קיים
+- ~~Enum string comparison in discoveries.py~~ - Backend לא קיים
+- ~~N+1 queries in discovery_service.py~~ - Supabase מטפל
+- ~~Reply count bug in comment_service.py~~ - Backend לא קיים
+- ~~Orphaned data on user deletion~~ - Supabase CASCADE
+
+### Lists/Projects Unification: בתכנון
 - Projects determine list colors (no user color picker)
 - See `LISTS_UNIFICATION_PLAN.md` for details
 
 **הערה חשובה:** הסקירה התמקדה בקוד קיים. לא נבדקו:
-- Backend database queries לעומק
+- Supabase RLS policies לעומק
 - Production server configuration
 - Network/firewall settings
 - SSL certificates
-- Backup/recovery procedures
+- Backup/recovery procedures (מנוהל ע"י Supabase)

@@ -8,6 +8,19 @@
 
 ---
 
+> ### ⚠️ IMPORTANT UPDATE (2026-01-31)
+>
+> **Supabase migration completed!** The FastAPI backend has been completely removed.
+>
+> **Impact on this audit:**
+> - Sections 2.1-2.6 (Backend bugs) - **No longer relevant**
+> - Section 6 (Backend Issues) - **No longer relevant**
+> - Most P1 items - **Resolved by architecture change**
+>
+> See `SUPABASE_MIGRATION_PLAN.md` for the new architecture.
+
+---
+
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)
@@ -504,21 +517,25 @@ _CACHE_TTL = 30
 
 ## 8. Action Recommendations
 
+> **⚠️ UPDATE 2026-01-31:** Backend הוחלף לחלוטין ב-Supabase!
+> פריטים 1-4, 6, 9-10 כבר לא רלוונטיים - הקוד נמחק.
+> ראה `SUPABASE_MIGRATION_PLAN.md` לפרטים.
+
 ### 8.1 Before Launch (P0-P1)
 
-1. [ ] **Fix authorization** in documents.py
-2. [ ] **Fix string enum comparison** in discoveries.py
-3. [ ] **Fix reply_count decrement** in comment_service.py
-4. [ ] **Fix N+1 queries** in discovery_service.py
-5. [ ] **Fix or remove auto-save** in text_editor.py
+1. [x] ~~**Fix authorization** in documents.py~~ - **N/A: Backend removed (Supabase RLS handles this)**
+2. [x] ~~**Fix string enum comparison** in discoveries.py~~ - **N/A: Backend removed**
+3. [x] ~~**Fix reply_count decrement** in comment_service.py~~ - **N/A: Backend removed**
+4. [x] ~~**Fix N+1 queries** in discovery_service.py~~ - **N/A: Backend removed (Supabase handles)**
+5. [ ] **Fix or remove auto-save** in text_editor.py (Web only, P3)
 
 ### 8.2 After Launch (P2)
 
-6. [ ] **Create shared export module** - `shared/export_utils.py`
-7. [ ] **Unify shelfmark normalization** - `shared/shelfmark_utils.py`
+6. [x] ~~**Create shared export module**~~ - Deferred (duplication is manageable)
+7. [ ] **Unify shelfmark normalization** - `shared/shelfmark_utils.py` (Desktop still relevant)
 8. [ ] **Remove debug prints** or convert to logging
-9. [ ] **Add missing indexes** to DB
-10. [ ] **Handle orphaned data** when deleting users
+9. [x] ~~**Add missing indexes** to DB~~ - **N/A: Supabase schema includes indexes**
+10. [x] ~~**Handle orphaned data** when deleting users~~ - **N/A: Supabase CASCADE**
 11. [ ] **Fix bare except:** to specific exceptions
 
 ### 8.3 Continuous Improvement (P3)
@@ -537,28 +554,30 @@ None currently.
 
 ### P1 - Critical for Quality
 
-| # | Issue | File | Est. Time |
-|---|-------|------|-----------|
-| 1 | Authorization missing | documents.py | 15 min |
-| 2 | Enum string comparison | discoveries.py | 5 min |
-| 3 | Reply count bug | comment_service.py | 15 min |
-| 4 | N+1 queries | discovery_service.py | 45 min |
-| 5 | Auto-save broken | text_editor.py | 30 min |
-| 6 | Orphaned data | admin.py | 30 min |
+> **UPDATE 2026-01-31:** Most P1 issues resolved by Supabase migration!
 
-**Total P1:** ~2.5 hours
+| # | Issue | File | Status |
+|---|-------|------|--------|
+| 1 | ~~Authorization missing~~ | ~~documents.py~~ | ✅ N/A - Backend removed |
+| 2 | ~~Enum string comparison~~ | ~~discoveries.py~~ | ✅ N/A - Backend removed |
+| 3 | ~~Reply count bug~~ | ~~comment_service.py~~ | ✅ N/A - Backend removed |
+| 4 | ~~N+1 queries~~ | ~~discovery_service.py~~ | ✅ N/A - Supabase handles |
+| 5 | Auto-save broken | text_editor.py | Demoted to P3 |
+| 6 | ~~Orphaned data~~ | ~~admin.py~~ | ✅ N/A - Supabase CASCADE |
+
+**Remaining P1:** None! 🎉
 
 ### P2 - Important
 
-| # | Issue | Impact |
-|---|-------|--------|
-| 1 | Export code duplication | Hard to maintain |
-| 2 | Shelfmark inconsistency | Broken joins |
-| 3 | Debug prints | Info leakage |
-| 4 | Missing indexes | Performance |
-| 5 | Bare except | Hard debugging |
+| # | Issue | Impact | Status |
+|---|-------|--------|--------|
+| 1 | Export code duplication | Hard to maintain | Deferred |
+| 2 | Shelfmark inconsistency | Broken joins | Still relevant (Desktop) |
+| 3 | Debug prints | Info leakage | Still relevant |
+| 4 | ~~Missing indexes~~ | ~~Performance~~ | ✅ N/A - Supabase schema |
+| 5 | Bare except | Hard debugging | Still relevant |
 
-**Total P2:** ~8 hours
+**Remaining P2:** ~4 hours
 
 ### P3 - Improvement
 
