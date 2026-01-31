@@ -1,37 +1,59 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-01-23
+> Last updated: 2026-01-31
 > For: Developers, System Administrators, AI Assistants
 
 ---
 
-## Deployment Summary
+## Architecture Overview (January 2026)
 
-This production deployment was set up in January 2026. Key decisions:
+GenizahSearch uses a simplified architecture with Supabase as the backend:
 
-- **Domain**: Registered via Cloudflare (includes DNS, SSL, DDoS protection)
-- **Transcriptions data**: Downloaded from Zenodo (https://zenodo.org/records/17734473)
-- **Search indexes**: Built on-server using `build_index.py` (~1 hour build time)
-- **Database**: PostgreSQL for user data; Tantivy for manuscript search
-- **Management**: Cockpit web UI at admin.genizahsearch.com
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLOUDFLARE                               │
+│                   (DNS, SSL, DDoS Protection)                    │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                           NGINX                                  │
+│                      (Reverse Proxy)                             │
+│                   Port 80/443 → Port 8081                        │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      WEB APPLICATION                             │
+│                    (NiceGUI on port 8081)                        │
+│                                                                  │
+│   ┌─────────────────┐              ┌─────────────────────────┐  │
+│   │  Search/Browse  │              │    User Data            │  │
+│   │                 │              │                         │  │
+│   │  Tantivy Index  │              │  Supabase (Cloud)       │  │
+│   │    (Local)      │              │  - Authentication       │  │
+│   │                 │              │  - Lists & Items        │  │
+│   │  - tantivy_db   │              │  - Corrections          │  │
+│   │  - lab_index    │              │  - Comments             │  │
+│   │                 │              │  - Discoveries          │  │
+│   └─────────────────┘              │  - Joins                │  │
+│                                    └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### Data Sources
-| File | Source | Size |
-|------|--------|------|
-| Transcriptions.txt (V0.8) | Zenodo | 1.4 GB |
-| Genizah_OLD.txt (V0.7) | Optional, local upload | ~1 GB |
+### Key Changes from Previous Architecture
 
-### Index Sizes (built from Transcriptions.txt)
-| Index | Size | Purpose |
-|-------|------|---------|
-| tantivy_db | 3.3 GB | Main manuscript search |
-| lab_index | 3.0 GB | Parallels/lab features |
+| Component | Before (Pre-Jan 2026) | Now |
+|-----------|----------------------|-----|
+| Backend API | FastAPI on port 8000 | **Removed** - Supabase replaces it |
+| Database | PostgreSQL (self-hosted) | **Supabase** (cloud) |
+| Authentication | Custom JWT | **Supabase Auth** |
+| Services | 2 systemd services | **1 service** (genizah-web only) |
 
 ---
 
-## Infrastructure Overview
+## Server Details
 
-### Server Details
 | Component | Value |
 |-----------|-------|
 | Provider | AWS EC2 |
@@ -41,6 +63,7 @@ This production deployment was set up in January 2026. Key decisions:
 | Region | us-west-2 |
 
 ### Domain & DNS
+
 | Component | Value |
 |-----------|-------|
 | Domain | genizahsearch.com |
@@ -48,21 +71,14 @@ This production deployment was set up in January 2026. Key decisions:
 | DNS | Cloudflare (Proxied) |
 | SSL | Let's Encrypt + Cloudflare |
 
-### Cloudflare DNS Records
-| Type | Name | Target | Proxy |
-|------|------|--------|-------|
-| A | genizahsearch.com | 44.247.206.248 | Proxied |
-| CNAME | www | genizahsearch.com | Proxied |
-| CNAME | admin | genizahsearch.com | Proxied |
-
 ### Application Stack
+
 | Component | Technology | Port |
 |-----------|------------|------|
-| Backend API | FastAPI + Uvicorn | 8000 |
-| Web Frontend | NiceGUI | 8081 |
-| Database | PostgreSQL 16 | 5432 |
-| Web Server | Nginx 1.24 | 80, 443 |
-| Search Engine | Tantivy | - |
+| Web Application | NiceGUI | 8081 |
+| Web Server | Nginx | 80, 443 |
+| Search Engine | Tantivy | - (embedded) |
+| User Database | Supabase | Cloud |
 
 ---
 
@@ -70,74 +86,54 @@ This production deployment was set up in January 2026. Key decisions:
 
 ```
 /home/ubuntu/GenizahSearch/
-├── backend/                 # FastAPI backend
-│   ├── api/routes/         # API endpoints
-│   ├── models/             # SQLAlchemy models
-│   ├── schemas/            # Pydantic schemas
-│   └── services/           # Business logic
-├── web/                    # NiceGUI frontend
-│   ├── pages/              # Application pages
-│   └── components/         # UI components
-├── Genizah_Index/          # Search indexes
-│   ├── tantivy_db/         # Main search index (3.3GB)
-│   ├── lab_index/          # Parallels index (3.0GB)
-│   ├── browse_map.pkl      # Browse navigation data
-│   ├── metadata_cache.pkl  # Metadata cache
-│   └── lab/                # Lab configuration
-├── data/                   # Application data
-│   └── genizah_users.db    # SQLite (dev) - not used in prod
-├── venv/                   # Python virtual environment
-├── Transcriptions.txt      # Source transcription data (1.4GB)
-├── .env                    # Environment variables
-├── deploy.sh               # Deployment script
-├── build_index.py          # Index building script
-└── create_admin.py         # Admin user creation script
+├── web/                    # NiceGUI web application
+│   ├── main.py            # Entry point
+│   ├── pages/             # Page components
+│   ├── components/        # UI components
+│   └── supabase_client.py # Supabase integration
+├── Genizah_Index/         # Search indexes
+│   ├── tantivy_db/        # Main search index (3.3GB)
+│   ├── lab_index/         # Parallels index (3.0GB)
+│   ├── browse_map.pkl     # Browse navigation data
+│   ├── metadata_cache.pkl # Metadata cache
+│   └── lab/               # Lab configuration
+├── genizah_core.py        # Core search logic
+├── venv/                  # Python virtual environment
+├── Transcriptions.txt     # Source transcription data (1.4GB)
+├── .env                   # Environment variables
+├── deploy.sh              # Deployment script
+└── build_index.py         # Index building script
 ```
 
 ---
 
-## Configuration Files
+## Configuration
 
-### Environment Variables (`/home/ubuntu/GenizahSearch/.env`)
+### Environment Variables (`.env`)
+
 ```bash
-DATABASE_URL=postgresql://genizah:genizah_secure_pwd_2024@localhost:5432/genizah_db
-SECRET_KEY=cC7D6nzn_wJn091OuY_14V_9-IJK0SDjNUy7BAep078
+# Supabase Configuration (REQUIRED)
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Application Settings
+GENIZAH_PORT=8081
+NICEGUI_RELOAD=false
+NICEGUI_SHOW=false
 ENVIRONMENT=production
-DEBUG=false
 ```
 
-### Systemd Services
+### Systemd Service (`/etc/systemd/system/genizah-web.service`)
 
-#### Backend Service (`/etc/systemd/system/genizah-backend.service`)
-```ini
-[Unit]
-Description=Genizah Backend API
-After=network.target postgresql.service
-
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/GenizahSearch
-EnvironmentFile=/home/ubuntu/GenizahSearch/.env
-Environment="CORS_ORIGINS=[\"https://genizahsearch.com\",\"https://www.genizahsearch.com\",\"http://localhost:8081\"]"
-ExecStart=/home/ubuntu/GenizahSearch/venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### Web Service (`/etc/systemd/system/genizah-web.service`)
 ```ini
 [Unit]
 Description=Genizah Web Interface
-After=network.target genizah-backend.service
+After=network.target
 
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/GenizahSearch
 EnvironmentFile=/home/ubuntu/GenizahSearch/.env
-Environment=CORRECTIONS_API_URL=https://genizahsearch.com/api/v1
 Environment=GENIZAH_PORT=8081
 Environment=NICEGUI_RELOAD=false
 Environment=NICEGUI_SHOW=false
@@ -150,11 +146,12 @@ WantedBy=multi-user.target
 ```
 
 ### Nginx Configuration (`/etc/nginx/sites-available/genizah`)
+
 ```nginx
 server {
     listen 80;
     server_name genizahsearch.com www.genizahsearch.com;
-    # Redirects to HTTPS (managed by certbot)
+    return 301 https://$server_name$request_uri;
 }
 
 server {
@@ -164,22 +161,15 @@ server {
     ssl_certificate /etc/letsencrypt/live/genizahsearch.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/genizahsearch.com/privkey.pem;
 
-    # Backend API
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Web frontend (NiceGUI with WebSocket)
+    # All traffic goes to NiceGUI (no separate /api route needed)
     location / {
         proxy_pass http://127.0.0.1:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (required for NiceGUI)
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -190,69 +180,22 @@ server {
 
 ---
 
-## Database
-
-### PostgreSQL Connection
-```
-Host: localhost
-Port: 5432
-Database: genizah_db
-User: genizah
-Password: genizah_secure_pwd_2024
-```
-
-### Useful Commands
-```bash
-# Connect to database
-sudo -u postgres psql genizah_db
-
-# List tables
-\dt
-
-# View users
-SELECT id, email, username, role, is_active FROM users;
-
-# Backup database
-pg_dump -U genizah genizah_db > backup_$(date +%Y%m%d).sql
-
-# Restore database
-psql -U genizah genizah_db < backup.sql
-```
-
----
-
 ## Service Management
 
 ### Systemd Commands
+
 ```bash
 # Check status
-sudo systemctl status genizah-backend genizah-web
+sudo systemctl status genizah-web
 
 # Start/Stop/Restart
-sudo systemctl start genizah-backend genizah-web
-sudo systemctl stop genizah-backend genizah-web
-sudo systemctl restart genizah-backend genizah-web
+sudo systemctl start genizah-web
+sudo systemctl stop genizah-web
+sudo systemctl restart genizah-web
 
-# Enable/Disable on boot
-sudo systemctl enable genizah-backend genizah-web
-sudo systemctl disable genizah-backend genizah-web
-
-# Reload systemd after config changes
-sudo systemctl daemon-reload
-```
-
-### View Logs
-```bash
-# Real-time backend logs
-sudo journalctl -u genizah-backend -f
-
-# Real-time web logs
-sudo journalctl -u genizah-web -f
-
-# Last 100 lines
-sudo journalctl -u genizah-backend -n 100
-
-# Logs since today
+# View logs
+sudo journalctl -u genizah-web -f          # Real-time
+sudo journalctl -u genizah-web -n 100      # Last 100 lines
 sudo journalctl -u genizah-web --since today
 
 # Nginx logs
@@ -265,6 +208,7 @@ sudo tail -f /var/log/nginx/error.log
 ## Deployment Procedures
 
 ### Standard Code Update
+
 ```bash
 cd /home/ubuntu/GenizahSearch
 ./deploy.sh
@@ -274,86 +218,95 @@ Or manually:
 ```bash
 cd /home/ubuntu/GenizahSearch
 git fetch origin
-git reset --hard origin/web-parallels-snippet-fix-7917465670133512409
+git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt
-pip install -r backend/requirements.txt
-sudo systemctl restart genizah-backend genizah-web
+sudo systemctl restart genizah-web
 ```
 
-### Rebuild Indexes
+### Rebuild Search Indexes
+
 ```bash
 cd /home/ubuntu/GenizahSearch
 source venv/bin/activate
 
-# Build both indexes
+# Build both indexes (~1 hour)
 python build_index.py
 
-# Build main index only
-python build_index.py main
+# Build specific index
+python build_index.py main    # Main search index only
+python build_index.py lab     # Lab/parallels index only
 
-# Build lab index only
-python build_index.py lab
-
-# Restart services after rebuild
-sudo systemctl restart genizah-backend genizah-web
-```
-
-### Create Admin User
-```bash
-cd /home/ubuntu/GenizahSearch
-source venv/bin/activate
-python create_admin.py email@example.com password "Full Name"
+# Restart service after rebuild
+sudo systemctl restart genizah-web
 ```
 
 ---
 
-## SSL Certificate
+## Supabase Management
 
-### Certificate Details
-- Provider: Let's Encrypt
-- Auto-renewal: Enabled via certbot timer
-- Location: `/etc/letsencrypt/live/genizahsearch.com/`
+### Dashboard Access
 
-### Manual Renewal
-```bash
-sudo certbot renew
-sudo systemctl reload nginx
+- URL: https://supabase.com/dashboard
+- Project: GenizahSearch
+
+### Database Tables
+
+| Table | Description |
+|-------|-------------|
+| `profiles` | User profiles (extends auth.users) |
+| `user_lists` | Personal manuscript lists |
+| `list_items` | Items in each list |
+| `corrections` | Transcription corrections |
+| `comments` | User comments on manuscripts |
+| `discoveries` | Community discoveries/findings |
+| `joins` | Fragment join relationships |
+
+### Common Operations
+
+```sql
+-- View all users
+SELECT id, email, full_name, role FROM profiles;
+
+-- View user's lists
+SELECT * FROM user_lists WHERE user_id = 'uuid-here';
+
+-- View pending corrections
+SELECT * FROM corrections WHERE status = 'pending';
 ```
 
-### Check Certificate Expiry
-```bash
-sudo certbot certificates
-```
+### Backups
+
+Supabase handles automatic daily backups. To restore:
+1. Dashboard → Settings → Database → Backups
+2. Select backup point → Restore
 
 ---
 
 ## Monitoring & Health Checks
 
 ### Quick Health Check
+
 ```bash
-# Check services
-curl -s http://localhost:8000/api/docs -o /dev/null -w '%{http_code}\n'  # Should be 200
-curl -s http://localhost:8081 -o /dev/null -w '%{http_code}\n'           # Should be 200
+# Check service
+curl -s http://localhost:8081 -o /dev/null -w '%{http_code}\n'  # Should be 200
 
 # Check external access
-curl -s https://genizahsearch.com -o /dev/null -w '%{http_code}\n'       # Should be 200
+curl -s https://genizahsearch.com -o /dev/null -w '%{http_code}\n'  # Should be 200
 ```
 
-### Disk Usage
+### Server Resources
+
 ```bash
+# Disk usage
 df -h /
 du -sh /home/ubuntu/GenizahSearch/Genizah_Index/*
-```
 
-### Memory Usage
-```bash
+# Memory
 free -h
-```
 
-### Process Status
-```bash
-ps aux | grep -E '(uvicorn|nicegui|python)'
+# Processes
+ps aux | grep python
 ```
 
 ---
@@ -361,105 +314,100 @@ ps aux | grep -E '(uvicorn|nicegui|python)'
 ## Troubleshooting
 
 ### Service Won't Start
-1. Check logs: `sudo journalctl -u genizah-backend -n 50`
-2. Verify environment file: `cat /home/ubuntu/GenizahSearch/.env`
-3. Test manually: `cd /home/ubuntu/GenizahSearch && source venv/bin/activate && python -m uvicorn backend.main:app`
+
+1. Check logs: `sudo journalctl -u genizah-web -n 50`
+2. Verify environment: `cat /home/ubuntu/GenizahSearch/.env`
+3. Test manually:
+   ```bash
+   cd /home/ubuntu/GenizahSearch
+   source venv/bin/activate
+   python -m web.main
+   ```
 
 ### 502 Bad Gateway
-1. Check if services are running: `sudo systemctl status genizah-backend genizah-web`
-2. Check nginx config: `sudo nginx -t`
-3. Reload nginx: `sudo systemctl reload nginx`
 
-### Database Connection Error
-1. Check PostgreSQL: `sudo systemctl status postgresql`
-2. Test connection: `psql -U genizah -h localhost genizah_db`
-3. Check DATABASE_URL in `.env`
+1. Check service: `sudo systemctl status genizah-web`
+2. Check nginx: `sudo nginx -t`
+3. Restart: `sudo systemctl restart genizah-web && sudo systemctl reload nginx`
 
-### Index Not Loading
-1. Verify index exists: `ls -la /home/ubuntu/GenizahSearch/Genizah_Index/tantivy_db/`
+### User Data Not Syncing
+
+1. Check Supabase status: https://status.supabase.com
+2. Verify `.env` has correct `SUPABASE_URL` and `SUPABASE_ANON_KEY`
+3. Check browser console for errors
+4. Test Supabase connection:
+   ```python
+   from web.supabase_client import get_client
+   client = get_client()
+   print(client.table('profiles').select('*').limit(1).execute())
+   ```
+
+### Search Not Working
+
+1. Check index exists: `ls -la /home/ubuntu/GenizahSearch/Genizah_Index/tantivy_db/`
 2. Check permissions: `ls -la /home/ubuntu/GenizahSearch/Genizah_Index/`
-3. Restart services: `sudo systemctl restart genizah-backend genizah-web`
+3. Restart service: `sudo systemctl restart genizah-web`
+4. If still broken, rebuild index (see above)
 
 ---
 
-## Backup Procedures
+## SSL Certificate
 
-### Database Backup
+- Provider: Let's Encrypt
+- Auto-renewal: Enabled via certbot
+- Location: `/etc/letsencrypt/live/genizahsearch.com/`
+
 ```bash
-# Create backup
-pg_dump -U genizah genizah_db > /home/ubuntu/backups/db_$(date +%Y%m%d_%H%M%S).sql
+# Manual renewal
+sudo certbot renew
+sudo systemctl reload nginx
 
-# Automated daily backup (add to crontab)
-0 2 * * * pg_dump -U genizah genizah_db > /home/ubuntu/backups/db_$(date +\%Y\%m\%d).sql
-```
-
-### Index Backup
-```bash
-# Compress and backup indexes
-tar -czvf /home/ubuntu/backups/indexes_$(date +%Y%m%d).tar.gz /home/ubuntu/GenizahSearch/Genizah_Index/
+# Check expiry
+sudo certbot certificates
 ```
 
 ---
 
 ## Security Notes
 
-- SSH access is key-based only
-- PostgreSQL only accepts local connections
-- All external traffic goes through Cloudflare proxy
-- SSL/TLS encryption enabled
-- CORS restricted to genizahsearch.com domains
+- SSH: Key-based authentication only
+- Supabase: Row Level Security (RLS) enabled
+- External traffic: All through Cloudflare proxy
+- SSL/TLS: Encryption enabled
+- Database: No direct access (Supabase handles it)
 
 ---
 
 ## Cockpit Server Management
 
-Cockpit provides a web-based UI for server management.
+Web-based UI for server management:
 
-### Access
 - URL: https://admin.genizahsearch.com
 - User: `ubuntu`
-- Auth: Password (set via `sudo passwd ubuntu`)
-
-### Nginx Configuration (`/etc/nginx/sites-available/cockpit`)
-```nginx
-server {
-    listen 443 ssl;
-    server_name admin.genizahsearch.com;
-
-    ssl_certificate /etc/letsencrypt/live/genizahsearch.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/genizahsearch.com/privkey.pem;
-
-    location / {
-        proxy_pass https://127.0.0.1:9090;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_ssl_verify off;
-    }
-}
-```
-
-### Service Management
-```bash
-# Cockpit is socket-activated
-sudo systemctl status cockpit.socket
-sudo systemctl restart cockpit.socket
-```
+- Auth: Set password via `sudo passwd ubuntu`
 
 ---
 
-## Pending / Optional Tasks
+## Data Sources
 
-- [ ] Upload V0.7 transcriptions (Genizah_OLD.txt) for historical comparison
-- [ ] Set Cloudflare SSL mode to "Full (strict)" for additional security
-- [ ] Configure automated database backups (cron job)
-- [ ] Set up monitoring alerts (optional: UptimeRobot, Healthchecks.io)
+| File | Source | Size |
+|------|--------|------|
+| Transcriptions.txt (V0.8) | [Zenodo](https://zenodo.org/records/17734473) | 1.4 GB |
+| Genizah_OLD.txt (V0.7) | Optional, historical | ~1 GB |
+
+### Index Sizes
+
+| Index | Size | Purpose |
+|-------|------|---------|
+| tantivy_db | 3.3 GB | Main manuscript search |
+| lab_index | 3.0 GB | Parallels/lab features |
 
 ---
 
-## Contact & Resources
+## Resources
 
-- GitHub Repository: https://github.com/gershuni/GenizahSearch
-- API Documentation: https://genizahsearch.com/api/docs
+- GitHub: https://github.com/gershuni/GenizahSearch
+- Website: https://genizahsearch.com
 - Server Management: https://admin.genizahsearch.com
+- Supabase Dashboard: https://supabase.com/dashboard
 - Cloudflare Dashboard: https://dash.cloudflare.com

@@ -29,7 +29,9 @@ docs/
 │
 ├── guides/                   # How-to guides
 │   ├── WEBSITE_ADMIN_GUIDE.md    # For site admins (non-technical)
-│   └── DEPLOYMENT_TECHNICAL.md   # Technical deployment guide
+│   ├── DEPLOYMENT_TECHNICAL.md   # Technical deployment guide
+│   ├── DEVELOPER_GUIDE.md        # Local development setup
+│   └── SUPABASE_GUIDE.md         # Supabase database guide
 │
 ├── plans/                    # Implementation plans
 │   ├── PLANS_INDEX.md            # Index of all plans
@@ -42,9 +44,7 @@ docs/
 │
 ├── specs/                    # Technical specifications
 │   ├── JOINS_TECHNICAL_SPEC.md
-│   ├── JOINS_SIMPLIFIED_SPEC.md
-│   ├── USER_CORRECTIONS_SPEC.md
-│   └── SEARCHABLE_CORRECTIONS_SPEC.md
+│   └── JOINS_SIMPLIFIED_SPEC.md
 │
 └── archive/                  # Archived/historical documents
     ├── START_SERVERS_README.md   # Outdated (backend removed)
@@ -66,7 +66,9 @@ docs/
   - Cockpit server management
 
 ### For Developers
+- **[DEVELOPER_GUIDE.md](guides/DEVELOPER_GUIDE.md)** - Getting started with local development
 - **[DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md)** - Technical deployment and configuration
+- **[SUPABASE_GUIDE.md](guides/SUPABASE_GUIDE.md)** - Working with the Supabase database
 
 ---
 
@@ -93,8 +95,8 @@ Detailed specifications for complex features:
 |------|-------------|
 | [JOINS_TECHNICAL_SPEC.md](specs/JOINS_TECHNICAL_SPEC.md) | Fragment joins system architecture |
 | [JOINS_SIMPLIFIED_SPEC.md](specs/JOINS_SIMPLIFIED_SPEC.md) | Simplified joins for first release |
-| [USER_CORRECTIONS_SPEC.md](specs/USER_CORRECTIONS_SPEC.md) | User corrections workflow |
-| [SEARCHABLE_CORRECTIONS_SPEC.md](specs/SEARCHABLE_CORRECTIONS_SPEC.md) | Searchable corrections index |
+
+> Note: Old correction specs (USER_CORRECTIONS_SPEC.md, SEARCHABLE_CORRECTIONS_SPEC.md) moved to archive after Supabase migration.
 
 ---
 
