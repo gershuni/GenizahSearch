@@ -108,6 +108,17 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ---
 
+## Documentation
+
+For detailed documentation, see the [docs/](docs/DOCUMENTATION_INDEX.md) directory:
+
+* **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Overview of all documentation
+* **[Admin Guide](docs/guides/WEBSITE_ADMIN_GUIDE.md)** - Website management for administrators
+* **[Code Index](docs/CODE_INDEX.md)** - Code structure and architecture
+* **[Plans](docs/plans/)** - Implementation plans and roadmaps
+
+---
+
 ## Credits & Data
 
 * **Development:** Hillel Gershuni
