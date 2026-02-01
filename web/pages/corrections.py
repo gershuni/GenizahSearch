@@ -118,50 +118,64 @@ async def create_corrections_page():
                 ui.label(tr('User not found')).style('color: var(--danger);')
                 return
 
-            # Get user's corrections from Supabase
-            try:
-                corrections_raw = get_corrections(author_id=user_id)
-                # Format corrections for display
-                corrections = []
-                for c in corrections_raw:
-                    profile = c.get('profiles', {}) or {}
-                    corrections.append({
-                        'id': c.get('id'),
-                        'document_id': c.get('sys_id'),
-                        'system_id': c.get('sys_id'),
-                        'page_number': c.get('page_number'),
-                        'original_text': c.get('original_text'),
-                        'corrected_text': c.get('corrected_text'),
-                        'notes': c.get('notes'),
-                        'status': c.get('status', 'pending'),
-                        'created_at': c.get('created_at', ''),
-                        'upvotes': c.get('upvotes', 0),
-                        'downvotes': c.get('downvotes', 0),
-                        'user_vote': None  # TODO: Implement vote tracking
-                    })
-            except Exception as e:
-                ui.label(f"{tr('Error')}: {str(e)}").style('color: var(--danger);')
-                return
+            # Container for content
+            content_container = ui.column().classes('w-full')
 
-            if not corrections:
+            # Show loading spinner initially
+            with content_container:
                 with ui.column().classes('w-full items-center py-8'):
-                    ui.icon('edit_note').classes('text-6xl').style('color: var(--text-tertiary);')
-                    # Changed to H3
-                    h3(tr('No edits yet'), classes='text-xl', style='color: var(--text-secondary);')
-                    ui.label(tr('Edit transcriptions to help improve the corpus')).style('color: var(--text-tertiary);')
-            else:
-                def delete_correction(corr_id: int):
-                    """Delete a correction after confirmation."""
-                    try:
-                        client = get_client()
-                        client.table('corrections').delete().eq('id', corr_id).execute()
-                        ui.notify(tr('Correction deleted'), type='positive')
-                        ui.navigate.reload()
-                    except Exception as e:
-                        ui.notify(str(e), type='negative')
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr('Loading your edits...')).classes('mt-2').style('color: var(--text-secondary);')
 
-                for corr in corrections:
-                    create_edit_card(corr, delete_correction)
+            def load_edits():
+                content_container.clear()
+                with content_container:
+                    # Get user's corrections from Supabase
+                    try:
+                        corrections_raw = get_corrections(author_id=user_id)
+                        # Format corrections for display
+                        corrections = []
+                        for c in corrections_raw:
+                            profile = c.get('profiles', {}) or {}
+                            corrections.append({
+                                'id': c.get('id'),
+                                'document_id': c.get('sys_id'),
+                                'system_id': c.get('sys_id'),
+                                'page_number': c.get('page_number'),
+                                'original_text': c.get('original_text'),
+                                'corrected_text': c.get('corrected_text'),
+                                'notes': c.get('notes'),
+                                'status': c.get('status', 'pending'),
+                                'created_at': c.get('created_at', ''),
+                                'upvotes': c.get('upvotes', 0),
+                                'downvotes': c.get('downvotes', 0),
+                                'user_vote': None  # TODO: Implement vote tracking
+                            })
+                    except Exception as e:
+                        ui.label(f"{tr('Error')}: {str(e)}").style('color: var(--danger);')
+                        return
+
+                    if not corrections:
+                        with ui.column().classes('w-full items-center py-8'):
+                            ui.icon('edit_note').classes('text-6xl').style('color: var(--text-tertiary);')
+                            h3(tr('No edits yet'), classes='text-xl', style='color: var(--text-secondary);')
+                            ui.label(tr('Edit transcriptions to help improve the corpus')).style('color: var(--text-tertiary);')
+                    else:
+                        def delete_correction(corr_id: int):
+                            """Delete a correction after confirmation."""
+                            try:
+                                client = get_client()
+                                client.table('corrections').delete().eq('id', corr_id).execute()
+                                ui.notify(tr('Correction deleted'), type='positive')
+                                ui.navigate.reload()
+                            except Exception as e:
+                                ui.notify(str(e), type='negative')
+
+                        for corr in corrections:
+                            create_edit_card(corr, delete_correction)
+
+            # Load data after brief delay to show spinner
+            ui.timer(0.1, load_edits, once=True)
 
         def create_edit_card(corr: dict, delete_callback):
             """Create a card for a single edit/correction."""
@@ -355,36 +369,50 @@ async def create_corrections_page():
                     h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
                 return
 
-            # Get user's comments from Supabase
-            try:
-                comments_raw = get_comments(author_id=user_id)
-                comments = []
-                for c in comments_raw:
-                    profile = c.get('profiles', {}) or {}
-                    comments.append({
-                        'id': c.get('id'),
-                        'document_id': c.get('sys_id'),
-                        'page_number': c.get('page_number'),
-                        'content': c.get('content', ''),
-                        'comment_type': c.get('scope', 'general'),
-                        'created_at': c.get('created_at', '')
-                    })
-            except Exception as e:
-                with ui.column().classes('w-full items-center py-8'):
-                    ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
-                    h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
-                    ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
-                return
+            # Container for content
+            content_container = ui.column().classes('w-full')
 
-            if not comments:
+            # Show loading spinner initially
+            with content_container:
                 with ui.column().classes('w-full items-center py-8'):
-                    ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
-                    # Changed to H3
-                    h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
-                    ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
-            else:
-                for comment in comments:
-                    create_comment_card(comment)
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr('Loading your comments...')).classes('mt-2').style('color: var(--text-secondary);')
+
+            def load_comments():
+                content_container.clear()
+                with content_container:
+                    # Get user's comments from Supabase
+                    try:
+                        comments_raw = get_comments(author_id=user_id)
+                        comments = []
+                        for c in comments_raw:
+                            profile = c.get('profiles', {}) or {}
+                            comments.append({
+                                'id': c.get('id'),
+                                'document_id': c.get('sys_id'),
+                                'page_number': c.get('page_number'),
+                                'content': c.get('content', ''),
+                                'comment_type': c.get('scope', 'general'),
+                                'created_at': c.get('created_at', '')
+                            })
+                    except Exception as e:
+                        with ui.column().classes('w-full items-center py-8'):
+                            ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
+                            h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
+                            ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
+                        return
+
+                    if not comments:
+                        with ui.column().classes('w-full items-center py-8'):
+                            ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
+                            h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
+                            ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
+                    else:
+                        for comment in comments:
+                            create_comment_card(comment)
+
+            # Load data after brief delay to show spinner
+            ui.timer(0.1, load_comments, once=True)
 
         def create_comment_card(comment: dict):
             """Create a card for a single comment."""
