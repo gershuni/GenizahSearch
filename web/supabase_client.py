@@ -678,7 +678,7 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
     """Get comments with optional filters."""
     try:
         client = get_client()
-        query = client.table('comments').select('*, profiles(username, full_name)')
+        query = client.table('comments').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
