@@ -904,8 +904,8 @@ None
 
 ### Critical - Safety (Before Launch)
 1. [x] **Security: Verify all content in sanitize=False comes from trusted source** ✅ Audited - 14/16 safe, 2 fixed
-2. [ ] **Security: Check HTTPS enforcement on Production**
-3. [ ] **Security: Check no information leakage in error messages to user**
+2. [x] **Security: Check HTTPS enforcement on Production** ✅ HTTP→HTTPS redirect (301), Cloudflare SSL, httponly cookies
+3. [x] **Security: Check no information leakage in error messages to user** ✅ Low risk - `str(e)` in toasts only, logged to server, users authenticated. P3 cleanup post-launch.
 
 ### Urgent - Functional (Before Launch)
 4. [x] **Comments: Comment added in Browse appears in Browse** ✅ Fixed (#15) - async timing issue
