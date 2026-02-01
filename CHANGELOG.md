@@ -6,6 +6,10 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [5.2.0] - 2026-02-01
 
+### Documentation
+
+- **Help Center rewrite:** Comprehensive bilingual help page covering Search, Parallels, Browse, Lists, and Export features
+
 ### UX Improvements
 
 - **Search spinners:** More prominent animated spinners (bars instead of dots, larger size, pulsing text)
