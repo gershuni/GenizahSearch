@@ -1062,7 +1062,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'shelfmark': c.get('shelfmark'),
                         'page_number': c.get('page_number'),
                         'created_at': c.get('created_at'),
-                        'author': {'id': c.get('user_id')}
+                        'author': {'id': c.get('author_id')}  # corrections uses author_id
                     })
             except Exception as e:
                 print(f"Error loading corrections: {e}")
@@ -1083,7 +1083,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'shelfmark': c.get('shelfmark'),
                         'page_number': c.get('page_number'),
                         'created_at': c.get('created_at'),
-                        'author': {'id': c.get('user_id')}
+                        'author': {'id': c.get('author_id')}  # comments uses author_id
                     })
             except Exception as e:
                 print(f"Error loading comments: {e}")
