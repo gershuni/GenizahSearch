@@ -528,6 +528,32 @@ class SupabaseCorrectionsClient:
             except:
                 pass
 
+    def request_password_reset(self, email: str) -> Dict[str, Any]:
+        """
+        Request a password reset email.
+
+        This is useful for users who signed up with Google OAuth and need
+        to set a password for desktop app login.
+
+        Args:
+            email: User's email address
+
+        Returns:
+            Dict with 'success': True on success, or 'error': message on failure
+        """
+        client = self._get_client()
+        if not client:
+            return {'error': 'Supabase client not available'}
+
+        try:
+            # Supabase's reset_password_for_email sends a reset link
+            client.auth.reset_password_for_email(email)
+            return {'success': True}
+        except AuthApiError as e:
+            return {'error': str(e)}
+        except Exception as e:
+            return {'error': f'Failed to send reset email: {str(e)}'}
+
     def _load_user_profile(self, user_id: str):
         """Load user profile from Supabase."""
         client = self._get_client()

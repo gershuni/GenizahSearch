@@ -1029,6 +1029,12 @@ TRANSLATIONS = {
     "Please enter email and password": "אנא הזן אימייל וסיסמה",
     "Logging in...": "מתחבר...",
     "Login Failed": "ההתחברות נכשלה",
+    "Forgot password?": "שכחת סיסמה?",
+    "Forgot Password": "שכחתי סיסמה",
+    "Enter your email address:": "הזן את כתובת האימייל שלך:",
+    "Email Sent": "האימייל נשלח",
+    "A password reset link has been sent to your email.\n\nIf you signed up with Google, this will let you set a password for desktop login.": "קישור לאיפוס סיסמה נשלח לאימייל שלך.\n\nאם נרשמת דרך Google, זה יאפשר לך להגדיר סיסמה לכניסה מהתוכנה.",
+    "Failed to send reset email": "שליחת האימייל לאיפוס נכשלה",
     "Create Account": "יצירת חשבון",
     "Create a new account to contribute corrections": "צור חשבון חדש כדי לתרום תיקונים",
     "Email*:": "אימייל*:",
@@ -1050,6 +1056,8 @@ TRANSLATIONS = {
     "Not logged in": "לא מחובר",
     "Login to participate in the community": "התחבר כדי להשתתף בקהילה",
     "Login with Google": "התחבר עם Google",
+    "Sign up with Google": "הרשם עם Google",
+    "For desktop app login, set a password in your profile after signing up.": "לכניסה מתוכנת המחשב, הגדר סיסמה בפרופיל לאחר ההרשמה.",
     "or": "או",
 
     # ==================== Submit Correction ====================

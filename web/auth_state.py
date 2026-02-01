@@ -200,7 +200,7 @@ def create_login_dialog():
     """
     from web.translations import tr
 
-    dialog = ui.dialog().props('persistent')
+    dialog = ui.dialog()  # Removed 'persistent' to allow Esc to close
 
     with dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
         with ui.tabs().classes('w-full') as tabs:
@@ -233,6 +233,9 @@ def create_login_dialog():
                     with ui.row().classes('w-full justify-end gap-2'):
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Login'), on_click=handle_login).props('color=primary')
+
+                    # Enter key to submit
+                    login_password.on('keydown.enter', handle_login)
 
                     # Divider
                     with ui.row().classes('w-full items-center gap-2 my-2'):
@@ -298,6 +301,32 @@ def create_login_dialog():
                     with ui.row().classes('w-full justify-end gap-2'):
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Register'), on_click=handle_register).props('color=primary')
+
+                    # Enter key to submit
+                    reg_confirm.on('keydown.enter', handle_register)
+
+                    # Divider
+                    with ui.row().classes('w-full items-center gap-2 my-2'):
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+                        ui.label(tr('or')).classes('text-gray-500 text-sm')
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+
+                    # Google signup button (same as login - will create account if needed)
+                    async def handle_google_signup():
+                        reg_error.classes('hidden', remove='visible')
+                        redirect_url = f"{os.environ.get('SITE_URL', 'https://genizahsearch.com')}/auth/callback"
+                        result = get_oauth_url('google', redirect_url)
+                        if "error" in result:
+                            reg_error.text = result["error"]
+                            reg_error.classes('visible', remove='hidden')
+                        else:
+                            ui.navigate.to(result['url'], new_tab=False)
+
+                    ui.button(tr('Sign up with Google'), icon='img:https://www.google.com/favicon.ico',
+                              on_click=handle_google_signup).classes('w-full').props('outline')
+
+                    # Note about desktop app
+                    ui.label(tr('For desktop app login, set a password in your profile after signing up.')).classes('text-xs text-center mt-1').style('color: var(--text-muted);')
 
     # Store tabs reference for external access
     dialog.tabs = tabs

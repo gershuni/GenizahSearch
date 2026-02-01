@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFrame, QMessageBox, QProgressDialog,
     QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
     QSplitter, QMenu, QStatusBar, QListWidget, QListWidgetItem,
-    QCompleter
+    QCompleter, QInputDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
@@ -78,6 +78,13 @@ class LoginDialog(QDialog):
 
         layout.addLayout(form)
 
+        # Forgot password link
+        forgot_link = QLabel(f'<a href="#">{tr("Forgot password?")}</a>')
+        forgot_link.setOpenExternalLinks(False)
+        forgot_link.linkActivated.connect(self.open_forgot_password)
+        forgot_link.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(forgot_link)
+
         # Buttons
         btn_layout = QHBoxLayout()
 
@@ -122,6 +129,31 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, tr("Login Failed"), message)
             self.btn_login.setEnabled(True)
             self.btn_login.setText(tr("Login"))
+
+    def open_forgot_password(self):
+        """Open forgot password dialog to send reset email."""
+        email = self.email_input.text().strip()
+        if not email:
+            email, ok = QInputDialog.getText(
+                self, tr("Forgot Password"),
+                tr("Enter your email address:"),
+                QLineEdit.EchoMode.Normal
+            )
+            if not ok or not email:
+                return
+
+        # Send password reset email via Supabase
+        try:
+            result = self.client.request_password_reset(email)
+            if result.get('success'):
+                QMessageBox.information(
+                    self, tr("Email Sent"),
+                    tr("A password reset link has been sent to your email.\n\nIf you signed up with Google, this will let you set a password for desktop login.")
+                )
+            else:
+                QMessageBox.warning(self, tr("Error"), result.get('error', tr("Failed to send reset email")))
+        except Exception as e:
+            QMessageBox.warning(self, tr("Error"), str(e))
 
     def open_register(self):
         dialog = RegisterDialog(self, self.client)
