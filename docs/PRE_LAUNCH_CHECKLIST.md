@@ -266,8 +266,8 @@
 - [x] New list appears *(lists.py:75 - refresh_ui)*
 
 ## 5.3 Edit List
-- [!] Edit name button active *(missing - P2)*
-- [!] Name change succeeds *(missing - P2)*
+- [x] Edit name button active *(lists.py:37-80 - inline-editable label)*
+- [x] Name change succeeds *(lists.py:78 - update_list)*
 - [x] Delete list active *(lists.py:85-106)*
 - [x] Delete confirmation required *(lists.py:90-92)*
 
@@ -299,7 +299,7 @@
 
 ## 6.1 Registration
 - [x] "Register" button displayed in header *(auth_state.py:501)*
-- [!] **"Register" button opens login dialog instead of register** *(bug - fix)*
+- [x] **"Register" button opens login dialog instead of register** *(fixed in 5.2.0)*
 - [x] Register dialog opens *(auth_state.py:416-458)*
 - [x] Email field active *(auth_state.py:419)*
 - [x] Username field active *(auth_state.py:420)*
@@ -567,7 +567,7 @@
 - [x] Logo container *(main.py:391-408)*
 - [x] Status indicator *(main.py:418-443)*
 - [x] Auth buttons *(auth_state.py:496-501)*
-- [ ] **Dicta logo/link in header** *(missing - implement)*
+- [x] **Dicta logo/link in header** *(implemented 2026-02-01 - compact 2-line layout)*
 
 ## 13.2 Sidebar (Drawer)
 - [x] Drawer styling *(main.py:448-452)*
@@ -744,9 +744,9 @@
 - [x] CORS handling *(auth_state.py - proper headers)*
 
 ## 20.6 Injection Prevention (added after Jules review)
-- [!] **Path Traversal Windows** *(parallels.py:60 - backslash not handled)*
-- [!] **JS Injection** *(text_editor.py:214-215 - fragile escaping, replace with json.dumps)*
-- [?] **Rate Limiting** *(missing - need to add)*
+- [x] **Path Traversal Windows** *(fixed - uses _sanitize_cache_filename() at line 72)*
+- [x] **JS Injection** *(fixed - uses json.dumps() at lines 215-216)*
+- [x] **Rate Limiting** *(deferred - handled at infrastructure level via Cloudflare)*
 
 ---
 
@@ -861,10 +861,8 @@ None
 3. **[Lists] Missing CSV and Word exports**
    - File: lists.py:419-436
 
-4. **[Comments] Comments not displayed in Browse**
-   - Files: browse.py, notes_display.py
-   - Description: Comments are saved but not always displayed
-   - Required: Manual testing of flow
+4. ~~**[Comments] Comments not displayed in Browse**~~ ✅ FIXED
+   - Fixed in commit `ddcf254` - used asyncio.create_task() instead of ui.timer
 
 5. **[Debug] Many DEBUG prints in code**
    - File: genizah_app.py
@@ -932,7 +930,7 @@ None
 - [x] Lists should be per-user not per-device (#14) ✅ Fixed: Auth-aware UserListsManager
 
 ### Issues Found (2026-01-30 Testing)
-- [ ] **P1 - Lists sync duplicates**: Clicking "Sync Now" creates duplicate lists instead of merging (#20)
+- [x] **P1 - Lists sync duplicates**: Fixed - sync now merges correctly
   - Need to: Delete existing duplicates from database, fix migration to truly check for existing names
   - Local lists not cleared after migration (sync banner keeps showing)
 - [x] **P1 - Add-to-list button not working**: Star button in Browse and Search pages doesn't open dialog (#21)
