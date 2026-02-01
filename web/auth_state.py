@@ -19,7 +19,8 @@ load_dotenv()
 # Import Supabase client
 from web.supabase_client import (
     get_client, sign_in as supabase_sign_in, sign_up as supabase_sign_up,
-    sign_out as supabase_sign_out, get_profile, update_profile
+    sign_out as supabase_sign_out, get_profile, update_profile,
+    get_oauth_url, set_session_from_url
 )
 
 
@@ -233,6 +234,28 @@ def create_login_dialog():
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Login'), on_click=handle_login).props('color=primary')
 
+                    # Divider
+                    with ui.row().classes('w-full items-center gap-2 my-2'):
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+                        ui.label(tr('or')).classes('text-gray-500 text-sm')
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+
+                    # Google login button
+                    async def handle_google_login():
+                        login_error.classes('hidden', remove='visible')
+                        # Get current URL for redirect
+                        redirect_url = f"{os.environ.get('SITE_URL', 'https://genizahsearch.com')}/auth/callback"
+                        result = get_oauth_url('google', redirect_url)
+                        if "error" in result:
+                            login_error.text = result["error"]
+                            login_error.classes('visible', remove='hidden')
+                        else:
+                            # Redirect to Google OAuth
+                            ui.navigate.to(result['url'], new_tab=False)
+
+                    ui.button(tr('Login with Google'), icon='img:https://www.google.com/favicon.ico',
+                              on_click=handle_google_login).classes('w-full').props('outline')
+
             # Register panel
             with ui.tab_panel(register_tab):
                 with ui.column().classes('w-full gap-3'):
@@ -276,6 +299,10 @@ def create_login_dialog():
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Register'), on_click=handle_register).props('color=primary')
 
+    # Store tabs reference for external access
+    dialog.tabs = tabs
+    dialog.login_tab = login_tab
+    dialog.register_tab = register_tab
     return dialog
 
 
@@ -316,8 +343,16 @@ def create_auth_buttons():
         # Login/Register buttons
         dialog = create_login_dialog()
 
-        ui.button(tr('Login'), on_click=dialog.open).props('flat text-color=white dense').classes('text-sm')
-        ui.button(tr('Register'), on_click=lambda: (dialog.open(), setattr(dialog, '_active_tab', 'register'))).props('outline text-color=white dense').classes('text-sm')
+        def open_login():
+            dialog.tabs.set_value(dialog.login_tab)
+            dialog.open()
+
+        def open_register():
+            dialog.tabs.set_value(dialog.register_tab)
+            dialog.open()
+
+        ui.button(tr('Login'), on_click=open_login).props('flat text-color=white dense').classes('text-sm')
+        ui.button(tr('Register'), on_click=open_register).props('outline text-color=white dense').classes('text-sm')
 
 
 # ============================================================================

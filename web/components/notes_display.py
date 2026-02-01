@@ -14,7 +14,8 @@ import re
 import asyncio
 from nicegui import ui
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import get_comments
 from typing import Optional, List
 
 
@@ -70,7 +71,7 @@ def render_content_with_mentions(content: str, container_classes: str = '', cont
             i += 1
 
 
-async def fetch_document_comments(document_id: str, page_number: int = None) -> List[dict]:
+def fetch_document_comments(document_id: str, page_number: int = None) -> List[dict]:
     """
     Fetch comments for a document.
 
@@ -81,23 +82,46 @@ async def fetch_document_comments(document_id: str, page_number: int = None) -> 
     Returns:
         List of comment objects
     """
-    result = await api_call(
-        "GET",
-        f"/comments/document/{document_id}",
-        {"include_replies": True}
-    )
+    try:
+        # Get public comments for this document
+        comments = get_comments(sys_id=document_id, is_public=True)
 
-    if "error" in result:
+        # Also get user's private comments if logged in
+        user_id = GlobalAuthState.get_user_id()
+        if user_id:
+            private_comments = get_comments(sys_id=document_id, author_id=user_id, is_public=False)
+            comments.extend(private_comments)
+
+        # Sort by created_at
+        comments.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+
+        # Transform to expected format
+        formatted_comments = []
+        for c in comments:
+            profile = c.get('profiles', {}) or {}
+            formatted_comments.append({
+                'id': c.get('id'),
+                'content': c.get('content', ''),
+                'page_number': c.get('page_number'),
+                'is_public': c.get('is_public', True),
+                'created_at': c.get('created_at', ''),
+                'author': {
+                    'username': profile.get('username'),
+                    'full_name': profile.get('full_name')
+                },
+                'replies': []  # TODO: Implement nested replies if needed
+            })
+
+        # Filter by page_number if specified
+        # Include comments without page_number (document-level comments)
+        if page_number is not None:
+            formatted_comments = [c for c in formatted_comments
+                                  if c.get('page_number') == page_number or c.get('page_number') is None]
+
+        return formatted_comments
+    except Exception as e:
+        print(f"Error fetching comments: {e}")
         return []
-
-    comments = result.get('items', [])
-
-    # Filter by page_number if specified
-    # Include comments without page_number (document-level comments)
-    if page_number is not None:
-        comments = [c for c in comments if c.get('page_number') == page_number or c.get('page_number') is None]
-
-    return comments
 
 
 def create_notes_panel(
@@ -125,12 +149,12 @@ def create_notes_panel(
     with panel:
         notes_container = ui.column().classes('w-full gap-2 p-2')
 
-        async def load_notes():
+        def load_notes():
             """Load and display notes."""
             notes_container.clear()
 
             with notes_container:
-                comments = await fetch_document_comments(document_id, page_number)
+                comments = fetch_document_comments(document_id, page_number)
 
                 if not comments:
                     with ui.row().classes('w-full justify-center p-4'):
@@ -139,15 +163,15 @@ def create_notes_panel(
                     for comment in comments:
                         create_comment_card(comment)
 
-        async def refresh_and_expand():
+        def refresh_and_expand():
             """Refresh notes and expand the panel to show new content."""
             panel.value = True  # Expand the panel
-            await load_notes()
+            load_notes()
 
-        # Load on expansion - use background task for async
-        async def on_expand(e):
+        # Load on expansion
+        def on_expand(e):
             if e.args:
-                await load_notes()
+                load_notes()
 
         panel.on('update:model-value', on_expand)
 
@@ -252,7 +276,7 @@ def create_notes_button(
     container = ui.element('div').classes('relative inline-block')
 
     with container:
-        async def show_notes_dialog():
+        def show_notes_dialog():
             dialog = ui.dialog()
 
             with dialog, ui.card().classes('w-96 max-h-96'):
@@ -262,7 +286,7 @@ def create_notes_button(
 
                 with ui.scroll_area().classes('w-full').style('height: 300px;'):
                     with ui.column().classes('w-full gap-2 p-4'):
-                        comments = await fetch_document_comments(document_id, page_number)
+                        comments = fetch_document_comments(document_id, page_number)
 
                         if not comments:
                             with ui.row().classes('w-full justify-center'):
@@ -285,15 +309,15 @@ def create_notes_button(
         )
 
         # Check for comments and show indicator
-        async def check_comments():
+        def check_comments():
             try:
-                comments = await fetch_document_comments(document_id, page_number)
+                comments = fetch_document_comments(document_id, page_number)
                 if comments:
                     indicator.style(add='display: block;')
                     btn.style(add='color: #f59e0b;')
             except Exception as e:
                 pass  # Silently ignore errors in background check
 
-        asyncio.create_task(check_comments())
+        ui.timer(0.1, check_comments, once=True)
 
     return container

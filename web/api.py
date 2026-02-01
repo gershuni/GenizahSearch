@@ -675,3 +675,46 @@ def init_api_routes():
         except Exception as e:
             print(f"Export List Excel error: {e}")
             return Response("Export failed", status_code=500)
+
+    @app.post('/api/auth/oauth-callback')
+    async def oauth_callback(request):
+        """
+        Handle OAuth callback - receive tokens from client-side and set session.
+        """
+        from fastapi import Request
+        from fastapi.responses import JSONResponse
+        from web.supabase_client import set_session_from_url, get_profile
+        from web.auth_state import GlobalAuthState
+
+        try:
+            body = await request.json()
+            access_token = body.get('access_token')
+            refresh_token = body.get('refresh_token')
+
+            if not access_token or not refresh_token:
+                return JSONResponse({'error': 'Missing tokens'}, status_code=400)
+
+            # Set session in Supabase client
+            result = set_session_from_url(access_token, refresh_token)
+
+            if 'error' in result:
+                return JSONResponse({'error': result['error']}, status_code=400)
+
+            user = result.get('user')
+            if user:
+                # Get or create profile
+                profile = get_profile(user['id'])
+
+                # Store in NiceGUI session storage
+                from nicegui import app as nicegui_app
+                nicegui_app.storage.user[GlobalAuthState.USER_KEY] = user
+                if profile:
+                    nicegui_app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+
+                return JSONResponse({'success': True, 'user': user})
+
+            return JSONResponse({'error': 'No user returned'}, status_code=400)
+
+        except Exception as e:
+            print(f"OAuth callback error: {e}")
+            return JSONResponse({'error': str(e)}, status_code=500)

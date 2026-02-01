@@ -7,7 +7,8 @@ User corrections and comments system: view, edit, and manage your contributions.
 
 from nicegui import ui, app
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call, create_login_dialog, do_logout
+from web.auth_state import GlobalAuthState, create_login_dialog, do_logout
+from web.supabase_client import get_corrections, update_correction, get_comments, get_client
 from web.state import state
 from typing import Optional, Dict, Any, List
 from web.components.typography import h1, h2, h3
@@ -39,12 +40,12 @@ async def create_corrections_page():
         # Main content container
         main_container = ui.column().classes('w-full gap-6')
 
-        async def refresh_page():
+        def refresh_page():
             """Refresh the page content."""
             main_container.clear()
             with main_container:
                 if GlobalAuthState.is_logged_in():
-                    await create_logged_in_view()
+                    create_logged_in_view()
                 else:
                     create_login_view()
 
@@ -63,7 +64,7 @@ async def create_corrections_page():
 
                     ui.button(tr('Login / Register'), icon='login', on_click=open_login).props('color=primary size=lg')
 
-        async def create_logged_in_view():
+        def create_logged_in_view():
             """Create view for logged in users."""
             user = GlobalAuthState.get_user()
 
@@ -77,10 +78,10 @@ async def create_corrections_page():
                             h3(user.get('full_name', user.get('username', '')), classes='font-bold')
                             ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation_score', 0)}").classes('text-sm').style('color: var(--text-secondary);')
 
-                    async def handle_logout():
+                    def handle_logout():
                         do_logout()
                         ui.notify(tr('Logged out'), type='info')
-                        await refresh_page()
+                        ui.navigate.reload()
 
                     ui.button(tr('Logout'), on_click=handle_logout).props('flat color=negative')
 
@@ -95,43 +96,52 @@ async def create_corrections_page():
             with ui.tab_panels(tabs, value=my_edits_tab).classes('w-full'):
                 # My Edits panel
                 with ui.tab_panel(my_edits_tab):
-                    await create_my_edits_view()
+                    create_my_edits_view()
 
                 # My Comments panel
                 with ui.tab_panel(my_comments_tab):
-                    await create_my_comments_view()
+                    create_my_comments_view()
 
                 # Review panel (for reviewers+)
                 if user.get('role') in ('reviewer', 'editor', 'admin'):
                     with ui.tab_panel(review_tab):
-                        await create_review_view()
+                        create_review_view()
 
                 # Leaderboard panel
                 with ui.tab_panel(leaderboard_tab):
-                    await create_leaderboard_view()
+                    create_leaderboard_view()
 
-        async def create_my_edits_view():
+        def create_my_edits_view():
             """View user's own corrections/edits."""
-            # Show loading indicator
-            with ui.row().classes('w-full items-center justify-center py-8'):
-                loading_spinner = ui.spinner(size='lg')
-                loading_label = ui.label(tr('Loading...')).classes('ml-3')
-
-            result = await api_call("GET", "/corrections/my")
-
-            # Remove loading indicator
-            loading_spinner.delete()
-            loading_label.delete()
-
-            if "error" in result:
-                if result.get("expired"):
-                    ui.notify(result["error"], type='warning')
-                    await refresh_page()
-                    return
-                ui.label(f"{tr('Error')}: {result['error']}").style('color: var(--danger);')
+            user_id = GlobalAuthState.get_user_id()
+            if not user_id:
+                ui.label(tr('User not found')).style('color: var(--danger);')
                 return
 
-            corrections = result.get('items', [])
+            # Get user's corrections from Supabase
+            try:
+                corrections_raw = get_corrections(author_id=user_id)
+                # Format corrections for display
+                corrections = []
+                for c in corrections_raw:
+                    profile = c.get('profiles', {}) or {}
+                    corrections.append({
+                        'id': c.get('id'),
+                        'document_id': c.get('sys_id'),
+                        'system_id': c.get('sys_id'),
+                        'page_number': c.get('page_number'),
+                        'original_text': c.get('original_text'),
+                        'corrected_text': c.get('corrected_text'),
+                        'notes': c.get('notes'),
+                        'status': c.get('status', 'pending'),
+                        'created_at': c.get('created_at', ''),
+                        'upvotes': c.get('upvotes', 0),
+                        'downvotes': c.get('downvotes', 0),
+                        'user_vote': None  # TODO: Implement vote tracking
+                    })
+            except Exception as e:
+                ui.label(f"{tr('Error')}: {str(e)}").style('color: var(--danger);')
+                return
 
             if not corrections:
                 with ui.column().classes('w-full items-center py-8'):
@@ -140,19 +150,20 @@ async def create_corrections_page():
                     h3(tr('No edits yet'), classes='text-xl', style='color: var(--text-secondary);')
                     ui.label(tr('Edit transcriptions to help improve the corpus')).style('color: var(--text-tertiary);')
             else:
-                async def delete_correction(corr_id: int):
+                def delete_correction(corr_id: int):
                     """Delete a correction after confirmation."""
-                    result = await api_call("DELETE", f"/corrections/{corr_id}")
-                    if "error" in result:
-                        ui.notify(result["error"], type='negative')
-                    else:
+                    try:
+                        client = get_client()
+                        client.table('corrections').delete().eq('id', corr_id).execute()
                         ui.notify(tr('Correction deleted'), type='positive')
-                        await refresh_page()
+                        ui.navigate.reload()
+                    except Exception as e:
+                        ui.notify(str(e), type='negative')
 
                 for corr in corrections:
-                    await create_edit_card(corr, delete_correction)
+                    create_edit_card(corr, delete_correction)
 
-        async def create_edit_card(corr: dict, delete_callback):
+        def create_edit_card(corr: dict, delete_callback):
             """Create a card for a single edit/correction."""
             doc_id = corr.get('document_id') or corr.get('system_id', 'Unknown')
             page_num = corr.get('page_number', 1)
@@ -214,21 +225,15 @@ async def create_corrections_page():
                         corr_id = corr.get('id')
 
                         with ui.row().classes('items-center gap-1'):
-                            async def do_vote(vote_val: int, cid=corr_id):
-                                result = await api_call("POST", f"/corrections/{cid}/vote", {
-                                    "vote_value": vote_val
-                                })
-                                if "error" in result:
-                                    ui.notify(result.get("detail", result["error"]), type='negative')
-                                else:
-                                    ui.notify(tr('Vote recorded'), type='positive')
-                                    await refresh_page()
+                            def do_vote(vote_val: int, cid=corr_id):
+                                # Voting feature not yet migrated to Supabase
+                                ui.notify(tr('Voting feature coming soon'), type='info')
 
-                            async def upvote(cid=corr_id):
-                                await do_vote(1, cid)
+                            def upvote(cid=corr_id):
+                                do_vote(1, cid)
 
-                            async def downvote(cid=corr_id):
-                                await do_vote(-1, cid)
+                            def downvote(cid=corr_id):
+                                do_vote(-1, cid)
 
                             # Upvote button
                             upvote_btn = ui.button(icon='thumb_up', on_click=upvote).props('flat round dense size=sm')
@@ -258,8 +263,8 @@ async def create_corrections_page():
                             # Edit button - for drafts
                             corr_status = corr.get('status', 'draft')
                             if corr_status == 'draft':
-                                async def edit_correction(c=corr):
-                                    await open_edit_dialog(c)
+                                def edit_correction(c=corr):
+                                    open_edit_dialog(c)
 
                                 ui.button(icon='edit', on_click=edit_correction).props('flat round dense').tooltip(tr('Edit'))
 
@@ -270,22 +275,22 @@ async def create_corrections_page():
                             if can_delete:
                                 corr_id = corr.get('id')
 
-                                async def confirm_delete(cid=corr_id):
+                                def confirm_delete(cid=corr_id):
                                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
                                         # Changed to H3
                                         h3(tr('Delete Correction?'), classes='text-lg font-bold')
                                         ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
-                                            async def do_delete():
+                                            def do_delete():
                                                 confirm_dialog.close()
-                                                await delete_callback(cid)
+                                                delete_callback(cid)
                                             ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                     confirm_dialog.open()
 
                                 ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
 
-        async def open_edit_dialog(corr: dict):
+        def open_edit_dialog(corr: dict):
             """Open dialog to edit a correction."""
             dialog = ui.dialog().props('maximized persistent')
 
@@ -325,47 +330,51 @@ async def create_corrections_page():
                 with ui.row().classes('w-full justify-end gap-2 p-4 border-t'):
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-                    async def save_changes():
-                        result = await api_call("PUT", f"/corrections/{corr['id']}", {
-                            "corrected_text": text_area.value,
-                            "notes": notes_area.value or None
+                    def save_changes():
+                        result = update_correction(corr['id'], {
+                            'corrected_text': text_area.value,
+                            'notes': notes_area.value or None
                         })
                         if "error" in result:
                             ui.notify(result["error"], type='negative')
                         else:
                             ui.notify(tr('Correction updated'), type='positive')
                             dialog.close()
-                            await refresh_page()
+                            ui.navigate.reload()
 
                     ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
 
             dialog.open()
 
-        async def create_my_comments_view():
+        def create_my_comments_view():
             """View user's own comments."""
-            with ui.row().classes('w-full items-center justify-center py-8'):
-                loading_spinner = ui.spinner(size='lg')
-                loading_label = ui.label(tr('Loading...')).classes('ml-3')
-
-            result = await api_call("GET", "/comments/my")
-
-            loading_spinner.delete()
-            loading_label.delete()
-
-            if "error" in result:
-                if result.get("expired"):
-                    ui.notify(result["error"], type='warning')
-                    await refresh_page()
-                    return
-                # Might not have this endpoint yet - show empty state
+            user_id = GlobalAuthState.get_user_id()
+            if not user_id:
                 with ui.column().classes('w-full items-center py-8'):
                     ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
-                    # Changed to H3
+                    h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
+                return
+
+            # Get user's comments from Supabase
+            try:
+                comments_raw = get_comments(author_id=user_id)
+                comments = []
+                for c in comments_raw:
+                    profile = c.get('profiles', {}) or {}
+                    comments.append({
+                        'id': c.get('id'),
+                        'document_id': c.get('sys_id'),
+                        'page_number': c.get('page_number'),
+                        'content': c.get('content', ''),
+                        'comment_type': c.get('scope', 'general'),
+                        'created_at': c.get('created_at', '')
+                    })
+            except Exception as e:
+                with ui.column().classes('w-full items-center py-8'):
+                    ui.icon('comment').classes('text-6xl').style('color: var(--text-tertiary);')
                     h3(tr('No comments yet'), classes='text-xl', style='color: var(--text-secondary);')
                     ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
                 return
-
-            comments = result.get('items', []) if isinstance(result, dict) else result
 
             if not comments:
                 with ui.column().classes('w-full items-center py-8'):
@@ -375,9 +384,9 @@ async def create_corrections_page():
                     ui.label(tr('Share your insights and questions')).style('color: var(--text-tertiary);')
             else:
                 for comment in comments:
-                    await create_comment_card(comment)
+                    create_comment_card(comment)
 
-        async def create_comment_card(comment: dict):
+        def create_comment_card(comment: dict):
             """Create a card for a single comment."""
             doc_id = comment.get('document_id', 'Unknown')
             page_num = comment.get('page_number')  # Page/image number in manuscript
@@ -426,35 +435,37 @@ async def create_corrections_page():
                             ui.button(icon='visibility', on_click=view_in_browse).props('flat round dense').tooltip(tr('View in Browse'))
 
                             # Edit button
-                            async def edit_comment(c=comment):
-                                await open_comment_edit_dialog(c)
+                            def edit_comment(c=comment):
+                                open_comment_edit_dialog(c)
 
                             ui.button(icon='edit', on_click=edit_comment).props('flat round dense').tooltip(tr('Edit'))
 
                             # Delete button
                             comment_id = comment.get('id')
 
-                            async def confirm_delete(cid=comment_id):
+                            def confirm_delete(cid=comment_id):
                                 with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
                                     # Changed to H3
                                     h3(tr('Delete Comment?'), classes='text-lg font-bold')
                                     ui.label(tr('This action cannot be undone.')).classes('text-sm').style('color: var(--text-tertiary);')
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
-                                        async def do_delete():
-                                            result = await api_call("DELETE", f"/comments/{cid}")
-                                            confirm_dialog.close()
-                                            if "error" in result:
-                                                ui.notify(result["error"], type='negative')
-                                            else:
+                                        def do_delete():
+                                            try:
+                                                client = get_client()
+                                                client.table('comments').delete().eq('id', cid).execute()
+                                                confirm_dialog.close()
                                                 ui.notify(tr('Comment deleted'), type='positive')
-                                                await refresh_page()
+                                                ui.navigate.reload()
+                                            except Exception as e:
+                                                confirm_dialog.close()
+                                                ui.notify(str(e), type='negative')
                                         ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                 confirm_dialog.open()
 
                             ui.button(icon='delete', on_click=confirm_delete).props('flat round dense color=negative').tooltip(tr('Delete'))
 
-        async def open_comment_edit_dialog(comment: dict):
+        def open_comment_edit_dialog(comment: dict):
             """Open dialog to edit a comment."""
             dialog = ui.dialog()
 
@@ -469,41 +480,48 @@ async def create_corrections_page():
                 with ui.row().classes('w-full justify-end gap-2 mt-4'):
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-                    async def save_comment():
-                        result = await api_call("PUT", f"/comments/{comment['id']}", {
-                            "content": text_area.value
-                        })
-                        if "error" in result:
-                            ui.notify(result["error"], type='negative')
-                        else:
+                    def save_comment():
+                        try:
+                            client = get_client()
+                            client.table('comments').update({
+                                'content': text_area.value
+                            }).eq('id', comment['id']).execute()
                             ui.notify(tr('Comment updated'), type='positive')
                             dialog.close()
-                            await refresh_page()
+                            ui.navigate.reload()
+                        except Exception as e:
+                            ui.notify(str(e), type='negative')
 
                     ui.button(tr('Save'), icon='save', on_click=save_comment).props('color=primary')
 
             dialog.open()
 
-        async def create_review_view():
+        def create_review_view():
             """View for reviewers to review pending corrections."""
-            with ui.row().classes('w-full items-center justify-center py-8'):
-                loading_spinner = ui.spinner(size='lg')
-                loading_label = ui.label(tr('Loading pending corrections...')).classes('ml-3')
-
-            result = await api_call("GET", "/corrections/pending")
-
-            loading_spinner.delete()
-            loading_label.delete()
-
-            if "error" in result:
-                if result.get("expired"):
-                    ui.notify(result["error"], type='warning')
-                    await refresh_page()
-                    return
-                ui.label(f"{tr('Error loading pending corrections')}: {result['error']}").style('color: var(--danger);')
+            # Get pending corrections from Supabase
+            try:
+                pending_raw = get_corrections(status='pending')
+                pending = []
+                for c in pending_raw:
+                    profile = c.get('profiles', {}) or {}
+                    pending.append({
+                        'id': c.get('id'),
+                        'document_id': c.get('sys_id'),
+                        'system_id': c.get('sys_id'),
+                        'page_number': c.get('page_number'),
+                        'original_text': c.get('original_text'),
+                        'corrected_text': c.get('corrected_text'),
+                        'notes': c.get('notes'),
+                        'upvotes': c.get('upvotes', 0),
+                        'downvotes': c.get('downvotes', 0),
+                        'author': {
+                            'username': profile.get('username'),
+                            'full_name': profile.get('full_name')
+                        }
+                    })
+            except Exception as e:
+                ui.label(f"{tr('Error loading pending corrections')}: {str(e)}").style('color: var(--danger);')
                 return
-
-            pending = result.get('items', [])
 
             if not pending:
                 with ui.column().classes('w-full items-center py-8'):
@@ -561,53 +579,49 @@ async def create_corrections_page():
 
                             review_notes = ui.input(tr('Review notes')).classes('w-full').props('outlined dense')
 
-                            async def approve(c=corr, notes=review_notes):
-                                result = await api_call("POST", f"/corrections/{c['id']}/review", {
-                                    "action": "approve",
-                                    "review_notes": notes.value or None
-                                })
-                                if "error" in result:
-                                    ui.notify(result.get("detail", result["error"]), type='negative')
-                                else:
-                                    ui.notify(tr('Correction approved'), type='positive')
-                                    await refresh_page()
+                            def approve(c=corr, notes=review_notes):
+                                try:
+                                    result = update_correction(c['id'], {
+                                        'status': 'approved',
+                                        'notes': notes.value or None
+                                    })
+                                    if "error" in result:
+                                        ui.notify(result["error"], type='negative')
+                                    else:
+                                        ui.notify(tr('Correction approved'), type='positive')
+                                        ui.navigate.reload()
+                                except Exception as e:
+                                    ui.notify(str(e), type='negative')
 
-                            async def reject(c=corr, notes=review_notes):
-                                rejection_text = notes.value or tr('Rejected by reviewer')
-                                result = await api_call("POST", f"/corrections/{c['id']}/review", {
-                                    "action": "reject",
-                                    "rejection_reason": rejection_text
-                                })
-                                if "error" in result:
-                                    ui.notify(result.get("detail", result["error"]), type='negative')
-                                else:
-                                    ui.notify(tr('Correction rejected'), type='info')
-                                    await refresh_page()
+                            def reject(c=corr, notes=review_notes):
+                                try:
+                                    rejection_text = notes.value or tr('Rejected by reviewer')
+                                    result = update_correction(c['id'], {
+                                        'status': 'rejected',
+                                        'notes': rejection_text
+                                    })
+                                    if "error" in result:
+                                        ui.notify(result["error"], type='negative')
+                                    else:
+                                        ui.notify(tr('Correction rejected'), type='info')
+                                        ui.navigate.reload()
+                                except Exception as e:
+                                    ui.notify(str(e), type='negative')
 
                             with ui.row().classes('gap-2'):
                                 ui.button(tr('Approve'), on_click=approve).props('color=positive')
                                 ui.button(tr('Reject'), on_click=reject).props('color=negative flat')
 
-        async def create_leaderboard_view():
+        def create_leaderboard_view():
             """Show top contributors."""
-            with ui.row().classes('w-full items-center justify-center py-8'):
-                loading_spinner = ui.spinner(size='lg')
-                loading_label = ui.label(tr('Loading leaderboard...')).classes('ml-3')
-
-            result = await api_call("GET", "/users/leaderboard", {"limit": 20})
-
-            loading_spinner.delete()
-            loading_label.delete()
-
-            if "error" in result:
-                if result.get("expired"):
-                    ui.notify(result["error"], type='warning')
-                    await refresh_page()
-                    return
-                ui.label(f"{tr('Error loading leaderboard')}: {result['error']}").style('color: var(--danger);')
+            # Get users with their correction counts from Supabase
+            try:
+                client = get_client()
+                response = client.table('profiles').select('*').order('reputation', desc=True).limit(20).execute()
+                users = response.data or []
+            except Exception as e:
+                ui.label(f"{tr('Error loading leaderboard')}: {str(e)}").style('color: var(--danger);')
                 return
-
-            users = result if isinstance(result, list) else result.get('items', [])
 
             with ui.column().classes('w-full'):
                 # Changed to H3
@@ -636,4 +650,4 @@ async def create_corrections_page():
                                     ui.badge(f"{user.get('reputation_score', 0)} pts").props('color=primary')
 
         # Initial render
-        await refresh_page()
+        refresh_page()

@@ -12,6 +12,7 @@ Run with: python -m web.main (from project root)
 
 import os
 import sys
+import asyncio
 
 # Load environment variables first (for Supabase configuration)
 from dotenv import load_dotenv
@@ -1697,6 +1698,131 @@ def download_page_route():
     with content:
         from web.pages.download import create_download_page
         create_download_page()
+
+
+@ui.page('/auth/callback')
+async def auth_callback_route(code: str = None):
+    """
+    OAuth callback handler.
+    Supabase redirects here after Google login with either:
+    - ?code= parameter (PKCE flow) - needs code exchange (fallback)
+    - #access_token= hash (implicit flow) - direct tokens (preferred)
+    """
+    from web.supabase_client import set_session_from_url, get_profile, exchange_code_for_session
+    from web.auth_state import GlobalAuthState
+    import json
+
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    with ui.column().classes('w-full h-screen items-center justify-center'):
+        spinner = ui.spinner(size='xl')
+        status_label = ui.label('Completing login...').classes('text-lg mt-4')
+        error_label = ui.label('').classes('text-red-500 mt-4 hidden')
+        home_btn = ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2 hidden')
+
+    async def complete_login(user, profile):
+        """Store user in session and redirect."""
+        app.storage.user[GlobalAuthState.USER_KEY] = user
+        if profile:
+            app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+        status_label.text = 'Login successful! Redirecting...'
+        await asyncio.sleep(0.5)
+        ui.navigate.to('/')
+
+    def show_error(message):
+        """Display error and show home button."""
+        spinner.set_visibility(False)
+        status_label.set_visibility(False)
+        error_label.text = message
+        error_label.classes(remove='hidden')
+        home_btn.classes(remove='hidden')
+
+    try:
+        # Method 1: PKCE flow - code in query parameter (fallback if implicit not available)
+        if code:
+            print(f"OAuth callback: exchanging code {code[:20]}...")
+            result = exchange_code_for_session(code)
+            print(f"Code exchange result: {result}")
+
+            if 'error' in result:
+                show_error(result['error'])
+                return
+
+            user = result.get('user')
+            if user:
+                profile = get_profile(user['id'])
+                await complete_login(user, profile)
+            else:
+                show_error('Login failed - no user returned')
+            return
+
+        # Method 2: Implicit flow - tokens in URL hash
+        await asyncio.sleep(0.5)
+        tokens_json = await ui.run_javascript('''
+            (function() {
+                const hash = window.location.hash.substring(1);
+                console.log("Hash:", hash);
+                if (hash) {
+                    const params = new URLSearchParams(hash);
+                    return JSON.stringify({
+                        access_token: params.get('access_token'),
+                        refresh_token: params.get('refresh_token'),
+                        error: params.get('error_description') || params.get('error')
+                    });
+                }
+                // Also check query params for error
+                const urlParams = new URLSearchParams(window.location.search);
+                const error = urlParams.get('error_description') || urlParams.get('error');
+                if (error) {
+                    return JSON.stringify({error: error});
+                }
+                return JSON.stringify({no_tokens: true});
+            })();
+        ''')
+
+        print(f"OAuth callback received: {tokens_json}")
+        tokens = json.loads(tokens_json) if tokens_json else {}
+
+        if tokens.get('error'):
+            show_error(tokens['error'])
+            return
+
+        if tokens.get('no_tokens'):
+            # No tokens found - redirect to home
+            ui.navigate.to('/')
+            return
+
+        access_token = tokens.get('access_token')
+        refresh_token = tokens.get('refresh_token')
+
+        if not access_token or not refresh_token:
+            ui.navigate.to('/')
+            return
+
+        result = set_session_from_url(access_token, refresh_token)
+        print(f"set_session_from_url result: {result}")
+
+        if 'error' in result:
+            show_error(result['error'])
+            return
+
+        user = result.get('user')
+        if user:
+            profile = get_profile(user['id'])
+            await complete_login(user, profile)
+        else:
+            show_error('Login failed - no user returned')
+
+    except Exception as e:
+        print(f"OAuth callback error: {e}")
+        import traceback
+        traceback.print_exc()
+        spinner.set_visibility(False)
+        status_label.set_visibility(False)
+        error_label.text = f'Error: {str(e)}'
+        error_label.classes(remove='hidden')
+        home_btn.classes(remove='hidden')
 
 
 # ============================================================================

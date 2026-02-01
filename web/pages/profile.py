@@ -7,7 +7,8 @@ Edit user profile details and change password.
 
 from nicegui import ui, app
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call, create_login_dialog
+from web.auth_state import GlobalAuthState, create_login_dialog
+from web.supabase_client import update_profile, get_client
 from web.components.typography import h1, h2, h3
 
 
@@ -74,24 +75,26 @@ async def create_profile_page():
                 ).classes('w-full').props('outlined rows=3')
 
                 # Save button
-                async def save_profile():
+                def save_profile():
+                    user_id = GlobalAuthState.get_user_id()
+                    if not user_id:
+                        ui.notify(tr('User not found'), type='negative')
+                        return
+
                     update_data = {
                         'full_name': full_name_input.value or None,
                         'affiliation': affiliation_input.value or None,
                         'bio': bio_input.value or None
                     }
 
-                    result = await api_call("PUT", "/users/me", update_data)
+                    result = update_profile(user_id, update_data)
 
                     if "error" in result:
-                        ui.notify(result.get('detail', result['error']), type='negative')
+                        ui.notify(result.get('error', 'Update failed'), type='negative')
                     else:
-                        # Update local user data
-                        GlobalAuthState.set_auth(
-                            GlobalAuthState.get_token(),
-                            result,
-                            GlobalAuthState.get_refresh_token()
-                        )
+                        # Update cached profile
+                        profile = result.get('profile', {})
+                        GlobalAuthState.update_profile_cache(profile)
                         ui.notify(tr('Profile updated'), type='positive')
 
                 with ui.row().classes('w-full justify-end'):
@@ -123,7 +126,7 @@ async def create_profile_page():
 
                 password_error = ui.label('').classes('text-red-500 text-sm hidden')
 
-                async def change_password():
+                def change_password():
                     password_error.classes('hidden', remove='visible')
 
                     if not current_password_input.value:
@@ -146,21 +149,23 @@ async def create_profile_page():
                         password_error.classes('visible', remove='hidden')
                         return
 
-                    result = await api_call("POST", "/auth/change-password", {
-                        'current_password': current_password_input.value,
-                        'new_password': new_password_input.value,
-                        'confirm_password': confirm_password_input.value
-                    })
+                    try:
+                        # Use Supabase to update password
+                        client = get_client()
+                        response = client.auth.update_user({'password': new_password_input.value})
 
-                    if "error" in result:
-                        password_error.text = result.get('detail', result['error'])
+                        if response and response.user:
+                            ui.notify(tr('Password changed successfully'), type='positive')
+                            # Clear password fields
+                            current_password_input.value = ''
+                            new_password_input.value = ''
+                            confirm_password_input.value = ''
+                        else:
+                            password_error.text = tr('Failed to change password')
+                            password_error.classes('visible', remove='hidden')
+                    except Exception as e:
+                        password_error.text = str(e)
                         password_error.classes('visible', remove='hidden')
-                    else:
-                        ui.notify(tr('Password changed successfully'), type='positive')
-                        # Clear password fields
-                        current_password_input.value = ''
-                        new_password_input.value = ''
-                        confirm_password_input.value = ''
 
                 with ui.row().classes('w-full justify-end'):
                     ui.button(tr('Change Password'), icon='lock', on_click=change_password).props('color=primary')

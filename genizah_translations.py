@@ -1049,6 +1049,8 @@ TRANSLATIONS = {
     "Logged in as": "מחובר כ",
     "Not logged in": "לא מחובר",
     "Login to participate in the community": "התחבר כדי להשתתף בקהילה",
+    "Login with Google": "התחבר עם Google",
+    "or": "או",
 
     # ==================== Submit Correction ====================
     "Submit Correction": "שלח תיקון",
