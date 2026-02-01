@@ -618,7 +618,7 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
     """Get corrections with optional filters."""
     try:
         client = get_client()
-        query = client.table('corrections').select('*, profiles(username, full_name)')
+        query = client.table('corrections').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
@@ -726,7 +726,7 @@ def get_discoveries(user_id: str = None, type: str = None, status: str = None) -
     """Get discoveries with optional filters."""
     try:
         client = get_client()
-        query = client.table('discoveries').select('*, profiles(username, full_name)')
+        query = client.table('discoveries').select('*')
 
         if user_id:
             query = query.eq('user_id', user_id)
@@ -784,7 +784,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
     """Get fragment joins with optional filters."""
     try:
         client = get_client()
-        query = client.table('fragment_joins').select('*, profiles(username, full_name)')
+        query = client.table('fragment_joins').select('*')
 
         if user_id:
             query = query.eq('user_id', user_id)
@@ -890,9 +890,9 @@ def get_discovery_responses(discovery_id: int) -> List[Dict]:
     """Get responses for a discovery."""
     try:
         client = get_client()
-        response = client.table('discovery_responses').select(
-            '*, profiles(username, full_name)'
-        ).eq('discovery_id', discovery_id).order('created_at', desc=False).execute()
+        response = client.table('discovery_responses').select('*').eq(
+            'discovery_id', discovery_id
+        ).order('created_at', desc=False).execute()
         return response.data or []
     except Exception as e:
         print(f"Error getting discovery responses: {e}")
