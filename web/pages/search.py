@@ -173,13 +173,12 @@ def create_search_page(initial_query: str = None):
                     )
 
                     # Stop Button (hidden by default) - replaces search button
-                    with ui.column().classes('items-center gap-0').style('display: none;') as cancel_btn:
-                        ui.button(
-                            tr('Stop'),
-                            icon='stop',
-                            on_click=lambda: cancel_search()
-                        ).classes('h-10 px-4').props('outline color=red')
-                        ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
+                    stop_btn = ui.button(
+                        tr('Stop'),
+                        icon='stop',
+                        on_click=lambda: cancel_search()
+                    ).classes('h-10 px-4').style('display: none;').props('outline color=red')
+                    stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -626,11 +625,11 @@ def create_search_page(initial_query: str = None):
                 status_label.text = search_state.status
                 # Swap buttons: hide search, show stop (using style to avoid performance issues)
                 search_btn.style('display: none;')
-                cancel_btn.style('display: flex;')
+                stop_btn.style('display: inline-flex;')
             else:
                 # Swap buttons: show search, hide stop
-                search_btn.style('display: flex;')
-                cancel_btn.style('display: none;')
+                search_btn.style('display: inline-flex;')
+                stop_btn.style('display: none;')
                 if search_state.progress >= 1.0:
                     progress_bar.value = 1.0
                     status_label.text = tr("Done. Found {} results.").format(len(search_state.results))

@@ -1537,6 +1537,7 @@ TRANSLATIONS = {
     "Partial results (search cancelled)": "תוצאות חלקיות (החיפוש בוטל)",
     "Partial results (search stopped)": "תוצאות חלקיות (החיפוש נעצר)",
     "Showing partial results": "מציג תוצאות חלקיות",
+    "Stops the search and shows partial results": "עוצר את החיפוש ומציג תוצאות חלקיות",
     "Search cancelled - no results yet": "החיפוש בוטל - אין תוצאות עדיין",
     "Top score": "ציון גבוה ביותר",
     "Sort by score": "מיון לפי ציון",
