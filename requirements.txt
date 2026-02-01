@@ -7,3 +7,5 @@ colorama
 openpyxl
 python-docx
 nicegui
+supabase
+python-dotenv
