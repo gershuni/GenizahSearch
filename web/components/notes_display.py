@@ -11,6 +11,7 @@ Supports:
 """
 
 import re
+import asyncio
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
@@ -36,35 +37,35 @@ def render_content_with_mentions(content: str, container_classes: str = '', cont
     if not content:
         return
 
+    # Check if there are any mentions in the content
+    if not SHELFMARK_MENTION_PATTERN.search(content):
+        # No mentions - just display the text directly
+        ui.label(content).classes(f'text-sm whitespace-pre-wrap {container_classes}').style(container_style)
+        return
+
     # Split content by mentions
     parts = SHELFMARK_MENTION_PATTERN.split(content)
 
     # parts will be: [text, shelfmark1, id1, text, shelfmark2, id2, ...]
     # Every 3 elements: text, shelfmark, id
 
-    with ui.element('div').classes(f'text-sm whitespace-pre-wrap {container_classes}').style(container_style):
+    with ui.row().classes(f'flex-wrap items-baseline gap-0 {container_classes}').style(container_style):
         i = 0
         while i < len(parts):
             if i % 3 == 0:
                 # Regular text
                 text = parts[i]
                 if text:
-                    ui.html(f'<span>{text}</span>')
+                    ui.label(text).classes('text-sm whitespace-pre-wrap')
             elif i % 3 == 1:
                 # Shelfmark (next element is id)
                 shelfmark = parts[i]
                 doc_id = parts[i + 1] if i + 1 < len(parts) else ''
 
-                def make_click(did=doc_id):
-                    def click():
-                        ui.navigate.to(f'/browse?sys_id={did}')
-                    return click
-
-                with ui.element('span').classes('inline'):
-                    ui.link(
-                        shelfmark,
-                        target=f'/browse?sys_id={doc_id}'
-                    ).classes('text-primary font-medium hover:underline').style('cursor: pointer;')
+                ui.link(
+                    shelfmark,
+                    target=f'/browse?sys_id={doc_id}'
+                ).classes('text-primary font-medium hover:underline text-sm').style('cursor: pointer;')
                 i += 1  # Skip the id part
             i += 1
 
@@ -113,7 +114,8 @@ def create_notes_panel(
         shelfmark: Display name for the document
 
     Returns:
-        The panel container element
+        Tuple of (panel element, refresh function)
+        The refresh function can be called to reload notes and expand the panel
     """
     panel = ui.expansion(
         text=tr('Notes & Comments'),
@@ -137,6 +139,11 @@ def create_notes_panel(
                     for comment in comments:
                         create_comment_card(comment)
 
+        async def refresh_and_expand():
+            """Refresh notes and expand the panel to show new content."""
+            panel.value = True  # Expand the panel
+            await load_notes()
+
         # Load on expansion - use background task for async
         async def on_expand(e):
             if e.args:
@@ -144,7 +151,7 @@ def create_notes_panel(
 
         panel.on('update:model-value', on_expand)
 
-    return panel
+    return panel, refresh_and_expand
 
 
 def create_comment_card(comment: dict):
@@ -154,12 +161,13 @@ def create_comment_card(comment: dict):
     Args:
         comment: Comment data object
     """
-    author = comment.get('author', {})
-    author_name = author.get('full_name') or author.get('username', 'Unknown')
-    created_at = comment.get('created_at', '')[:10]
+    author = comment.get('author') or {}
+    author_name = author.get('full_name') or author.get('username') or 'Unknown'
+    created_at_raw = comment.get('created_at', '')
+    created_at = str(created_at_raw)[:10] if created_at_raw else ''
     content = comment.get('content', '')
     is_public = comment.get('is_public', True)
-    replies = comment.get('replies', [])
+    replies = comment.get('replies') or []
 
     with ui.card().classes('w-full p-3').style('border: 1px solid var(--border-light);'):
         # Header
@@ -202,9 +210,10 @@ def create_reply_item(reply: dict):
     Args:
         reply: Reply comment data
     """
-    author = reply.get('author', {})
-    author_name = author.get('full_name') or author.get('username', 'Unknown')
-    created_at = reply.get('created_at', '')[:10]
+    author = reply.get('author') or {}
+    author_name = author.get('full_name') or author.get('username') or 'Unknown'
+    created_at_raw = reply.get('created_at', '')
+    created_at = str(created_at_raw)[:10] if created_at_raw else ''
     content = reply.get('content', '')
 
     with ui.row().classes('w-full gap-2').style('border-right: 2px solid var(--border-light); padding-right: 8px;'):
@@ -277,11 +286,14 @@ def create_notes_button(
 
         # Check for comments and show indicator
         async def check_comments():
-            comments = await fetch_document_comments(document_id, page_number)
-            if comments:
-                indicator.style(add='display: block;')
-                btn.style(add='color: #f59e0b;')
+            try:
+                comments = await fetch_document_comments(document_id, page_number)
+                if comments:
+                    indicator.style(add='display: block;')
+                    btn.style(add='color: #f59e0b;')
+            except Exception as e:
+                pass  # Silently ignore errors in background check
 
-        ui.timer(0.2, check_comments, once=True)
+        asyncio.create_task(check_comments())
 
     return container

@@ -98,6 +98,12 @@ async def create_discoveries_page():
 
         # === Statistics Cards ===
         stats_row = ui.row().classes('w-full gap-4')
+        # Show loading spinner first
+        with stats_row:
+            with ui.column().classes('w-full items-center py-4'):
+                ui.spinner('dots', size='md', color='primary')
+        # Clear and load actual stats
+        stats_row.clear()
         await load_stats(stats_row)
 
         # === Filter Bar ===
@@ -149,6 +155,13 @@ async def create_discoveries_page():
         async def refresh_feed():
             """Reload the activity feed."""
             feed_container.clear()
+            # Show loading spinner while fetching
+            with feed_container:
+                with ui.column().classes('w-full items-center py-12'):
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr('Loading feed...')).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+            # Now load the actual feed
+            feed_container.clear()
             with feed_container:
                 await load_feed(
                     type_filter.value if type_filter.value != 'all' else None,
@@ -163,7 +176,13 @@ async def create_discoveries_page():
         type_filter.on('update:model-value', on_filter_change)
         period_filter.on('update:model-value', on_filter_change)
 
-        # Initial load
+        # Initial load - show spinner first
+        with feed_container:
+            with ui.column().classes('w-full items-center py-12'):
+                ui.spinner('dots', size='lg', color='primary')
+                ui.label(tr('Loading feed...')).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+        # Then load the actual feed
+        feed_container.clear()
         with feed_container:
             await load_feed(None, None, on_refresh=refresh_feed)
 
@@ -1040,7 +1059,7 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
 
                                 def make_list_click(lid=list_id, lname=list_name):
                                     def click():
-                                        items = state.lists_mgr.get_items_in_list(lid)
+                                        items = state.lists_mgr.get_items_in_list_sync(lid)
                                         show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                     return click
 
@@ -1374,7 +1393,7 @@ def create_new_discovery_dialog(on_success=None):
 
                                         def make_list_click(lid=list_id, lname=list_name):
                                             def click():
-                                                items = state.lists_mgr.get_items_in_list(lid)
+                                                items = state.lists_mgr.get_items_in_list_sync(lid)
                                                 show_document_items(items, f"{tr('Items in')}: {lname}", back_callback=show_lists_view)
                                             return click
 

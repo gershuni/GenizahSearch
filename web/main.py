@@ -13,6 +13,10 @@ Run with: python -m web.main (from project root)
 import os
 import sys
 
+# Load environment variables first (for Supabase configuration)
+from dotenv import load_dotenv
+load_dotenv()
+
 # Ensure we can import from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -412,7 +416,7 @@ COMMON_STYLES = '''
         background: rgba(255,255,255,0.2);
         padding: 2px 8px;
         border-radius: 12px;
-        margin-left: 8px;
+        margin-inline-start: 8px;
     }
 
     /* Status indicator */
@@ -448,7 +452,15 @@ COMMON_STYLES = '''
 
     .q-drawer {
         background-color: var(--bg-sidebar) !important;
+    }
+
+    /* Use logical properties for drawer borders - works for both LTR and RTL */
+    .q-drawer--left {
         border-right: 1px solid var(--border-light) !important;
+    }
+
+    .q-drawer--right {
+        border-left: 1px solid var(--border-light) !important;
     }
 
     .sidebar-nav {
@@ -487,12 +499,12 @@ COMMON_STYLES = '''
         background: var(--bg-active);
         color: var(--primary-700);
         font-weight: 600;
-        border-left: 3px solid var(--primary-600);
+        border-inline-start: 3px solid var(--primary-600);
     }
 
     [data-theme="dark"] .nav-item.active {
         color: var(--primary-400);
-        border-left-color: var(--primary-400);
+        border-inline-start-color: var(--primary-400);
     }
 
     .nav-item-icon {
@@ -501,7 +513,7 @@ COMMON_STYLES = '''
     }
 
     .nav-item-badge {
-        margin-left: auto;
+        margin-inline-start: auto;
         background: var(--primary-100);
         color: var(--primary-700);
         padding: 2px 8px;
@@ -1004,13 +1016,18 @@ COMMON_STYLES = '''
     }
 
     /* Mobile drawer - CSS only, hide on phones/tablets */
+    /* Handles both LTR (left drawer) and RTL (right drawer) modes */
     @media (max-width: 768px) {
         .q-drawer--left:not(.q-drawer--on-top) {
             transform: translateX(-100%) !important;
         }
+        .q-drawer--right:not(.q-drawer--on-top) {
+            transform: translateX(100%) !important;
+        }
     }
 
-    /* Force RTL text direction for Hebrew Input/Text only - KEEP LAYOUT LTR */
+    /* Hebrew mode text direction enhancements */
+    /* Layout RTL is handled by Quasar natively; these rules enhance text content */
 
     /* Ensure Inputs in Hebrew mode are RTL */
     .hebrew-mode input,
@@ -1217,60 +1234,82 @@ def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
 
     current_page = app.storage.user.get('current_page', '/')
+    rtl_mode = is_rtl()
 
-    # Global LTR Layout (User Request: "Exact English Copy")
-    # We do NOT use RTL layout mode. All alignment is LTR.
-    # We only inject RTL direction into text content.
+    # Reference dictionary to store UI elements accessible across function scopes
+    refs = {}
 
+    # === Modular Header Rendering Functions ===
+    # These allow us to reverse DOM order for RTL without using CSS order or row-reverse
+
+    def render_header_left():
+        """Render left section: Menu button + Logo"""
+        with ui.row().classes('items-center gap-4') as section:
+            refs['menu_btn'] = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
+
+            # Logo
+            with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
+                ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
+                with ui.column().classes('gap-0 hidden sm:flex'):
+                    ui.label('Genizah Search').classes('text-lg font-bold text-white tracking-wide')
+                    ui.label('Pro').classes('text-xs text-white/60')
+        return section
+
+    def render_header_center():
+        """Render center section: Quick search"""
+        with ui.row().classes('hidden md:flex items-center') as section:
+            quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
+            quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
+        return section
+
+    def render_header_right():
+        """Render right section: Status + Auth + Help"""
+        with ui.row().classes('items-center gap-2 sm:gap-4') as section:
+            # Status Indicator
+            with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
+                status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
+                status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
+
+                def update_status():
+                    if state.is_ready():
+                        status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
+                        status_text.text = tr('Ready')
+                    else:
+                        status_dot.classes('bg-yellow-400', remove='bg-green-400')
+                        status_text.text = tr('Loading...')
+
+                ui.timer(3.0, update_status, once=True)
+
+            # Auth Buttons (Login/Register or User Menu)
+            with ui.row().classes('auth-buttons'):
+                from web.auth_state import create_auth_buttons
+                create_auth_buttons()
+
+            # Help Button (hidden on mobile via CSS)
+            ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
+        return section
+
+    # === Build Header with correct DOM order ===
     with ui.header().classes('q-py-none').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
-            # Left: Menu + Logo
-            with ui.row().classes('items-center gap-4'):
-                menu_btn = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
-
-                # Logo
-                with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
-                    ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
-                    with ui.column().classes('gap-0 hidden sm:flex'):
-                        ui.label('Genizah Search').classes('text-lg font-bold text-white tracking-wide')
-                        ui.label('Pro').classes('text-xs text-white/60')
-
-            # Center: Search Quick Access (optional)
-            with ui.row().classes('hidden md:flex items-center'):
-                quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
-                quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value}'))
-
-            # Right: Status + Actions + Auth
-            with ui.row().classes('items-center gap-2 sm:gap-4'):
-                # Status Indicator
-                with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
-                    status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
-                    status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
-
-                    def update_status():
-                        if state.is_ready():
-                            status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
-                            status_text.text = tr('Ready')
-                        else:
-                            status_dot.classes('bg-yellow-400', remove='bg-green-400')
-                            status_text.text = tr('Loading...')
-
-                    ui.timer(3.0, update_status, once=True)
-
-                # Auth Buttons (Login/Register or User Menu)
-                with ui.row().classes('auth-buttons'):
-                    from web.auth_state import create_auth_buttons
-                    create_auth_buttons()
-
-                # Help Button (hidden on mobile via CSS)
-                ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
+            if rtl_mode:
+                # RTL: Render Right -> Center -> Left for correct tab order
+                render_header_right()
+                render_header_center()
+                render_header_left()
+            else:
+                # LTR: Normal order Left -> Center -> Right
+                render_header_left()
+                render_header_center()
+                render_header_right()
 
     # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
     drawer_open = app.storage.user.get('drawer_open', True)
 
-    # Standard Left Drawer (LTR Style)
-    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+    # Set drawer side based on RTL mode - Quasar will handle page padding correctly
+    drawer_side = 'right' if rtl_mode else 'left'
+    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
     # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
@@ -1286,8 +1325,9 @@ def create_layout():
         """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
         ui.navigate.to(path)
 
-    # Connect menu button to toggle function
-    menu_btn.on('click', toggle_drawer)
+    # Connect menu button to toggle function (using refs dictionary)
+    if 'menu_btn' in refs:
+        refs['menu_btn'].on('click', toggle_drawer)
 
     with main_drawer:
         with ui.column().classes('h-full'):
@@ -1402,9 +1442,8 @@ def apply_theme_immediately():
     current_lang = get_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
-    # Force LTR Layout Globally (as per user request: "Interface exactly as English")
-    # We only set dir="ltr" globally.
-    dir_attr = "ltr"
+    # Use proper direction based on language (RTL for Hebrew, LTR for English)
+    dir_attr = get_dir()
 
     # Add Hebrew-specific class if needed
     body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
@@ -1430,6 +1469,7 @@ def apply_theme_immediately():
             var theme = "{current_theme}";
             var lang = "{current_lang}";
             var dir = "{dir_attr}";
+            var isRtl = (dir === "rtl");
 
             // Apply to html immediately (before DOM ready)
             document.documentElement.setAttribute("data-theme", theme);
@@ -1450,11 +1490,31 @@ def apply_theme_immediately():
                     }}
                 }}
             }};
+
+            // Activate Quasar RTL mode when ready
+            var activateQuasarRtl = function() {{
+                if (typeof Quasar !== 'undefined' && isRtl) {{
+                    // Try to use Hebrew language pack first, fallback to generic RTL
+                    if (Quasar.lang && Quasar.lang.he) {{
+                        Quasar.lang.set(Quasar.lang.he);
+                    }} else if (Quasar.lang && Quasar.lang.set) {{
+                        // Fallback: Set RTL mode without full language pack
+                        Quasar.lang.set({{ rtl: true }});
+                    }}
+                }}
+            }};
+
             // Execute immediately
             applyTheme();
+
             // Backup for body element when it exists
             if (document.readyState === 'loading') {{
-                document.addEventListener('DOMContentLoaded', applyTheme);
+                document.addEventListener('DOMContentLoaded', function() {{
+                    applyTheme();
+                    activateQuasarRtl();
+                }});
+            }} else {{
+                activateQuasarRtl();
             }}
         }})();
     </script>'''
@@ -1652,6 +1712,9 @@ async def initialize_engine():
             # 1. Metadata
             state.meta_mgr = MetadataManager()
             state.lists_mgr = ListsManager(state.meta_mgr)
+
+            # Initialize user lists manager (auth-aware wrapper)
+            state.init_user_lists_mgr()
 
             # 2. Lab Settings & Engine
             state.lab_engine = LabEngine(state.meta_mgr, None)

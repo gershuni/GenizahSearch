@@ -10,6 +10,8 @@ Comments can be public or private.
 Supports shelfmark mentions in format: [[shelfmark:T-S 8J6.1|id:123456]]
 """
 
+import asyncio
+
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, api_call
@@ -88,7 +90,7 @@ def create_comment_dialog(
                                 recent_container.clear()
                                 if state.lists_mgr:
                                     # Use get_items_in_list to get proper item dicts
-                                    recent_items = state.lists_mgr.get_items_in_list('recent')
+                                    recent_items = state.lists_mgr.get_items_in_list_sync('recent')
                                     if recent_items:
                                         with recent_container:
                                             for item in recent_items[:20]:
@@ -131,7 +133,7 @@ def create_comment_dialog(
                                                 def make_show_list(lid=list_id, lname=list_name):
                                                     def show_list():
                                                         lists_container.clear()
-                                                        items = state.lists_mgr.get_items_in_list(lid)
+                                                        items = state.lists_mgr.get_items_in_list_sync(lid)
                                                         with lists_container:
                                                             # Back button
                                                             ui.button(tr('Back'), icon='arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
@@ -219,7 +221,11 @@ def create_comment_dialog(
                         ui.notify(tr('Comment submitted successfully'), type='positive')
                         dialog.close()
                         if on_submit:
-                            on_submit()
+                            # Support both sync and async callbacks
+                            if asyncio.iscoroutinefunction(on_submit):
+                                await on_submit()
+                            else:
+                                on_submit()
 
                 submit_btn = ui.button(tr('Submit'), icon='send', on_click=submit_comment).props('color=primary')
 

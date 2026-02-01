@@ -9,14 +9,96 @@ Features:
 - View list contents with metadata
 - Edit notes and tags for items
 - Export lists
+- Per-user storage (syncs across devices when logged in)
+- Per-device storage (for anonymous users)
 """
 
 from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
+from web.components.project_tree import create_project_tree
+from web.auth_state import GlobalAuthState
 from typing import Optional
 import time
+import asyncio
+
+
+def create_inline_edit_label(
+    current_name: str,
+    list_id: str,
+    is_system: bool,
+    lists_mgr,
+    tr_func,
+    classes: str = 'font-semibold',
+    on_save_callback=None
+):
+    """
+    Create an inline-editable label for list names.
+    Click to edit, Enter/blur to save, Escape to cancel.
+    """
+    if is_system:
+        # System lists cannot be renamed, just show a label
+        ui.label(current_name).classes(classes)
+        return
+
+    # Container to hold either the label or the input
+    container = ui.element('div').classes('inline-edit-container')
+
+    with container:
+        # State for editing mode
+        editing_state = {'active': False}
+
+        # The display label (shown when not editing)
+        label_el = ui.label(current_name).classes(classes + ' cursor-pointer hover:underline')
+
+        # The input field (hidden initially)
+        input_el = ui.input(value=current_name).classes('inline-edit-input').props('dense outlined')
+        input_el.set_visibility(False)
+
+        def start_editing():
+            """Switch to edit mode."""
+            if editing_state['active']:
+                return
+            editing_state['active'] = True
+            input_el.value = label_el.text
+            label_el.set_visibility(False)
+            input_el.set_visibility(True)
+            # Focus the input
+            ui.run_javascript(f'document.querySelector("[id=\\"{input_el.id}\\"] input")?.focus(); document.querySelector("[id=\\"{input_el.id}\\"] input")?.select();')
+
+        def save_edit():
+            """Save the new name and exit edit mode."""
+            if not editing_state['active']:
+                return
+            new_name = input_el.value.strip()
+            if new_name and new_name != label_el.text:
+                # Call API to update
+                if lists_mgr:
+                    lists_mgr.update_list(list_id, name=new_name)
+                    label_el.text = new_name
+                    ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
+                    if on_save_callback:
+                        on_save_callback()
+            cancel_edit()
+
+        def cancel_edit():
+            """Cancel editing and restore the label."""
+            editing_state['active'] = False
+            input_el.set_visibility(False)
+            label_el.set_visibility(True)
+
+        def handle_keydown(e):
+            """Handle keyboard events in the input."""
+            if e.args.get('key') == 'Enter':
+                save_edit()
+            elif e.args.get('key') == 'Escape':
+                cancel_edit()
+
+        # Attach event handlers
+        label_el.on('click', start_editing, [])
+        input_el.on('keydown', handle_keydown)
+        input_el.on('blur', save_edit)
 
 
 def create_lists_page():
@@ -40,6 +122,15 @@ def create_lists_page():
         render_lists_sidebar()
         render_list_content()
 
+    async def async_refresh_ui():
+        """Async version of refresh_ui - refreshes data from API if authenticated."""
+        if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'refresh_data'):
+            try:
+                await state.lists_mgr.refresh_data()
+            except Exception as e:
+                print(f"Error refreshing lists data: {e}")
+        refresh_ui()
+
     # --- Create New List Dialog ---
     def show_create_list_dialog():
         """Show dialog to create a new list."""
@@ -57,22 +148,27 @@ def create_lists_page():
                 colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
                           '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
                 for color in colors:
-                    btn = ui.button(icon='circle').props('flat round').style(
-                        f'color: {color}; font-size: 2rem;'
+                    btn = ui.button().props('flat round dense').style(
+                        f'background-color: {color}; width: 32px; height: 32px; min-width: 32px;'
                     )
                     btn.on('click', lambda c=color: selected_color.update({'value': c}))
 
-            def create_list():
+            async def create_list():
                 name = list_name.value.strip()
                 if not name:
                     ui.notify(tr('Please enter a list name'), type='warning')
                     return
 
                 if state.lists_mgr:
-                    list_id = state.lists_mgr.create_list(name, color=selected_color['value'])
+                    # Use async method if authenticated, sync otherwise
+                    if GlobalAuthState.is_logged_in():
+                        list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
+                    else:
+                        list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+
                     ui.notify(f"{tr('List created')}: {name}", type='positive')
                     dialog.close()
-                    refresh_ui()
+                    await async_refresh_ui()
                 else:
                     ui.notify(tr('Lists manager not available'), type='negative')
 
@@ -91,17 +187,120 @@ def create_lists_page():
             ui.label(f"{tr('Are you sure you want to delete')}: {list_name}?").classes('mb-4').style('color: var(--text-secondary);')
             ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
 
-            def delete_list():
+            async def delete_list():
                 if state.lists_mgr:
-                    state.lists_mgr.delete_list(list_id)
+                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'delete_list'):
+                        try:
+                            await state.lists_mgr.delete_list(list_id)
+                        except TypeError:
+                            state.lists_mgr.delete_list(list_id)
+                    else:
+                        state.lists_mgr.delete_list(list_id)
                     ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
                     dialog.close()
                     page_state.selected_list_id = None
-                    refresh_ui()
+                    await async_refresh_ui()
 
             with ui.row().classes('w-full justify-end gap-2'):
                 ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                 ui.button(tr('Delete'), on_click=delete_list).classes('bg-red-500 text-white')
+
+        dialog.open()
+
+    # --- Trash Dialog ---
+    def show_trash_dialog():
+        """Show dialog with deleted lists (trash)."""
+        if not state.lists_mgr:
+            return
+
+        # Get deleted lists
+        if hasattr(state.lists_mgr, 'get_deleted_lists'):
+            deleted_lists = state.lists_mgr.get_deleted_lists()
+        else:
+            ui.notify(tr('Trash not available'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            h3(tr('Trash'), classes='text-xl font-bold mb-4')
+
+            if not deleted_lists:
+                ui.label(tr('Trash is empty.')).classes('text-gray-500 mb-4')
+                ui.button(tr('Close'), on_click=dialog.close).props('flat')
+            else:
+                ui.label(tr('{} deleted lists').format(len(deleted_lists))).classes('mb-4').style('color: var(--text-secondary);')
+
+                # List of deleted lists
+                trash_list = ui.column().classes('w-full max-h-60 overflow-auto border rounded p-2 mb-4')
+                selected_list_id = {'value': None}
+
+                def select_item(list_id, btn):
+                    selected_list_id['value'] = list_id
+                    # Update selection visuals
+                    for child in trash_list:
+                        if hasattr(child, 'classes'):
+                            child.classes(remove='bg-blue-100')
+                    btn.classes(add='bg-blue-100')
+
+                with trash_list:
+                    for lst in deleted_lists:
+                        from datetime import datetime
+                        deleted_at = lst.get('deleted_at')
+                        if deleted_at:
+                            if isinstance(deleted_at, (int, float)):
+                                deleted_str = datetime.fromtimestamp(deleted_at).strftime('%Y-%m-%d %H:%M')
+                            else:
+                                deleted_str = str(deleted_at)[:16]
+                        else:
+                            deleted_str = tr('Unknown')
+
+                        count = lst.get('count', 0)
+                        with ui.row().classes('w-full items-center justify-between p-2 hover:bg-gray-100 rounded cursor-pointer') as row:
+                            row.on('click', lambda e, lid=lst['id'], r=row: select_item(lid, r))
+                            ui.label(f"{lst['name']} ({count} {tr('items')})")
+                            ui.label(f"{tr('Deleted')}: {deleted_str}").classes('text-sm text-gray-500')
+
+                # Action buttons
+                with ui.row().classes('w-full justify-end gap-2'):
+                    async def restore_selected():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to restore.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'restore_list'):
+                            try:
+                                await state.lists_mgr.restore_list(selected_list_id['value'])
+                            except TypeError:
+                                state.lists_mgr.restore_list(selected_list_id['value'])
+                            ui.notify(tr('List restored'), type='positive')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def delete_permanently():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to delete.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'permanently_delete_list'):
+                            try:
+                                await state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            except TypeError:
+                                state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            ui.notify(tr('List deleted permanently'), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def empty_trash():
+                        if hasattr(state.lists_mgr, 'empty_trash'):
+                            try:
+                                count = await state.lists_mgr.empty_trash()
+                            except TypeError:
+                                count = state.lists_mgr.empty_trash()
+                            ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                    ui.button(tr('Restore'), on_click=restore_selected).classes('bg-green-500 text-white')
+                    ui.button(tr('Delete Permanently'), on_click=delete_permanently).classes('bg-red-500 text-white')
+                    ui.button(tr('Empty Trash'), on_click=empty_trash).classes('bg-red-700 text-white')
 
         dialog.open()
 
@@ -148,64 +347,15 @@ def create_lists_page():
 
     # --- Render Lists Sidebar ---
     def render_lists_sidebar():
-        """Render the left sidebar with list of lists."""
-        lists_sidebar_container.clear()
-
-        with lists_sidebar_container:
-            # Header with Create button
-            with ui.row().classes('w-full justify-between items-center mb-4 pb-2 border-b'):
-                # Changed to H2
-                h2(tr('My Lists'), classes='text-lg font-bold')
-                ui.button(
-                    icon='add',
-                    on_click=show_create_list_dialog
-                ).props('flat round dense').tooltip(tr('Create new list'))
-
-            if not state.lists_mgr:
-                ui.label(tr('Lists manager not available')).classes('text-red-500')
-                return
-
-            lists = state.lists_mgr.data.get('lists', {})
-            if not lists:
-                ui.label(tr('No lists yet. Create your first list!')).classes('text-center mt-4').style('color: var(--text-muted);')
-                return
-
-            # Render each list
-            with ui.column().classes('w-full gap-1'):
-                for list_id, list_data in lists.items():
-                    is_selected = page_state.selected_list_id == list_id
-                    is_system = list_data.get('is_system', False)
-
-                    card_class = 'w-full p-3 cursor-pointer transition-all'
-                    if is_selected:
-                        card_class += ' bg-green-100 border-l-4 border-green-600'
-                    else:
-                        card_class += ' hover:shadow-sm'
-
-                    with ui.card().classes(card_class).on('click', lambda lid=list_id: select_list(lid)):
-                        with ui.row().classes('w-full items-center justify-between gap-2'):
-                            # Color indicator + Name
-                            with ui.row().classes('items-center gap-2 flex-grow'):
-                                ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 1.2rem;')
-                                ui.label(list_data.get('name', 'Unnamed')).classes('font-semibold')
-
-                            # Item count
-                            if list_id == 'recent':
-                                count = len(state.lists_mgr.data.get('recent_items', []))
-                            else:
-                                count = state.lists_mgr._get_list_item_count(list_id)
-                            ui.label(str(count)).classes('text-xs px-2 py-1 rounded-full').style('background: var(--bg-tertiary); color: var(--text-secondary);')
-
-                            # Delete button (only for non-system lists)
-                            if not is_system:
-                                def make_delete_handler(lid, lname):
-                                    def handler():
-                                        show_delete_list_dialog(lid, lname)
-                                    return handler
-                                ui.button(
-                                    icon='delete',
-                                    on_click=make_delete_handler(list_id, list_data.get('name'))
-                                ).props('flat round dense size=sm stop-propagation').classes('text-red-400').tooltip(tr('Delete list'))
+        """Render the left sidebar with project tree."""
+        # Use the new project tree component
+        create_project_tree(
+            lists_mgr=state.lists_mgr,
+            container=lists_sidebar_container,
+            on_select=select_list,
+            selected_list_id=page_state.selected_list_id,
+            on_refresh=lambda: asyncio.create_task(async_refresh_ui())
+        )
 
     # --- Select List ---
     def select_list(list_id: str):
@@ -239,16 +389,29 @@ def create_lists_page():
                 return
 
             # List Header
+            is_system = list_data.get('is_system', False)
+            # Use project-inherited color if available
+            display_color = (
+                state.lists_mgr.get_list_display_color(list_id)
+                if hasattr(state.lists_mgr, 'get_list_display_color')
+                else list_data.get('color', '#FFD700')
+            )
             with ui.row().classes('w-full justify-between items-start mb-6 pb-4 border-b-2').style(
-                f'border-color: {list_data.get("color", "#999")};'
+                f'border-color: {display_color};'
             ):
                 with ui.column().classes('gap-1'):
                     with ui.row().classes('items-center gap-3'):
-                        ui.icon('circle').style(f'color: {list_data.get("color", "#999")}; font-size: 2rem;')
-                        # Changed to H2
-                        h2(list_data.get('name', 'Unnamed'), classes='text-3xl font-bold')
-
-                    is_system = list_data.get('is_system', False)
+                        ui.icon('circle').style(f'color: {display_color}; font-size: 2rem;')
+                        # Inline-editable list name (click to rename)
+                        create_inline_edit_label(
+                            current_name=list_data.get('name', 'Unnamed'),
+                            list_id=list_id,
+                            is_system=is_system,
+                            lists_mgr=state.lists_mgr,
+                            tr_func=tr,
+                            classes='text-3xl font-bold',
+                            on_save_callback=refresh_ui
+                        )
                     if is_system:
                         ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
 
@@ -261,7 +424,7 @@ def create_lists_page():
                     ).props('flat').classes('text-primary')
 
             # Get items
-            items_list = state.lists_mgr.get_items_in_list(list_id)
+            items_list = state.lists_mgr.get_items_in_list_sync(list_id)
             items_data = [(item.get('item_id'), item) for item in items_list]
 
             if not items_data:
@@ -307,7 +470,8 @@ def create_lists_page():
 
                                 # Note
                                 if note:
-                                    with ui.card().classes('p-2 mt-2').style('background: var(--bg-tertiary);'):
+                                    with ui.row().classes('items-start gap-2 p-2 mt-2 rounded').style('background: var(--bg-tertiary);'):
+                                        ui.icon('note', size='xs').style('color: var(--text-muted);')
                                         ui.label(note).classes('text-xs').style('color: var(--text-secondary);')
 
                                 # Tags
@@ -409,12 +573,20 @@ def create_lists_page():
                                     on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
                                 ).props('flat dense size=sm').style('color: var(--text-tertiary);')
 
-    def remove_item_from_list(item_id: str, list_id: str):
+    async def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""
         if state.lists_mgr:
-            if state.lists_mgr.remove_item_from_list(item_id, list_id):
+            if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'remove_item_from_list'):
+                try:
+                    result = await state.lists_mgr.remove_item_from_list(item_id, list_id)
+                except TypeError:
+                    result = state.lists_mgr.remove_item_from_list_sync(item_id, list_id)
+            else:
+                result = state.lists_mgr.remove_item_from_list(item_id, list_id)
+
+            if result:
                 ui.notify(tr('Item removed from list'), type='info')
-                refresh_ui()
+                await async_refresh_ui()
 
     def export_list(list_id: str):
         """Export list to Excel."""
@@ -425,7 +597,9 @@ def create_lists_page():
                     ui.notify(tr('List not found'), type='warning')
                     return
 
-                items = list_data.get('items', [])
+                # Use get_items_in_list to correctly fetch items
+                # Items are stored in data['items'] with list membership in each item's 'lists' field
+                items = state.lists_mgr.get_items_in_list_sync(list_id)
                 if not items:
                     ui.notify(tr('This list is empty'), type='warning')
                     return
@@ -435,20 +609,79 @@ def create_lists_page():
             except Exception as e:
                 ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
 
+    # --- Migration Dialog ---
+    async def show_migration_dialog():
+        """Show dialog to migrate local lists to user account."""
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            h3(tr('Sync Your Lists'), classes='text-xl font-bold mb-4')
+            ui.label(tr('You have local lists that can be synced to your account.')).classes('mb-2')
+            ui.label(tr('This will make them available on all your devices.')).classes('mb-4').style('color: var(--text-secondary);')
+
+            async def do_migration():
+                if hasattr(state.lists_mgr, 'migrate_local_to_user'):
+                    result = await state.lists_mgr.migrate_local_to_user()
+                    if 'error' not in result:
+                        ui.notify(
+                            f"{tr('Migration complete')}: {result.get('lists_migrated', 0)} {tr('lists')}, "
+                            f"{result.get('items_migrated', 0)} {tr('items')}",
+                            type='positive'
+                        )
+                        dialog.close()
+                        await async_refresh_ui()
+                    else:
+                        ui.notify(f"{tr('Migration failed')}: {result.get('error')}", type='negative')
+                else:
+                    ui.notify(tr('Migration not available'), type='warning')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Later'), on_click=dialog.close).props('flat')
+                ui.button(tr('Sync Now'), on_click=do_migration).classes('bg-primary text-white')
+
+        dialog.open()
+
     # --- Main Layout ---
     with ui.column().classes('w-full h-[calc(100vh-120px)]'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
             # Changed to H1
             h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
-            ui.button(
-                tr('Create List'),
-                icon='add',
-                on_click=show_create_list_dialog
-            ).classes('bg-primary text-white')
+            with ui.row().classes('items-center gap-2'):
+                # Show sync status
+                if GlobalAuthState.is_logged_in():
+                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Synced to your account'))
+                else:
+                    ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
+                ui.button(
+                    tr('Create List'),
+                    icon='add',
+                    on_click=show_create_list_dialog
+                ).classes('bg-primary text-white')
+                ui.button(
+                    tr('Trash'),
+                    icon='delete',
+                    on_click=show_trash_dialog
+                ).props('flat').classes('text-gray-600')
 
-        # Description
-        ui.label(tr('Organize and save manuscripts for easy access')).classes('mb-4').style('color: var(--text-secondary);')
+        # Description with sync status
+        if GlobalAuthState.is_logged_in():
+            ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
+        else:
+            with ui.row().classes('items-center gap-2 mb-4'):
+                ui.label(tr('Lists are stored locally.')).style('color: var(--text-secondary);')
+                ui.link(tr('Log in to sync across devices'), '/').classes('text-primary underline')
+
+        # Check for migration opportunity (logged in with local lists)
+        if GlobalAuthState.is_logged_in():
+            local_mgr = state.get_local_lists_mgr()
+            if local_mgr and hasattr(state.lists_mgr, 'has_local_lists'):
+                if state.lists_mgr.has_local_lists():
+                    with ui.card().classes('w-full p-4 mb-4 bg-blue-50 border-l-4 border-blue-500'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.icon('sync', size='md').classes('text-blue-600')
+                            with ui.column().classes('flex-grow'):
+                                ui.label(tr('Local Lists Available')).classes('font-semibold text-blue-800')
+                                ui.label(tr('You have lists stored on this device. Sync them to your account?')).classes('text-sm text-blue-600')
+                            ui.button(tr('Sync Now'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:

@@ -104,46 +104,20 @@ def load_result(container, result):
 
             with ui.row().classes('gap-2'):
                 # Add to list button
-                def show_add_to_list():
-                    with ui.dialog() as dialog, ui.card().classes('p-4'):
-                        ui.label(tr('Add to List')).classes('text-lg font-bold mb-2')
-                        ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm text-gray-600 mb-4')
-
-                        if state.lists_mgr:
-                            lists = state.lists_mgr.data.get('lists', {})
-                            list_options = {lst_id: lst['name'] for lst_id, lst in lists.items() if not lst.get('is_system')}
-
-                            if not list_options:
-                                ui.label(tr('No lists available. Create a list first.')).classes('text-gray-500 mb-2')
-                                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('bg-primary text-white')
-                            else:
-                                selected_list = ui.select(
-                                    list_options,
-                                    label=tr('Select List'),
-                                    value=list(list_options.keys())[0]
-                                ).classes('w-full mb-4')
-
-                                note_input = ui.input(label=tr('Note (optional)')).classes('w-full mb-4')
-
-                                def add_to_list():
-                                    if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
-                                        ui.notify(tr('Added to list'), type='positive')
-                                        dialog.close()
-                                    else:
-                                        ui.notify(tr('Already in list'), type='info')
-
-                                with ui.row().classes('w-full justify-end gap-2'):
-                                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                                    ui.button(tr('Add'), on_click=add_to_list).classes('bg-primary text-white')
-                        else:
-                            ui.label(tr('Lists manager not available')).classes('text-red-500')
-
-                    dialog.open()
+                def show_add_to_list_local():
+                    from web.components import show_add_to_list_dialog
+                    show_add_to_list_dialog(
+                        sys_id=sys_id,
+                        shelfmark=shelfmark,
+                        lists_mgr=state.lists_mgr,
+                        note_default='',
+                        fl_id=fl_id
+                    )
 
                 ui.button(
                     icon='star_border',
-                    on_click=show_add_to_list
-                ).props('flat round dense').tooltip(tr('Add to list'))
+                    on_click=show_add_to_list_local
+                ).props('flat round dense').tooltip(tr('Add to List'))
 
                 ui.button(icon='download', on_click=lambda: ui.notify('Exporting...')).props('flat round dense')
 

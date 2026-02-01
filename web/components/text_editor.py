@@ -211,8 +211,9 @@ def create_edit_text_dialog(
                                     if fl_match:
                                         direct_url = f"{NLI_IIIF_BASE}/FL{fl_match.group(1)}/full/max/0/default.jpg"
 
-                                safe_url = direct_url.replace("'", "\\'").replace('"', '\\"')
-                                safe_doc_id = (document_id or '').replace("'", "\\'").replace('"', '\\"')
+                                # Use json.dumps for proper JS string escaping (handles backticks, backslashes, etc.)
+                                safe_url = json.dumps(direct_url)[1:-1]  # Remove surrounding quotes
+                                safe_doc_id = json.dumps(document_id or '')[1:-1]  # Remove surrounding quotes
                                 page_idx = page_number - 1 if page_number else 0
 
                                 # Use JavaScript fallback that fetches IIIF manifest client-side

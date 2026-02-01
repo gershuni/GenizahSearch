@@ -103,6 +103,7 @@ class ImageInfo:
 
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 
+
 def get_thumbnail_url(fl_id: str, size: int = 400) -> str:
     if not fl_id: return ''
     digits = re.sub(r"\D", "", str(fl_id))
@@ -145,25 +146,58 @@ class GenizahService:
         # Initialization is handled by main.py startup thread
         return True
 
-    def search_by_shelfmark(self, shelfmark_query: str, limit: int = 50) -> List[ManuscriptInfo]:
-        if not self.is_ready: return []
+    def search_by_shelfmark(self, shelfmark_query: str, limit: int = 100) -> Tuple[List[ManuscriptInfo], bool]:
+        """
+        Search for manuscripts by shelfmark using MetadataManager.resolve_system_by_shelfmark().
+
+        This uses the same logic as the desktop app:
+        - Normalizes query and all shelfmarks for comparison
+        - Finds exact matches first, then partial matches
+        - Sorts using natural_sort_key (100.1, 100.2, 100.10 not 100.1, 100.10, 100.2)
+
+        Returns:
+            Tuple of (list of ManuscriptInfo, exact_match_found boolean)
+            If single exact match is found, returns that match with exact_match=True.
+            Otherwise returns sorted suggestions with exact_match=False.
+        """
+        if not self.is_ready or not state.meta_mgr:
+            return [], False
+
         try:
-            results = state.searcher.execute_search(shelfmark_query, 'Shelfmark', 0)
-            manuscripts = []
-            seen_ids = set()
-            for r in results[:limit]:
-                sys_id = r['display']['id']
-                if sys_id and sys_id not in seen_ids:
-                    seen_ids.add(sys_id)
-                    manuscripts.append(ManuscriptInfo(
-                        sys_id=sys_id,
-                        shelfmark=r['display'].get('shelfmark', ''),
-                        title=r['display'].get('title', '')
-                    ))
-            return manuscripts
+            # Use the same resolution logic as desktop app
+            result = state.meta_mgr.resolve_system_by_shelfmark(shelfmark_query, limit=limit)
+
+            # Single exact match found
+            if result.get('sys_id'):
+                return [ManuscriptInfo(
+                    sys_id=result['sys_id'],
+                    shelfmark=result.get('selected_shelfmark', ''),
+                    title=''  # Title fetched later if needed
+                )], True
+
+            # Multiple options - already sorted by natural_sort_key in genizah_core
+            options = result.get('options', [])
+            if not options:
+                return [], False
+
+            manuscripts = [
+                ManuscriptInfo(
+                    sys_id=opt['sys_id'],
+                    shelfmark=opt['shelfmark'],
+                    title=opt.get('title', '')
+                )
+                for opt in options
+            ]
+
+            # If there's only one option, treat it as exact match
+            if len(manuscripts) == 1:
+                return manuscripts, True
+
+            return manuscripts, False
+
         except Exception as e:
             print(f"Search by shelfmark error: {e}")
-            return []
+            return [], False
 
     def get_browse_page(self, sys_id: str, p_num: Optional[int] = None, direction: int = 0, absolute_index: Optional[int] = None, allow_cross: bool = False) -> Optional[BrowsePage]:
         if not self.is_ready: return None

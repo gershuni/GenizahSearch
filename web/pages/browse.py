@@ -664,6 +664,7 @@ class BrowseState:
         self.sys_id: Optional[str] = None
         self.is_loading: bool = False
         self.error: Optional[str] = None
+        self.search_error: Optional[str] = None  # Inline error for shelfmark not found
         self.zoom_level: float = 1.0
         self.rotation: int = 0
         self.is_fullscreen: bool = False
@@ -707,6 +708,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # Add custom styles
     ui.add_head_html(VIEWER_STYLES)
 
+    def update_search_error():
+        """Update the inline search error display below the search bar."""
+        error_container = slider_refs.get('search_error_container')
+        if error_container:
+            error_container.clear()
+            if state.search_error:
+                with error_container:
+                    ui.icon('error_outline', size='sm').classes('text-red-500')
+                    ui.label(state.search_error).classes('text-red-500 text-sm ml-1')
+
     def search_shelfmark():
         """Search for manuscripts by shelfmark."""
         if not state.shelfmark_query.strip():
@@ -714,24 +725,82 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         state.is_loading = True
         state.error = None
+        state.search_error = None  # Clear inline error
+        update_search_error()  # Clear the error display
         update_content()
 
         try:
-            results = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
+            results, exact_match = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
 
-            if results:
+            if not results:
+                # Show inline error below search bar instead of full-page error
+                state.search_error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
+                state.is_loading = False
+                update_search_error()
+                update_content()
+                return
+
+            # Clear any previous inline error on success
+            state.search_error = None
+            update_search_error()
+
+            # If exact match or single result, load directly
+            if exact_match or len(results) == 1:
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
                 load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
-                state.error = tr('No manuscript found')
+                # Multiple results - show selection dialog
                 state.is_loading = False
                 update_content()
+                show_shelfmark_suggestions(results)
 
         except Exception as e:
             state.error = str(e)
             state.is_loading = False
             update_content()
+
+    def show_shelfmark_suggestions(results):
+        """Show a dialog with shelfmark suggestions for user to select."""
+        with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
+            # Header
+            with ui.row().classes('w-full items-center justify-between mb-4'):
+                h3(tr('Select Manuscript'), classes='text-lg font-semibold m-0')
+                ui.button(icon='close', on_click=dialog.close).props('flat round dense')
+
+            ui.label(
+                f"{tr('Multiple matches found for')}: \"{state.shelfmark_query}\""
+            ).classes('mb-4').style('color: var(--text-secondary);')
+
+            # Results list
+            with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
+                for result in results:
+                    def select_result(r=result):
+                        dialog.close()
+                        state.sys_id = r.sys_id
+                        state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
+                        # Update the search input field if available
+                        if slider_refs.get('search_input'):
+                            slider_refs['search_input'].value = r.shelfmark
+                        state.current_page = None
+                        load_page(p_num=1)
+
+                    with ui.card().classes(
+                        'w-full p-3 cursor-pointer hover:bg-gray-100'
+                    ).style(
+                        'background: var(--bg-surface); border: 1px solid var(--border-subtle);'
+                    ).on('click', select_result):
+                        # Shelfmark (LTR)
+                        ui.label(result.shelfmark).classes('font-medium').style(
+                            'color: var(--text-primary); direction: ltr; text-align: left;'
+                        )
+                        # Title (RTL for Hebrew)
+                        if result.title:
+                            ui.label(result.title).classes('text-sm').style(
+                                'color: var(--text-secondary); direction: rtl; text-align: right;'
+                            )
+
+        dialog.open()
 
     def load_page(direction: int = 0, p_num: Optional[int] = None):
         """Load a page of the manuscript."""
@@ -777,7 +846,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     try:
                         from web.state import state as app_state
                         if app_state.lists_mgr:
-                            app_state.lists_mgr.add_to_recent(state.sys_id, fl_id=page.fl_id)
+                            # Use sync version to avoid async/await issues
+                            app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
                     except Exception as track_err:
                         print(f"Failed to track recent item: {track_err}")
             else:
@@ -919,86 +989,56 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def add_manuscript_to_list():
         """Add entire manuscript to a list."""
+        print(f"[DEBUG] add_manuscript_to_list called, sys_id={state.sys_id}, current_page={state.current_page}")
         if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
+        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {state.current_page.shelfmark}").style('color: var(--text-secondary);')
-
-            lists = app_state.lists_mgr.data.get('lists', {})
-            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-            if list_options:
-                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                def do_add():
-                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value):
-                        ui.notify(tr('Added to list'), type='positive')
-                        dialog.close()
-                    else:
-                        ui.notify(tr('Already in list'), type='info')
-
-                with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
-            else:
-                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-
-        dialog.open()
+        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, shelfmark={state.current_page.shelfmark}")
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=state.current_page.shelfmark,
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default
+            fl_id=None
+        )
+        print(f"[DEBUG] Dialog should have opened")
 
     def add_page_to_list():
         """Add specific page/image to a list."""
+        print(f"[DEBUG] add_page_to_list called")
+        print(f"[DEBUG] state.sys_id = {state.sys_id}")
+        print(f"[DEBUG] state.current_page = {state.current_page}")
         if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
+        from web.components import show_add_to_list_dialog
+        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
         # Use FL ID if available for specific page reference
         fl_id = state.current_page.fl_id
-        note_text = f"Page {state.current_page.p_num}"
-        if fl_id:
-            note_text += f" (FL{fl_id})"
 
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}").style('color: var(--text-secondary);')
-
-            lists = app_state.lists_mgr.data.get('lists', {})
-            list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-            if list_options:
-                selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                note_input = ui.input(label=tr('Note (optional)'), value=note_text).classes('w-full mt-2').props('outlined')
-
-                def do_add():
-                    # Add with FL ID if available
-                    if app_state.lists_mgr.add_item(state.sys_id, selected_list.value, note=note_input.value, fl_id=fl_id):
-                        ui.notify(tr('Added to list'), type='positive')
-                        dialog.close()
-                    else:
-                        ui.notify(tr('Already in list'), type='info')
-
-                with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                    ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
-            else:
-                ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-
-        dialog.open()
+        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, fl_id={fl_id}")
+        show_add_to_list_dialog(
+            sys_id=state.sys_id,
+            shelfmark=f"{state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}",
+            lists_mgr=app_state.lists_mgr,
+            note_default='',  # Empty by default (user requested)
+            fl_id=fl_id
+        )
+        print(f"[DEBUG] Dialog function returned")
 
     def zoom_in():
         """Increase zoom level."""
@@ -1402,6 +1442,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             page = state.current_page
 
+            # Reference to hold the notes panel refresh function
+            # Will be set after the notes panel is created
+            notes_refresh_ref = {'refresh': None}
+
+            async def refresh_notes_after_comment():
+                """Refresh the notes panel after a comment is submitted."""
+                if notes_refresh_ref['refresh']:
+                    await notes_refresh_ref['refresh']()
+
             # === Compact Metadata Header ===
             with ui.card().classes('w-full p-3 mb-3').style(
                 'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important; '
@@ -1495,7 +1544,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ui.button(
                             icon='star_border',
                             on_click=add_manuscript_to_list
-                        ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').style('color: #ffffff !important;').tooltip(tr('Add to Favorites'))
+                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('Add to List'))
 
                     # Next Shelfmark Button
                     ui.button(
@@ -1766,7 +1815,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='star_border',
                                 on_click=add_page_to_list
-                            ).props(f'flat round dense aria-label="{tr("Add to Favorites")}"').classes('text-green-700').tooltip(tr('Add to Favorites'))
+                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('Add to List'))
 
                             # Image toggle button - placeholder, will be connected later
                             image_toggle_btn = None
@@ -1798,7 +1847,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id,
-                                    on_submit=refresh_page
+                                    on_submit=refresh_notes_after_comment
                                 )
                                 create_notes_button(
                                     document_id=page.sys_id,
@@ -2027,11 +2076,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 # Comments section - below panels
                 from web.components import create_notes_panel
-                create_notes_panel(
+                _, notes_refresh_fn = create_notes_panel(
                     document_id=page.sys_id,
                     page_number=page.p_num,
                     shelfmark=page.shelfmark or page.sys_id
                 )
+                # Store the refresh function so comment dialog can call it
+                notes_refresh_ref['refresh'] = notes_refresh_fn
 
                 # === FULLSCREEN EDIT OVERLAY ===
                 if state.fullscreen_edit and state.edit_mode:
@@ -2264,12 +2315,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     label=tr('Enter shelfmark')
                 ).classes('flex-1').props('outlined dense clearable color=green')
 
+                # Store reference for updates from other functions (e.g. suggestion dialog)
+                slider_refs['search_input'] = search_input
+
                 # Set initial value if we have one
                 if state.shelfmark_query:
                     search_input.value = state.shelfmark_query
 
                 def do_search():
                     state.shelfmark_query = search_input.value or ''
+                    state.search_error = None  # Clear previous error
                     if state.shelfmark_query.strip():
                         search_shelfmark()
 
@@ -2281,6 +2336,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     icon='arrow_forward',
                     on_click=do_search
                 ).props('color=green').classes('px-6')
+
+            # Error notice area (below search bar)
+            search_error_container = ui.row().classes('w-full mt-2 items-center')
+            slider_refs['search_error_container'] = search_error_container
 
         # Service status warning
         if not service.is_ready:

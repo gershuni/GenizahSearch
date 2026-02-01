@@ -1,0 +1,137 @@
+# GenizahSearch - Claude Context
+
+> This file provides context for AI assistants working on the GenizahSearch project.
+
+## Project Overview
+
+GenizahSearch is a collaborative research platform for the Cairo Genizah, featuring:
+- **Web Application** (NiceGUI) - https://genizahsearch.com
+- **Desktop Application** (PyQt6) - Windows executable
+- **Supabase Backend** - Cloud database for user data
+
+## Architecture (January 2026)
+
+```
+Web App (NiceGUI) ──────────────┐
+         │                       │
+         ├── Tantivy Index       ├──► Supabase (PostgreSQL)
+         │   (local search)      │    - User auth
+         │                       │    - Lists, corrections
+Desktop App (PyQt6) ────────────┘    - Comments, discoveries
+```
+
+**Note:** The FastAPI backend was removed in January 2026. All user data now goes directly to Supabase.
+
+## Key Files
+
+### Core
+- `genizah_core.py` - Search engine, data models, core logic
+- `genizah_app.py` - Desktop application (PyQt6)
+
+### Web
+- `web/main.py` - Web app entry point
+- `web/pages/` - Page components (search.py, browse.py, lists.py, etc.)
+- `web/components/` - Reusable UI components
+- `web/supabase_client.py` - Supabase integration
+
+### Desktop
+- `supabase_corrections_client.py` - Desktop Supabase client
+- `lists_sync.py` - Cloud sync for lists
+
+## Common Tasks
+
+### Running the Web App
+```bash
+python -m web.main
+```
+Opens on port 8080 or 8081.
+
+### Running the Desktop App
+```bash
+python genizah_app.py
+```
+
+## Important Conventions
+
+1. **Hebrew RTL** - Many strings are in Hebrew, text is right-to-left
+2. **Shelfmarks** - Manuscript identifiers like "T-S 12.123", "MS Heb c 57"
+3. **sys_id** - Internal unique identifier for manuscripts
+4. **fl_id** - Fragment/leaf identifier (e.g., "T-S 12.123.1r" for recto)
+
+## Documentation
+
+See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
+- `docs/guides/` - Admin and deployment guides
+- `docs/plans/` - Implementation plans
+- `docs/specs/` - Technical specifications
+- `docs/archive/` - Historical documents
+
+## Code Style
+
+- Python 3.10+
+- NiceGUI for web UI
+- PyQt6 for desktop UI
+- Type hints encouraged
+- Hebrew comments are acceptable
+
+## Environment Variables
+
+```
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+```
+
+## Testing
+
+```bash
+pytest tests/
+```
+
+## Common Issues
+
+1. **Search not working** - Check if Tantivy index exists in `Genizah_Index/`
+2. **User data not syncing** - Check Supabase connection and credentials
+3. **Images not loading** - NLI/Cambridge IIIF APIs may be down
+
+## Documentation Maintenance (Important!)
+
+**AI agents working on this codebase should keep documentation updated.**
+
+### When to Update Docs
+
+| If you change... | Update these docs |
+|------------------|-------------------|
+| Architecture/infrastructure | `CLAUDE.md`, `docs/guides/DEPLOYMENT_TECHNICAL.md` |
+| Supabase schema (tables, RLS) | `docs/guides/SUPABASE_GUIDE.md` |
+| Web app pages/components | `docs/CODE_INDEX.md` |
+| Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
+| Major features | `CHANGELOG.md`, `README.md` |
+
+### Before Finishing a Session
+
+Run the documentation health check:
+```bash
+python scripts/check_docs.py
+```
+
+If it reports issues, fix them before committing.
+
+### Key Docs to Keep Updated
+
+1. **`CLAUDE.md`** - This file! Update if architecture changes
+2. **`docs/guides/DEPLOYMENT_TECHNICAL.md`** - Server/deployment info
+3. **`docs/guides/SUPABASE_GUIDE.md`** - Database schema and queries
+
+### Outdated Terms to Avoid
+
+These terms indicate outdated documentation:
+- `FastAPI` / `backend server` - Removed in Jan 2026
+- `genizah-backend` service - No longer exists
+- `DATABASE_URL` - Replaced by `SUPABASE_URL`
+- `port 8000` - Backend port no longer used
+
+## Recently Changed
+
+- January 2026: Migrated from FastAPI to Supabase
+- January 2026: Documentation reorganized into `docs/` subdirectories
+- January 2026: Projects and Lists unified

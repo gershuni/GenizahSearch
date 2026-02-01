@@ -42,6 +42,11 @@ from .joins_panel import (
     invalidate_joins_cache
 )
 
+from .add_to_list_dialog import (
+    show_add_to_list_dialog,
+    create_add_to_list_button
+)
+
 __all__ = [
     'create_edit_button',
     'create_edit_text_dialog',
@@ -62,4 +67,6 @@ __all__ = [
     'create_joins_indicator',
     'fetch_connected_fragments',
     'invalidate_joins_cache',
+    'show_add_to_list_dialog',
+    'create_add_to_list_button',
 ]

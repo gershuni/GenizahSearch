@@ -3186,22 +3186,51 @@ class MetadataManager:
         """Search for system IDs where the specified field matches the query.
 
         Uses precise matching to avoid false positives like 120.2 matching 120.25.
-        First tries exact match, then word-boundary aware substring match.
+        For shelfmarks, uses normalization to handle format variations like:
+        - "ts12.123" or "T-S 12 123" matching "T-S 12.123"
+        - Missing/extra spaces, dashes, dots
+        - Case insensitivity
         """
         results = set()
         q_norm = query.lower().strip()
+
+        # For shelfmark searches, also compute fully normalized version
+        q_normalized = self._normalize_shelfmark(query) if field == 'shelfmark' else None
 
         # Helper function for smart matching
         def matches(value, query_norm):
             val_norm = value.lower().strip()
 
-            # 1. Exact match
+            # 1. Exact match (case-insensitive)
             if val_norm == query_norm:
                 return True
 
-            # 2. For shelfmarks, use precise sequential token matching
-            # Split by spaces, dots, hyphens to avoid 12.4 matching 121.4
+            # 2. For shelfmarks, use normalized matching to handle format variations
             if field == 'shelfmark':
+                # Normalize the value and compare with normalized query
+                val_normalized = self._normalize_shelfmark(value)
+
+                # Exact normalized match: "ts12.123" matches "T-S 12.123"
+                if val_normalized == q_normalized:
+                    return True
+
+                # Normalized prefix match: "ts12" matches "T-S 12.123"
+                # But be careful with numeric boundaries
+                if q_normalized and val_normalized.startswith(q_normalized):
+                    next_pos = len(q_normalized)
+                    if next_pos < len(val_normalized):
+                        next_char = val_normalized[next_pos]
+                        # Allow if next char is a dot (e.g., "ts12" -> "ts12.123")
+                        # or if it's not a digit (e.g., "ts12" -> "ts12a")
+                        if next_char == '.' or not next_char.isdigit():
+                            return True
+                        # If query ends with digit and value continues with digit,
+                        # don't immediately return - fall through to token matching
+                        # This allows "T-S NS 12" to match "T-S NS 120.2" via tokens
+                    else:
+                        return True
+
+                # Also try token-based matching for partial searches
                 # Tokenize both query and value
                 val_tokens = [t for t in re.split(r'[\s\.\-]+', val_norm) if t]
                 query_tokens = [t for t in re.split(r'[\s\.\-]+', query_norm) if t]
@@ -3210,10 +3239,6 @@ class MetadataManager:
                     return False
 
                 # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
-                # Query: ["t", "s", "ns", "12", "4"]
-                # Value: ["t", "s", "ns", "121", "4"] -> NO MATCH (12 != 121)
-                # Value: ["t", "s", "ns", "12", "4"] -> MATCH
-
                 query_idx = 0
                 val_idx = 0
 
@@ -3227,24 +3252,26 @@ class MetadataManager:
                         query_idx += 1
                         val_idx += 1
                     elif vt.startswith(qt):
-                        # Prefix match - only allow if both are not purely numeric
-                        # This prevents "12" from matching "121" but allows "8j6" to match "8j6a"
-                        if qt.isdigit() and vt.isdigit():
-                            # Both numeric: must be exact or vt must start with qt followed by non-digit
-                            # "12" can match "12" but not "121"
-                            # To allow "12" to be prefix of "12a", we need to check the next char
+                        # Prefix match
+                        # For the LAST query token, allow numeric prefix (e.g., "12" matches "120")
+                        # For earlier tokens, be strict to avoid false positives
+                        if query_idx == len(query_tokens) - 1:
+                            # Last token - allow prefix match even for digits
+                            query_idx += 1
+                            val_idx += 1
+                        elif qt.isdigit() and vt.isdigit():
+                            # Not last token and both numeric - be strict
                             if len(vt) > len(qt) and vt[len(qt)].isdigit():
-                                # Next char is digit, so "12" doesn't match "121"
-                                val_idx += 1  # Try next token
+                                val_idx += 1
                                 continue
-                        # Valid prefix match
-                        query_idx += 1
-                        val_idx += 1
+                            query_idx += 1
+                            val_idx += 1
+                        else:
+                            query_idx += 1
+                            val_idx += 1
                     else:
-                        # No match, try next value token
                         val_idx += 1
 
-                # Success if all query tokens were matched
                 return query_idx == len(query_tokens)
 
             # 3. For other fields (title), use substring match
@@ -3269,12 +3296,15 @@ class MetadataManager:
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots between digits."""
+        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots/slashes between digits."""
         if not shelfmark:
             return ""
 
-        # First, preserve dots that appear between digits (like 120.2) by replacing with a marker
-        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', shelfmark)
+        # Treat "/" as "." for consistency (192/23 -> 192.23)
+        temp = shelfmark.replace('/', '.')
+
+        # Preserve dots that appear between digits (like 120.2) by replacing with a marker
+        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
 
         # Remove all other non-alphanumeric characters
         cleaned = re.sub(r'\W+', '', temp).casefold()
@@ -3317,6 +3347,7 @@ class MetadataManager:
 
         exact_matches = []
         partial_matches = []
+        fuzzy_matches = []  # For digit-only queries that might match with dots
         seen = set()
 
         def shelf_sort_key(entry):
@@ -3325,6 +3356,11 @@ class MetadataManager:
             sid_val = entry.get('sys_id', '')
             return (natural_sort_key(shelf), natural_sort_key(title), natural_sort_key(sid_val))
 
+        # For pure digit queries without dots (e.g., "19234"), also match with various dot positions
+        # This allows "19234" to match "19.234", "192.34", "1923.4"
+        norm_query_no_dots = norm_query.replace('.', '')
+        query_is_pure_digits = norm_query_no_dots.isdigit() and '.' not in norm_query
+
         for sys_id, shelf, title in self._iter_shelfmark_sources():
             norm_shelf = self._normalize_shelfmark(shelf)
             if not norm_shelf or (sys_id, norm_shelf) in seen:
@@ -3332,10 +3368,21 @@ class MetadataManager:
             seen.add((sys_id, norm_shelf))
 
             entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
+
+            # Standard matching
             if norm_shelf == norm_query:
                 exact_matches.append(entry)
             elif norm_query in norm_shelf:
                 partial_matches.append(entry)
+            # Fuzzy matching for pure digit queries - compare without dots
+            elif query_is_pure_digits:
+                norm_shelf_no_dots = norm_shelf.replace('.', '')
+                if norm_shelf_no_dots == norm_query_no_dots:
+                    # Exact match ignoring dots (19234 == 192.34)
+                    exact_matches.append(entry)
+                elif norm_query_no_dots in norm_shelf_no_dots:
+                    # Partial match ignoring dots
+                    fuzzy_matches.append(entry)
 
         if len(exact_matches) == 1:
             result['sys_id'] = exact_matches[0]['sys_id']
@@ -3344,9 +3391,10 @@ class MetadataManager:
 
         exact_matches.sort(key=shelf_sort_key)
         partial_matches.sort(key=shelf_sort_key)
+        fuzzy_matches.sort(key=shelf_sort_key)
 
-        # Aggregate suggestions (exact first, then partial), capped at limit
-        suggestions = exact_matches + partial_matches
+        # Aggregate suggestions (exact first, then partial, then fuzzy), capped at limit
+        suggestions = exact_matches + partial_matches + fuzzy_matches
         result['options'] = suggestions[:limit]
         return result
 
@@ -5409,15 +5457,139 @@ class ListsManager:
         """Save lists to file."""
         try:
             os.makedirs(Config.INDEX_DIR, exist_ok=True)
+            # Create backup before saving (keep last 3 backups)
+            if os.path.exists(self.LISTS_FILE):
+                import shutil
+                for i in range(2, 0, -1):
+                    old_backup = f"{self.LISTS_FILE}.bak{i}"
+                    new_backup = f"{self.LISTS_FILE}.bak{i+1}"
+                    if os.path.exists(old_backup):
+                        if os.path.exists(new_backup):
+                            os.remove(new_backup)
+                        shutil.move(old_backup, new_backup)
+                backup_file = f"{self.LISTS_FILE}.bak1"
+                shutil.copy2(self.LISTS_FILE, backup_file)
             with open(self.LISTS_FILE, 'wb') as f:
                 pickle.dump(self.data, f)
         except Exception as e:
             LOGGER.error(f"Failed to save lists: {e}")
 
+    def clear_all(self):
+        """Clear all lists and reset to default state. Used after migration."""
+        print(f"[DEBUG] ListsManager.clear_all() called")
+        print(f"[DEBUG] Before clear: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
+        self.data = self._get_default_data()
+        print(f"[DEBUG] After reset: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
+        self.save()
+        print(f"[DEBUG] Data saved to {self.LISTS_FILE}")
+
+    # --- Cloud Sync Integration ---
+
+    def enable_cloud_sync(self, user_id: str, supabase_client=None):
+        """Enable cloud sync for the given user (call after login).
+
+        Args:
+            user_id: The user's UUID from Supabase auth
+            supabase_client: Optional authenticated Supabase client for RLS
+        """
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.set_user(user_id)
+            if supabase_client:
+                sync.set_client(supabase_client)
+            LOGGER.info(f"Cloud sync enabled for user")
+        except ImportError:
+            LOGGER.debug("lists_sync module not available")
+        except Exception as e:
+            LOGGER.warning(f"Failed to enable cloud sync: {e}")
+
+    def disable_cloud_sync(self):
+        """Disable cloud sync (call on logout)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            sync.clear_user()
+        except Exception:
+            pass
+
+    def sync_from_cloud(self):
+        """Pull lists from cloud and merge with local data."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_from_cloud()
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def is_sync_available(self):
+        """Check if cloud sync is available (user logged in, network ok)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.is_sync_available()
+        except ImportError:
+            return False
+        except Exception:
+            return False
+
+    @property
+    def _last_sync(self):
+        """Get timestamp of last sync (for debouncing)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return getattr(sync, '_last_sync', 0)
+        except Exception:
+            return 0
+
+    def sync_to_cloud(self):
+        """Push local lists to cloud."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.sync_to_cloud()
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def get_cloud_lists_preview(self):
+        """Get preview of cloud lists without syncing (for dialog display)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.get_cloud_lists_preview()
+        except ImportError:
+            return {'success': False, 'lists': [], 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'lists': [], 'error': str(e)}
+
+    def get_local_lists_summary(self):
+        """Get summary of local lists for dialog display."""
+        lists = []
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_data.get('is_system'):
+                continue
+            lists.append({
+                'id': list_id,
+                'name': list_data.get('name', 'Unnamed'),
+                'color': list_data.get('color', '#FFD700'),
+                'item_count': self._get_list_item_count(list_id)
+            })
+        return lists
+
     # --- List Management ---
 
-    def get_all_lists(self, include_recent=True):
-        """Get all lists sorted alphabetically (system lists have special handling)."""
+    def get_all_lists(self, include_recent=True, include_deleted=False):
+        """Get all lists sorted alphabetically (system lists have special handling).
+
+        Args:
+            include_recent: Include the "Recently Viewed" system list
+            include_deleted: Include soft-deleted lists (for trash view)
+        """
         lists = []
         list_ids = []
         ordered = [list_id for list_id in self.data.get('lists_order', []) if list_id in self.data['lists']]
@@ -5429,6 +5601,9 @@ class ListsManager:
             if list_id == 'recent' and not include_recent:
                 continue
             list_data = self.data['lists'][list_id]
+            # Skip deleted lists unless explicitly requested
+            if list_data.get('deleted_at') and not include_deleted:
+                continue
             lists.append({
                 'id': list_id,
                 **list_data,
@@ -5436,6 +5611,20 @@ class ListsManager:
             })
 
         return lists
+
+    def get_deleted_lists(self):
+        """Get soft-deleted lists (trash view)."""
+        deleted = []
+        for list_id, list_data in self.data['lists'].items():
+            if list_data.get('deleted_at'):
+                deleted.append({
+                    'id': list_id,
+                    **list_data,
+                    'count': self._get_list_item_count(list_id)
+                })
+        # Sort by deletion time, most recent first
+        deleted.sort(key=lambda x: x.get('deleted_at', 0), reverse=True)
+        return deleted
 
     def _get_list_item_count(self, list_id):
         """Get the number of items in a list."""
@@ -5606,8 +5795,13 @@ class ListsManager:
         ]
         self.save()
 
-    def delete_list(self, list_id):
-        """Delete a list and all its items."""
+    def delete_list(self, list_id, permanent=False):
+        """Soft-delete a list (move to trash).
+
+        Args:
+            list_id: The list ID to delete
+            permanent: If True, permanently delete. Default is soft delete.
+        """
         if list_id not in self.data['lists']:
             return False
 
@@ -5615,24 +5809,52 @@ class ListsManager:
         if lst.get('is_default') or lst.get('is_system'):
             return False  # Cannot delete system lists
 
-        # Remove list reference from all items
-        items_to_remove = []
-        for sys_id, item in self.data['items'].items():
-            if list_id in item.get('lists', []):
-                item['lists'].remove(list_id)
-                # If item has no more lists, mark for removal
-                if not item['lists']:
-                    items_to_remove.append(sys_id)
+        if permanent:
+            # Permanent delete - remove list and orphaned items
+            items_to_remove = []
+            for sys_id, item in self.data['items'].items():
+                if list_id in item.get('lists', []):
+                    item['lists'].remove(list_id)
+                    if not item['lists']:
+                        items_to_remove.append(sys_id)
+            for sys_id in items_to_remove:
+                del self.data['items'][sys_id]
+            del self.data['lists'][list_id]
+            if list_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(list_id)
+        else:
+            # Soft delete - set deleted_at timestamp
+            import time
+            lst['deleted_at'] = time.time()
 
-        # Remove orphaned items
-        for sys_id in items_to_remove:
-            del self.data['items'][sys_id]
-
-        del self.data['lists'][list_id]
-        if list_id in self.data.get('lists_order', []):
-            self.data['lists_order'].remove(list_id)
         self.save()
         return True
+
+    def restore_list(self, list_id):
+        """Restore a soft-deleted list from trash."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if not lst.get('deleted_at'):
+            return False  # Not deleted
+
+        del lst['deleted_at']
+        self.save()
+        return True
+
+    def permanently_delete_list(self, list_id):
+        """Permanently delete a list (no recovery)."""
+        return self.delete_list(list_id, permanent=True)
+
+    def empty_trash(self):
+        """Permanently delete all soft-deleted lists."""
+        deleted_lists = [lid for lid, data in self.data['lists'].items() if data.get('deleted_at')]
+        count = 0
+        for list_id in deleted_lists:
+            if self.delete_list(list_id, permanent=True):
+                count += 1
+        return count
 
     def duplicate_list(self, list_id, new_name=None):
         """Duplicate a list with all its items."""
@@ -5677,6 +5899,159 @@ class ListsManager:
             self.save()
 
         return True
+
+    def find_duplicate_lists(self):
+        """
+        Find all duplicate lists (same name) and return info for resolution.
+
+        Returns:
+            List of duplicate groups, each containing:
+            {
+                'name': str,
+                'has_conflict': bool,  # True if different projects
+                'lists': [{'id', 'project_id', 'project_name', 'item_count', 'created', 'has_cloud_id'}, ...]
+            }
+        """
+        from collections import defaultdict
+
+        lists_by_name = defaultdict(list)
+        for list_id, list_data in self.data.get('lists', {}).items():
+            list_name = list_data.get('name', '')
+            lists_by_name[list_name].append((list_id, list_data))
+
+        projects = self.data.get('projects', {})
+        duplicate_groups = []
+
+        for list_name, lists in lists_by_name.items():
+            if len(lists) <= 1:
+                continue
+
+            group_info = {'name': list_name, 'lists': []}
+            project_ids = set()
+
+            for list_id, list_data in lists:
+                project_id = list_data.get('project_id')
+                project_ids.add(project_id)
+
+                if list_id == 'recent':
+                    item_count = len(self.data.get('recent_items', []))
+                else:
+                    item_count = sum(1 for item in self.data.get('items', {}).values()
+                                    if list_id in item.get('lists', []))
+
+                group_info['lists'].append({
+                    'id': list_id,
+                    'project_id': project_id,
+                    'project_name': projects.get(project_id, {}).get('name') if project_id else None,
+                    'item_count': item_count,
+                    'created': list_data.get('created', 0),
+                    'has_cloud_id': bool(list_data.get('cloud_id'))
+                })
+
+            group_info['has_conflict'] = len(project_ids) > 1
+            duplicate_groups.append(group_info)
+
+        return duplicate_groups
+
+    def merge_duplicate_group(self, keep_id, duplicate_ids, target_project_id=None):
+        """Merge a group of duplicate lists into one."""
+        result = {'merged_items': 0, 'deleted_count': 0}
+
+        keeper_data = self.data['lists'].get(keep_id)
+        if not keeper_data:
+            return result
+
+        list_name = keeper_data.get('name', '')
+
+        if target_project_id is not None:
+            keeper_data['project_id'] = target_project_id if target_project_id else None
+
+        for dup_id in duplicate_ids:
+            if dup_id == keep_id:
+                continue
+
+            dup_data = self.data['lists'].get(dup_id)
+            if not dup_data:
+                continue
+
+            if list_name == 'Recently Viewed':
+                recent_items = self.data.setdefault('recent_items', [])
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        sys_id = item.get('sys_id', item_id)
+                        if sys_id and sys_id not in recent_items:
+                            recent_items.insert(0, sys_id)
+                            result['merged_items'] += 1
+                if len(recent_items) > self.MAX_RECENT_ITEMS:
+                    self.data['recent_items'] = recent_items[:self.MAX_RECENT_ITEMS]
+            else:
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        if keep_id not in item['lists']:
+                            item['lists'].append(keep_id)
+                            result['merged_items'] += 1
+
+            if dup_id in self.data['lists']:
+                del self.data['lists'][dup_id]
+                result['deleted_count'] += 1
+            if dup_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(dup_id)
+
+            LOGGER.info(f"Merged duplicate list '{list_name}' ({dup_id}) into {keep_id}")
+
+        self.save()
+        return result
+
+    def auto_merge_duplicate_group(self, group):
+        """Automatically merge a duplicate group using heuristics."""
+        list_name = group['name']
+        lists = group['lists']
+
+        if list_name == 'General':
+            keep_id = 'default'
+        elif list_name == 'Recently Viewed':
+            keep_id = 'recent'
+        else:
+            sorted_lists = sorted(lists, key=lambda x: (
+                0 if x['project_id'] else 1,
+                0 if not x['has_cloud_id'] else 1,
+                x['created']
+            ))
+            keep_id = sorted_lists[0]['id']
+
+        duplicate_ids = [l['id'] for l in lists if l['id'] != keep_id]
+        result = self.merge_duplicate_group(keep_id, duplicate_ids)
+        result['keep_id'] = keep_id
+        return result
+
+    def restore_project_hierarchy(self):
+        """Restore project hierarchy for orphaned lists by color matching."""
+        result = {'restored_count': 0}
+
+        projects = self.data.get('projects', {})
+        if not projects:
+            return result
+
+        color_to_project = {proj.get('color'): pid for pid, proj in projects.items() if proj.get('color')}
+
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_id in ['default', 'recent'] or list_data.get('is_system'):
+                continue
+            if list_data.get('project_id') and list_data['project_id'] in projects:
+                continue
+
+            list_color = list_data.get('color')
+            if list_color and list_color in color_to_project:
+                list_data['project_id'] = color_to_project[list_color]
+                result['restored_count'] += 1
+                LOGGER.info(f"Restored project for list '{list_data.get('name')}' by color match")
+
+        if result['restored_count'] > 0:
+            self.save()
+
+        return result
 
     # --- Item Management ---
 

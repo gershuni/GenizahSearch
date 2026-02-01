@@ -10,6 +10,17 @@ import os
 import json
 import requests
 import time
+import re
+
+
+def _sanitize_cache_filename(ref: str) -> str:
+    """Sanitize a reference string to create a safe cache filename.
+
+    Uses a whitelist approach: only alphanumeric characters, underscores, and hyphens
+    are allowed. All other characters are replaced with underscores.
+    This prevents path traversal attacks (e.g., ../ or ..\\ on Windows).
+    """
+    return re.sub(r'[^a-zA-Z0-9_\-]', '_', ref)
 
 # Import shared utilities (no PyQt6 dependency)
 from sefaria_utils import (
@@ -44,7 +55,8 @@ class SefariaFetchThread(QThread):
             self.progress.emit(i, len(self.refs), ref)
 
             # Check cache first (cleaned version)
-            cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
+            safe_filename = _sanitize_cache_filename(ref)
+            cache_file = os.path.join(cache_dir, f"{safe_filename}_clean.txt")
 
             if self.use_cache and os.path.exists(cache_file):
                 try:

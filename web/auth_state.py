@@ -1,52 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-Global Authentication State Management
+Global Authentication State Management (Supabase Version)
 
 Provides a singleton auth state that persists across all pages using NiceGUI's
 app.storage.user mechanism. This allows consistent login state throughout the app.
+
+Uses Supabase for authentication instead of the FastAPI backend.
 """
 
 from typing import Optional, Dict, Any
 from nicegui import app, ui
-import httpx
 import os
-import asyncio
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
-# API Configuration
-DEFAULT_API_TIMEOUT = 30  # seconds - matches desktop timeout
-AUTH_API_TIMEOUT = 10     # shorter timeout for auth operations
-MAX_RETRIES = 3           # retry count for transient failures
-RETRY_BACKOFF = 0.5       # exponential backoff factor
-
-
-def get_api_base() -> str:
-    """
-    Get the full API base URL for the backend API.
-
-    The backend API runs on port 8000 (separate from web interface on 8081).
-
-    Configuration options (in order of priority):
-    1. CORRECTIONS_API_URL - Full URL (e.g., https://api.genizah.dicta.org.il/api/v1)
-    2. API_HOST + API_SCHEME + GENIZAH_BACKEND_PORT - Build URL from parts
-    3. Fallback to localhost:8000 for development
-    """
-    # Option 1: Full URL (preferred for production)
-    full_url = os.environ.get('CORRECTIONS_API_URL')
-    if full_url:
-        return full_url
-
-    # Option 2: Build from parts (useful for flexible deployment)
-    host = os.environ.get('API_HOST')
-    if host:
-        scheme = os.environ.get('API_SCHEME', 'https')
-        port = os.environ.get('GENIZAH_BACKEND_PORT', '')
-        port_suffix = f":{port}" if port else ""
-        return f"{scheme}://{host}{port_suffix}/api/v1"
-
-    # Option 3: Development fallback
-    port = int(os.environ.get('GENIZAH_BACKEND_PORT', 8000))
-    return f"http://localhost:{port}/api/v1"
+# Import Supabase client
+from web.supabase_client import (
+    get_client, sign_in as supabase_sign_in, sign_up as supabase_sign_up,
+    sign_out as supabase_sign_out, get_profile, update_profile
+)
 
 
 class GlobalAuthState:
@@ -56,19 +30,8 @@ class GlobalAuthState:
     """
 
     # Storage keys
-    TOKEN_KEY = 'auth_token'
-    REFRESH_TOKEN_KEY = 'refresh_token'
     USER_KEY = 'auth_user'
-
-    @classmethod
-    def get_token(cls) -> Optional[str]:
-        """Get the current auth token."""
-        return app.storage.user.get(cls.TOKEN_KEY)
-
-    @classmethod
-    def get_refresh_token(cls) -> Optional[str]:
-        """Get the current refresh token."""
-        return app.storage.user.get(cls.REFRESH_TOKEN_KEY)
+    PROFILE_KEY = 'auth_profile'
 
     @classmethod
     def get_user(cls) -> Optional[Dict]:
@@ -76,15 +39,26 @@ class GlobalAuthState:
         return app.storage.user.get(cls.USER_KEY)
 
     @classmethod
+    def get_profile(cls) -> Optional[Dict]:
+        """Get the current user's profile."""
+        return app.storage.user.get(cls.PROFILE_KEY)
+
+    @classmethod
     def is_logged_in(cls) -> bool:
         """Check if user is logged in."""
-        return cls.get_token() is not None and cls.get_user() is not None
+        return cls.get_user() is not None
+
+    @classmethod
+    def get_user_id(cls) -> Optional[str]:
+        """Get current user's ID."""
+        user = cls.get_user()
+        return user.get('id') if user else None
 
     @classmethod
     def get_role(cls) -> Optional[str]:
         """Get current user's role."""
-        user = cls.get_user()
-        return user.get('role') if user else None
+        profile = cls.get_profile()
+        return profile.get('role') if profile else None
 
     @classmethod
     def is_admin(cls) -> bool:
@@ -108,200 +82,44 @@ class GlobalAuthState:
         return cls.is_logged_in()
 
     @classmethod
-    def get_headers(cls) -> Dict[str, str]:
-        """Get auth headers for API calls."""
-        token = cls.get_token()
-        if token:
-            return {"Authorization": f"Bearer {token}"}
-        return {}
-
-    @classmethod
-    def set_auth(cls, token: str, user: Dict, refresh_token: str = None):
+    def set_auth(cls, user: Dict, profile: Dict = None):
         """Set authentication after successful login."""
-        app.storage.user[cls.TOKEN_KEY] = token
         app.storage.user[cls.USER_KEY] = user
-        if refresh_token:
-            app.storage.user[cls.REFRESH_TOKEN_KEY] = refresh_token
+        if profile:
+            app.storage.user[cls.PROFILE_KEY] = profile
 
     @classmethod
-    def update_tokens(cls, token: str, refresh_token: str = None):
-        """Update tokens after refresh (without changing user info)."""
-        app.storage.user[cls.TOKEN_KEY] = token
-        if refresh_token:
-            app.storage.user[cls.REFRESH_TOKEN_KEY] = refresh_token
+    def update_profile_cache(cls, profile: Dict):
+        """Update the cached profile."""
+        app.storage.user[cls.PROFILE_KEY] = profile
 
     @classmethod
     def clear_auth(cls):
         """Clear authentication (logout)."""
-        app.storage.user.pop(cls.TOKEN_KEY, None)
-        app.storage.user.pop(cls.REFRESH_TOKEN_KEY, None)
         app.storage.user.pop(cls.USER_KEY, None)
+        app.storage.user.pop(cls.PROFILE_KEY, None)
+        # Also sign out from Supabase client
+        try:
+            supabase_sign_out()
+        except Exception:
+            pass
 
     @classmethod
     def get_username(cls) -> str:
         """Get display name for current user."""
+        profile = cls.get_profile()
+        if profile:
+            return profile.get('full_name') or profile.get('username') or 'User'
         user = cls.get_user()
         if user:
-            return user.get('full_name') or user.get('username') or 'User'
+            return user.get('email', '').split('@')[0] or 'User'
         return ''
 
-
-async def _refresh_access_token() -> bool:
-    """
-    Refresh the access token using the refresh token.
-
-    Returns:
-        True if refresh was successful, False otherwise
-    """
-    refresh_token = GlobalAuthState.get_refresh_token()
-    if not refresh_token:
-        return False
-
-    base_url = get_api_base()
-    url = f"{base_url}/auth/refresh"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                url,
-                json={'refresh_token': refresh_token},
-                timeout=AUTH_API_TIMEOUT
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                new_access_token = data.get('access_token')
-                new_refresh_token = data.get('refresh_token', refresh_token)
-
-                if new_access_token:
-                    GlobalAuthState.update_tokens(new_access_token, new_refresh_token)
-                    return True
-
-            return False
-    except (httpx.TimeoutException, httpx.RequestError):
-        return False
-
-
-async def api_call(
-    method: str,
-    endpoint: str,
-    data: Dict = None,
-    headers: Dict = None,
-    timeout: int = None,
-    _retry_after_refresh: bool = True
-) -> Dict:
-    """
-    Make API call to corrections backend with automatic retry on transient failures.
-
-    Args:
-        method: HTTP method (GET, POST, PUT, DELETE)
-        endpoint: API endpoint (e.g., "/auth/login")
-        data: Request data (query params for GET, JSON body for POST/PUT)
-        headers: Additional headers
-        timeout: Request timeout in seconds (default: 30s, 10s for auth endpoints)
-        _retry_after_refresh: Internal flag to prevent infinite refresh loops
-
-    Returns:
-        Response JSON or error dict
-    """
-    base_url = get_api_base()
-    url = f"{base_url}{endpoint}"
-    all_headers = GlobalAuthState.get_headers()
-    if headers:
-        all_headers.update(headers)
-
-    # Use shorter timeout for auth endpoints
-    if timeout is None:
-        timeout = AUTH_API_TIMEOUT if '/auth/' in endpoint else DEFAULT_API_TIMEOUT
-
-    last_error = None
-
-    # Retry logic with exponential backoff for transient failures
-    for attempt in range(MAX_RETRIES):
-        async with httpx.AsyncClient() as client:
-            try:
-                if method == "GET":
-                    resp = await client.get(url, headers=all_headers, params=data, timeout=timeout)
-                elif method == "POST":
-                    resp = await client.post(url, headers=all_headers, json=data, timeout=timeout)
-                elif method == "PUT":
-                    resp = await client.put(url, headers=all_headers, json=data, timeout=timeout)
-                elif method == "PATCH":
-                    resp = await client.patch(url, headers=all_headers, json=data, timeout=timeout)
-                elif method == "DELETE":
-                    resp = await client.delete(url, headers=all_headers, timeout=timeout)
-                else:
-                    return {"error": f"Unknown method: {method}"}
-
-                # Success - return immediately
-                if resp.status_code in (200, 201):
-                    return resp.json()
-
-                # Auth error - attempt token refresh
-                if resp.status_code == 401:
-                    # Don't try refresh for auth endpoints (login/register/refresh)
-                    if '/auth/' in endpoint:
-                        GlobalAuthState.clear_auth()
-                        return {"error": "Authentication failed", "status": 401, "expired": True}
-
-                    # Attempt token refresh if we have a refresh token
-                    if _retry_after_refresh and GlobalAuthState.get_refresh_token():
-                        if await _refresh_access_token():
-                            # Retry the original request with new token
-                            return await api_call(
-                                method, endpoint, data, headers, timeout,
-                                _retry_after_refresh=False
-                            )
-
-                    # Token refresh failed or not available - clear auth
-                    GlobalAuthState.clear_auth()
-                    return {"error": "Session expired. Please login again.", "status": 401, "expired": True}
-
-                # Client errors (4xx except 401) - don't retry
-                if 400 <= resp.status_code < 500:
-                    try:
-                        error_detail = resp.json()
-                        detail = error_detail.get("detail", resp.text)
-
-                        # Handle FastAPI validation errors (detail is a list)
-                        if isinstance(detail, list):
-                            if detail and isinstance(detail[0], dict):
-                                msg = detail[0].get("msg", "Validation error")
-                                loc = detail[0].get("loc", [])
-                                field = loc[-1] if loc else "field"
-                                error_msg = f"{field}: {msg}"
-                            else:
-                                error_msg = "Validation error"
-                        elif isinstance(detail, dict):
-                            error_msg = detail.get("message", str(detail))
-                        else:
-                            error_msg = str(detail)
-
-                        return {"error": error_msg, "status": resp.status_code}
-                    except (ValueError, KeyError, TypeError):
-                        return {"error": resp.text, "status": resp.status_code}
-
-                # Server errors (5xx) - retry with backoff
-                if resp.status_code >= 500:
-                    last_error = f"Server error: {resp.status_code}"
-                    if attempt < MAX_RETRIES - 1:
-                        await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
-                        continue
-                    return {"error": last_error, "status": resp.status_code}
-
-            except httpx.TimeoutException:
-                last_error = "Request timeout"
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
-                    continue
-            except httpx.RequestError as e:
-                last_error = f"Request failed: {type(e).__name__}"
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(RETRY_BACKOFF * (2 ** attempt))
-                    continue
-
-    # All retries exhausted
-    return {"error": last_error or "Request failed after retries"}
+    @classmethod
+    def get_headers(cls) -> Dict[str, str]:
+        """Get auth headers for API calls (legacy compatibility)."""
+        # Supabase handles auth internally, but keep this for any legacy code
+        return {}
 
 
 async def do_login(email: str, password: str) -> Dict:
@@ -311,31 +129,22 @@ async def do_login(email: str, password: str) -> Dict:
     Returns:
         Success dict with user info or error dict
     """
-    result = await api_call("POST", "/auth/login", {
-        "email": email,
-        "password": password
-    })
+    result = supabase_sign_in(email, password)
 
     if "error" in result:
         return result
 
-    # Store tokens
-    token = result.get("access_token")
-    refresh_token = result.get("refresh_token")
-    if not token:
-        return {"error": "No token received"}
+    user = result.get('user')
+    if not user:
+        return {"error": "No user returned"}
 
-    # Get user profile (set temporary auth to get headers)
-    GlobalAuthState.set_auth(token, {}, refresh_token)
-    profile = await api_call("GET", "/users/me")
+    # Get user profile
+    profile = get_profile(user['id'])
 
-    if "error" in profile:
-        GlobalAuthState.clear_auth()
-        return profile
+    # Update global state
+    GlobalAuthState.set_auth(user, profile)
 
-    # Update with full user info (keep refresh token)
-    GlobalAuthState.set_auth(token, profile, refresh_token)
-    return {"success": True, "user": profile}
+    return {"success": True, "user": user, "profile": profile}
 
 
 async def do_register(email: str, username: str, password: str,
@@ -343,26 +152,38 @@ async def do_register(email: str, username: str, password: str,
     """
     Perform registration and automatically log in.
 
-    The registration endpoint returns user info, not tokens.
-    After successful registration, we automatically log in.
-
     Returns:
         Success dict with user info or error dict
     """
-    result = await api_call("POST", "/auth/register", {
-        "email": email,
-        "username": username,
-        "password": password,
-        "confirm_password": password,
-        "full_name": full_name,
-        "affiliation": affiliation
-    })
+    # Register with metadata
+    metadata = {}
+    if full_name:
+        metadata['full_name'] = full_name
+    if affiliation:
+        metadata['affiliation'] = affiliation
+
+    result = supabase_sign_up(email, password, metadata if metadata else None)
 
     if "error" in result:
         return result
 
-    # Registration returns user info, not tokens
-    # Automatically log in after successful registration
+    user = result.get('user')
+    if not user:
+        return {"error": "Registration failed - no user returned"}
+
+    # Update profile with additional info
+    if username or full_name or affiliation:
+        profile_data = {}
+        if username:
+            profile_data['username'] = username
+        if full_name:
+            profile_data['full_name'] = full_name
+        if affiliation:
+            profile_data['affiliation'] = affiliation
+
+        update_profile(user['id'], profile_data)
+
+    # Auto-login after registration
     return await do_login(email, password)
 
 
@@ -405,7 +226,6 @@ def create_login_dialog():
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
                         else:
-                            ui.notify(tr('Login successful'), type='positive')
                             dialog.close()
                             ui.navigate.reload()
 
@@ -449,7 +269,6 @@ def create_login_dialog():
                             reg_error.text = result["error"]
                             reg_error.classes('visible', remove='hidden')
                         else:
-                            ui.notify(tr('Registration successful'), type='positive')
                             dialog.close()
                             ui.navigate.reload()
 
@@ -468,7 +287,7 @@ def create_auth_buttons():
     from web.translations import tr
 
     if GlobalAuthState.is_logged_in():
-        user = GlobalAuthState.get_user()
+        profile = GlobalAuthState.get_profile()
         username = GlobalAuthState.get_username()
         role = GlobalAuthState.get_role() or 'user'
 
@@ -499,3 +318,41 @@ def create_auth_buttons():
 
         ui.button(tr('Login'), on_click=dialog.open).props('flat text-color=white dense').classes('text-sm')
         ui.button(tr('Register'), on_click=lambda: (dialog.open(), setattr(dialog, '_active_tab', 'register'))).props('outline text-color=white dense').classes('text-sm')
+
+
+# ============================================================================
+# LEGACY COMPATIBILITY - Keep these for code that still uses the old API
+# ============================================================================
+
+def get_api_base() -> str:
+    """Legacy function - returns empty string as we use Supabase now."""
+    return ""
+
+
+async def api_call(method: str, endpoint: str, data: Dict = None,
+                   headers: Dict = None, timeout: int = None,
+                   _retry_after_refresh: bool = True) -> Dict:
+    """
+    Legacy API call function - redirects to Supabase client functions.
+
+    This maintains backward compatibility with existing code while we migrate.
+    """
+    # Map old endpoints to Supabase functions
+    if '/auth/login' in endpoint:
+        if data:
+            return await do_login(data.get('email', ''), data.get('password', ''))
+        return {'error': 'Missing credentials'}
+
+    if '/auth/register' in endpoint:
+        if data:
+            return await do_register(
+                data.get('email', ''),
+                data.get('username', ''),
+                data.get('password', ''),
+                data.get('full_name'),
+                data.get('affiliation')
+            )
+        return {'error': 'Missing registration data'}
+
+    # For other endpoints, return an error indicating migration needed
+    return {'error': f'Endpoint {endpoint} needs migration to Supabase'}

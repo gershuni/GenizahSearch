@@ -438,6 +438,9 @@ def create_search_page(initial_query: str = None):
             ui.notify(tr('No valid selections'), type='warning')
             return
 
+        # State for inline list creation
+        creating_new_list = {'active': False}
+
         # Show list selection dialog
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
             # Changed to H3 semantic heading
@@ -448,26 +451,115 @@ def create_search_page(initial_query: str = None):
                 lists = state.lists_mgr.data.get('lists', {})
                 list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
 
-                if not list_options:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-                else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
+                # Container for list selection form
+                form_container = ui.column().classes('w-full mt-4 gap-3')
+                # Container for new list creation form
+                new_list_container = ui.column().classes('w-full mt-4 gap-3')
+                new_list_container.set_visibility(False)
+
+                with form_container:
+                    if not list_options:
+                        ui.label(tr('No lists yet. Create your first list!')).style('color: var(--text-muted);')
+                    else:
+                        # List selection with "Create new list" option
+                        list_options_with_new = {'__new__': f"+ {tr('Create new list')}", **list_options}
+                        selected_list = ui.select(
+                            list_options_with_new,
+                            label=tr('Select List'),
+                            value=list(list_options.keys())[0] if list_options else '__new__'
+                        ).classes('w-full').props('outlined').style('color: var(--text-primary);')
+
+                        def on_list_change():
+                            if selected_list.value == '__new__':
+                                form_container.set_visibility(False)
+                                new_list_container.set_visibility(True)
+                                creating_new_list['active'] = True
+
+                        selected_list.on('update:model-value', on_list_change)
+
+                    # Create New List button (shown when no lists exist)
+                    if not list_options:
+                        ui.button(
+                            tr('Create new list'),
+                            icon='add',
+                            on_click=lambda: (form_container.set_visibility(False), new_list_container.set_visibility(True))
+                        ).classes('btn-primary')
+
+                # New list creation form
+                with new_list_container:
+                    ui.label(tr('Create New List')).classes('font-semibold').style('color: var(--text-primary);')
+                    new_list_name = ui.input(label=tr('List Name')).classes('w-full').props('outlined')
+
+                    # Color picker
+                    ui.label(tr('Color')).classes('text-sm mt-2').style('color: var(--text-secondary);')
+                    selected_color = {'value': '#4CAF50'}
+
+                    with ui.row().classes('gap-2 flex-wrap'):
+                        colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
+                                  '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
+                        for color in colors:
+                            btn = ui.button(icon='circle').props('flat round dense').style(
+                                f'color: {color}; font-size: 1.5rem;'
+                            )
+                            btn.on('click', lambda c=color: selected_color.update({'value': c}))
+
+                    with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                        def back_to_list_selection():
+                            new_list_container.set_visibility(False)
+                            form_container.set_visibility(True)
+                            creating_new_list['active'] = False
+
+                        if list_options:
+                            ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
+
+                        def create_and_add_all():
+                            name = new_list_name.value.strip()
+                            if not name:
+                                ui.notify(tr('Please enter a list name'), type='warning')
+                                return
+
+                            new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+                            if new_list_id:
+                                added_count = 0
+                                for res in selected_results:
+                                    display = res.get('display', {})
+                                    sys_id = display.get('id')
+                                    if sys_id and state.lists_mgr.add_item_sync(sys_id, new_list_id):
+                                        added_count += 1
+
+                                ui.notify(f"{tr('List created')}: {name}", type='positive')
+                                ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
+                                dialog.close()
+
+                        ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
+
+                # Action buttons for existing list selection
+                with ui.row().classes('w-full justify-end gap-2 mt-6') as action_row:
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
                     def add_all():
+                        if not list_options or creating_new_list['active']:
+                            return
+
+                        if selected_list.value == '__new__':
+                            form_container.set_visibility(False)
+                            new_list_container.set_visibility(True)
+                            creating_new_list['active'] = True
+                            return
+
                         added_count = 0
                         for res in selected_results:
                             display = res.get('display', {})
                             sys_id = display.get('id')
-                            if sys_id and state.lists_mgr.add_item(sys_id, selected_list.value):
+                            if sys_id and state.lists_mgr.add_item_sync(sys_id, selected_list.value):
                                 added_count += 1
 
                         ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
                         dialog.close()
 
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+                    add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
+                    if not list_options:
+                        add_btn.set_visibility(False)
             else:
                 ui.label(tr('Lists manager not available')).style('color: var(--error);')
 
@@ -570,6 +662,9 @@ def create_search_page(initial_query: str = None):
         search_state.results = []
         search_btn.disable()
 
+        # Show loading spinner immediately
+        render_results([])
+
         def progress_cb(current, total):
             if total > 0:
                 search_state.progress = current / total
@@ -627,6 +722,14 @@ def create_search_page(initial_query: str = None):
 
     def render_results(results):
         results_container.clear()
+
+        # Show loading spinner when search is running
+        if search_state.is_running:
+            with results_container:
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.spinner('dots', size='lg', color='primary')
+                    ui.label(tr("Searching...")).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+            return
 
         if not results:
             with results_container:
@@ -688,12 +791,12 @@ def create_search_page(initial_query: str = None):
 
                     def make_star_handler(r):
                         def handler():
-                            show_add_to_list_dialog(r)
+                            show_add_to_list_dialog_local(r)
                         return handler
                     ui.button(
                         icon='star_border',
                         on_click=make_star_handler(result)
-                    ).props('flat round dense size=sm').style('color: var(--accent-amber);')
+                    ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
 
                     # Edit and Comment buttons
                     sys_id = display.get('id', '')
@@ -763,23 +866,37 @@ def create_search_page(initial_query: str = None):
                 mobile_expand.on('show', load_mobile_content)
 
     def open_advanced_dialog(index, result):
-        """Open a maximized dialog showing the full result with navigation."""
+        """Open a redesigned Advanced View dialog with comprehensive result information."""
 
         with ui.dialog().props('maximized') as dialog:
-            with ui.card().classes('w-full h-full flex flex-col'):
-                # Header with navigation
-                with ui.row().classes('w-full p-4 items-center justify-between').style(
-                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+            with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
+                # === Header Bar ===
+                with ui.row().classes('w-full px-6 py-4 items-center justify-between shrink-0').style(
+                    'background: var(--bg-header); color: white;'
                 ):
-                    with ui.row().classes('items-center gap-3'):
-                        ui.button(icon='close', on_click=dialog.close).props('flat round')
-                        # Changed to H3
-                        h3(tr('Advanced View'), classes='text-xl font-bold')
+                    # Left: Close and Title
+                    with ui.row().classes('items-center gap-4'):
+                        ui.button(icon='close', on_click=dialog.close).props('flat round color=white')
+                        with ui.column().classes('gap-0'):
+                            h2(tr('Advanced View'), classes='text-xl font-bold', style='color: white;')
+                            ui.label(f"{tr('Result')} {index + 1} {tr('of')} {len(search_state.results)}").classes(
+                                'text-sm opacity-80'
+                            )
 
-                    # Navigation controls
-                    with ui.row().classes('items-center gap-2'):
-                        result_counter = ui.label(f"{index + 1} / {len(search_state.results)}")
+                    # Right: Navigation and Score
+                    with ui.row().classes('items-center gap-4'):
+                        # Relevance Score Badge (if available)
+                        sort_score = result.get('sort_score')
+                        if sort_score is not None:
+                            score_pct = min(100, max(0, int(sort_score)))
+                            score_color = '#10b981' if score_pct >= 70 else '#f59e0b' if score_pct >= 40 else '#ef4444'
+                            with ui.element('div').classes('flex items-center gap-2 px-3 py-1 rounded-full').style(
+                                f'background: rgba(255,255,255,0.15);'
+                            ):
+                                ui.icon('insights').classes('text-sm')
+                                ui.label(f"{tr('Score')}: {score_pct}").classes('text-sm font-medium')
 
+                        # Navigation Buttons (RTL-aware: right arrow = previous, left arrow = next)
                         def navigate_result(direction):
                             new_idx = index + direction
                             if 0 <= new_idx < len(search_state.results):
@@ -787,124 +904,257 @@ def create_search_page(initial_query: str = None):
                                 open_advanced_dialog(new_idx, search_state.results[new_idx])
 
                         ui.button(
-                            icon='chevron_left',
+                            icon='chevron_right',
                             on_click=lambda: navigate_result(-1)
-                        ).props('flat round').tooltip(tr('Previous')).set_enabled(index > 0)
+                        ).props('flat round color=white').tooltip(tr('Previous')).set_enabled(index > 0)
 
                         ui.button(
-                            icon='chevron_right',
+                            icon='chevron_left',
                             on_click=lambda: navigate_result(1)
-                        ).props('flat round').tooltip(tr('Next')).set_enabled(index < len(search_state.results) - 1)
+                        ).props('flat round color=white').tooltip(tr('Next')).set_enabled(index < len(search_state.results) - 1)
 
-                # Content area
-                with ui.scroll_area().classes('flex-grow p-6'):
-                    render_dialog_content(result, dialog)
+                # === Main Content ===
+                with ui.scroll_area().classes('flex-grow'):
+                    with ui.column().classes('w-full max-w-5xl mx-auto p-6 gap-6'):
+                        render_advanced_dialog_content(result, dialog, index)
 
         dialog.open()
 
-    def render_dialog_content(result, dialog):
-        """Render the content inside the advanced dialog."""
+    def render_advanced_dialog_content(result, dialog, index):
+        """Render the redesigned Advanced View content."""
         display = result.get('display', {})
         shelfmark = display.get('shelfmark', 'Unknown')
         title = display.get('title', '')
         sys_id = display.get('id', '')
         snippet = result.get('snippet', '')
         full_text = result.get('full_text', '')
+        source = display.get('source', '')
+        page_num = display.get('img', '')
 
-        with ui.column().classes('w-full max-w-4xl mx-auto gap-6'):
-            # Main Info Section
-            with ui.card().classes('w-full p-6'):
-                with ui.column().classes('gap-3'):
-                    # Changed to H1
-                    h1(shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
+        # Extract FL ID for browse link
+        fl_id = None
+        if 'raw_header' in result and state.meta_mgr:
+            try:
+                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                fl_id = parsed.get('fl_id')
+            except Exception:
+                pass
 
-                    if title:
-                        # Changed to H2
-                        h2(title, classes='text-lg', style='color: var(--text-secondary); direction: rtl;')
+        # === Hero Section: Manuscript Identity ===
+        with ui.card().classes('w-full overflow-hidden').style(
+            'border-radius: 16px; border: none;'
+        ):
+            # Gradient accent bar
+            ui.element('div').classes('w-full h-2').style(
+                'background: linear-gradient(90deg, var(--primary-600), var(--primary-400), var(--accent-gold));'
+            )
 
-                    # Badges
-                    with ui.row().classes('gap-2 flex-wrap mt-2'):
-                        if display.get('source'):
-                            ui.badge(display['source'], color='blue')
-                        if display.get('img'):
-                            ui.badge(f"{tr('Page')} {display['img']}", color='green')
+            with ui.column().classes('p-6 gap-4'):
+                # Shelfmark as main heading
+                with ui.row().classes('items-start justify-between w-full'):
+                    with ui.column().classes('gap-2 flex-grow'):
+                        h1(shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
+                        if title:
+                            ui.label(title).classes('text-lg').style(
+                                'color: var(--text-secondary); direction: rtl; text-align: right;'
+                            )
 
-            # Metadata Section
-            with ui.card().classes('w-full p-6'):
-                # Changed to H3
-                h3(tr('Metadata'), classes='text-xl font-bold mb-4')
-                with ui.column().classes('gap-3'):
-                    metadata_items = [
-                        (tr('Shelfmark'), shelfmark),
-                        (tr('Title'), title or tr('Not available')),
-                        (tr('System ID'), sys_id or tr('Not available')),
-                        (tr('Source'), display.get('source', tr('Not available'))),
-                        (tr('Page'), display.get('img', tr('Not available'))),
-                    ]
-                    for label, value in metadata_items:
-                        with ui.row().classes('items-start gap-4'):
-                            ui.label(label + ':').classes('font-bold w-32').style('color: var(--text-secondary);')
-                            ui.label(value).style('color: var(--text-primary); direction: rtl;')
+                    # Quick action buttons (top right)
+                    with ui.row().classes('gap-2 shrink-0'):
+                        if sys_id:
+                            browse_url = f'/browse?sys_id={sys_id}'
+                            if fl_id:
+                                browse_url += f'&fl_id={fl_id}'
+                            ui.button(icon='menu_book', on_click=lambda url=browse_url: (
+                                dialog.close(), ui.navigate.to(url)
+                            )).props('round color=green').tooltip(tr('Browse Full Manuscript'))
 
-            # Snippet Section
-            if snippet:
-                with ui.card().classes('w-full p-6'):
-                    # Changed to H3
-                    h3(tr('Match Context'), classes='text-xl font-bold mb-4')
-                    snippet_html = SearchEngine.format_snippet(snippet)
-                    with ui.element('div').classes('p-4 rounded-lg').style(
-                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
+                        def make_add_handler(r):
+                            def handler():
+                                show_add_to_list_dialog_local(r)
+                            return handler
+                        ui.button(icon='star_border', on_click=make_add_handler(result)).props(
+                            'round'
+                        ).style('color: var(--accent-amber);').tooltip(tr('Add to List'))
+
+                # Info Chips Row
+                with ui.row().classes('gap-3 flex-wrap mt-2'):
+                    if source:
+                        with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                            'background: var(--primary-100); color: var(--primary-700);'
+                        ):
+                            ui.icon('source').classes('text-sm')
+                            ui.label(source).classes('text-sm font-medium')
+
+                    if page_num:
+                        with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                            'background: var(--accent-blue); color: white;'
+                        ):
+                            ui.icon('description').classes('text-sm')
+                            ui.label(f"{tr('Page')} {page_num}").classes('text-sm font-medium')
+
+                    # Result position
+                    with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                        'background: var(--bg-tertiary); color: var(--text-secondary);'
                     ):
-                        ui.html(snippet_html, sanitize=False)
+                        ui.icon('tag').classes('text-sm')
+                        ui.label(f"#{index + 1}").classes('text-sm font-medium')
 
-            # Full Text Section
-            if full_text:
-                with ui.card().classes('w-full p-6'):
-                    # Changed to H3
-                    h3(tr('Full Text'), classes='text-xl font-bold mb-4')
-                    with ui.element('div').classes('p-4 rounded-lg max-h-96 overflow-auto').style(
-                        'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2;'
+        # === Match Context Section (Primary Focus) ===
+        if snippet:
+            with ui.card().classes('w-full p-6').style('border-radius: 16px;'):
+                with ui.row().classes('items-center gap-3 mb-4'):
+                    ui.icon('highlight').classes('text-2xl').style('color: var(--accent-amber);')
+                    h2(tr('Match Context'), classes='text-xl font-bold', style='color: var(--text-primary);')
+
+                snippet_html = SearchEngine.format_snippet(snippet)
+                with ui.element('div').classes('p-5 rounded-xl').style(
+                    'background: var(--bg-tertiary); direction: rtl; text-align: right; '
+                    'line-height: 2.2; font-size: 1.15rem; font-family: "SBL Hebrew", "David", serif;'
+                ):
+                    ui.html(snippet_html, sanitize=False)
+
+                # Copy snippet button
+                with ui.row().classes('justify-end mt-3'):
+                    ui.button(
+                        tr('Copy Match'),
+                        icon='content_copy',
+                        on_click=lambda: copy_result_text(snippet.replace('*', ''))
+                    ).props('flat dense').classes('text-sm')
+
+        # === Full Manuscript Text Section (Expandable) ===
+        if full_text:
+            with ui.card().classes('w-full').style('border-radius: 16px;'):
+                with ui.expansion(
+                    value=False
+                ).classes('w-full').props('dense header-class="text-lg font-bold"') as full_text_expansion:
+                    with full_text_expansion.add_slot('header'):
+                        with ui.row().classes('items-center gap-3 w-full py-2'):
+                            ui.icon('article').classes('text-2xl').style('color: var(--primary-600);')
+                            ui.label(tr('Full Manuscript Text')).classes('text-lg font-bold')
+                            word_count = len(full_text.split())
+                            ui.label(f"({word_count} {tr('words')})").classes('text-sm').style(
+                                'color: var(--text-muted);'
+                            )
+
+                    with ui.column().classes('w-full gap-4 p-4'):
+                        # Full text display with enhanced styling
+                        with ui.scroll_area().classes('w-full').style('max-height: 400px;'):
+                            with ui.element('div').classes('p-4 rounded-lg').style(
+                                'background: var(--bg-tertiary); direction: rtl; text-align: right; '
+                                'line-height: 2.2; font-family: "SBL Hebrew", "David", serif;'
+                            ):
+                                # Format full text with line numbers for reference
+                                lines = full_text.strip().split('\n')
+                                for i, line in enumerate(lines, 1):
+                                    if line.strip():
+                                        with ui.row().classes('w-full gap-3 hover:bg-opacity-50').style(
+                                            'direction: rtl;'
+                                        ):
+                                            ui.label(line).classes('flex-grow whitespace-pre-wrap').style(
+                                                'color: var(--text-primary);'
+                                            )
+
+                        # Actions for full text
+                        with ui.row().classes('justify-end gap-2'):
+                            ui.button(
+                                tr('Copy Full Text'),
+                                icon='content_copy',
+                                on_click=lambda: copy_result_text(full_text)
+                            ).props('flat dense')
+
+        # === Metadata Details Section (Collapsible) ===
+        with ui.card().classes('w-full').style('border-radius: 16px;'):
+            with ui.expansion(value=False).classes('w-full').props(
+                'dense header-class="text-lg font-bold"'
+            ) as metadata_expansion:
+                with metadata_expansion.add_slot('header'):
+                    with ui.row().classes('items-center gap-3 w-full py-2'):
+                        ui.icon('info').classes('text-2xl').style('color: var(--info);')
+                        ui.label(tr('Metadata & Details')).classes('text-lg font-bold')
+
+                with ui.column().classes('w-full p-4'):
+                    with ui.element('div').classes('grid gap-4').style(
+                        'grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));'
                     ):
-                        ui.label(full_text).classes('whitespace-pre-wrap').style('color: var(--text-primary);')
+                        # Metadata cards
+                        metadata_items = [
+                            ('library', tr('Shelfmark'), shelfmark, 'var(--primary-600)'),
+                            ('title', tr('Title'), title or tr('Not available'), 'var(--text-secondary)'),
+                            ('fingerprint', tr('System ID'), sys_id or tr('Not available'), 'var(--text-muted)'),
+                            ('source', tr('Source'), source or tr('Not available'), 'var(--accent-blue)'),
+                            ('description', tr('Page'), page_num or tr('Not available'), 'var(--success)'),
+                        ]
 
-            # Actions Section
-            with ui.card().classes('w-full p-6'):
-                with ui.row().classes('gap-3 flex-wrap'):
-                    # Browse button
-                    if sys_id:
-                        fl_id = None
-                        if 'raw_header' in result and state.meta_mgr:
-                            try:
-                                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                                fl_id = parsed.get('fl_id')
-                            except Exception:
-                                pass
+                        for icon_name, label, value, color in metadata_items:
+                            with ui.element('div').classes('p-4 rounded-lg').style(
+                                'background: var(--bg-tertiary);'
+                            ):
+                                with ui.row().classes('items-center gap-2 mb-2'):
+                                    ui.icon(icon_name).style(f'color: {color};')
+                                    ui.label(label).classes('text-sm font-medium').style(
+                                        'color: var(--text-secondary);'
+                                    )
+                                ui.label(value).classes('text-sm').style(
+                                    'color: var(--text-primary); direction: rtl; word-break: break-word;'
+                                )
 
-                        browse_url = f'/browse?sys_id={sys_id}'
-                        if fl_id:
-                            browse_url += f'&fl_id={fl_id}'
+        # === Actions Section ===
+        with ui.card().classes('w-full p-6').style(
+            'border-radius: 16px; background: var(--bg-tertiary);'
+        ):
+            h3(tr('Actions'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
 
-                        ui.button(
-                            tr('View in Browse'),
-                            icon='menu_book',
-                            on_click=lambda: (dialog.close(), ui.navigate.to(browse_url))
-                        ).classes('btn-primary')
+            with ui.row().classes('gap-4 flex-wrap'):
+                # Primary: Browse manuscript
+                if sys_id:
+                    browse_url = f'/browse?sys_id={sys_id}'
+                    if fl_id:
+                        browse_url += f'&fl_id={fl_id}'
+                    ui.button(
+                        tr('Browse Full Manuscript'),
+                        icon='menu_book',
+                        on_click=lambda url=browse_url: (dialog.close(), ui.navigate.to(url))
+                    ).classes('btn-primary')
 
-                    # Copy text button
-                    text_to_copy = full_text or snippet.replace('*', '')
+                # Find parallels
+                text_for_parallels = full_text or snippet.replace('*', '')
+                if text_for_parallels:
+                    ui.button(
+                        tr('Find Parallels'),
+                        icon='compare_arrows',
+                        on_click=lambda t=text_for_parallels: (
+                            dialog.close(),
+                            ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
+                        )
+                    ).props('outline')
+
+                # Copy all text
+                text_to_copy = full_text or snippet.replace('*', '')
+                if text_to_copy:
                     ui.button(
                         tr('Copy Text'),
                         icon='content_copy',
                         on_click=lambda t=text_to_copy: copy_result_text(t)
                     ).props('outline')
 
-                    # Find Parallels button
-                    text_for_parallels = full_text or snippet.replace('*', '')
-                    ui.button(
-                        tr('Find Parallels'),
-                        icon='compare_arrows',
-                        on_click=lambda: (dialog.close(), ui.navigate.to(f'/parallels?text={quote(text_for_parallels[:2000])}'))
-                    ).props('outline')
+                # Edit and Comment buttons (if available)
+                if full_text and sys_id:
+                    from web.components import create_edit_button, create_comment_button
+                    p_num = int(page_num) if page_num and page_num.isdigit() else 1
+                    create_edit_button(
+                        document_id=sys_id,
+                        page_number=p_num,
+                        original_text=full_text,
+                        shelfmark=shelfmark,
+                        size='md'
+                    )
+                    create_comment_button(
+                        document_id=sys_id,
+                        page_number=p_num,
+                        shelfmark=shelfmark,
+                        size='md'
+                    )
 
     def copy_result_text(text):
         """Copy text to clipboard."""
@@ -1078,45 +1328,24 @@ def create_search_page(initial_query: str = None):
                     search_state.selected_result['display']['img'] = str(page_data.p_num)
                     load_in_viewer(search_state.selected_result)
 
-    def show_add_to_list_dialog(result):
+    def show_add_to_list_dialog_local(result):
+        from web.components import show_add_to_list_dialog as show_dialog
         display = result.get('display', {})
         sys_id = display.get('id')
-        shelfmark = display.get('shelfmark', 'Unknown')
-
         if not sys_id:
             ui.notify(tr('Cannot add: missing system ID'), type='warning')
             return
-
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
-            # Changed to H3
-            h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-            ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
-
-            if state.lists_mgr:
-                lists = state.lists_mgr.data.get('lists', {})
-                list_options = {lid: lst['name'] for lid, lst in lists.items() if not lst.get('is_system')}
-
-                if not list_options:
-                    ui.label(tr('No lists available. Create a list first.')).style('color: var(--text-muted);')
-                    ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).classes('btn-primary mt-4')
-                else:
-                    selected_list = ui.select(list_options, label=tr('Select List')).classes('w-full mt-4').props('outlined').style('color: var(--text-primary);')
-                    note_input = ui.input(label=tr('Note (optional)')).classes('w-full mt-2').props('outlined')
-
-                    def add_to_list():
-                        if state.lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value):
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                        else:
-                            ui.notify(tr('Already in list'), type='info')
-
-                    with ui.row().classes('w-full justify-end gap-2 mt-6'):
-                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                        ui.button(tr('Add'), on_click=add_to_list).classes('btn-primary')
-            else:
-                ui.label(tr('Lists manager not available')).style('color: var(--error);')
-
-        dialog.open()
+        if not state.lists_mgr:
+            ui.notify(tr('Lists manager not available'), type='warning')
+            return
+        shelfmark = display.get('shelfmark', 'Unknown')
+        show_dialog(
+            sys_id=sys_id,
+            shelfmark=shelfmark,
+            lists_mgr=state.lists_mgr,
+            note_default='',  # Empty by default
+            fl_id=None
+        )
 
     # Initialize with restored results or initial query
     if initial_query:

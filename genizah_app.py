@@ -2517,23 +2517,23 @@ class ResultDialog(QDialog):
             by_doc_id = joins_mgr.data.get('by_document_id', {})
             by_normalized = joins_mgr.data.get('by_normalized', {})
             total_joins = len(joins_mgr.data.get('joins', {}))
-            print(f"[DEBUG] ResultDialog joins: total_joins={total_joins}, by_document_id={len(by_doc_id)}, by_normalized={len(by_normalized)}", flush=True)
-            print(f"[DEBUG] Looking for doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}'", flush=True)
+            logger.debug("ResultDialog joins: total_joins=%s, by_document_id=%s, by_normalized=%s", total_joins, len(by_doc_id), len(by_normalized))
+            logger.debug("Looking for doc_id='%s', plain_shelfmark='%s'", document_id, plain_shelfmark)
 
             # First try document_id lookup
             if document_id in by_doc_id:
-                print(f"[DEBUG] Found in by_document_id with join_ids: {by_doc_id[document_id]}", flush=True)
+                logger.debug("Found in by_document_id with join_ids: %s", by_doc_id[document_id])
             connected = joins_mgr.get_connected_fragments_by_id(document_id)
 
             # If no results by document_id, try shelfmark
             if not connected or connected.get('total_fragments', 0) <= 1:
                 normalized = joins_mgr._normalize_shelfmark(plain_shelfmark)
-                print(f"[DEBUG] Not found by doc_id, trying normalized shelfmark: '{normalized}'", flush=True)
+                logger.debug("Not found by doc_id, trying normalized shelfmark: '%s'", normalized)
                 if normalized in by_normalized:
-                    print(f"[DEBUG] Found in by_normalized with join_ids: {by_normalized[normalized]}", flush=True)
+                    logger.debug("Found in by_normalized with join_ids: %s", by_normalized[normalized])
                 connected = joins_mgr.get_connected_fragments(plain_shelfmark)
 
-            print(f"[DEBUG] Final connected result: fragments={connected.get('fragments', []) if connected else 'None'}", flush=True)
+            logger.debug("Final connected result: fragments=%s", connected.get('fragments', []) if connected else 'None')
 
         if not connected or connected.get('total_fragments', 0) <= 1:
             action = self.rd_joins_menu.addAction(tr("No joined fragments"))
@@ -2575,7 +2575,7 @@ class ResultDialog(QDialog):
             if shelf and doc_id:
                 shelfmark_to_docid[shelf.upper()] = doc_id
 
-        print(f"[DEBUG] _rd_update_joins_menu: doc_id='{document_id}', plain_shelfmark='{plain_shelfmark}', direct={direct_fragments}", flush=True)
+        logger.debug("_rd_update_joins_menu: doc_id='%s', plain_shelfmark='%s', direct=%s", document_id, plain_shelfmark, direct_fragments)
         for frag in fragments_list:
             # Compare with plain shelfmark (joins store plain shelfmarks)
             is_current = frag.upper() == plain_shelfmark.upper()
@@ -2709,9 +2709,9 @@ class ResultDialog(QDialog):
         try:
             versions_data = client.get_page_versions(doc_id, page_num)
             all_versions = versions_data.get('all_versions', [])
-            print(f"[DEBUG] _rd_refresh_versions: doc_id={doc_id}, page={page_num}, versions={len(all_versions)}", flush=True)
+            logger.debug("_rd_refresh_versions: doc_id=%s, page=%s, versions=%s", doc_id, page_num, len(all_versions))
             for v in all_versions:
-                print(f"[DEBUG]   version: source={v.get('source')}, user={v.get('user_name')}, id={v.get('id')}", flush=True)
+                logger.debug("version: source=%s, user=%s, id=%s", v.get('source'), v.get('user_name'), v.get('id'))
 
             # Filter to only latest version per user (use user_name as key for consistent deduplication)
             user_versions = [v for v in all_versions if v.get('source') == 'user']
@@ -2727,7 +2727,7 @@ class ResultDialog(QDialog):
                     if ver.get('created_at', '') > existing.get('created_at', ''):
                         latest_by_user[user_key] = ver
 
-            print(f"[DEBUG] After dedup: {len(latest_by_user)} unique users from {len(user_versions)} versions", flush=True)
+            logger.debug("After dedup: %s unique users from %s versions", len(latest_by_user), len(user_versions))
 
             # Add V0.7 if available
             for ver in all_versions:
@@ -2775,7 +2775,7 @@ class ResultDialog(QDialog):
                 users_with_versions.add(user_name)
 
         except Exception as e:
-            print(f"[DEBUG] Error refreshing versions: {e}", flush=True)
+            logger.debug("Error refreshing versions: %s", e)
 
         # Also fetch corrections from corrections API (separate from versions)
         # Only add corrections for users who don't already have a version entry
@@ -2783,9 +2783,9 @@ class ResultDialog(QDialog):
             corrections = client.get_corrections_for_document(doc_id, include_drafts=True)
             # Filter corrections by page number
             page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
-            print(f"[DEBUG] _rd_refresh_versions: corrections={len(corrections)}, page_corrections={len(page_corrections)}", flush=True)
+            logger.debug("_rd_refresh_versions: corrections=%s, page_corrections=%s", len(corrections), len(page_corrections))
             for c in corrections:
-                print(f"[DEBUG]   corr id={c.id}, status={c.status}, author={c.author_username}, page={c.page_number}", flush=True)
+                logger.debug("corr id=%s, status=%s, author=%s, page=%s", c.id, c.status, c.author_username, c.page_number)
 
             # Group by user, keep latest per user
             corrections_by_user = {}
@@ -2808,7 +2808,7 @@ class ResultDialog(QDialog):
 
                 # Skip if user already has a version entry (avoid duplicates)
                 if user_name in users_with_versions:
-                    print(f"[DEBUG]   correction: user={user_name} SKIPPED (has version)", flush=True)
+                    logger.debug("correction: user=%s SKIPPED (has version)", user_name)
                     continue
 
                 # Filter based on status and user permissions:
@@ -2820,12 +2820,12 @@ class ResultDialog(QDialog):
                 if status == 'rejected':
                     # Rejected corrections: only visible to author or admin
                     if not is_own_correction and not is_reviewer_or_admin:
-                        print(f"[DEBUG]   correction: user={user_name} SKIPPED (rejected, not authorized)", flush=True)
+                        logger.debug("correction: user=%s SKIPPED (rejected, not authorized)", user_name)
                         continue
                 elif status in ('draft', 'pending'):
                     # Draft/Pending: only visible to author or reviewer/admin
                     if not is_own_correction and not is_reviewer_or_admin:
-                        print(f"[DEBUG]   correction: user={user_name} SKIPPED ({status}, not authorized)", flush=True)
+                        logger.debug("correction: user=%s SKIPPED (%s, not authorized)", user_name, status)
                         continue
 
                 created_at = corr.created_at[:10] if corr.created_at else ''
@@ -2847,7 +2847,7 @@ class ResultDialog(QDialog):
                     if created_at:
                         label += f" ({created_at})"
 
-                print(f"[DEBUG]   correction: user={user_name}, status={status}, id={corr.id}", flush=True)
+                logger.debug("correction: user=%s, status=%s, id=%s", user_name, status, corr.id)
 
                 self.rd_version_combo.addItem(label, {
                     "source": "correction",
@@ -2862,7 +2862,7 @@ class ResultDialog(QDialog):
                     new_user_idx = self.rd_version_combo.count() - 1
 
         except Exception as e:
-            print(f"[DEBUG] Error fetching corrections: {e}", flush=True)
+            logger.debug("Error fetching corrections: %s", e)
 
         # Enable combo if we have versions/corrections
         if self.rd_version_combo.count() > 1:
@@ -2918,7 +2918,7 @@ class ResultDialog(QDialog):
                         self._rd_versions_cache[cache_key] = content
                         self._rd_display_text(content)
                 except Exception as e:
-                    print(f"[DEBUG] Error loading version: {e}", flush=True)
+                    logger.debug("Error loading version: %s", e)
 
     def _rd_display_text(self, text):
         """Display text in the manuscript viewer."""
@@ -4237,17 +4237,17 @@ class GenizahGUI(QMainWindow):
     def _on_tab_changed(self, index):
         """Handle tab change events."""
         import sys
-        print(f"[DEBUG] _on_tab_changed called with index={index}", flush=True)
+        logger.debug("_on_tab_changed called with index=%s", index)
         try:
             current_widget = self.tabs.widget(index)
-            print(f"[DEBUG] current_widget={current_widget}", flush=True)
+            logger.debug("current_widget=%s", current_widget)
             if hasattr(self, 'community_tab') and current_widget == self.community_tab:
-                print(f"[DEBUG] Matched community_tab, _community_data_loaded={getattr(self, '_community_data_loaded', False)}", flush=True)
+                logger.debug("Matched community_tab, _community_data_loaded=%s", getattr(self, '_community_data_loaded', False))
                 # Load community data when tab is first shown or refresh if needed
                 if not getattr(self, '_community_data_loaded', False):
-                    print("[DEBUG] About to call _refresh_community_panels", flush=True)
+                    logger.debug("About to call _refresh_community_panels")
                     self._refresh_community_panels()
-                    print("[DEBUG] _refresh_community_panels completed", flush=True)
+                    logger.debug("_refresh_community_panels completed")
                     self._community_data_loaded = True
         except Exception as e:
             import traceback
@@ -4267,6 +4267,8 @@ class GenizahGUI(QMainWindow):
         if dialog.exec():
             self._update_corner_login_state()
             self._refresh_community_panels()
+            # Enable cloud sync for lists after successful login
+            self._enable_lists_cloud_sync()
 
     def _show_register_dialog(self):
         dialog = RegisterDialog(self, self.corrections_client)
@@ -4275,10 +4277,283 @@ class GenizahGUI(QMainWindow):
             self._refresh_community_panels()
 
     def _do_logout(self):
+        # Disable cloud sync before logout
+        self._disable_lists_cloud_sync()
         self.corrections_client.logout()
         self._update_corner_login_state()
         self._refresh_community_panels()
         QMessageBox.information(self, tr("Logged Out"), tr("You have been logged out."))
+
+    def _enable_lists_cloud_sync(self):
+        """Enable cloud sync for user lists after login - shows sync dialog."""
+        try:
+            user = self.corrections_client.current_user
+            logger.debug(f"Cloud sync: user={user}")
+
+            # Get user UUID - try multiple approaches
+            user_uuid = None
+            if user:
+                # Try _uuid attribute (supabase_corrections_client)
+                if hasattr(user, '_uuid') and user._uuid:
+                    user_uuid = user._uuid
+                    logger.debug(f"Cloud sync: Got UUID from _uuid: {user_uuid[:8]}...")
+                # Try getting from supabase auth session directly
+                elif hasattr(self.corrections_client, '_client') and self.corrections_client._client:
+                    try:
+                        session = self.corrections_client._client.auth.get_session()
+                        if session and session.user:
+                            user_uuid = str(session.user.id)
+                            logger.debug(f"Cloud sync: Got UUID from session: {user_uuid[:8]}...")
+                    except Exception as e:
+                        logger.debug(f"Could not get UUID from session: {e}")
+
+            if not user_uuid:
+                logger.warning("Cloud sync: No user UUID available - cannot sync")
+                return
+
+            # Enable cloud sync connection (but don't sync yet)
+            # Pass the authenticated Supabase client for RLS to work
+            logger.info(f"Enabling cloud sync for user UUID: {user_uuid}")
+            supabase_client = None
+            if hasattr(self.corrections_client, '_client'):
+                supabase_client = self.corrections_client._client
+                logger.debug("Using authenticated client from corrections system")
+            self.lists_mgr.enable_cloud_sync(user_uuid, supabase_client=supabase_client)
+
+            # Get preview of what's in cloud vs local
+            cloud_preview = self.lists_mgr.get_cloud_lists_preview()
+            logger.info(f"Cloud preview returned: {cloud_preview}")
+            local_lists = self.lists_mgr.get_local_lists_summary()
+
+            logger.debug(f"Cloud preview result: success={cloud_preview.get('success')}, "
+                        f"lists_count={len(cloud_preview.get('lists', []))}, "
+                        f"error={cloud_preview.get('error')}")
+
+            cloud_lists = cloud_preview.get('lists', []) if cloud_preview.get('success') else []
+
+            # If preview failed, show error but still allow upload
+            cloud_error = None
+            if not cloud_preview.get('success'):
+                cloud_error = cloud_preview.get('error', 'Unknown error')
+                logger.warning(f"Cloud preview failed: {cloud_error}")
+
+            # If both are empty (and no error), nothing to sync
+            if not cloud_lists and not local_lists and not cloud_error:
+                logger.info("Cloud sync: No lists to sync (both empty)")
+                return
+
+            # Check if already in sync (same list names with cloud_ids set)
+            if not cloud_error and cloud_lists and local_lists:
+                # Filter out "Recently Viewed" - it's local-only and not synced
+                local_names = {lst.get('name') for lst in local_lists}
+                cloud_names = {lst.get('name') for lst in cloud_lists
+                              if lst.get('name') != 'Recently Viewed'}
+                # Check if local lists have cloud_ids (already synced)
+                local_with_cloud_ids = sum(1 for lst in self.lists_mgr.data.get('lists', {}).values()
+                                           if lst.get('cloud_id'))
+                # Consider synced if: same user lists AND has some cloud_ids
+                if local_names == cloud_names and local_with_cloud_ids > 0:
+                    logger.info("Cloud sync: Already in sync, skipping dialog")
+                    # Don't sync - lists are already in sync
+                    return
+
+            # Show sync dialog
+            self._show_lists_sync_dialog(local_lists, cloud_lists, cloud_error)
+
+        except Exception as e:
+            logger.warning(f"Cloud sync dialog error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
+        """Show dialog to let user choose how to sync lists."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Sync Your Lists"))
+        dialog.setMinimumWidth(500)
+        layout = QVBoxLayout(dialog)
+
+        # Header
+        if cloud_error:
+            header = QLabel(tr("Could not load cloud lists. You can still upload your local lists."))
+        elif cloud_lists:
+            header = QLabel(tr("Your account has lists in the cloud. How would you like to sync?"))
+        else:
+            header = QLabel(tr("Upload your local lists to the cloud?"))
+        header.setWordWrap(True)
+        header.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(header)
+
+        # Show error if any
+        if cloud_error:
+            error_label = QLabel(f"Error: {cloud_error}")
+            error_label.setStyleSheet("color: #f44336; font-size: 12px; margin-bottom: 10px;")
+            error_label.setWordWrap(True)
+            layout.addWidget(error_label)
+
+        # Two columns: Local vs Cloud
+        columns = QHBoxLayout()
+
+        # Local lists column
+        local_group = QGroupBox(tr("Local Lists (this device)"))
+        local_layout = QVBoxLayout(local_group)
+        if local_lists:
+            for lst in local_lists[:10]:  # Show max 10
+                item_label = QLabel(f"• {lst['name']} ({lst['item_count']} items)")
+                local_layout.addWidget(item_label)
+            if len(local_lists) > 10:
+                local_layout.addWidget(QLabel(f"... and {len(local_lists) - 10} more"))
+        else:
+            local_layout.addWidget(QLabel(tr("No local lists")))
+        local_layout.addStretch()
+        columns.addWidget(local_group)
+
+        # Cloud lists column
+        cloud_group = QGroupBox(tr("Cloud Lists (your account)"))
+        cloud_layout = QVBoxLayout(cloud_group)
+        if cloud_lists:
+            for lst in cloud_lists[:10]:  # Show max 10
+                item_label = QLabel(f"• {lst['name']} ({lst['item_count']} items)")
+                cloud_layout.addWidget(item_label)
+            if len(cloud_lists) > 10:
+                cloud_layout.addWidget(QLabel(f"... and {len(cloud_lists) - 10} more"))
+        else:
+            cloud_layout.addWidget(QLabel(tr("No cloud lists")))
+        cloud_layout.addStretch()
+        columns.addWidget(cloud_group)
+
+        layout.addLayout(columns)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+
+        # Download from cloud button
+        if cloud_lists:
+            download_btn = QPushButton(tr("Download from Cloud"))
+            download_btn.setToolTip(tr("Add cloud lists to this device (keeps both)"))
+            download_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px 16px;")
+            download_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'download'))
+            btn_layout.addWidget(download_btn)
+
+        # Upload to cloud button
+        if local_lists:
+            upload_btn = QPushButton(tr("Upload to Cloud"))
+            upload_btn.setToolTip(tr("Push local lists to your account"))
+            upload_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px 16px;")
+            upload_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'upload'))
+            btn_layout.addWidget(upload_btn)
+
+        # Merge both (if both have lists)
+        if cloud_lists and local_lists:
+            merge_btn = QPushButton(tr("Merge Both"))
+            merge_btn.setToolTip(tr("Download cloud AND upload local (combine everything)"))
+            merge_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 8px 16px;")
+            merge_btn.clicked.connect(lambda: self._do_sync_action(dialog, 'merge'))
+            btn_layout.addWidget(merge_btn)
+
+        # Skip button
+        skip_btn = QPushButton(tr("Skip"))
+        skip_btn.setToolTip(tr("Don't sync now - you can sync later from Settings"))
+        skip_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(skip_btn)
+
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
+    def _do_sync_action(self, dialog, action):
+        """Execute the chosen sync action."""
+        dialog.accept()
+
+        progress = QProgressDialog(tr("Syncing lists..."), None, 0, 0, self)
+        progress.setWindowTitle(tr("Sync"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+
+        try:
+            if action == 'download':
+                # Download cloud lists to local (merge)
+                result = self.lists_mgr.sync_from_cloud()
+                if result.get('success'):
+                    added = result.get('lists_added', 0)
+                    items = result.get('items_added', 0)
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Downloaded {lists} lists and {items} items from cloud.").format(
+                            lists=added, items=items
+                        )
+                    )
+                else:
+                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+
+            elif action == 'upload':
+                # Upload local lists to cloud
+                result = self.lists_mgr.sync_to_cloud()
+                if result.get('success'):
+                    pushed = result.get('lists_pushed', 0)
+                    items = result.get('items_pushed', 0)
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Uploaded {lists} lists and {items} items to cloud.").format(
+                            lists=pushed, items=items
+                        )
+                    )
+                else:
+                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+
+            elif action == 'merge':
+                # Both directions
+                download_result = self.lists_mgr.sync_from_cloud()
+                upload_result = self.lists_mgr.sync_to_cloud()
+
+                if download_result.get('success') and upload_result.get('success'):
+                    QMessageBox.information(
+                        self, tr("Sync Complete"),
+                        tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
+                            dl=download_result.get('lists_added', 0),
+                            ul=upload_result.get('lists_pushed', 0)
+                        )
+                    )
+                else:
+                    errors = []
+                    if not download_result.get('success'):
+                        errors.append(f"Download: {download_result.get('error')}")
+                    if not upload_result.get('success'):
+                        errors.append(f"Upload: {upload_result.get('error')}")
+                    QMessageBox.warning(self, tr("Sync Error"), "\n".join(errors))
+
+            # Refresh the lists UI if it exists
+            if hasattr(self, 'lists_tree'):
+                self.lists_refresh_all()
+
+        except Exception as e:
+            QMessageBox.critical(self, tr("Sync Error"), str(e))
+        finally:
+            progress.close()
+
+    def _disable_lists_cloud_sync(self):
+        """Disable cloud sync on logout."""
+        try:
+            # Skip sync on logout if recently synced (auto-sync handles it)
+            import time
+            if hasattr(self.lists_mgr, '_last_sync') and self.lists_mgr._last_sync:
+                if time.time() - self.lists_mgr._last_sync < 60:  # Synced in last minute
+                    logger.debug("Skipping logout sync - recently synced")
+                    self.lists_mgr.disable_cloud_sync()
+                    return
+
+            # Quick sync with 10-second timeout
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self.lists_mgr.sync_to_cloud)
+                try:
+                    future.result(timeout=10)
+                except concurrent.futures.TimeoutError:
+                    logger.debug("Logout sync timed out after 10s - continuing")
+
+            self.lists_mgr.disable_cloud_sync()
+        except Exception as e:
+            logger.debug(f"Cloud sync disable: {e}")
 
     def _show_discoveries_dialog(self):
         dialog = DiscoveriesDialog(
@@ -4622,7 +4897,7 @@ class GenizahGUI(QMainWindow):
                     if hasattr(self, 'browse_original_page_text'):
                         self._browse_display_version_text(self.browse_original_page_text)
             except Exception as e:
-                print(f"[DEBUG] Error loading version content: {e}", flush=True)
+                logger.debug("Error loading version content: %s", e)
                 if hasattr(self, 'browse_original_page_text'):
                     self._browse_display_version_text(self.browse_original_page_text)
 
@@ -4782,7 +5057,7 @@ class GenizahGUI(QMainWindow):
                         "corrected_text": corr.corrected_text
                     })
             except Exception as e:
-                print(f"[DEBUG] Error fetching corrections for browse: {e}", flush=True)
+                logger.debug("Error fetching corrections for browse: %s", e)
 
             # Enable combo if we have more than just V0.8
             if self.browse_version_combo.count() > 1:
@@ -4804,7 +5079,7 @@ class GenizahGUI(QMainWindow):
                 self.browse_version_combo.setEnabled(False)
 
         except Exception as e:
-            print(f"[DEBUG] Error fetching versions: {e}", flush=True)
+            logger.debug("Error fetching versions: %s", e)
             self.browse_version_combo.setEnabled(False)
 
     def _browse_add_comment(self):
@@ -6831,6 +7106,16 @@ class GenizahGUI(QMainWindow):
         btn_merge.clicked.connect(self.lists_merge_lists)
         sidebar_actions.addWidget(btn_merge)
 
+        btn_cleanup = QPushButton(tr("Fix Duplicates"))
+        btn_cleanup.setToolTip(tr("Merge duplicate lists created by sync issues"))
+        btn_cleanup.clicked.connect(self.lists_cleanup_duplicates)
+        sidebar_actions.addWidget(btn_cleanup)
+
+        btn_trash = QPushButton(tr("Trash"))
+        btn_trash.setToolTip(tr("View and restore deleted lists"))
+        btn_trash.clicked.connect(self.lists_show_trash)
+        sidebar_actions.addWidget(btn_trash)
+
         sidebar_layout.addLayout(sidebar_actions)
 
         is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
@@ -6950,6 +7235,76 @@ class GenizahGUI(QMainWindow):
         self.lists_refresh_items()
         self._update_search_action_stars()
         self._update_browse_add_to_list_button()
+
+    _auto_sync_pending = False
+    _auto_sync_last = 0
+
+    def _lists_auto_sync(self):
+        """Auto-sync to cloud after local changes (if logged in).
+
+        Features:
+        - Runs in background thread (won't freeze UI)
+        - Quick network check before syncing
+        - Debounced (max once per 2 seconds)
+        - 30-second timeout
+        """
+        if not self.lists_mgr:
+            logger.debug("Auto-sync: no lists_mgr")
+            return
+        if not hasattr(self.lists_mgr, 'is_sync_available') or not self.lists_mgr.is_sync_available():
+            logger.debug("Auto-sync: sync not available")
+            return
+
+        # Debounce: skip if synced recently
+        import time
+        now = time.time()
+        if now - self.__class__._auto_sync_last < 2:
+            return
+
+        # Skip if sync already pending
+        if self.__class__._auto_sync_pending:
+            return
+
+        self.__class__._auto_sync_pending = True
+        self.__class__._auto_sync_last = now
+
+        try:
+            import threading
+
+            def sync_task():
+                try:
+                    # Quick network check (try to resolve Supabase host)
+                    import socket
+                    socket.setdefaulttimeout(5)
+                    try:
+                        socket.gethostbyname('ylcpglwxompwjcufdemz.supabase.co')
+                    except socket.gaierror:
+                        logger.debug("Auto-sync skipped: no network")
+                        return
+                    finally:
+                        socket.setdefaulttimeout(None)
+
+                    logger.debug("Auto-sync starting...")
+                    # Run sync with timeout
+                    import concurrent.futures
+                    import time as _time
+                    start = _time.time()
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(self.lists_mgr.sync_to_cloud)
+                        try:
+                            result = future.result(timeout=30)  # 30 second timeout
+                            logger.debug(f"Auto-sync completed in {_time.time()-start:.1f}s: {result}")
+                        except concurrent.futures.TimeoutError:
+                            logger.debug("Auto-sync timed out after 30s")
+                except Exception as e:
+                    logger.debug(f"Auto-sync failed: {e}")
+                finally:
+                    self.__class__._auto_sync_pending = False
+
+            threading.Thread(target=sync_task, daemon=True).start()
+        except Exception as e:
+            self.__class__._auto_sync_pending = False
+            logger.debug(f"Auto-sync error: {e}")
 
     def lists_refresh_sidebar(self):
         """Refresh the lists tree in the sidebar."""
@@ -7489,6 +7844,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_mgr:
                 self.lists_mgr.create_list(name.strip())
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
 
     def lists_create_new_project(self):
         """Create a new project."""
@@ -7497,6 +7853,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_mgr:
                 self.lists_mgr.create_project(name.strip())
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
 
     def lists_edit_current_list(self):
         """Edit the current list name/color."""
@@ -7511,6 +7868,7 @@ class GenizahGUI(QMainWindow):
         if ok and name.strip():
             self.lists_mgr.update_list(self.lists_current_list_id, name=name.strip())
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def lists_delete_current_list(self):
         """Delete the current list."""
@@ -7524,7 +7882,7 @@ class GenizahGUI(QMainWindow):
         name = lst.get('name', 'List')
         reply = QMessageBox.question(
             self, tr("Delete List?"),
-            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            tr("Move '{}' to trash?\nYou can restore it later from the Trash.").format(name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -7532,6 +7890,7 @@ class GenizahGUI(QMainWindow):
             self.lists_mgr.delete_list(self.lists_current_list_id)
             self.lists_current_list_id = 'default'
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def lists_duplicate_selected_list(self):
         """Duplicate the current list."""
@@ -7540,6 +7899,7 @@ class GenizahGUI(QMainWindow):
 
         self.lists_mgr.duplicate_list(self.lists_current_list_id)
         self.lists_refresh_sidebar()
+        self._lists_auto_sync()
 
     def lists_merge_lists(self):
         """Show dialog to merge lists."""
@@ -7575,6 +7935,227 @@ class GenizahGUI(QMainWindow):
                 self.lists_mgr.merge_lists(self.lists_current_list_id, target_list['id'])
                 self.lists_current_list_id = target_list['id']
                 self.lists_refresh_all()
+
+    def lists_cleanup_duplicates(self):
+        """Clean up duplicate lists created by sync bugs."""
+        if not self.lists_mgr:
+            return
+
+        duplicate_groups = self.lists_mgr.find_duplicate_lists()
+
+        if not duplicate_groups:
+            QMessageBox.information(self, tr("Fix Duplicates"), tr("No duplicate lists found."))
+            return
+
+        auto_groups = [g for g in duplicate_groups if not g['has_conflict']]
+        conflict_groups = [g for g in duplicate_groups if g['has_conflict']]
+
+        total_merged = 0
+        total_deleted = 0
+        details = []
+
+        for group in auto_groups:
+            result = self.lists_mgr.auto_merge_duplicate_group(group)
+            total_merged += result['merged_items']
+            total_deleted += result['deleted_count']
+            if result['merged_items'] > 0:
+                details.append((group['name'], result['merged_items']))
+
+        for group in conflict_groups:
+            result = self._show_duplicate_conflict_dialog(group)
+            if result:
+                total_merged += result['merged_items']
+                total_deleted += result['deleted_count']
+                if result['merged_items'] > 0:
+                    details.append((group['name'], result['merged_items']))
+
+        hierarchy_result = self.lists_mgr.restore_project_hierarchy()
+        restored = hierarchy_result.get('restored_count', 0)
+
+        if total_deleted > 0 or restored > 0:
+            msg = tr("Cleanup complete:\n")
+            if total_deleted > 0:
+                msg += tr("- Removed {} duplicate lists\n").format(total_deleted)
+            if total_merged > 0:
+                msg += tr("- Merged {} items total\n").format(total_merged)
+            for list_name, count in details:
+                msg += f"  * '{list_name}': {count} " + tr("items merged") + "\n"
+            if restored > 0:
+                msg += tr("- Restored {} lists to their projects\n").format(restored)
+            QMessageBox.information(self, tr("Fix Duplicates"), msg)
+            self.lists_refresh_all()
+        else:
+            QMessageBox.information(self, tr("Fix Duplicates"), tr("No changes made."))
+
+    def _show_duplicate_conflict_dialog(self, group):
+        """Show dialog for user to resolve a duplicate list conflict."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QRadioButton, QButtonGroup, QDialogButtonBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Resolve Duplicate: {}").format(group['name']))
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout(dialog)
+
+        header = QLabel(tr("Found {} lists named '{}' with different projects.\nChoose which to keep:").format(
+            len(group['lists']), group['name']
+        ))
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        button_group = QButtonGroup(dialog)
+
+        for i, lst in enumerate(group['lists']):
+            project_name = lst['project_name'] or tr("(no project)")
+            item_count = lst['item_count']
+            label = tr("Under '{}' ({} items)").format(project_name, item_count)
+            if lst['id'] in ['default', 'recent']:
+                label += tr(" [System]")
+
+            radio = QRadioButton(label)
+            radio.setProperty('list_info', lst)
+            button_group.addButton(radio, i)
+            layout.addWidget(radio)
+            if i == 0:
+                radio.setChecked(True)
+
+        layout.addSpacing(10)
+        info = QLabel(tr("Items from other lists will be merged into the selected one."))
+        info.setStyleSheet("color: gray; font-size: 11px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+        selected_id = button_group.checkedId()
+        if selected_id < 0:
+            return None
+
+        selected_lst = group['lists'][selected_id]
+        keep_id = selected_lst['id']
+        target_project_id = selected_lst['project_id']
+        duplicate_ids = [l['id'] for l in group['lists'] if l['id'] != keep_id]
+
+        return self.lists_mgr.merge_duplicate_group(keep_id, duplicate_ids, target_project_id)
+
+    def lists_show_trash(self):
+        """Show dialog with deleted lists (trash)."""
+        if not self.lists_mgr:
+            return
+
+        deleted_lists = self.lists_mgr.get_deleted_lists()
+
+        if not deleted_lists:
+            QMessageBox.information(self, tr("Trash"), tr("Trash is empty."))
+            return
+
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                      QListWidget, QListWidgetItem, QPushButton,
+                                      QDialogButtonBox)
+        from datetime import datetime
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Trash"))
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+
+        layout = QVBoxLayout(dialog)
+
+        header = QLabel(tr("{} deleted lists").format(len(deleted_lists)))
+        layout.addWidget(header)
+
+        list_widget = QListWidget()
+        for lst in deleted_lists:
+            deleted_at = lst.get('deleted_at', 0)
+            if deleted_at:
+                deleted_str = datetime.fromtimestamp(deleted_at).strftime('%Y-%m-%d %H:%M')
+            else:
+                deleted_str = tr("Unknown")
+
+            item = QListWidgetItem(f"{lst['name']} ({lst['count']} {tr('items')}) - {tr('Deleted')}: {deleted_str}")
+            item.setData(Qt.ItemDataRole.UserRole, lst['id'])
+            list_widget.addItem(item)
+
+        layout.addWidget(list_widget)
+
+        btn_layout = QHBoxLayout()
+
+        btn_restore = QPushButton(tr("Restore"))
+        btn_restore.clicked.connect(lambda: self._trash_restore(dialog, list_widget))
+        btn_layout.addWidget(btn_restore)
+
+        btn_delete_perm = QPushButton(tr("Delete Permanently"))
+        btn_delete_perm.clicked.connect(lambda: self._trash_delete_permanently(dialog, list_widget))
+        btn_layout.addWidget(btn_delete_perm)
+
+        btn_empty = QPushButton(tr("Empty Trash"))
+        btn_empty.clicked.connect(lambda: self._trash_empty(dialog))
+        btn_layout.addWidget(btn_empty)
+
+        layout.addLayout(btn_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.exec()
+
+    def _trash_restore(self, dialog, list_widget):
+        """Restore selected list from trash."""
+        item = list_widget.currentItem()
+        if not item:
+            QMessageBox.warning(self, tr("Restore"), tr("Please select a list to restore."))
+            return
+
+        list_id = item.data(Qt.ItemDataRole.UserRole)
+        if self.lists_mgr.restore_list(list_id):
+            list_widget.takeItem(list_widget.row(item))
+            self.lists_refresh_all()
+            self._lists_auto_sync()
+            if list_widget.count() == 0:
+                dialog.accept()
+
+    def _trash_delete_permanently(self, dialog, list_widget):
+        """Permanently delete selected list from trash."""
+        item = list_widget.currentItem()
+        if not item:
+            QMessageBox.warning(self, tr("Delete Permanently"), tr("Please select a list to delete."))
+            return
+
+        list_id = item.data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(
+            self, tr("Delete Permanently"),
+            tr("Are you sure you want to permanently delete this list?\nThis cannot be undone."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.lists_mgr.permanently_delete_list(list_id):
+                list_widget.takeItem(list_widget.row(item))
+                self._lists_auto_sync()
+                if list_widget.count() == 0:
+                    dialog.accept()
+
+    def _trash_empty(self, dialog):
+        """Empty all trash."""
+        reply = QMessageBox.question(
+            self, tr("Empty Trash"),
+            tr("Are you sure you want to permanently delete all lists in trash?\nThis cannot be undone."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            count = self.lists_mgr.empty_trash()
+            QMessageBox.information(self, tr("Empty Trash"), tr("Deleted {} lists permanently.").format(count))
+            self.lists_refresh_all()
+            self._lists_auto_sync()
+            dialog.accept()
 
     def lists_move_selected_items(self):
         """Move selected items to another list."""
@@ -7730,35 +8311,35 @@ class GenizahGUI(QMainWindow):
 
     def _open_document_result_dialog(self, shelfmark=None, sys_id=None, page_num=1):
         """Open ResultDialog for a document by shelfmark or sys_id."""
-        print(f"[DEBUG] _open_document_result_dialog called: shelfmark={shelfmark}, sys_id={sys_id}", flush=True)
+        logger.debug("_open_document_result_dialog called: shelfmark=%s, sys_id=%s", shelfmark, sys_id)
         try:
             if not self.searcher or not self.meta_mgr:
-                print("[DEBUG] searcher or meta_mgr not available", flush=True)
+                logger.debug("searcher or meta_mgr not available")
                 return
 
             # Get sys_id from shelfmark if needed
             if not sys_id and shelfmark:
-                print("[DEBUG] Looking up sys_id from shelfmark", flush=True)
+                logger.debug("Looking up sys_id from shelfmark")
                 self._ensure_shelf_map()
                 norm = self._normalize_shelfmark(shelfmark)
                 sys_id = self._shelf_to_sys.get(norm) if norm else None
-                print(f"[DEBUG] Normalized: {norm}, sys_id: {sys_id}", flush=True)
+                logger.debug("Normalized: %s, sys_id: %s", norm, sys_id)
 
             if not sys_id:
-                print("[DEBUG] No sys_id found", flush=True)
+                logger.debug("No sys_id found")
                 QMessageBox.warning(self, tr("Error"), tr("Document not found"))
                 return
 
             # Get page data
-            print(f"[DEBUG] Getting page data for sys_id={sys_id}", flush=True)
+            logger.debug("Getting page data for sys_id=%s", sys_id)
             page_data = self.searcher.get_browse_page(sys_id, p_num=page_num)
             if not page_data:
-                print("[DEBUG] No page data found", flush=True)
+                logger.debug("No page data found")
                 QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
                 return
 
             shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
-            print(f"[DEBUG] shelfmark_display={shelfmark_display}, title={title}", flush=True)
+            logger.debug("shelfmark_display=%s, title=%s", shelfmark_display, title)
 
             # Create result dict for ResultDialog
             result = {
@@ -7776,11 +8357,11 @@ class GenizahGUI(QMainWindow):
                 }
             }
 
-            print("[DEBUG] Opening ResultDialog", flush=True)
+            logger.debug("Opening ResultDialog")
             ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
-            print("[DEBUG] ResultDialog closed", flush=True)
+            logger.debug("ResultDialog closed")
         except Exception as e:
-            print(f"[DEBUG] Error in _open_document_result_dialog: {e}", flush=True)
+            logger.debug("Error in _open_document_result_dialog: %s", e)
             import traceback
             traceback.print_exc()
 
@@ -8012,12 +8593,14 @@ class GenizahGUI(QMainWindow):
             if category_actions and action in category_actions:
                 self.lists_mgr.update_list_project(list_id, category_actions[action])
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
             elif action_new_category and action == action_new_category:
                 name, ok = QInputDialog.getText(self, tr("Create New Project"), tr("Project Name:"))
                 if ok and name.strip():
                     project_id = self.lists_mgr.create_project(name.strip())
                     self.lists_mgr.update_list_project(list_id, project_id)
                     self.lists_refresh_sidebar()
+                    self._lists_auto_sync()
 
     def _rename_list(self, list_id):
         """Rename a specific list."""
@@ -8032,6 +8615,7 @@ class GenizahGUI(QMainWindow):
         if ok and name.strip():
             self.lists_mgr.update_list(list_id, name=name.strip())
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def _delete_list(self, list_id):
         """Delete a specific list."""
@@ -8045,7 +8629,7 @@ class GenizahGUI(QMainWindow):
         name = lst.get('name', 'List')
         reply = QMessageBox.question(
             self, tr("Delete List?"),
-            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            tr("Move '{}' to trash?\nYou can restore it later from the Trash.").format(name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -8054,6 +8638,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_current_list_id == list_id:
                 self.lists_current_list_id = 'default'
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def _duplicate_list(self, list_id):
         """Duplicate a specific list."""
@@ -8062,6 +8647,7 @@ class GenizahGUI(QMainWindow):
 
         self.lists_mgr.duplicate_list(list_id)
         self.lists_refresh_sidebar()
+        self._lists_auto_sync()
 
     def _export_list(self, list_id):
         """Export a specific list (opens format menu)."""
@@ -8587,48 +9173,48 @@ class GenizahGUI(QMainWindow):
             use_cache_first: If True, display cached data first for instant response,
                            then fetch fresh data in background.
         """
-        print("[DEBUG] _refresh_community_panels started", flush=True)
+        logger.debug("_refresh_community_panels started")
 
         # Quick connectivity check to avoid long timeouts when offline
         server_available = self.corrections_client.is_server_available()
-        print(f"[DEBUG] Server available: {server_available}", flush=True)
+        logger.debug("Server available: %s", server_available)
 
         # If offline, only use cached data - skip all API calls
         skip_api_calls = not server_available
 
         try:
-            print("[DEBUG] Calling _update_community_header...", flush=True)
+            logger.debug("Calling _update_community_header...")
             self._update_community_header()
-            print("[DEBUG] _update_community_header completed", flush=True)
+            logger.debug("_update_community_header completed")
         except Exception as e:
             print(f"Error in _update_community_header: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_discoveries_panel...", flush=True)
+            logger.debug("Calling _refresh_discoveries_panel...")
             self._refresh_discoveries_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_discoveries_panel completed", flush=True)
+            logger.debug("_refresh_discoveries_panel completed")
         except Exception as e:
             print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
             import traceback
             traceback.print_exc()
         try:
-            print("[DEBUG] Calling _refresh_corrections_panel...", flush=True)
+            logger.debug("Calling _refresh_corrections_panel...")
             self._refresh_corrections_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_corrections_panel completed", flush=True)
+            logger.debug("_refresh_corrections_panel completed")
         except Exception as e:
             print(f"Error in _refresh_corrections_panel: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_comments_panel...", flush=True)
+            logger.debug("Calling _refresh_comments_panel...")
             self._refresh_comments_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_comments_panel completed", flush=True)
+            logger.debug("_refresh_comments_panel completed")
         except Exception as e:
             print(f"Error in _refresh_comments_panel: {e}", flush=True)
         try:
-            print("[DEBUG] Calling _refresh_joins_panel...", flush=True)
+            logger.debug("Calling _refresh_joins_panel...")
             self._refresh_joins_panel(use_cache_first, skip_api_calls=skip_api_calls)
-            print("[DEBUG] _refresh_joins_panel completed", flush=True)
+            logger.debug("_refresh_joins_panel completed")
         except Exception as e:
             print(f"Error in _refresh_joins_panel: {e}", flush=True)
-        print("[DEBUG] _refresh_community_panels finished", flush=True)
+        logger.debug("_refresh_community_panels finished")
 
     def _update_community_header(self):
         """Update the community header with user info."""
@@ -8667,15 +9253,15 @@ class GenizahGUI(QMainWindow):
                 current_user = self.corrections_client.current_user
                 is_admin = current_user and current_user.role == 'admin'
 
-            print(f"[DEBUG] _refresh_discoveries_panel: is_admin={is_admin}, include_hidden={is_admin}", flush=True)
+            logger.debug("_refresh_discoveries_panel: is_admin=%s, include_hidden=%s", is_admin, is_admin)
 
             discoveries, total = self.corrections_client.get_discoveries(
                 page_size=20,
                 include_hidden=is_admin
             )
-            print(f"[DEBUG] Got {len(discoveries)} discoveries from API, total={total}", flush=True)
+            logger.debug("Got %s discoveries from API, total=%s", len(discoveries), total)
             for d in discoveries:
-                print(f"[DEBUG]   discovery id={d.id}, title={d.title[:30] if d.title else 'N/A'}, is_hidden={d.is_hidden}", flush=True)
+                logger.debug("discovery id=%s, title=%s, is_hidden=%s", d.id, d.title[:30] if d.title else 'N/A', d.is_hidden)
 
             # Convert to cacheable format with discovery_type, is_pinned, is_hidden
             cache_data = [{
@@ -8889,7 +9475,7 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_comments_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the comments list panels (My Comments + All Comments)."""
-        print("[DEBUG] _refresh_comments_panel started", flush=True)
+        logger.debug("_refresh_comments_panel started")
         self.my_comments_list.clear()
         self.all_comments_list.clear()
 
@@ -8897,19 +9483,19 @@ class GenizahGUI(QMainWindow):
         if self.corrections_client.is_logged_in():
             cached_my = self.corrections_client.get_cached_data('my_comments') if use_cache_first else None
             if cached_my:
-                print(f"[DEBUG] Using cached my comments: {len(cached_my)} items", flush=True)
+                logger.debug("Using cached my comments: %s items", len(cached_my))
                 self._populate_comments_list(cached_my, self.my_comments_list)
 
             if not skip_api_calls:
                 try:
                     comments, total = self.corrections_client.get_my_comments(page_size=20)
-                    print(f"[DEBUG] Got {len(comments)} my comments, total={total}", flush=True)
+                    logger.debug("Got %s my comments, total=%s", len(comments), total)
                     cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
                     self.corrections_client.set_cached_data('my_comments', cache_data)
                     self.my_comments_list.clear()
                     self._populate_comments_list(cache_data, self.my_comments_list)
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching my comments: {e}", flush=True)
+                    logger.debug("Error fetching my comments: %s", e)
                     if not cached_my:
                         item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                         self.my_comments_list.addItem(item)
@@ -8928,13 +9514,13 @@ class GenizahGUI(QMainWindow):
         if not skip_api_calls:
             try:
                 comments, total = self.corrections_client.get_all_comments(page_size=20)
-                print(f"[DEBUG] Got {len(comments)} all comments, total={total}", flush=True)
+                logger.debug("Got %s all comments, total=%s", len(comments), total)
                 cache_data = [{'id': c.id, 'document_id': c.document_id, 'content': c.content, 'author_username': c.author_username, 'page_number': c.page_number} for c in comments]
                 self.corrections_client.set_cached_data('all_comments', cache_data)
                 self.all_comments_list.clear()
                 self._populate_comments_list(cache_data, self.all_comments_list, show_author=True)
             except Exception as e:
-                print(f"[DEBUG] Error fetching all comments: {e}", flush=True)
+                logger.debug("Error fetching all comments: %s", e)
                 if not cached_all:
                     item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                     self.all_comments_list.addItem(item)
@@ -8942,7 +9528,7 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
             self.all_comments_list.addItem(item)
 
-        print("[DEBUG] Comments panel refresh completed", flush=True)
+        logger.debug("Comments panel refresh completed")
 
     def _populate_comments_list(self, comments_data, target_list, show_author=False):
         """Populate comments list from data."""
@@ -9115,9 +9701,9 @@ class GenizahGUI(QMainWindow):
                     page_data = self.searcher.get_browse_page(doc_id, p_num=page_num)
                     if page_data:
                         original_v08_text = page_data.get('text', '')
-                        print(f"[DEBUG] Got V0.8 text from searcher: {len(original_v08_text) if original_v08_text else 0} chars", flush=True)
+                        logger.debug("Got V0.8 text from searcher: %s chars", len(original_v08_text) if original_v08_text else 0)
             except Exception as e:
-                print(f"[DEBUG] Error fetching V0.8 text: {e}", flush=True)
+                logger.debug("Error fetching V0.8 text: %s", e)
 
             dialog = CorrectionDetailDialog(self, self.corrections_client, correction, original_v08_text)
             dialog.exec()
@@ -9151,18 +9737,18 @@ class GenizahGUI(QMainWindow):
 
     def _on_correction_clicked(self, item):
         """Handle correction item double-click - open ResultDialog."""
-        print(f"[DEBUG] _on_correction_clicked called", flush=True)
+        logger.debug("_on_correction_clicked called")
         try:
             corr_data = item.data(Qt.ItemDataRole.UserRole)
-            print(f"[DEBUG] corr_data={corr_data}", flush=True)
+            logger.debug("corr_data=%s", corr_data)
             if corr_data:
                 sys_id = corr_data.get('system_id')
                 shelfmark = corr_data.get('shelfmark')
                 page_num = corr_data.get('page_number') or 1
-                print(f"[DEBUG] sys_id={sys_id}, shelfmark={shelfmark}, page_num={page_num}", flush=True)
+                logger.debug("sys_id=%s, shelfmark=%s, page_num=%s", sys_id, shelfmark, page_num)
                 self._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id, page_num=page_num)
         except Exception as e:
-            print(f"[DEBUG] Error in _on_correction_clicked: {e}", flush=True)
+            logger.debug("Error in _on_correction_clicked: %s", e)
             import traceback
             traceback.print_exc()
 
@@ -9180,7 +9766,7 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_joins_panel(self, use_cache_first=True, skip_api_calls=False):
         """Refresh the joins list panels (My Joins + All Joins)."""
-        print("[DEBUG] _refresh_joins_panel started", flush=True)
+        logger.debug("_refresh_joins_panel started")
         self.my_joins_list.clear()
         self.all_joins_list.clear()
 
@@ -9188,13 +9774,13 @@ class GenizahGUI(QMainWindow):
         if self.corrections_client.is_logged_in():
             cached_my = self.corrections_client.get_cached_data('my_joins') if use_cache_first else None
             if cached_my:
-                print(f"[DEBUG] Using cached my joins: {len(cached_my)} items", flush=True)
+                logger.debug("Using cached my joins: %s items", len(cached_my))
                 self._populate_joins_list(cached_my, self.my_joins_list)
 
             if not skip_api_calls:
                 try:
                     joins, total = self.corrections_client.get_my_joins(limit=20)
-                    print(f"[DEBUG] Got {len(joins)} my joins, total={total}", flush=True)
+                    logger.debug("Got %s my joins, total=%s", len(joins), total)
                     cache_data = [{
                         'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
                         'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
@@ -9205,7 +9791,7 @@ class GenizahGUI(QMainWindow):
                     self.my_joins_list.clear()
                     self._populate_joins_list(cache_data, self.my_joins_list)
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching my joins: {e}", flush=True)
+                    logger.debug("Error fetching my joins: %s", e)
                     if not cached_my:
                         item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                         self.my_joins_list.addItem(item)
@@ -9224,7 +9810,7 @@ class GenizahGUI(QMainWindow):
         if not skip_api_calls:
             try:
                 joins, total = self.corrections_client.search_joins(source='user', limit=20)
-                print(f"[DEBUG] Got {len(joins)} all joins, total={total}", flush=True)
+                logger.debug("Got %s all joins, total=%s", len(joins), total)
                 cache_data = [{
                     'id': j.id, 'fragment_a': j.fragment_a, 'fragment_b': j.fragment_b,
                     'document_id_a': j.document_id_a, 'document_id_b': j.document_id_b,
@@ -9235,7 +9821,7 @@ class GenizahGUI(QMainWindow):
                 self.all_joins_list.clear()
                 self._populate_joins_list(cache_data, self.all_joins_list, show_author=True)
             except Exception as e:
-                print(f"[DEBUG] Error fetching all joins: {e}", flush=True)
+                logger.debug("Error fetching all joins: %s", e)
                 if not cached_all:
                     item = QListWidgetItem(f"⚠️ {tr('Error')}: {str(e)[:30]}")
                     self.all_joins_list.addItem(item)
@@ -9243,7 +9829,7 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
             self.all_joins_list.addItem(item)
 
-        print("[DEBUG] Joins panel refresh completed", flush=True)
+        logger.debug("Joins panel refresh completed")
 
     def _populate_joins_list(self, joins_data, target_list, show_author=False):
         """Populate joins list from data."""

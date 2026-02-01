@@ -1572,10 +1572,42 @@ class CorrectionsClient:
 # Singleton instance for easy access
 _client_instance: Optional[CorrectionsClient] = None
 
+# Flag to enable Supabase-based client (Phase 5 migration)
+USE_SUPABASE_CLIENT = True
 
-def get_corrections_client() -> CorrectionsClient:
-    """Get or create the corrections client singleton"""
+
+def get_corrections_client():
+    """
+    Get or create the corrections client singleton.
+
+    By default, returns the Supabase-based client for direct database access.
+    Falls back to REST API client if Supabase is not available.
+    """
     global _client_instance
+
     if _client_instance is None:
-        _client_instance = CorrectionsClient()
+        if USE_SUPABASE_CLIENT:
+            try:
+                from supabase_corrections_client import (
+                    get_supabase_corrections_client,
+                    SUPABASE_AVAILABLE,
+                    SUPABASE_ANON_KEY
+                )
+                if SUPABASE_AVAILABLE and SUPABASE_ANON_KEY:
+                    _client_instance = get_supabase_corrections_client()
+                    logger.info("Using Supabase corrections client")
+                else:
+                    logger.info("Supabase not configured, falling back to REST API client")
+                    _client_instance = CorrectionsClient()
+            except ImportError as e:
+                logger.warning(f"Could not import Supabase client: {e}")
+                _client_instance = CorrectionsClient()
+        else:
+            _client_instance = CorrectionsClient()
+
     return _client_instance
+
+
+def get_rest_api_client() -> CorrectionsClient:
+    """Get the REST API client (for backward compatibility or when Supabase unavailable)."""
+    return CorrectionsClient()
