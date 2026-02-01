@@ -28,6 +28,7 @@ async def create_profile_page():
         return
 
     user = GlobalAuthState.get_user()
+    profile = GlobalAuthState.get_profile() or {}
 
     with ui.column().classes('w-full max-w-3xl mx-auto gap-6 fade-in'):
 
@@ -44,34 +45,28 @@ async def create_profile_page():
             h2(tr('Profile Details'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-4'):
-                # Username (read-only)
-                ui.input(
-                    label=tr('Username'),
-                    value=user.get('username', '')
-                ).classes('w-full').props('outlined readonly').style('direction: ltr;')
-
-                # Email (read-only)
+                # Email (read-only) - from auth user
                 ui.input(
                     label=tr('Email'),
                     value=user.get('email', '')
                 ).classes('w-full').props('outlined readonly').style('direction: ltr;')
 
-                # Full Name (editable)
+                # Full Name (editable) - from profile
                 full_name_input = ui.input(
                     label=tr('Full Name'),
-                    value=user.get('full_name', '')
+                    value=profile.get('full_name', '')
                 ).classes('w-full').props('outlined')
 
-                # Affiliation (editable)
+                # Affiliation (editable) - from profile
                 affiliation_input = ui.input(
                     label=tr('Affiliation'),
-                    value=user.get('affiliation', '')
+                    value=profile.get('affiliation', '')
                 ).classes('w-full').props('outlined')
 
-                # Bio (editable)
+                # Bio (editable) - from profile
                 bio_input = ui.textarea(
                     label=tr('Bio'),
-                    value=user.get('bio', '')
+                    value=profile.get('bio', '')
                 ).classes('w-full').props('outlined rows=3')
 
                 # Save button
@@ -178,20 +173,20 @@ async def create_profile_page():
             with ui.row().classes('w-full gap-8 flex-wrap'):
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Role')).classes('text-sm').style('color: var(--text-muted);')
-                    role = user.get('role', 'contributor')
+                    role = profile.get('role', 'contributor')
                     ui.label(role.title()).classes('font-medium')
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Reputation')).classes('text-sm').style('color: var(--text-muted);')
-                    ui.label(str(user.get('reputation_score', 0))).classes('font-medium')
+                    ui.label(str(profile.get('reputation_score', 0))).classes('font-medium')
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Corrections')).classes('text-sm').style('color: var(--text-muted);')
-                    ui.label(str(user.get('corrections_count', 0))).classes('font-medium')
+                    ui.label(str(profile.get('corrections_count', 0))).classes('font-medium')
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Member Since')).classes('text-sm').style('color: var(--text-muted);')
-                    created_at = user.get('created_at', '')
+                    created_at = profile.get('created_at', '')
                     if created_at:
                         # Handle both datetime objects and strings
                         if hasattr(created_at, 'strftime'):
