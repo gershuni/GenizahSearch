@@ -165,19 +165,21 @@ def create_search_page(initial_query: str = None):
                         app.storage.user['search_gap'] = int(gap_input.value or 0)
                     gap_input.on('blur', save_gap)
 
-                # Search Button
-                search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
-                    'btn-primary h-10 px-8'
-                )
+                # Search/Stop Button Container - buttons swap in same position
+                with ui.column().classes('items-center gap-0'):
+                    # Search Button
+                    search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
+                        'btn-primary h-10 px-8'
+                    )
 
-                # Stop Button (hidden by default) - shows partial results
-                with ui.column().classes('items-center gap-0').style('display: none;') as cancel_btn:
-                    ui.button(
-                        tr('Stop'),
-                        icon='stop',
-                        on_click=lambda: cancel_search()
-                    ).classes('h-10 px-4').props('outline color=red')
-                    ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
+                    # Stop Button (hidden by default) - replaces search button
+                    with ui.column().classes('items-center gap-0').style('display: none;') as cancel_btn:
+                        ui.button(
+                            tr('Stop'),
+                            icon='stop',
+                            on_click=lambda: cancel_search()
+                        ).classes('h-10 px-4').props('outline color=red')
+                        ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -622,10 +624,12 @@ def create_search_page(initial_query: str = None):
                 progress_bar.classes(remove='opacity-0')
                 progress_bar.value = search_state.progress
                 status_label.text = search_state.status
-                # Show stop button using style (not set_visibility to avoid performance issues)
+                # Swap buttons: hide search, show stop (using style to avoid performance issues)
+                search_btn.style('display: none;')
                 cancel_btn.style('display: flex;')
             else:
-                # Hide stop button
+                # Swap buttons: show search, hide stop
+                search_btn.style('display: flex;')
                 cancel_btn.style('display: none;')
                 if search_state.progress >= 1.0:
                     progress_bar.value = 1.0
@@ -680,7 +684,6 @@ def create_search_page(initial_query: str = None):
         search_state.progress = 0
         search_state.status = tr("Starting...")
         search_state.results = []
-        search_btn.disable()
 
         # Show loading spinner immediately
         render_results([])
@@ -732,7 +735,6 @@ def create_search_page(initial_query: str = None):
         search_state.is_cancelled = False  # Reset flag
         search_state.progress = 1.0
         search_state.results = results
-        search_btn.enable()
 
         try:
             app.storage.user['search_results'] = results
