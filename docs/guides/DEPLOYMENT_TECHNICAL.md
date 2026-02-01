@@ -1,6 +1,6 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-01-31
+> Last updated: 2026-02-01
 > For: Developers, System Administrators, AI Assistants
 
 ---
@@ -214,11 +214,16 @@ cd /home/ubuntu/GenizahSearch
 ./deploy.sh
 ```
 
+The `deploy.sh` script:
+1. Pulls latest code from `master-main` branch
+2. Installs any new dependencies
+3. Restarts the web service
+
 Or manually:
 ```bash
 cd /home/ubuntu/GenizahSearch
 git fetch origin
-git pull origin main
+git reset --hard origin/master-main
 source venv/bin/activate
 pip install -r requirements.txt
 sudo systemctl restart genizah-web
