@@ -276,6 +276,9 @@ def create_login_dialog():
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Register'), on_click=handle_register).props('color=primary')
 
+    # Store tabs reference for external access
+    dialog.tabs = tabs
+    dialog.register_tab = register_tab
     return dialog
 
 
@@ -316,8 +319,16 @@ def create_auth_buttons():
         # Login/Register buttons
         dialog = create_login_dialog()
 
-        ui.button(tr('Login'), on_click=dialog.open).props('flat text-color=white dense').classes('text-sm')
-        ui.button(tr('Register'), on_click=lambda: (dialog.open(), setattr(dialog, '_active_tab', 'register'))).props('outline text-color=white dense').classes('text-sm')
+        def open_login():
+            dialog.tabs.set_value(dialog.tabs._tabs[0])  # First tab (Login)
+            dialog.open()
+
+        def open_register():
+            dialog.tabs.set_value(dialog.register_tab)
+            dialog.open()
+
+        ui.button(tr('Login'), on_click=open_login).props('flat text-color=white dense').classes('text-sm')
+        ui.button(tr('Register'), on_click=open_register).props('outline text-color=white dense').classes('text-sm')
 
 
 # ============================================================================
