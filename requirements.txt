@@ -8,4 +8,5 @@ openpyxl
 python-docx
 nicegui
 supabase
+gotrue
 python-dotenv
