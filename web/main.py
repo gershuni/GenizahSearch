@@ -1634,7 +1634,7 @@ async def corrections_page_route():
         await create_corrections_page()
 
 @ui.page('/discoveries')
-async def discoveries_page_route():
+def discoveries_page_route():
     set_current_page('/discoveries')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1644,7 +1644,7 @@ async def discoveries_page_route():
     content = create_layout()
     with content:
         from web.pages.discoveries import create_discoveries_page
-        await create_discoveries_page()
+        create_discoveries_page()
 
 @ui.page('/admin')
 async def admin_page_route():
