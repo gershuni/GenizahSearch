@@ -9,12 +9,19 @@ All notable changes to Genizah Search Pro will be documented in this file.
 ### Documentation
 
 - **Help Center rewrite:** Comprehensive bilingual help page covering Search, Parallels, Browse, Lists, and Export features
+- **File index:** New `docs/FILE_INDEX.md` with comprehensive listing of all project files
+
+### Codebase Cleanup
+
+- **Root directory cleanup:** Removed unused directories (`backend/`, `backend_legacy/`, `frontend_web/`, `build/`, `Reports/`, `Results/`)
+- **Scripts organization:** Moved utility scripts to `scripts/` folder (cleanup, verify, debug scripts)
+- **Branch cleanup:** Deleted 25 stale/merged git branches
 
 ### UX Improvements
 
 - **Search spinners:** More prominent animated spinners (bars instead of dots, larger size, pulsing text)
 - **Parallels search feedback:** Spinner and status now visible in control panel without scrolling
-- **Stop button:** Changed from "Cancel" to "Stop" with "and show partial results" subtitle
+- **Stop button:** Added to regular search (swaps with search button during search), shows partial results when stopped
 - **Filter sources badge:** Shows count of enabled filter sources on the expansion header
 - **Filter tooltip:** Explains filter feature in both English and Hebrew
 
@@ -30,7 +37,6 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - All authentication now handled by Supabase Auth
 - User lists, corrections, and comments stored in Supabase
 - Built-in rate limiting and security features
-- Legacy backend moved to `backend_legacy/` (deprecated)
 
 ### Authentication Fixes
 

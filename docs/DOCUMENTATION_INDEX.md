@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-01-31
+> Last updated: 2026-02-01
 
 This directory contains all project documentation, organized by category.
 
@@ -12,6 +12,7 @@ This directory contains all project documentation, organized by category.
 |------------|-----------|
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
+| Find a specific file | [FILE_INDEX.md](FILE_INDEX.md) |
 | Understand the code structure | [CODE_INDEX.md](CODE_INDEX.md) |
 | See what's in the next release | [plans/PLANS_INDEX.md](plans/PLANS_INDEX.md) |
 | Check pre-launch status | [PRE_LAUNCH_CHECKLIST.md](PRE_LAUNCH_CHECKLIST.md) |
@@ -23,6 +24,7 @@ This directory contains all project documentation, organized by category.
 ```
 docs/
 ├── DOCUMENTATION_INDEX.md    # This file
+├── FILE_INDEX.md             # Complete file listing for the project
 ├── CODE_INDEX.md             # Code structure and architecture
 ├── PRE_LAUNCH_CHECKLIST.md   # Pre-launch tasks checklist
 ├── Oxford_Nav.md             # Oxford Bodleian navigation notes
@@ -154,4 +156,4 @@ These files remain in the project root:
 
 ---
 
-*Last reorganization: 2026-01-31*
+*Last reorganization: 2026-02-01*
