@@ -926,7 +926,7 @@ None
 
 ### Additional Issues Found (2026-01-29 Manual Testing)
 - [x] Shelfmark input matching - handle format variations (#11) ✅ Fixed: "/" as ".", pure digit matching, inline error
-- [ ] Loading spinners needed across website (#12)
+- [x] Loading spinners needed across website (#12) *(added to corrections page, search/parallels already had them)*
 - [x] Lists should be per-user not per-device (#14) ✅ Fixed: Auth-aware UserListsManager
 
 ### Issues Found (2026-01-30 Testing)
