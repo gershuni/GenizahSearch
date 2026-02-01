@@ -5524,6 +5524,27 @@ class ListsManager:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    def is_sync_available(self):
+        """Check if cloud sync is available (user logged in, network ok)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return sync.is_sync_available()
+        except ImportError:
+            return False
+        except Exception:
+            return False
+
+    @property
+    def _last_sync(self):
+        """Get timestamp of last sync (for debouncing)."""
+        try:
+            from lists_sync import get_lists_sync
+            sync = get_lists_sync(self)
+            return getattr(sync, '_last_sync', 0)
+        except Exception:
+            return 0
+
     def sync_to_cloud(self):
         """Push local lists to cloud."""
         try:
@@ -5562,8 +5583,13 @@ class ListsManager:
 
     # --- List Management ---
 
-    def get_all_lists(self, include_recent=True):
-        """Get all lists sorted alphabetically (system lists have special handling)."""
+    def get_all_lists(self, include_recent=True, include_deleted=False):
+        """Get all lists sorted alphabetically (system lists have special handling).
+
+        Args:
+            include_recent: Include the "Recently Viewed" system list
+            include_deleted: Include soft-deleted lists (for trash view)
+        """
         lists = []
         list_ids = []
         ordered = [list_id for list_id in self.data.get('lists_order', []) if list_id in self.data['lists']]
@@ -5575,6 +5601,9 @@ class ListsManager:
             if list_id == 'recent' and not include_recent:
                 continue
             list_data = self.data['lists'][list_id]
+            # Skip deleted lists unless explicitly requested
+            if list_data.get('deleted_at') and not include_deleted:
+                continue
             lists.append({
                 'id': list_id,
                 **list_data,
@@ -5582,6 +5611,20 @@ class ListsManager:
             })
 
         return lists
+
+    def get_deleted_lists(self):
+        """Get soft-deleted lists (trash view)."""
+        deleted = []
+        for list_id, list_data in self.data['lists'].items():
+            if list_data.get('deleted_at'):
+                deleted.append({
+                    'id': list_id,
+                    **list_data,
+                    'count': self._get_list_item_count(list_id)
+                })
+        # Sort by deletion time, most recent first
+        deleted.sort(key=lambda x: x.get('deleted_at', 0), reverse=True)
+        return deleted
 
     def _get_list_item_count(self, list_id):
         """Get the number of items in a list."""
@@ -5752,8 +5795,13 @@ class ListsManager:
         ]
         self.save()
 
-    def delete_list(self, list_id):
-        """Delete a list and all its items."""
+    def delete_list(self, list_id, permanent=False):
+        """Soft-delete a list (move to trash).
+
+        Args:
+            list_id: The list ID to delete
+            permanent: If True, permanently delete. Default is soft delete.
+        """
         if list_id not in self.data['lists']:
             return False
 
@@ -5761,24 +5809,52 @@ class ListsManager:
         if lst.get('is_default') or lst.get('is_system'):
             return False  # Cannot delete system lists
 
-        # Remove list reference from all items
-        items_to_remove = []
-        for sys_id, item in self.data['items'].items():
-            if list_id in item.get('lists', []):
-                item['lists'].remove(list_id)
-                # If item has no more lists, mark for removal
-                if not item['lists']:
-                    items_to_remove.append(sys_id)
+        if permanent:
+            # Permanent delete - remove list and orphaned items
+            items_to_remove = []
+            for sys_id, item in self.data['items'].items():
+                if list_id in item.get('lists', []):
+                    item['lists'].remove(list_id)
+                    if not item['lists']:
+                        items_to_remove.append(sys_id)
+            for sys_id in items_to_remove:
+                del self.data['items'][sys_id]
+            del self.data['lists'][list_id]
+            if list_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(list_id)
+        else:
+            # Soft delete - set deleted_at timestamp
+            import time
+            lst['deleted_at'] = time.time()
 
-        # Remove orphaned items
-        for sys_id in items_to_remove:
-            del self.data['items'][sys_id]
-
-        del self.data['lists'][list_id]
-        if list_id in self.data.get('lists_order', []):
-            self.data['lists_order'].remove(list_id)
         self.save()
         return True
+
+    def restore_list(self, list_id):
+        """Restore a soft-deleted list from trash."""
+        if list_id not in self.data['lists']:
+            return False
+
+        lst = self.data['lists'][list_id]
+        if not lst.get('deleted_at'):
+            return False  # Not deleted
+
+        del lst['deleted_at']
+        self.save()
+        return True
+
+    def permanently_delete_list(self, list_id):
+        """Permanently delete a list (no recovery)."""
+        return self.delete_list(list_id, permanent=True)
+
+    def empty_trash(self):
+        """Permanently delete all soft-deleted lists."""
+        deleted_lists = [lid for lid, data in self.data['lists'].items() if data.get('deleted_at')]
+        count = 0
+        for list_id in deleted_lists:
+            if self.delete_list(list_id, permanent=True):
+                count += 1
+        return count
 
     def duplicate_list(self, list_id, new_name=None):
         """Duplicate a list with all its items."""
@@ -5823,6 +5899,159 @@ class ListsManager:
             self.save()
 
         return True
+
+    def find_duplicate_lists(self):
+        """
+        Find all duplicate lists (same name) and return info for resolution.
+
+        Returns:
+            List of duplicate groups, each containing:
+            {
+                'name': str,
+                'has_conflict': bool,  # True if different projects
+                'lists': [{'id', 'project_id', 'project_name', 'item_count', 'created', 'has_cloud_id'}, ...]
+            }
+        """
+        from collections import defaultdict
+
+        lists_by_name = defaultdict(list)
+        for list_id, list_data in self.data.get('lists', {}).items():
+            list_name = list_data.get('name', '')
+            lists_by_name[list_name].append((list_id, list_data))
+
+        projects = self.data.get('projects', {})
+        duplicate_groups = []
+
+        for list_name, lists in lists_by_name.items():
+            if len(lists) <= 1:
+                continue
+
+            group_info = {'name': list_name, 'lists': []}
+            project_ids = set()
+
+            for list_id, list_data in lists:
+                project_id = list_data.get('project_id')
+                project_ids.add(project_id)
+
+                if list_id == 'recent':
+                    item_count = len(self.data.get('recent_items', []))
+                else:
+                    item_count = sum(1 for item in self.data.get('items', {}).values()
+                                    if list_id in item.get('lists', []))
+
+                group_info['lists'].append({
+                    'id': list_id,
+                    'project_id': project_id,
+                    'project_name': projects.get(project_id, {}).get('name') if project_id else None,
+                    'item_count': item_count,
+                    'created': list_data.get('created', 0),
+                    'has_cloud_id': bool(list_data.get('cloud_id'))
+                })
+
+            group_info['has_conflict'] = len(project_ids) > 1
+            duplicate_groups.append(group_info)
+
+        return duplicate_groups
+
+    def merge_duplicate_group(self, keep_id, duplicate_ids, target_project_id=None):
+        """Merge a group of duplicate lists into one."""
+        result = {'merged_items': 0, 'deleted_count': 0}
+
+        keeper_data = self.data['lists'].get(keep_id)
+        if not keeper_data:
+            return result
+
+        list_name = keeper_data.get('name', '')
+
+        if target_project_id is not None:
+            keeper_data['project_id'] = target_project_id if target_project_id else None
+
+        for dup_id in duplicate_ids:
+            if dup_id == keep_id:
+                continue
+
+            dup_data = self.data['lists'].get(dup_id)
+            if not dup_data:
+                continue
+
+            if list_name == 'Recently Viewed':
+                recent_items = self.data.setdefault('recent_items', [])
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        sys_id = item.get('sys_id', item_id)
+                        if sys_id and sys_id not in recent_items:
+                            recent_items.insert(0, sys_id)
+                            result['merged_items'] += 1
+                if len(recent_items) > self.MAX_RECENT_ITEMS:
+                    self.data['recent_items'] = recent_items[:self.MAX_RECENT_ITEMS]
+            else:
+                for item_id, item in self.data.get('items', {}).items():
+                    if dup_id in item.get('lists', []):
+                        item['lists'].remove(dup_id)
+                        if keep_id not in item['lists']:
+                            item['lists'].append(keep_id)
+                            result['merged_items'] += 1
+
+            if dup_id in self.data['lists']:
+                del self.data['lists'][dup_id]
+                result['deleted_count'] += 1
+            if dup_id in self.data.get('lists_order', []):
+                self.data['lists_order'].remove(dup_id)
+
+            LOGGER.info(f"Merged duplicate list '{list_name}' ({dup_id}) into {keep_id}")
+
+        self.save()
+        return result
+
+    def auto_merge_duplicate_group(self, group):
+        """Automatically merge a duplicate group using heuristics."""
+        list_name = group['name']
+        lists = group['lists']
+
+        if list_name == 'General':
+            keep_id = 'default'
+        elif list_name == 'Recently Viewed':
+            keep_id = 'recent'
+        else:
+            sorted_lists = sorted(lists, key=lambda x: (
+                0 if x['project_id'] else 1,
+                0 if not x['has_cloud_id'] else 1,
+                x['created']
+            ))
+            keep_id = sorted_lists[0]['id']
+
+        duplicate_ids = [l['id'] for l in lists if l['id'] != keep_id]
+        result = self.merge_duplicate_group(keep_id, duplicate_ids)
+        result['keep_id'] = keep_id
+        return result
+
+    def restore_project_hierarchy(self):
+        """Restore project hierarchy for orphaned lists by color matching."""
+        result = {'restored_count': 0}
+
+        projects = self.data.get('projects', {})
+        if not projects:
+            return result
+
+        color_to_project = {proj.get('color'): pid for pid, proj in projects.items() if proj.get('color')}
+
+        for list_id, list_data in self.data.get('lists', {}).items():
+            if list_id in ['default', 'recent'] or list_data.get('is_system'):
+                continue
+            if list_data.get('project_id') and list_data['project_id'] in projects:
+                continue
+
+            list_color = list_data.get('color')
+            if list_color and list_color in color_to_project:
+                list_data['project_id'] = color_to_project[list_color]
+                result['restored_count'] += 1
+                LOGGER.info(f"Restored project for list '{list_data.get('name')}' by color match")
+
+        if result['restored_count'] > 0:
+            self.save()
+
+        return result
 
     # --- Item Management ---
 

@@ -4342,6 +4342,21 @@ class GenizahGUI(QMainWindow):
                 logger.info("Cloud sync: No lists to sync (both empty)")
                 return
 
+            # Check if already in sync (same list names with cloud_ids set)
+            if not cloud_error and cloud_lists and local_lists:
+                # Filter out "Recently Viewed" - it's local-only and not synced
+                local_names = {lst.get('name') for lst in local_lists}
+                cloud_names = {lst.get('name') for lst in cloud_lists
+                              if lst.get('name') != 'Recently Viewed'}
+                # Check if local lists have cloud_ids (already synced)
+                local_with_cloud_ids = sum(1 for lst in self.lists_mgr.data.get('lists', {}).values()
+                                           if lst.get('cloud_id'))
+                # Consider synced if: same user lists AND has some cloud_ids
+                if local_names == cloud_names and local_with_cloud_ids > 0:
+                    logger.info("Cloud sync: Already in sync, skipping dialog")
+                    # Don't sync - lists are already in sync
+                    return
+
             # Show sync dialog
             self._show_lists_sync_dialog(local_lists, cloud_lists, cloud_error)
 
@@ -4519,8 +4534,23 @@ class GenizahGUI(QMainWindow):
     def _disable_lists_cloud_sync(self):
         """Disable cloud sync on logout."""
         try:
-            # Push local changes to cloud before logout
-            self.lists_mgr.sync_to_cloud()
+            # Skip sync on logout if recently synced (auto-sync handles it)
+            import time
+            if hasattr(self.lists_mgr, '_last_sync') and self.lists_mgr._last_sync:
+                if time.time() - self.lists_mgr._last_sync < 60:  # Synced in last minute
+                    logger.debug("Skipping logout sync - recently synced")
+                    self.lists_mgr.disable_cloud_sync()
+                    return
+
+            # Quick sync with 10-second timeout
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self.lists_mgr.sync_to_cloud)
+                try:
+                    future.result(timeout=10)
+                except concurrent.futures.TimeoutError:
+                    logger.debug("Logout sync timed out after 10s - continuing")
+
             self.lists_mgr.disable_cloud_sync()
         except Exception as e:
             logger.debug(f"Cloud sync disable: {e}")
@@ -7076,6 +7106,16 @@ class GenizahGUI(QMainWindow):
         btn_merge.clicked.connect(self.lists_merge_lists)
         sidebar_actions.addWidget(btn_merge)
 
+        btn_cleanup = QPushButton(tr("Fix Duplicates"))
+        btn_cleanup.setToolTip(tr("Merge duplicate lists created by sync issues"))
+        btn_cleanup.clicked.connect(self.lists_cleanup_duplicates)
+        sidebar_actions.addWidget(btn_cleanup)
+
+        btn_trash = QPushButton(tr("Trash"))
+        btn_trash.setToolTip(tr("View and restore deleted lists"))
+        btn_trash.clicked.connect(self.lists_show_trash)
+        sidebar_actions.addWidget(btn_trash)
+
         sidebar_layout.addLayout(sidebar_actions)
 
         is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
@@ -7195,6 +7235,76 @@ class GenizahGUI(QMainWindow):
         self.lists_refresh_items()
         self._update_search_action_stars()
         self._update_browse_add_to_list_button()
+
+    _auto_sync_pending = False
+    _auto_sync_last = 0
+
+    def _lists_auto_sync(self):
+        """Auto-sync to cloud after local changes (if logged in).
+
+        Features:
+        - Runs in background thread (won't freeze UI)
+        - Quick network check before syncing
+        - Debounced (max once per 2 seconds)
+        - 30-second timeout
+        """
+        if not self.lists_mgr:
+            logger.debug("Auto-sync: no lists_mgr")
+            return
+        if not hasattr(self.lists_mgr, 'is_sync_available') or not self.lists_mgr.is_sync_available():
+            logger.debug("Auto-sync: sync not available")
+            return
+
+        # Debounce: skip if synced recently
+        import time
+        now = time.time()
+        if now - self.__class__._auto_sync_last < 2:
+            return
+
+        # Skip if sync already pending
+        if self.__class__._auto_sync_pending:
+            return
+
+        self.__class__._auto_sync_pending = True
+        self.__class__._auto_sync_last = now
+
+        try:
+            import threading
+
+            def sync_task():
+                try:
+                    # Quick network check (try to resolve Supabase host)
+                    import socket
+                    socket.setdefaulttimeout(5)
+                    try:
+                        socket.gethostbyname('ylcpglwxompwjcufdemz.supabase.co')
+                    except socket.gaierror:
+                        logger.debug("Auto-sync skipped: no network")
+                        return
+                    finally:
+                        socket.setdefaulttimeout(None)
+
+                    logger.debug("Auto-sync starting...")
+                    # Run sync with timeout
+                    import concurrent.futures
+                    import time as _time
+                    start = _time.time()
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(self.lists_mgr.sync_to_cloud)
+                        try:
+                            result = future.result(timeout=30)  # 30 second timeout
+                            logger.debug(f"Auto-sync completed in {_time.time()-start:.1f}s: {result}")
+                        except concurrent.futures.TimeoutError:
+                            logger.debug("Auto-sync timed out after 30s")
+                except Exception as e:
+                    logger.debug(f"Auto-sync failed: {e}")
+                finally:
+                    self.__class__._auto_sync_pending = False
+
+            threading.Thread(target=sync_task, daemon=True).start()
+        except Exception as e:
+            self.__class__._auto_sync_pending = False
+            logger.debug(f"Auto-sync error: {e}")
 
     def lists_refresh_sidebar(self):
         """Refresh the lists tree in the sidebar."""
@@ -7734,6 +7844,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_mgr:
                 self.lists_mgr.create_list(name.strip())
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
 
     def lists_create_new_project(self):
         """Create a new project."""
@@ -7742,6 +7853,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_mgr:
                 self.lists_mgr.create_project(name.strip())
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
 
     def lists_edit_current_list(self):
         """Edit the current list name/color."""
@@ -7756,6 +7868,7 @@ class GenizahGUI(QMainWindow):
         if ok and name.strip():
             self.lists_mgr.update_list(self.lists_current_list_id, name=name.strip())
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def lists_delete_current_list(self):
         """Delete the current list."""
@@ -7769,7 +7882,7 @@ class GenizahGUI(QMainWindow):
         name = lst.get('name', 'List')
         reply = QMessageBox.question(
             self, tr("Delete List?"),
-            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            tr("Move '{}' to trash?\nYou can restore it later from the Trash.").format(name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -7777,6 +7890,7 @@ class GenizahGUI(QMainWindow):
             self.lists_mgr.delete_list(self.lists_current_list_id)
             self.lists_current_list_id = 'default'
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def lists_duplicate_selected_list(self):
         """Duplicate the current list."""
@@ -7785,6 +7899,7 @@ class GenizahGUI(QMainWindow):
 
         self.lists_mgr.duplicate_list(self.lists_current_list_id)
         self.lists_refresh_sidebar()
+        self._lists_auto_sync()
 
     def lists_merge_lists(self):
         """Show dialog to merge lists."""
@@ -7820,6 +7935,227 @@ class GenizahGUI(QMainWindow):
                 self.lists_mgr.merge_lists(self.lists_current_list_id, target_list['id'])
                 self.lists_current_list_id = target_list['id']
                 self.lists_refresh_all()
+
+    def lists_cleanup_duplicates(self):
+        """Clean up duplicate lists created by sync bugs."""
+        if not self.lists_mgr:
+            return
+
+        duplicate_groups = self.lists_mgr.find_duplicate_lists()
+
+        if not duplicate_groups:
+            QMessageBox.information(self, tr("Fix Duplicates"), tr("No duplicate lists found."))
+            return
+
+        auto_groups = [g for g in duplicate_groups if not g['has_conflict']]
+        conflict_groups = [g for g in duplicate_groups if g['has_conflict']]
+
+        total_merged = 0
+        total_deleted = 0
+        details = []
+
+        for group in auto_groups:
+            result = self.lists_mgr.auto_merge_duplicate_group(group)
+            total_merged += result['merged_items']
+            total_deleted += result['deleted_count']
+            if result['merged_items'] > 0:
+                details.append((group['name'], result['merged_items']))
+
+        for group in conflict_groups:
+            result = self._show_duplicate_conflict_dialog(group)
+            if result:
+                total_merged += result['merged_items']
+                total_deleted += result['deleted_count']
+                if result['merged_items'] > 0:
+                    details.append((group['name'], result['merged_items']))
+
+        hierarchy_result = self.lists_mgr.restore_project_hierarchy()
+        restored = hierarchy_result.get('restored_count', 0)
+
+        if total_deleted > 0 or restored > 0:
+            msg = tr("Cleanup complete:\n")
+            if total_deleted > 0:
+                msg += tr("- Removed {} duplicate lists\n").format(total_deleted)
+            if total_merged > 0:
+                msg += tr("- Merged {} items total\n").format(total_merged)
+            for list_name, count in details:
+                msg += f"  * '{list_name}': {count} " + tr("items merged") + "\n"
+            if restored > 0:
+                msg += tr("- Restored {} lists to their projects\n").format(restored)
+            QMessageBox.information(self, tr("Fix Duplicates"), msg)
+            self.lists_refresh_all()
+        else:
+            QMessageBox.information(self, tr("Fix Duplicates"), tr("No changes made."))
+
+    def _show_duplicate_conflict_dialog(self, group):
+        """Show dialog for user to resolve a duplicate list conflict."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QRadioButton, QButtonGroup, QDialogButtonBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Resolve Duplicate: {}").format(group['name']))
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout(dialog)
+
+        header = QLabel(tr("Found {} lists named '{}' with different projects.\nChoose which to keep:").format(
+            len(group['lists']), group['name']
+        ))
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        button_group = QButtonGroup(dialog)
+
+        for i, lst in enumerate(group['lists']):
+            project_name = lst['project_name'] or tr("(no project)")
+            item_count = lst['item_count']
+            label = tr("Under '{}' ({} items)").format(project_name, item_count)
+            if lst['id'] in ['default', 'recent']:
+                label += tr(" [System]")
+
+            radio = QRadioButton(label)
+            radio.setProperty('list_info', lst)
+            button_group.addButton(radio, i)
+            layout.addWidget(radio)
+            if i == 0:
+                radio.setChecked(True)
+
+        layout.addSpacing(10)
+        info = QLabel(tr("Items from other lists will be merged into the selected one."))
+        info.setStyleSheet("color: gray; font-size: 11px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+        selected_id = button_group.checkedId()
+        if selected_id < 0:
+            return None
+
+        selected_lst = group['lists'][selected_id]
+        keep_id = selected_lst['id']
+        target_project_id = selected_lst['project_id']
+        duplicate_ids = [l['id'] for l in group['lists'] if l['id'] != keep_id]
+
+        return self.lists_mgr.merge_duplicate_group(keep_id, duplicate_ids, target_project_id)
+
+    def lists_show_trash(self):
+        """Show dialog with deleted lists (trash)."""
+        if not self.lists_mgr:
+            return
+
+        deleted_lists = self.lists_mgr.get_deleted_lists()
+
+        if not deleted_lists:
+            QMessageBox.information(self, tr("Trash"), tr("Trash is empty."))
+            return
+
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                      QListWidget, QListWidgetItem, QPushButton,
+                                      QDialogButtonBox)
+        from datetime import datetime
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Trash"))
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+
+        layout = QVBoxLayout(dialog)
+
+        header = QLabel(tr("{} deleted lists").format(len(deleted_lists)))
+        layout.addWidget(header)
+
+        list_widget = QListWidget()
+        for lst in deleted_lists:
+            deleted_at = lst.get('deleted_at', 0)
+            if deleted_at:
+                deleted_str = datetime.fromtimestamp(deleted_at).strftime('%Y-%m-%d %H:%M')
+            else:
+                deleted_str = tr("Unknown")
+
+            item = QListWidgetItem(f"{lst['name']} ({lst['count']} {tr('items')}) - {tr('Deleted')}: {deleted_str}")
+            item.setData(Qt.ItemDataRole.UserRole, lst['id'])
+            list_widget.addItem(item)
+
+        layout.addWidget(list_widget)
+
+        btn_layout = QHBoxLayout()
+
+        btn_restore = QPushButton(tr("Restore"))
+        btn_restore.clicked.connect(lambda: self._trash_restore(dialog, list_widget))
+        btn_layout.addWidget(btn_restore)
+
+        btn_delete_perm = QPushButton(tr("Delete Permanently"))
+        btn_delete_perm.clicked.connect(lambda: self._trash_delete_permanently(dialog, list_widget))
+        btn_layout.addWidget(btn_delete_perm)
+
+        btn_empty = QPushButton(tr("Empty Trash"))
+        btn_empty.clicked.connect(lambda: self._trash_empty(dialog))
+        btn_layout.addWidget(btn_empty)
+
+        layout.addLayout(btn_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.exec()
+
+    def _trash_restore(self, dialog, list_widget):
+        """Restore selected list from trash."""
+        item = list_widget.currentItem()
+        if not item:
+            QMessageBox.warning(self, tr("Restore"), tr("Please select a list to restore."))
+            return
+
+        list_id = item.data(Qt.ItemDataRole.UserRole)
+        if self.lists_mgr.restore_list(list_id):
+            list_widget.takeItem(list_widget.row(item))
+            self.lists_refresh_all()
+            self._lists_auto_sync()
+            if list_widget.count() == 0:
+                dialog.accept()
+
+    def _trash_delete_permanently(self, dialog, list_widget):
+        """Permanently delete selected list from trash."""
+        item = list_widget.currentItem()
+        if not item:
+            QMessageBox.warning(self, tr("Delete Permanently"), tr("Please select a list to delete."))
+            return
+
+        list_id = item.data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(
+            self, tr("Delete Permanently"),
+            tr("Are you sure you want to permanently delete this list?\nThis cannot be undone."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.lists_mgr.permanently_delete_list(list_id):
+                list_widget.takeItem(list_widget.row(item))
+                self._lists_auto_sync()
+                if list_widget.count() == 0:
+                    dialog.accept()
+
+    def _trash_empty(self, dialog):
+        """Empty all trash."""
+        reply = QMessageBox.question(
+            self, tr("Empty Trash"),
+            tr("Are you sure you want to permanently delete all lists in trash?\nThis cannot be undone."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            count = self.lists_mgr.empty_trash()
+            QMessageBox.information(self, tr("Empty Trash"), tr("Deleted {} lists permanently.").format(count))
+            self.lists_refresh_all()
+            self._lists_auto_sync()
+            dialog.accept()
 
     def lists_move_selected_items(self):
         """Move selected items to another list."""
@@ -8257,12 +8593,14 @@ class GenizahGUI(QMainWindow):
             if category_actions and action in category_actions:
                 self.lists_mgr.update_list_project(list_id, category_actions[action])
                 self.lists_refresh_sidebar()
+                self._lists_auto_sync()
             elif action_new_category and action == action_new_category:
                 name, ok = QInputDialog.getText(self, tr("Create New Project"), tr("Project Name:"))
                 if ok and name.strip():
                     project_id = self.lists_mgr.create_project(name.strip())
                     self.lists_mgr.update_list_project(list_id, project_id)
                     self.lists_refresh_sidebar()
+                    self._lists_auto_sync()
 
     def _rename_list(self, list_id):
         """Rename a specific list."""
@@ -8277,6 +8615,7 @@ class GenizahGUI(QMainWindow):
         if ok and name.strip():
             self.lists_mgr.update_list(list_id, name=name.strip())
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def _delete_list(self, list_id):
         """Delete a specific list."""
@@ -8290,7 +8629,7 @@ class GenizahGUI(QMainWindow):
         name = lst.get('name', 'List')
         reply = QMessageBox.question(
             self, tr("Delete List?"),
-            tr("Are you sure you want to delete '{}'?\nAll items in this list will be deleted.").format(name),
+            tr("Move '{}' to trash?\nYou can restore it later from the Trash.").format(name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -8299,6 +8638,7 @@ class GenizahGUI(QMainWindow):
             if self.lists_current_list_id == list_id:
                 self.lists_current_list_id = 'default'
             self.lists_refresh_all()
+            self._lists_auto_sync()
 
     def _duplicate_list(self, list_id):
         """Duplicate a specific list."""
@@ -8307,6 +8647,7 @@ class GenizahGUI(QMainWindow):
 
         self.lists_mgr.duplicate_list(list_id)
         self.lists_refresh_sidebar()
+        self._lists_auto_sync()
 
     def _export_list(self, list_id):
         """Export a specific list (opens format menu)."""

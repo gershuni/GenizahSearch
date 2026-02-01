@@ -27,7 +27,7 @@ except ImportError:
 
 # Configuration
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
+SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
 
 # Try to load from .env file if not in environment
 if not SUPABASE_ANON_KEY:
@@ -268,20 +268,49 @@ class ListsCloudSync:
             cloud_to_local = {}
             local_lists = self.lists_manager.data.get('lists', {})
 
+            # Map of cloud names to local system list IDs (for special handling)
+            SYSTEM_LIST_NAME_MAP = {
+                'General': 'default',
+                'Recently Viewed': 'recent',
+            }
+
             for cloud_list in cloud_lists:
                 cloud_id = cloud_list['id']
                 cloud_name = cloud_list.get('name', '')
 
-                # Find matching local list by name
-                local_id = None
-                for lid, ldata in local_lists.items():
-                    if ldata.get('name') == cloud_name and lid not in ['default', 'recent']:
-                        local_id = lid
-                        break
+                # First, check if this is a system list by name
+                local_id = SYSTEM_LIST_NAME_MAP.get(cloud_name)
+
+                # Skip syncing "Recently Viewed" - it's auto-generated locally
+                if local_id == 'recent':
+                    logger.debug(f"Skipping cloud list '{cloud_name}' - Recently Viewed is local-only")
+                    continue
+
+                # If not a system list, find matching local list by name
+                if not local_id:
+                    for lid, ldata in local_lists.items():
+                        if ldata.get('name') == cloud_name:
+                            local_id = lid
+                            break
 
                 # Map cloud project_id to local project_id
                 cloud_project_id = cloud_list.get('project_id')
                 local_project_id = cloud_project_to_local.get(cloud_project_id) if cloud_project_id else None
+
+                # Handle soft delete - convert cloud timestamp to local format
+                cloud_deleted_at = cloud_list.get('deleted_at')
+                local_deleted_at = None
+                if cloud_deleted_at:
+                    # Parse ISO timestamp from cloud to Unix timestamp
+                    try:
+                        from datetime import datetime
+                        if isinstance(cloud_deleted_at, str):
+                            dt = datetime.fromisoformat(cloud_deleted_at.replace('Z', '+00:00'))
+                            local_deleted_at = dt.timestamp()
+                        else:
+                            local_deleted_at = cloud_deleted_at
+                    except Exception:
+                        local_deleted_at = time.time()  # Fallback to now
 
                 if local_id:
                     # Update existing list
@@ -292,12 +321,18 @@ class ListsCloudSync:
                     # Update project assignment if changed
                     if local_project_id:
                         local_lists[local_id]['project_id'] = local_project_id
+                    # Sync deleted_at status
+                    if local_deleted_at:
+                        local_lists[local_id]['deleted_at'] = local_deleted_at
+                    elif 'deleted_at' in local_lists[local_id]:
+                        # Cloud restored the list - remove local deleted_at
+                        del local_lists[local_id]['deleted_at']
                     result['lists_updated'] += 1
                 else:
                     # Create new local list
                     import uuid
                     new_id = f"list_{uuid.uuid4().hex[:8]}"
-                    local_lists[new_id] = {
+                    new_list_data = {
                         'name': cloud_name,
                         'name_en': cloud_list.get('name_en', cloud_name),
                         'color': cloud_list.get('color', '#FFD700'),
@@ -307,12 +342,20 @@ class ListsCloudSync:
                         'project_id': local_project_id,
                         'cloud_id': cloud_id
                     }
+                    if local_deleted_at:
+                        new_list_data['deleted_at'] = local_deleted_at
+                    local_lists[new_id] = new_list_data
                     cloud_to_local[cloud_id] = new_id
                     self.lists_manager.data.setdefault('lists_order', []).append(new_id)
                     result['lists_added'] += 1
 
             # Fetch items for each cloud list
             for cloud_id, local_id in cloud_to_local.items():
+                # Skip syncing items for deleted lists
+                if local_lists.get(local_id, {}).get('deleted_at'):
+                    logger.debug(f"Skipping items sync for deleted list '{local_id}'")
+                    continue
+
                 items_response = client.table('list_items').select('*').eq(
                     'list_id', cloud_id
                 ).execute()
@@ -403,6 +446,7 @@ class ListsCloudSync:
                 'user_id', self._user_id
             ).execute()
             existing_cloud_projects = {proj['name']: proj['id'] for proj in (existing_projects_response.data or [])}
+            valid_project_ids = {proj['id'] for proj in (existing_projects_response.data or [])}
 
             # Push projects first (so we have cloud IDs for list references)
             local_projects = self.lists_manager.data.get('projects', {})
@@ -410,6 +454,11 @@ class ListsCloudSync:
 
             for proj_id, proj_data in local_projects.items():
                 cloud_proj_id = proj_data.get('cloud_id')
+                # Validate cloud_id still exists
+                if cloud_proj_id and cloud_proj_id not in valid_project_ids:
+                    logger.debug(f"Clearing stale cloud_id {cloud_proj_id} for project '{proj_data.get('name')}'")
+                    cloud_proj_id = None
+                    proj_data.pop('cloud_id', None)
                 proj_name = proj_data.get('name', 'Unnamed')
 
                 proj_payload = {
@@ -446,22 +495,37 @@ class ListsCloudSync:
                 'user_id', self._user_id
             ).execute()
             existing_cloud_lists = {lst['name']: lst['id'] for lst in (existing_lists_response.data or [])}
+            # Also build reverse map: id -> name (for validating cloud_ids)
+            valid_cloud_ids = {lst['id'] for lst in (existing_lists_response.data or [])}
             logger.debug(f"Found {len(existing_cloud_lists)} existing cloud lists")
 
             # Push lists
             local_lists = self.lists_manager.data.get('lists', {})
 
             for list_id, list_data in local_lists.items():
-                # Skip system lists
-                if list_id in ['recent'] or list_data.get('is_system'):
+                # Skip "Recently Viewed" - it's auto-generated locally and not synced
+                # But DO sync "default" (General) list
+                if list_id == 'recent' or list_data.get('is_system'):
                     continue
 
                 cloud_id = list_data.get('cloud_id')
+                # Validate cloud_id still exists (might be stale after cleanup)
+                if cloud_id and cloud_id not in valid_cloud_ids:
+                    logger.debug(f"Clearing stale cloud_id {cloud_id} for list '{list_data.get('name')}'")
+                    cloud_id = None
+                    list_data.pop('cloud_id', None)
                 list_name = list_data.get('name', 'Unnamed')
 
                 # Map local project_id to cloud project_id
                 local_proj_id = list_data.get('project_id')
                 cloud_proj_id = local_project_to_cloud.get(local_proj_id) if local_proj_id else None
+
+                # Handle soft delete - convert local timestamp to ISO format for cloud
+                local_deleted_at = list_data.get('deleted_at')
+                cloud_deleted_at = None
+                if local_deleted_at:
+                    from datetime import datetime, timezone
+                    cloud_deleted_at = datetime.fromtimestamp(local_deleted_at, tz=timezone.utc).isoformat()
 
                 list_payload = {
                     'user_id': self._user_id,
@@ -470,7 +534,8 @@ class ListsCloudSync:
                     'color': list_data.get('color', '#FFD700'),
                     'is_default': list_data.get('is_default', False),
                     'is_system': False,
-                    'project_id': cloud_proj_id
+                    'project_id': cloud_proj_id,
+                    'deleted_at': cloud_deleted_at
                 }
 
                 if cloud_id:
@@ -497,20 +562,36 @@ class ListsCloudSync:
 
                 result['lists_pushed'] += 1
 
-                # Push items in this list
+                # Skip syncing items for deleted lists
+                if local_deleted_at:
+                    logger.debug(f"Skipping items sync for deleted list '{list_name}'")
+                    continue
+
+                # Push items in this list - BATCH approach for performance
                 items = self.lists_manager.data.get('items', {})
+
+                # 1. Get all existing cloud items for this list in ONE call
+                existing_items_response = client.table('list_items').select('id, sys_id').eq(
+                    'list_id', cloud_id
+                ).execute()
+                existing_items_map = {item['sys_id']: item['id'] for item in (existing_items_response.data or [])}
+
+                # 2. Collect items to insert (new) vs update (existing)
+                items_to_insert = []
+                items_to_update = []
+
                 for item_id, item_data in items.items():
                     if list_id not in item_data.get('lists', []):
                         continue
 
-                    item_cloud_id = item_data.get('cloud_id')
                     sys_id = item_data.get('sys_id', item_id)
+                    item_cloud_id = item_data.get('cloud_id') or existing_items_map.get(sys_id)
 
                     item_payload = {
                         'list_id': cloud_id,
                         'sys_id': sys_id,
                         'shelfmark': item_data.get('shelfmark_override'),
-                        'title': None,  # Could be populated from metadata
+                        'title': None,
                         'fl_id': item_data.get('fl_id'),
                         'note': item_data.get('note', ''),
                         'tags': item_data.get('tags', [])
@@ -518,29 +599,39 @@ class ListsCloudSync:
 
                     if item_cloud_id:
                         # Update existing
-                        client.table('list_items').update(item_payload).eq(
-                            'id', item_cloud_id
-                        ).execute()
-                    else:
-                        # Check if item already exists in this cloud list
-                        existing = client.table('list_items').select('id').eq(
-                            'list_id', cloud_id
-                        ).eq('sys_id', sys_id).execute()
+                        items_to_update.append((item_cloud_id, item_payload, item_data))
+                    elif sys_id not in existing_items_map:
+                        # New item - insert
+                        items_to_insert.append((item_payload, item_data))
 
-                        if existing.data:
-                            # Update
-                            item_cloud_id = existing.data[0]['id']
-                            client.table('list_items').update(item_payload).eq(
-                                'id', item_cloud_id
-                            ).execute()
-                            item_data['cloud_id'] = item_cloud_id
-                        else:
-                            # Insert
-                            response = client.table('list_items').insert(item_payload).execute()
-                            if response.data:
-                                item_data['cloud_id'] = response.data[0]['id']
+                # 3. Batch insert new items
+                if items_to_insert:
+                    insert_payloads = [p for p, _ in items_to_insert]
+                    try:
+                        response = client.table('list_items').insert(insert_payloads).execute()
+                        if response.data:
+                            for i, row in enumerate(response.data):
+                                if i < len(items_to_insert):
+                                    items_to_insert[i][1]['cloud_id'] = row['id']
+                    except Exception as e:
+                        logger.warning(f"Batch insert failed, falling back to individual: {e}")
+                        for payload, item_data in items_to_insert:
+                            try:
+                                response = client.table('list_items').insert(payload).execute()
+                                if response.data:
+                                    item_data['cloud_id'] = response.data[0]['id']
+                            except Exception:
+                                pass
 
-                    result['items_pushed'] += 1
+                # 4. Update existing items (still individual but fewer calls)
+                for item_cloud_id, payload, item_data in items_to_update:
+                    try:
+                        client.table('list_items').update(payload).eq('id', item_cloud_id).execute()
+                        item_data['cloud_id'] = item_cloud_id
+                    except Exception:
+                        pass  # Ignore update errors
+
+                result['items_pushed'] += len(items_to_insert) + len(items_to_update)
 
             self.lists_manager.save()
             self._last_sync = time.time()

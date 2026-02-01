@@ -37,15 +37,15 @@ except ImportError:
 
 def cleanup_duplicates(user_id: str, dry_run: bool = True):
     """
-    Remove duplicate lists for a user.
+    Merge and remove duplicate lists for a user.
 
     Args:
         user_id: The user's UUID
-        dry_run: If True, only show what would be deleted without actually deleting
+        dry_run: If True, only show what would be done without actually doing it
     """
     print(f"\n{'='*60}")
     print(f"Cleaning up duplicate lists for user: {user_id}")
-    print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE (will delete)'}")
+    print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE (will merge & delete)'}")
     print(f"{'='*60}\n")
 
     client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -62,50 +62,84 @@ def cleanup_duplicates(user_id: str, dry_run: bool = True):
         by_name[lst['name']].append(lst)
 
     # Find duplicates
+    merge_operations = []  # (keep_id, dup_id, items_to_move)
     lists_to_delete = []
-    items_to_delete_count = 0
 
     for name, lists in by_name.items():
         if len(lists) > 1:
-            # Sort by ID (keep lowest = oldest)
-            lists.sort(key=lambda x: x['id'])
+            # Sort by item count descending, then by ID ascending (prefer list with more items, then oldest)
+            for lst in lists:
+                items_response = client.table('list_items').select('id').eq('list_id', lst['id']).execute()
+                lst['_item_count'] = len(items_response.data or [])
+
+            lists.sort(key=lambda x: (-x['_item_count'], x['id']))
             keep = lists[0]
             duplicates = lists[1:]
 
             print(f"List '{name}':")
-            print(f"  KEEP: ID {keep['id']}")
+            print(f"  KEEP: ID {keep['id']} ({keep['_item_count']} items)")
+
+            # Get existing sys_ids in keeper to avoid duplicates
+            keep_items = client.table('list_items').select('sys_id').eq('list_id', keep['id']).execute()
+            keep_sys_ids = {item['sys_id'] for item in (keep_items.data or [])}
+
             for dup in duplicates:
-                # Count items in this list
-                items_response = client.table('list_items').select('id').eq('list_id', dup['id']).execute()
-                item_count = len(items_response.data or [])
-                items_to_delete_count += item_count
-                print(f"  DELETE: ID {dup['id']} ({item_count} items)")
+                # Get items from duplicate
+                dup_items = client.table('list_items').select('*').eq('list_id', dup['id']).execute()
+                dup_item_list = dup_items.data or []
+
+                # Find items to move (not already in keeper)
+                items_to_move = [item for item in dup_item_list if item['sys_id'] not in keep_sys_ids]
+
+                print(f"  MERGE & DELETE: ID {dup['id']} ({dup['_item_count']} items, {len(items_to_move)} unique to move)")
+
+                merge_operations.append((keep['id'], dup['id'], items_to_move))
                 lists_to_delete.append(dup['id'])
+
+                # Add moved items to keeper set to avoid duplicates from other dups
+                for item in items_to_move:
+                    keep_sys_ids.add(item['sys_id'])
             print()
 
     if not lists_to_delete:
         print("No duplicates found!")
         return
 
+    total_items_to_move = sum(len(items) for _, _, items in merge_operations)
     print(f"\nSummary:")
-    print(f"  Lists to delete: {len(lists_to_delete)}")
-    print(f"  Items to delete: {items_to_delete_count}")
+    print(f"  Lists to merge & delete: {len(lists_to_delete)}")
+    print(f"  Items to move: {total_items_to_move}")
 
     if dry_run:
-        print(f"\nThis was a DRY RUN. To actually delete, run with dry_run=False")
+        print(f"\nThis was a DRY RUN. To actually merge & delete, run with --delete flag")
         return
 
-    # Actually delete
-    print(f"\nDeleting...")
+    # Actually merge and delete
+    print(f"\nMerging and deleting...")
 
-    for list_id in lists_to_delete:
-        # Delete items first (cascade should handle this, but be safe)
-        client.table('list_items').delete().eq('list_id', list_id).execute()
-        # Delete the list
-        client.table('user_lists').delete().eq('id', list_id).execute()
-        print(f"  Deleted list ID {list_id}")
+    for keep_id, dup_id, items_to_move in merge_operations:
+        # Move items to keeper list
+        for item in items_to_move:
+            # Insert into keeper list
+            new_item = {
+                'list_id': keep_id,
+                'sys_id': item['sys_id'],
+                'user_id': item['user_id'],
+                'added_at': item.get('added_at'),
+                'notes': item.get('notes'),
+            }
+            try:
+                client.table('list_items').insert(new_item).execute()
+            except Exception as e:
+                print(f"    Warning: Could not move item {item['sys_id']}: {e}")
 
-    print(f"\nDone! Deleted {len(lists_to_delete)} duplicate lists.")
+        # Delete items from duplicate
+        client.table('list_items').delete().eq('list_id', dup_id).execute()
+        # Delete the duplicate list
+        client.table('user_lists').delete().eq('id', dup_id).execute()
+        print(f"  Merged {len(items_to_move)} items and deleted list ID {dup_id}")
+
+    print(f"\nDone! Merged items and deleted {len(lists_to_delete)} duplicate lists.")
 
 
 if __name__ == '__main__':

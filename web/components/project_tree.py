@@ -64,11 +64,25 @@ def create_project_tree(
     # State for expanded/collapsed projects
     expanded_projects = {}
 
+    # State for management mode (show/hide action buttons)
+    management_mode = {'enabled': False}
+
     with container:
-        # Header with Create buttons
+        # Add CSS for management mode toggle
+        ui.add_css('''
+            .management-actions { display: none !important; }
+            .management-mode .management-actions { display: flex !important; }
+        ''')
+
+        # Header with Create buttons (rendered first)
         with ui.row().classes('w-full justify-between items-center mb-4 pb-2 border-b'):
             h2(tr('My Lists'), classes='text-lg font-bold')
             with ui.row().classes('gap-1'):
+                # Management mode toggle (manage_btn defined here, toggle_management_mode defined after tree_container)
+                manage_btn = ui.button(
+                    icon='settings',
+                ).props('flat round dense size=sm').tooltip(tr('Manage lists'))
+
                 ui.button(
                     icon='create_new_folder',
                     on_click=lambda: show_create_project_dialog(lists_mgr, on_refresh)
@@ -78,70 +92,86 @@ def create_project_tree(
                     on_click=lambda: show_create_list_dialog(lists_mgr, projects, on_refresh)
                 ).props('flat round dense size=sm').tooltip(tr('Create list'))
 
-        # Render projects with their lists
-        with ui.column().classes('w-full gap-2'):
-            # Projects section
-            for project_id, project_data in projects.items():
-                project_lists = lists_by_project.get(project_id, [])
-                _render_project_group(
-                    project_id=project_id,
-                    project_data=project_data,
-                    project_lists=project_lists,
-                    lists_mgr=lists_mgr,
-                    expanded_projects=expanded_projects,
-                    selected_list_id=selected_list_id,
-                    on_select=on_select,
-                    on_refresh=on_refresh
-                )
+        # Main tree container that will have management-mode class toggled
+        tree_container = ui.element('div').classes('w-full')
 
-            # Standalone lists section (lists not in any project)
-            standalone_lists = lists_by_project.get(None, [])
-            if standalone_lists:
-                # Filter out system lists for separate display
-                regular_lists = [l for l in standalone_lists if not l.get('is_system')]
-                system_lists = [l for l in standalone_lists if l.get('is_system')]
+        def toggle_management_mode():
+            management_mode['enabled'] = not management_mode['enabled']
+            if management_mode['enabled']:
+                tree_container.classes(add='management-mode')
+                manage_btn.props('color=primary')
+            else:
+                tree_container.classes(remove='management-mode')
+                manage_btn.props(remove='color=primary')
 
-                if regular_lists:
-                    with ui.element('div').classes('mt-4'):
-                        ui.label(tr('Standalone Lists')).classes(
-                            'text-xs font-semibold uppercase mb-2'
+        # Connect the button click handler
+        manage_btn.on('click', toggle_management_mode)
+
+        with tree_container:
+            # Render projects with their lists
+            with ui.column().classes('w-full gap-2'):
+                # Projects section
+                for project_id, project_data in projects.items():
+                    project_lists = lists_by_project.get(project_id, [])
+                    _render_project_group(
+                        project_id=project_id,
+                        project_data=project_data,
+                        project_lists=project_lists,
+                        lists_mgr=lists_mgr,
+                        expanded_projects=expanded_projects,
+                        selected_list_id=selected_list_id,
+                        on_select=on_select,
+                        on_refresh=on_refresh
+                    )
+
+                # Standalone lists section (lists not in any project)
+                standalone_lists = lists_by_project.get(None, [])
+                if standalone_lists:
+                    # Filter out system lists for separate display
+                    regular_lists = [l for l in standalone_lists if not l.get('is_system')]
+                    system_lists = [l for l in standalone_lists if l.get('is_system')]
+
+                    if regular_lists:
+                        with ui.element('div').classes('mt-4'):
+                            ui.label(tr('Standalone Lists')).classes(
+                                'text-xs font-semibold uppercase mb-2'
+                            ).style('color: var(--text-muted);')
+
+                            for list_data in regular_lists:
+                                _render_list_item(
+                                    list_data=list_data,
+                                    lists_mgr=lists_mgr,
+                                    selected_list_id=selected_list_id,
+                                    on_select=on_select,
+                                    on_refresh=on_refresh,
+                                    show_color=True
+                                )
+
+                    # System lists at bottom
+                    if system_lists:
+                        with ui.element('div').classes('mt-4'):
+                            ui.label(tr('System')).classes(
+                                'text-xs font-semibold uppercase mb-2'
+                            ).style('color: var(--text-muted);')
+
+                            for list_data in system_lists:
+                                _render_list_item(
+                                    list_data=list_data,
+                                    lists_mgr=lists_mgr,
+                                    selected_list_id=selected_list_id,
+                                    on_select=on_select,
+                                    on_refresh=on_refresh,
+                                    show_color=True
+                                )
+
+                # Empty state
+                if not projects and not standalone_lists:
+                    with ui.column().classes('w-full items-center py-8'):
+                        ui.icon('folder_open', size='3rem').style('color: var(--text-muted);')
+                        ui.label(tr('No lists yet')).classes('mt-2').style('color: var(--text-muted);')
+                        ui.label(tr('Create a project or list to get started')).classes(
+                            'text-sm'
                         ).style('color: var(--text-muted);')
-
-                        for list_data in regular_lists:
-                            _render_list_item(
-                                list_data=list_data,
-                                lists_mgr=lists_mgr,
-                                selected_list_id=selected_list_id,
-                                on_select=on_select,
-                                on_refresh=on_refresh,
-                                show_color=True
-                            )
-
-                # System lists at bottom
-                if system_lists:
-                    with ui.element('div').classes('mt-4'):
-                        ui.label(tr('System')).classes(
-                            'text-xs font-semibold uppercase mb-2'
-                        ).style('color: var(--text-muted);')
-
-                        for list_data in system_lists:
-                            _render_list_item(
-                                list_data=list_data,
-                                lists_mgr=lists_mgr,
-                                selected_list_id=selected_list_id,
-                                on_select=on_select,
-                                on_refresh=on_refresh,
-                                show_color=True
-                            )
-
-            # Empty state
-            if not projects and not standalone_lists:
-                with ui.column().classes('w-full items-center py-8'):
-                    ui.icon('folder_open', size='3rem').style('color: var(--text-muted);')
-                    ui.label(tr('No lists yet')).classes('mt-2').style('color: var(--text-muted);')
-                    ui.label(tr('Create a project or list to get started')).classes(
-                        'text-sm'
-                    ).style('color: var(--text-muted);')
 
 
 def _render_project_group(
@@ -184,28 +214,26 @@ def _render_project_group(
                     'color: var(--text-muted);'
                 )
 
-            # Project actions menu
-            with ui.button(icon='more_vert').props('flat round dense size=sm'):
-                with ui.menu().props('auto-close'):
-                    ui.menu_item(
-                        tr('Add list'),
-                        lambda pid=project_id: show_create_list_dialog(
-                            lists_mgr, {project_id: project_data}, on_refresh, default_project=pid
-                        )
-                    )
-                    ui.menu_item(
-                        tr('Rename'),
-                        lambda pid=project_id, pname=project_name: show_rename_project_dialog(
-                            lists_mgr, pid, pname, on_refresh
-                        )
-                    )
-                    ui.separator()
-                    ui.menu_item(
-                        tr('Delete'),
-                        lambda pid=project_id, pname=project_name, pcount=len(project_lists): show_delete_project_dialog(
-                            lists_mgr, pid, pname, pcount, on_refresh
-                        )
-                    ).classes('text-red-500')
+            # Project action buttons (hidden by default, shown in management mode)
+            def on_add_list(pid=project_id, pdata=project_data, mgr=lists_mgr, refresh=on_refresh):
+                show_create_list_dialog(mgr, {pid: pdata}, refresh, default_project=pid)
+
+            def on_rename_proj(pid=project_id, pname=project_name, mgr=lists_mgr, refresh=on_refresh):
+                show_rename_project_dialog(mgr, pid, pname, refresh)
+
+            def on_delete_proj(pid=project_id, pname=project_name, pcount=len(project_lists), mgr=lists_mgr, refresh=on_refresh):
+                show_delete_project_dialog(mgr, pid, pname, pcount, refresh)
+
+            with ui.row().classes('gap-0 management-actions'):
+                ui.button(icon='add', on_click=on_add_list).props(
+                    'flat round dense size=sm'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Add list'))
+                ui.button(icon='edit', on_click=on_rename_proj).props(
+                    'flat round dense size=sm'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Rename'))
+                ui.button(icon='delete', on_click=on_delete_proj).props(
+                    'flat round dense size=sm color=negative'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Delete'))
 
         def toggle_expand(pid=project_id, icon=expand_icon):
             expanded_projects[pid] = not expanded_projects.get(pid, True)
@@ -290,21 +318,27 @@ def _render_list_item(
 
         # Actions (only for non-system lists)
         if not is_system:
-            with ui.button(icon='more_vert').props('flat round dense size=sm').classes('opacity-50 hover:opacity-100'):
-                with ui.menu().props('auto-close'):
-                    ui.menu_item(
-                        tr('Rename'),
-                        lambda lid=list_id, lname=list_name: show_rename_list_dialog(
-                            lists_mgr, lid, lname, on_refresh
-                        )
-                    )
-                    ui.separator()
-                    ui.menu_item(
-                        tr('Delete'),
-                        lambda lid=list_id, lname=list_name: show_delete_list_dialog(
-                            lists_mgr, lid, lname, on_refresh
-                        )
-                    ).classes('text-red-500')
+            # Define callbacks with captured variables
+            def on_rename(lid=list_id, lname=list_name, mgr=lists_mgr, refresh=on_refresh):
+                show_rename_list_dialog(mgr, lid, lname, refresh)
+
+            def on_add_to_project(lid=list_id, mgr=lists_mgr, refresh=on_refresh):
+                show_move_to_project_dialog(mgr, lid, refresh)
+
+            def on_delete(lid=list_id, lname=list_name, mgr=lists_mgr, refresh=on_refresh):
+                show_delete_list_dialog(mgr, lid, lname, refresh)
+
+            # Action buttons (hidden by default, shown in management mode)
+            with ui.row().classes('gap-0 management-actions'):
+                ui.button(icon='edit', on_click=on_rename).props(
+                    'flat round dense size=sm'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Rename'))
+                ui.button(icon='folder', on_click=on_add_to_project).props(
+                    'flat round dense size=sm'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Add to project...'))
+                ui.button(icon='delete', on_click=on_delete).props(
+                    'flat round dense size=sm color=negative'
+                ).classes('opacity-50 hover:opacity-100').tooltip(tr('Delete'))
 
     def handle_click(lid=list_id):
         if on_select:
@@ -616,3 +650,91 @@ def show_delete_list_dialog(
             ui.button(tr('Delete'), on_click=delete_list).classes('bg-red-500 text-white')
 
     dialog.open()
+
+
+def show_move_to_project_dialog(lists_mgr, list_id: str, on_refresh: Optional[Callable] = None):
+    """Show dialog to move a list to a project."""
+    if lists_mgr is None:
+        ui.notify("Error: lists_mgr is None", type='negative')
+        return
+
+    try:
+        projects = lists_mgr.get_projects() if hasattr(lists_mgr, 'get_projects') else []
+    except Exception as e:
+        LOGGER.error(f"Error getting projects: {e}")
+        ui.notify(f"Error loading projects: {e}", type='negative')
+        return
+    with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[400px]'):
+        h3(tr('Add to project...'), classes='text-xl font-bold mb-4')
+
+        # Build options for select
+        options = {'': tr('No project')}
+        for proj in projects:
+            options[str(proj.get('id'))] = proj.get('name', 'Unnamed')
+
+        project_select = ui.select(
+            options=options,
+            value='',
+            label=tr('Select project')
+        ).classes('w-full mb-4').props('outlined')
+
+        ui.separator().classes('my-2')
+
+        # Add new project option
+        ui.label(tr('Or create new project:')).classes('text-sm').style('color: var(--text-secondary);')
+        new_project_name = ui.input(label=tr('New project name')).classes('w-full').props('outlined dense')
+
+        async def do_move():
+            LOGGER.debug(f"do_move called for list {list_id}")
+            try:
+                new_name = new_project_name.value.strip() if new_project_name.value else None
+                selected_val = project_select.value
+                LOGGER.debug(f"new_name={new_name}, selected_val={selected_val}")
+
+                # If new project name given, create it first
+                if new_name:
+                    LOGGER.debug(f"Creating new project: {new_name}")
+                    if GlobalAuthState.is_logged_in():
+                        target_project_id = await lists_mgr.create_project(new_name)
+                    else:
+                        target_project_id = lists_mgr.create_project_sync(new_name) if hasattr(lists_mgr, 'create_project_sync') else None
+
+                    if not target_project_id:
+                        ui.notify(tr('Failed to create project'), type='negative')
+                        return
+                    LOGGER.debug(f"Created project with id: {target_project_id}")
+                else:
+                    # Use selected project (empty string means no project)
+                    target_project_id = selected_val if selected_val else None
+
+                LOGGER.debug(f"Moving list {list_id} to project {target_project_id}")
+
+                # Move the list - always use async version when logged in
+                if not hasattr(lists_mgr, 'update_list_project'):
+                    ui.notify(tr('Feature not available'), type='warning')
+                    return
+
+                success = await lists_mgr.update_list_project(list_id, target_project_id)
+                LOGGER.debug(f"update_list_project returned: {success}")
+
+                if success:
+                    if target_project_id:
+                        ui.notify(tr('List moved to project'), type='positive')
+                    else:
+                        ui.notify(tr('List removed from project'), type='positive')
+                    dialog.close()
+                    if on_refresh:
+                        on_refresh()
+                else:
+                    ui.notify(tr('Failed to update list'), type='negative')
+            except Exception as e:
+                LOGGER.error(f"Error moving list to project: {e}", exc_info=True)
+                ui.notify(f"Error: {e}", type='negative')
+
+        with ui.row().classes('w-full justify-end gap-2 mt-4'):
+            ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+            ui.button(tr('Move'), on_click=do_move).classes('bg-primary text-white')
+
+    dialog.open()
+
+

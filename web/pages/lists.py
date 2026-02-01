@@ -207,6 +207,103 @@ def create_lists_page():
 
         dialog.open()
 
+    # --- Trash Dialog ---
+    def show_trash_dialog():
+        """Show dialog with deleted lists (trash)."""
+        if not state.lists_mgr:
+            return
+
+        # Get deleted lists
+        if hasattr(state.lists_mgr, 'get_deleted_lists'):
+            deleted_lists = state.lists_mgr.get_deleted_lists()
+        else:
+            ui.notify(tr('Trash not available'), type='warning')
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
+            h3(tr('Trash'), classes='text-xl font-bold mb-4')
+
+            if not deleted_lists:
+                ui.label(tr('Trash is empty.')).classes('text-gray-500 mb-4')
+                ui.button(tr('Close'), on_click=dialog.close).props('flat')
+            else:
+                ui.label(tr('{} deleted lists').format(len(deleted_lists))).classes('mb-4').style('color: var(--text-secondary);')
+
+                # List of deleted lists
+                trash_list = ui.column().classes('w-full max-h-60 overflow-auto border rounded p-2 mb-4')
+                selected_list_id = {'value': None}
+
+                def select_item(list_id, btn):
+                    selected_list_id['value'] = list_id
+                    # Update selection visuals
+                    for child in trash_list:
+                        if hasattr(child, 'classes'):
+                            child.classes(remove='bg-blue-100')
+                    btn.classes(add='bg-blue-100')
+
+                with trash_list:
+                    for lst in deleted_lists:
+                        from datetime import datetime
+                        deleted_at = lst.get('deleted_at')
+                        if deleted_at:
+                            if isinstance(deleted_at, (int, float)):
+                                deleted_str = datetime.fromtimestamp(deleted_at).strftime('%Y-%m-%d %H:%M')
+                            else:
+                                deleted_str = str(deleted_at)[:16]
+                        else:
+                            deleted_str = tr('Unknown')
+
+                        count = lst.get('count', 0)
+                        with ui.row().classes('w-full items-center justify-between p-2 hover:bg-gray-100 rounded cursor-pointer') as row:
+                            row.on('click', lambda e, lid=lst['id'], r=row: select_item(lid, r))
+                            ui.label(f"{lst['name']} ({count} {tr('items')})")
+                            ui.label(f"{tr('Deleted')}: {deleted_str}").classes('text-sm text-gray-500')
+
+                # Action buttons
+                with ui.row().classes('w-full justify-end gap-2'):
+                    async def restore_selected():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to restore.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'restore_list'):
+                            try:
+                                await state.lists_mgr.restore_list(selected_list_id['value'])
+                            except TypeError:
+                                state.lists_mgr.restore_list(selected_list_id['value'])
+                            ui.notify(tr('List restored'), type='positive')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def delete_permanently():
+                        if not selected_list_id['value']:
+                            ui.notify(tr('Please select a list to delete.'), type='warning')
+                            return
+                        if hasattr(state.lists_mgr, 'permanently_delete_list'):
+                            try:
+                                await state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            except TypeError:
+                                state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            ui.notify(tr('List deleted permanently'), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    async def empty_trash():
+                        if hasattr(state.lists_mgr, 'empty_trash'):
+                            try:
+                                count = await state.lists_mgr.empty_trash()
+                            except TypeError:
+                                count = state.lists_mgr.empty_trash()
+                            ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
+                            dialog.close()
+                            await async_refresh_ui()
+
+                    ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
+                    ui.button(tr('Restore'), on_click=restore_selected).classes('bg-green-500 text-white')
+                    ui.button(tr('Delete Permanently'), on_click=delete_permanently).classes('bg-red-500 text-white')
+                    ui.button(tr('Empty Trash'), on_click=empty_trash).classes('bg-red-700 text-white')
+
+        dialog.open()
+
     # --- Edit Item Dialog ---
     def show_edit_item_dialog(item_id: str, item_data: dict):
         """Show dialog to edit item notes and tags."""
@@ -559,6 +656,11 @@ def create_lists_page():
                     icon='add',
                     on_click=show_create_list_dialog
                 ).classes('bg-primary text-white')
+                ui.button(
+                    tr('Trash'),
+                    icon='delete',
+                    on_click=show_trash_dialog
+                ).props('flat').classes('text-gray-600')
 
         # Description with sync status
         if GlobalAuthState.is_logged_in():

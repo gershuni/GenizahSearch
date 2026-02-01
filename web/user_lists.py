@@ -280,15 +280,33 @@ class UserListsManager:
             return self.local_mgr.update_list(list_id, name, color)
         return False
 
+    async def update_list_project(self, list_id: str, project_id: Optional[str]) -> bool:
+        """Move a list to a project (or remove from project if project_id is None)."""
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+                project_id_int = int(project_id) if project_id else None
+            except (ValueError, TypeError):
+                return False
+
+            result = sb_update_list(list_id_int, {'project_id': project_id_int})
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.update_list_project(list_id, project_id)
+        return False
+
     async def delete_list(self, list_id: str) -> bool:
-        """Delete a list."""
+        """Soft-delete a list (move to trash)."""
         if self.is_authenticated:
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return False
 
-            result = sb_delete_list(list_id_int)
+            result = sb_delete_list(list_id_int)  # Now does soft delete
             if result.get('success'):
                 self.invalidate_cache()
                 return True
@@ -296,6 +314,63 @@ class UserListsManager:
         elif self.local_mgr:
             return self.local_mgr.delete_list(list_id)
         return False
+
+    def get_deleted_lists(self) -> List[Dict]:
+        """Get soft-deleted lists (trash view)."""
+        if self.is_authenticated:
+            from web.supabase_client import get_deleted_lists as sb_get_deleted_lists
+            return sb_get_deleted_lists(self.user_id)
+        elif self.local_mgr:
+            return self.local_mgr.get_deleted_lists()
+        return []
+
+    async def restore_list(self, list_id: str) -> bool:
+        """Restore a soft-deleted list from trash."""
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+            except ValueError:
+                return False
+
+            from web.supabase_client import restore_list as sb_restore_list
+            result = sb_restore_list(list_id_int)
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.restore_list(list_id)
+        return False
+
+    async def permanently_delete_list(self, list_id: str) -> bool:
+        """Permanently delete a list (no recovery)."""
+        if self.is_authenticated:
+            try:
+                list_id_int = int(list_id)
+            except ValueError:
+                return False
+
+            result = sb_delete_list(list_id_int, permanent=True)
+            if result.get('success'):
+                self.invalidate_cache()
+                return True
+            return False
+        elif self.local_mgr:
+            return self.local_mgr.permanently_delete_list(list_id)
+        return False
+
+    async def empty_trash(self) -> int:
+        """Permanently delete all soft-deleted lists. Returns count deleted."""
+        if self.is_authenticated:
+            from web.supabase_client import empty_trash as sb_empty_trash
+            result = sb_empty_trash(self.user_id)
+            if result.get('success'):
+                self.invalidate_cache()
+                return result.get('deleted_count', 0)
+            return 0
+        elif self.local_mgr:
+            return self.local_mgr.empty_trash()
+        return 0
 
     # === Item Operations ===
 

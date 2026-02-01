@@ -23,7 +23,7 @@ from gotrue.errors import AuthApiError
 # Load from environment variables (recommended for production)
 # Or use defaults for development
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')  # Set this in .env!
+SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
 
 # Singleton client instance
 _client: Optional[Client] = None
@@ -218,14 +218,45 @@ def update_profile(user_id: str, data: Dict) -> Dict:
 # LISTS OPERATIONS
 # ============================================================================
 
-def get_user_lists(user_id: str) -> List[Dict]:
-    """Get all lists for a user."""
+def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
+    """Get all lists for a user.
+
+    Args:
+        user_id: The user's UUID
+        include_deleted: If True, include soft-deleted lists (for trash view)
+    """
     try:
         client = get_client()
-        response = client.table('user_lists').select('*').eq('user_id', user_id).order('created_at').execute()
+        query = client.table('user_lists').select('*').eq('user_id', user_id)
+        if not include_deleted:
+            query = query.is_('deleted_at', 'null')
+        response = query.order('created_at').execute()
         return response.data or []
     except Exception as e:
+        # Fallback if deleted_at column doesn't exist yet
+        if 'deleted_at' in str(e):
+            try:
+                client = get_client()
+                response = client.table('user_lists').select('*').eq('user_id', user_id).order('created_at').execute()
+                return response.data or []
+            except Exception as e2:
+                print(f"Error getting lists (fallback): {e2}")
+                return []
         print(f"Error getting lists: {e}")
+        return []
+
+
+def get_deleted_lists(user_id: str) -> List[Dict]:
+    """Get soft-deleted lists for a user (trash view)."""
+    try:
+        client = get_client()
+        response = client.table('user_lists').select('*').eq('user_id', user_id).not_.is_('deleted_at', 'null').order('deleted_at', desc=True).execute()
+        return response.data or []
+    except Exception as e:
+        # Return empty if deleted_at column doesn't exist yet
+        if 'deleted_at' in str(e):
+            return []  # No trash feature until migration is run
+        print(f"Error getting deleted lists: {e}")
         return []
 
 
@@ -265,12 +296,64 @@ def update_list(list_id: int, data: Dict) -> Dict:
         return {'error': str(e)}
 
 
-def delete_list(list_id: int) -> Dict:
-    """Delete a list (also deletes all items in it via CASCADE)."""
+def delete_list(list_id: int, permanent: bool = False) -> Dict:
+    """Soft-delete a list (move to trash).
+
+    Args:
+        list_id: The list ID
+        permanent: If True, permanently delete (no recovery). Default is soft delete.
+    """
     try:
         client = get_client()
-        client.table('user_lists').delete().eq('id', list_id).execute()
+        if permanent:
+            # Permanent delete - also deletes items via CASCADE
+            client.table('user_lists').delete().eq('id', list_id).execute()
+        else:
+            # Soft delete - set deleted_at timestamp
+            from datetime import datetime, timezone
+            try:
+                client.table('user_lists').update({
+                    'deleted_at': datetime.now(timezone.utc).isoformat()
+                }).eq('id', list_id).execute()
+            except Exception as soft_err:
+                # Fallback to hard delete if deleted_at column doesn't exist
+                if 'deleted_at' in str(soft_err):
+                    client.table('user_lists').delete().eq('id', list_id).execute()
+                else:
+                    raise soft_err
         return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def restore_list(list_id: int) -> Dict:
+    """Restore a soft-deleted list from trash."""
+    try:
+        client = get_client()
+        response = client.table('user_lists').update({
+            'deleted_at': None
+        }).eq('id', list_id).execute()
+        if response.data:
+            return {'success': True, 'list': response.data[0]}
+        return {'error': 'Restore failed'}
+    except Exception as e:
+        # If deleted_at column doesn't exist, trash feature is not available
+        if 'deleted_at' in str(e):
+            return {'error': 'Trash feature not available - run migration first'}
+        return {'error': str(e)}
+
+
+def empty_trash(user_id: str) -> Dict:
+    """Permanently delete all soft-deleted lists for a user."""
+    try:
+        client = get_client()
+        # Get all deleted lists
+        deleted = get_deleted_lists(user_id)
+        count = len(deleted)
+        # Permanently delete each one
+        for lst in deleted:
+            client.table('user_lists').delete().eq('id', lst['id']).execute()
+        return {'success': True, 'deleted_count': count}
     except Exception as e:
         return {'error': str(e)}
 
