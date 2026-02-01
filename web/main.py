@@ -1016,6 +1016,13 @@ COMMON_STYLES = '''
         .help-btn-header { display: none !important; }
     }
 
+    /* Header reveal only on mobile - disable on desktop */
+    @media (min-width: 769px) {
+        .q-header {
+            transform: translateY(0) !important;
+        }
+    }
+
     /* Mobile drawer - CSS only, hide on phones/tablets */
     /* Handles both LTR (left drawer) and RTL (right drawer) modes */
     @media (max-width: 768px) {
@@ -1291,7 +1298,8 @@ def create_layout():
         return section
 
     # === Build Header with correct DOM order ===
-    with ui.header().classes('q-py-none').style('height: 64px;'):
+    # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
+    with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style('height: 64px;'):
         with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
             if rtl_mode:
                 # RTL: Render Right -> Center -> Left for correct tab order
