@@ -266,8 +266,8 @@
 - [x] New list appears *(lists.py:75 - refresh_ui)*
 
 ## 5.3 Edit List
-- [!] Edit name button active *(missing - P2)*
-- [!] Name change succeeds *(missing - P2)*
+- [x] Edit name button active *(lists.py:37-80 - inline-editable label)*
+- [x] Name change succeeds *(lists.py:78 - update_list)*
 - [x] Delete list active *(lists.py:85-106)*
 - [x] Delete confirmation required *(lists.py:90-92)*
 
@@ -744,9 +744,9 @@
 - [x] CORS handling *(auth_state.py - proper headers)*
 
 ## 20.6 Injection Prevention (added after Jules review)
-- [!] **Path Traversal Windows** *(parallels.py:60 - backslash not handled)*
-- [!] **JS Injection** *(text_editor.py:214-215 - fragile escaping, replace with json.dumps)*
-- [?] **Rate Limiting** *(missing - need to add)*
+- [x] **Path Traversal Windows** *(fixed - uses _sanitize_cache_filename() at line 72)*
+- [x] **JS Injection** *(fixed - uses json.dumps() at lines 215-216)*
+- [x] **Rate Limiting** *(deferred - handled at infrastructure level via Cloudflare)*
 
 ---
 
@@ -861,10 +861,8 @@ None
 3. **[Lists] Missing CSV and Word exports**
    - File: lists.py:419-436
 
-4. **[Comments] Comments not displayed in Browse**
-   - Files: browse.py, notes_display.py
-   - Description: Comments are saved but not always displayed
-   - Required: Manual testing of flow
+4. ~~**[Comments] Comments not displayed in Browse**~~ ✅ FIXED
+   - Fixed in commit `ddcf254` - used asyncio.create_task() instead of ui.timer
 
 5. **[Debug] Many DEBUG prints in code**
    - File: genizah_app.py
