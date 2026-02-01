@@ -4060,68 +4060,74 @@ class SearchEngine:
         LOGGER.info(f"[DEBUG] Tantivy returned {total_hits} hits")
         results = []
         regex_filtered_count = 0
+        was_interrupted = False
 
-        for i, (score, doc_addr) in enumerate(hits):
-            if progress_callback and i % 50 == 0:
-                progress_callback(i, total_hits)
-            try:
-                doc = self.searcher.doc(doc_addr)
-                content = self._get_field(doc, 'content', [""])[0]
-                scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
-                scope = scope_list[0]
+        try:
+            for i, (score, doc_addr) in enumerate(hits):
+                if progress_callback and i % 50 == 0:
+                    progress_callback(i, total_hits)
+                try:
+                    doc = self.searcher.doc(doc_addr)
+                    content = self._get_field(doc, 'content', [""])[0]
+                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
+                    scope = scope_list[0]
 
-                # Check for match before any heavy parsing
-                match_obj = regex.search(content)
-                if not match_obj:
-                    regex_filtered_count += 1
-                    continue
+                    # Check for match before any heavy parsing
+                    match_obj = regex.search(content)
+                    if not match_obj:
+                        regex_filtered_count += 1
+                        continue
 
-                boundaries = self._parse_boundaries(doc) if scope != 'page' else []
-                span = match_obj.span()
-                if boundaries:
-                    span_map = self._map_span_to_pages(span, boundaries)
-                    primary = span_map.get('primary') or {}
-                    display_header = primary.get('full_header', doc['full_header'][0])
-                    source_label = primary.get('source', doc['source'][0])
-                    hl_c = self._highlight_by_span(content, span, False)
-                    hl_f = self._highlight_by_span(content, span, True)
-                    meta = self.meta_mgr.get_display_data(display_header, source_label)
-                    page_highlights = []
-                    for ov in span_map.get('overlaps', []):
-                        if 'span' in ov and ov.get('uid'):
-                            page_highlights.append({
-                                'uid': ov.get('uid'),
-                                'p_num': ov.get('p_num'),
-                                'span': ov.get('span'),
-                                'full_header': ov.get('full_header', ''),
-                                'source': ov.get('source', '')
-                            })
-                    results.append({
-                        'display': meta,
-                        'snippet': hl_c or "",
-                        'full_text': content,
-                        'uid': primary.get('uid') or doc['unique_id'][0],
-                        'raw_header': display_header,
-                        'raw_file_hl': hl_f or "",
-                        'highlight_pattern': pattern_str,
-                        'page_highlights': page_highlights,
-                        'cross_page': span_map.get('cross_page', False),
-                        'scope': scope
-                    })
-                else:
-                    hl_c = self.highlight(content, regex, False)
-                    hl_f = self.highlight(content, regex, True)
-                    if hl_c:
-                        meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+                    boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    span = match_obj.span()
+                    if boundaries:
+                        span_map = self._map_span_to_pages(span, boundaries)
+                        primary = span_map.get('primary') or {}
+                        display_header = primary.get('full_header', doc['full_header'][0])
+                        source_label = primary.get('source', doc['source'][0])
+                        hl_c = self._highlight_by_span(content, span, False)
+                        hl_f = self._highlight_by_span(content, span, True)
+                        meta = self.meta_mgr.get_display_data(display_header, source_label)
+                        page_highlights = []
+                        for ov in span_map.get('overlaps', []):
+                            if 'span' in ov and ov.get('uid'):
+                                page_highlights.append({
+                                    'uid': ov.get('uid'),
+                                    'p_num': ov.get('p_num'),
+                                    'span': ov.get('span'),
+                                    'full_header': ov.get('full_header', ''),
+                                    'source': ov.get('source', '')
+                                })
                         results.append({
-                            'display': meta, 'snippet': hl_c, 'full_text': content,
-                            'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
-                            'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                            'display': meta,
+                            'snippet': hl_c or "",
+                            'full_text': content,
+                            'uid': primary.get('uid') or doc['unique_id'][0],
+                            'raw_header': display_header,
+                            'raw_file_hl': hl_f or "",
+                            'highlight_pattern': pattern_str,
+                            'page_highlights': page_highlights,
+                            'cross_page': span_map.get('cross_page', False),
                             'scope': scope
                         })
-            except Exception as e:
-                LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
-        LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}")
+                    else:
+                        hl_c = self.highlight(content, regex, False)
+                        hl_f = self.highlight(content, regex, True)
+                        if hl_c:
+                            meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+                            results.append({
+                                'display': meta, 'snippet': hl_c, 'full_text': content,
+                                'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
+                                'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                                'scope': scope
+                            })
+                except Exception as e:
+                    LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
+        except InterruptedError:
+            was_interrupted = True
+            LOGGER.info(f"[DEBUG] Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
+
+        LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
 
         # --- Apply Exclusion Filter (NOT Filter) ---

@@ -29,6 +29,7 @@ def create_search_page(initial_query: str = None):
             self.progress = 0.0
             self.status = ""
             self.is_running = False
+            self.is_cancelled = False  # For stop button functionality
             self.results = []
             self.selected_result = None
             self.total_count = 0
@@ -168,6 +169,15 @@ def create_search_page(initial_query: str = None):
                 search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
                     'btn-primary h-10 px-8'
                 )
+
+                # Stop Button (hidden by default) - shows partial results
+                with ui.column().classes('items-center gap-0').style('display: none;') as cancel_btn:
+                    ui.button(
+                        tr('Stop'),
+                        icon='stop',
+                        on_click=lambda: cancel_search()
+                    ).classes('h-10 px-4').props('outline color=red')
+                    ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -601,13 +611,22 @@ def create_search_page(initial_query: str = None):
         ''')
         ui.notify(f"{len(selected_results)} {tr('results copied to clipboard')}", type='positive')
 
+    def cancel_search():
+        """Cancel the current search and show partial results."""
+        search_state.is_cancelled = True
+        search_state.status = tr('Cancelling...')
+
     def update_progress_ui():
         try:
             if search_state.is_running:
                 progress_bar.classes(remove='opacity-0')
                 progress_bar.value = search_state.progress
                 status_label.text = search_state.status
+                # Show stop button using style (not set_visibility to avoid performance issues)
+                cancel_btn.style('display: flex;')
             else:
+                # Hide stop button
+                cancel_btn.style('display: none;')
                 if search_state.progress >= 1.0:
                     progress_bar.value = 1.0
                     status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
@@ -657,6 +676,7 @@ def create_search_page(initial_query: str = None):
 
         # Reset UI
         search_state.is_running = True
+        search_state.is_cancelled = False  # Reset cancellation flag
         search_state.progress = 0
         search_state.status = tr("Starting...")
         search_state.results = []
@@ -666,6 +686,9 @@ def create_search_page(initial_query: str = None):
         render_results([])
 
         def progress_cb(current, total):
+            # Check if search was cancelled
+            if search_state.is_cancelled:
+                raise InterruptedError("Search cancelled")
             if total > 0:
                 search_state.progress = current / total
                 search_state.status = f"{current} / {total}"
@@ -700,9 +723,13 @@ def create_search_page(initial_query: str = None):
 
         results = await run.io_bound(run_core_search)
 
+        # Check if search was cancelled before resetting
+        was_cancelled = search_state.is_cancelled
+
         # Save results
         state.last_results = results
         search_state.is_running = False
+        search_state.is_cancelled = False  # Reset flag
         search_state.progress = 1.0
         search_state.results = results
         search_btn.enable()
@@ -712,8 +739,14 @@ def create_search_page(initial_query: str = None):
         except Exception:
             pass
 
-        # Update count
-        results_count.text = f"{len(results)} {tr('Results')}"
+        # Show message if results are partial (search was cancelled)
+        if was_cancelled:
+            search_state.status = tr('Partial results (search stopped)')
+            ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+            results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
+        else:
+            # Update count
+            results_count.text = f"{len(results)} {tr('Results')}"
 
         # Render results
         render_results(results[:200])
