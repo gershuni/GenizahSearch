@@ -15,7 +15,8 @@ Provides inline text editing functionality with:
 
 from nicegui import ui, app
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import create_correction
 from typing import Optional, Callable
 from datetime import datetime
 import json
@@ -349,10 +350,15 @@ def create_edit_text_dialog(
 
                     ui.button(tr('Save Draft'), icon='save', on_click=save_locally).props('outline')
 
-                    # Submit to backend
-                    async def save_and_submit():
+                    # Submit to Supabase
+                    def save_and_submit():
                         if not GlobalAuthState.is_logged_in():
                             ui.notify(tr('Please login first'), type='negative')
+                            return
+
+                        user_id = GlobalAuthState.get_user_id()
+                        if not user_id:
+                            ui.notify(tr('User not found'), type='negative')
                             return
 
                         text = edited_textarea.value
@@ -365,17 +371,20 @@ def create_edit_text_dialog(
                         # Show loading
                         submit_btn.props('loading')
 
-                        # Submit to backend
-                        result = await api_call("POST", "/corrections/", {
-                            "document_id": document_id,
-                            "system_id": document_id,
-                            "shelfmark": shelfmark if shelfmark else None,
-                            "page_number": page_number,
-                            "original_text": original_text,
-                            "corrected_text": text,
-                            "correction_type": "text_correction",
-                            "notes": notes if notes else None
-                        })
+                        # Determine status based on role
+                        status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
+
+                        # Submit to Supabase
+                        result = create_correction(
+                            author_id=user_id,
+                            sys_id=document_id,
+                            shelfmark=shelfmark if shelfmark else '',
+                            page_number=page_number,
+                            original_text=original_text,
+                            corrected_text=text,
+                            notes=notes if notes else '',
+                            status=status
+                        )
 
                         submit_btn.props(remove='loading')
 

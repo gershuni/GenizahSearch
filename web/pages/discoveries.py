@@ -9,12 +9,18 @@ Shows:
 - NO leaderboard (researchers prefer anonymity over competition)
 """
 
-import asyncio
 import difflib
 import html
 from nicegui import ui, app, run
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import (
+    get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
+    delete_comment, delete_correction, delete_fragment_join,
+    get_discovery_responses, create_discovery_response,
+    vote_discovery, toggle_discovery_answered,
+    toggle_discovery_pin, toggle_discovery_hidden
+)
 from web.state import state
 from typing import Optional
 from datetime import datetime
@@ -84,7 +90,7 @@ def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
     return doc_id or '', ''
 
 
-async def create_discoveries_page():
+def create_discoveries_page():
     """Create the Discoveries Center page."""
 
     with ui.column().classes('w-full max-w-5xl mx-auto gap-6 fade-in'):
@@ -104,7 +110,7 @@ async def create_discoveries_page():
                 ui.spinner('dots', size='md', color='primary')
         # Clear and load actual stats
         stats_row.clear()
-        await load_stats(stats_row)
+        load_stats(stats_row)
 
         # === Filter Bar ===
         with ui.row().classes('w-full items-center justify-between p-3 rounded').style('background: var(--surface-secondary);'):
@@ -136,13 +142,13 @@ async def create_discoveries_page():
                 ).props('outlined dense').classes('min-w-32')
 
             # Create new button
-            async def open_create_dialog():
+            def open_create_dialog():
                 if not GlobalAuthState.is_logged_in():
                     ui.notify(tr('Please login to create a discovery'), type='warning')
                     return
 
-                async def on_discovery_created():
-                    await refresh_feed()
+                def on_discovery_created():
+                    refresh_feed()
 
                 dialog = create_new_discovery_dialog(on_success=on_discovery_created)
                 dialog.open()
@@ -152,7 +158,7 @@ async def create_discoveries_page():
         # === Activity Feed ===
         feed_container = ui.column().classes('w-full gap-4')
 
-        async def refresh_feed():
+        def refresh_feed():
             """Reload the activity feed."""
             feed_container.clear()
             # Show loading spinner while fetching
@@ -163,15 +169,15 @@ async def create_discoveries_page():
             # Now load the actual feed
             feed_container.clear()
             with feed_container:
-                await load_feed(
+                load_feed(
                     type_filter.value if type_filter.value != 'all' else None,
                     period_filter.value if period_filter.value != 'all' else None,
                     on_refresh=refresh_feed
                 )
 
-        # Bind filter changes - use async handler for proper await
-        async def on_filter_change():
-            await refresh_feed()
+        # Bind filter changes
+        def on_filter_change():
+            refresh_feed()
 
         type_filter.on('update:model-value', on_filter_change)
         period_filter.on('update:model-value', on_filter_change)
@@ -184,19 +190,37 @@ async def create_discoveries_page():
         # Then load the actual feed
         feed_container.clear()
         with feed_container:
-            await load_feed(None, None, on_refresh=refresh_feed)
+            load_feed(None, None, on_refresh=refresh_feed)
 
 
-async def load_stats(container):
+def load_stats(container):
     """Load and display statistics cards."""
-    result = await api_call("GET", "/discoveries/stats/summary")
+    # Get stats from Supabase
+    try:
+        client = get_client()
+        # Get basic stats
+        discoveries = client.table('discoveries').select('id', count='exact').execute()
+        corrections = client.table('corrections').select('id', count='exact').eq('status', 'approved').execute()
+        profiles = client.table('profiles').select('id', count='exact').execute()
+
+        stats = {
+            'words_corrected': 0,  # Would need text analysis
+            'documents_edited': corrections.count or 0,
+            'total_discoveries': discoveries.count or 0,
+            'open_questions': 0,  # Would need filtering
+            'active_contributors': profiles.count or 0
+        }
+    except Exception as e:
+        print(f"Error loading stats: {e}")
+        stats = {
+            'words_corrected': 0,
+            'documents_edited': 0,
+            'total_discoveries': 0,
+            'open_questions': 0,
+            'active_contributors': 0
+        }
 
     with container:
-        if "error" in result:
-            ui.label(tr('Could not load statistics')).style('color: var(--text-tertiary);')
-            return
-
-        stats = result
 
         # Cards layout
         stat_cards = [
@@ -247,15 +271,19 @@ async def load_stats(container):
                     ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
 
 
-async def load_feed(item_type: Optional[str], period: Optional[str], on_refresh=None):
+def load_feed(item_type: Optional[str], period: Optional[str], on_refresh=None):
     """Load and display the activity feed."""
-    params = {"limit": 50, "offset": 0}  # Increased limit
-    if item_type:
-        params["item_type"] = item_type
-    if period:
-        params["period"] = period
+    # Check if admin to include hidden items
+    current_user = GlobalAuthState.get_user()
+    is_admin = current_user and current_user.get('role') == 'admin'
 
-    result = await api_call("GET", "/discoveries/feed/items", params)
+    result = get_feed_items(
+        item_type=item_type,
+        period=period,
+        limit=50,
+        offset=0,
+        include_hidden=is_admin
+    )
 
     if "error" in result:
         with ui.column().classes('w-full items-center py-8'):
@@ -405,56 +433,55 @@ def create_feed_item(item: dict, on_refresh=None):
                         if is_author and item_type in ('discovery', 'question', 'identification', 'note'):
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
 
-                            async def edit_discovery(nid=numeric_id, i=item):
-                                await open_edit_discovery_dialog(nid, i, on_refresh)
+                            def do_edit_discovery(nid=numeric_id, i=item):
+                                open_edit_discovery_dialog(nid, i, on_refresh)
 
-                            ui.button(icon='edit', on_click=edit_discovery).props('flat round dense size=sm').tooltip(tr('Edit'))
+                            ui.button(icon='edit', on_click=do_edit_discovery).props('flat round dense size=sm').tooltip(tr('Edit'))
 
-                            async def delete_discovery(nid=numeric_id):
-                                await confirm_delete_discovery(nid, on_refresh)
+                            def do_delete_discovery(nid=numeric_id):
+                                confirm_delete_discovery(nid, on_refresh)
 
-                            ui.button(icon='delete', on_click=delete_discovery).props('flat round dense size=sm color=negative').tooltip(tr('Delete'))
+                            ui.button(icon='delete', on_click=do_delete_discovery).props('flat round dense size=sm color=negative').tooltip(tr('Delete'))
 
                         # Admin pin button for discoveries
                         if is_admin and item_type in ('discovery', 'question', 'identification', 'note'):
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
                             is_pinned = item.get('is_pinned', False)
 
-                            async def toggle_pin(nid=numeric_id, pinned=is_pinned):
-                                result = await api_call("POST", f"/discoveries/{nid}/pin", {"pinned": not pinned})
+                            def do_toggle_pin(nid=numeric_id, pinned=is_pinned):
+                                result = toggle_discovery_pin(int(nid), not pinned)
                                 if "error" not in result:
                                     ui.notify(tr('Pin toggled'), type='positive')
                                     if on_refresh:
-                                        await on_refresh()
+                                        on_refresh()
 
                             pin_icon = 'push_pin' if is_pinned else 'push_pin'
                             pin_color = 'color=red' if is_pinned else ''
-                            ui.button(icon=pin_icon, on_click=toggle_pin).props(f'flat round dense size=sm {pin_color}').tooltip(tr('Pin') if not is_pinned else tr('Unpin'))
+                            ui.button(icon=pin_icon, on_click=do_toggle_pin).props(f'flat round dense size=sm {pin_color}').tooltip(tr('Pin') if not is_pinned else tr('Unpin'))
 
                             # Admin hide/unhide button for discoveries
                             is_item_hidden = item.get('is_hidden', False)
 
-                            async def toggle_hide_discovery(nid=numeric_id, hidden=is_item_hidden):
-                                endpoint = f"/discoveries/{nid}/unhide" if hidden else f"/discoveries/{nid}/hide"
-                                result = await api_call("POST", endpoint)
+                            def do_toggle_hide(nid=numeric_id, hidden=is_item_hidden):
+                                result = toggle_discovery_hidden(int(nid), not hidden)
                                 if "error" not in result:
                                     msg = tr('Item unhidden') if hidden else tr('Item hidden')
                                     ui.notify(msg, type='positive')
                                     if on_refresh:
-                                        await on_refresh()
+                                        on_refresh()
                                 else:
                                     ui.notify(result.get("error", tr('Error')), type='negative')
 
                             if is_item_hidden:
-                                ui.button(icon='visibility', on_click=toggle_hide_discovery).props('flat round dense size=sm color=green').tooltip(tr('Unhide'))
+                                ui.button(icon='visibility', on_click=do_toggle_hide).props('flat round dense size=sm color=green').tooltip(tr('Unhide'))
                             else:
-                                ui.button(icon='visibility_off', on_click=toggle_hide_discovery).props('flat round dense size=sm').tooltip(tr('Hide'))
+                                ui.button(icon='visibility_off', on_click=do_toggle_hide).props('flat round dense size=sm').tooltip(tr('Hide'))
 
                         # Admin delete for comments
                         if is_admin and item_type == 'comment':
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
 
-                            async def delete_comment_admin(nid=numeric_id):
+                            def do_delete_comment_admin(nid=numeric_id):
                                 # Confirm dialog
                                 confirm_dialog = ui.dialog()
                                 with confirm_dialog, ui.card().classes('p-4'):
@@ -463,26 +490,26 @@ def create_feed_item(item: dict, on_refresh=None):
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
-                                        async def do_delete():
-                                            result = await api_call("DELETE", f"/comments/{nid}")
+                                        def do_delete():
+                                            result = delete_comment(int(nid))
                                             confirm_dialog.close()
                                             if "error" not in result:
                                                 ui.notify(tr('Comment deleted'), type='positive')
                                                 if on_refresh:
-                                                    await on_refresh()
+                                                    on_refresh()
                                             else:
                                                 ui.notify(result.get("error", tr('Error')), type='negative')
 
                                         ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                 confirm_dialog.open()
 
-                            ui.button(icon='delete', on_click=delete_comment_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete comment'))
+                            ui.button(icon='delete', on_click=do_delete_comment_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete comment'))
 
                         # Admin delete for corrections
                         if is_admin and item_type == 'correction':
                             numeric_id = item_id.split('_')[-1] if '_' in item_id else item_id
 
-                            async def delete_correction_admin(nid=numeric_id):
+                            def do_delete_correction_admin(nid=numeric_id):
                                 # Confirm dialog
                                 confirm_dialog = ui.dialog()
                                 with confirm_dialog, ui.card().classes('p-4'):
@@ -491,20 +518,20 @@ def create_feed_item(item: dict, on_refresh=None):
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
-                                        async def do_delete():
-                                            result = await api_call("DELETE", f"/corrections/{nid}")
+                                        def do_delete():
+                                            result = delete_correction(int(nid))
                                             confirm_dialog.close()
                                             if "error" not in result:
                                                 ui.notify(tr('Correction deleted'), type='positive')
                                                 if on_refresh:
-                                                    await on_refresh()
+                                                    on_refresh()
                                             else:
                                                 ui.notify(result.get("error", tr('Error')), type='negative')
 
                                         ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                 confirm_dialog.open()
 
-                            ui.button(icon='delete', on_click=delete_correction_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete correction'))
+                            ui.button(icon='delete', on_click=do_delete_correction_admin).props('flat round dense size=sm color=negative').tooltip(tr('Delete correction'))
 
                 # Title - for corrections and joins, generate localized title
                 if item_type == 'correction':
@@ -647,7 +674,7 @@ def create_feed_item(item: dict, on_refresh=None):
 
                                             # Admin delete button for individual join
                                             if is_admin and cj_id:
-                                                async def delete_single_join(jid=cj_id):
+                                                def do_delete_single_join(jid=cj_id):
                                                     confirm_dialog = ui.dialog()
                                                     with confirm_dialog, ui.card().classes('p-4'):
                                                         # Changed to H3
@@ -656,20 +683,20 @@ def create_feed_item(item: dict, on_refresh=None):
                                                         with ui.row().classes('justify-end gap-2 mt-4'):
                                                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
-                                                            async def do_delete():
-                                                                result = await api_call("DELETE", f"/joins/{jid}")
+                                                            def do_delete():
+                                                                result = delete_fragment_join(int(jid))
                                                                 confirm_dialog.close()
                                                                 if "error" not in result:
                                                                     ui.notify(tr('Join deleted'), type='positive')
                                                                     if on_refresh:
-                                                                        await on_refresh()
+                                                                        on_refresh()
                                                                 else:
                                                                     ui.notify(result.get("error", tr('Error')), type='negative')
 
                                                             ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                                     confirm_dialog.open()
 
-                                                ui.button(icon='delete', on_click=delete_single_join).props('flat round dense size=xs color=negative').tooltip(tr('Delete join'))
+                                                ui.button(icon='delete', on_click=do_delete_single_join).props('flat round dense size=xs color=negative').tooltip(tr('Delete join'))
 
                                         if cj_notes:
                                             ui.label(cj_notes).classes('text-xs mt-1').style('color: var(--text-secondary);')
@@ -754,68 +781,79 @@ def create_feed_item(item: dict, on_refresh=None):
                                 downvotes = item.get('downvotes', 0) or 0
 
                                 with ui.row().classes('items-center gap-1'):
-                                    async def vote_up(nid=numeric_id):
+                                    def do_vote_up(nid=numeric_id):
                                         if not GlobalAuthState.is_logged_in():
                                             ui.notify(tr('Login to vote'), type='warning')
                                             return
-                                        result = await api_call("POST", f"/discoveries/{nid}/vote?vote_type=up")
+                                        user_id = GlobalAuthState.get_user_id()
+                                        result = vote_discovery(int(nid), user_id, 'up')
                                         if "error" not in result:
                                             ui.notify(tr('Vote recorded'), type='positive')
                                             if on_refresh:
-                                                await on_refresh()
+                                                on_refresh()
 
-                                    ui.button(icon='thumb_up', on_click=vote_up).props('flat dense size=sm').tooltip(tr('Upvote'))
+                                    ui.button(icon='thumb_up', on_click=do_vote_up).props('flat dense size=sm').tooltip(tr('Upvote'))
                                     ui.label(str(upvotes)).classes('text-sm font-medium')
 
                                 with ui.row().classes('items-center gap-1'):
-                                    async def vote_down(nid=numeric_id):
+                                    def do_vote_down(nid=numeric_id):
                                         if not GlobalAuthState.is_logged_in():
                                             ui.notify(tr('Login to vote'), type='warning')
                                             return
-                                        result = await api_call("POST", f"/discoveries/{nid}/vote?vote_type=down")
+                                        user_id = GlobalAuthState.get_user_id()
+                                        result = vote_discovery(int(nid), user_id, 'down')
                                         if "error" not in result:
                                             ui.notify(tr('Vote recorded'), type='positive')
                                             if on_refresh:
-                                                await on_refresh()
+                                                on_refresh()
 
-                                    ui.button(icon='thumb_down', on_click=vote_down).props('flat dense size=sm').tooltip(tr('Downvote'))
+                                    ui.button(icon='thumb_down', on_click=do_vote_down).props('flat dense size=sm').tooltip(tr('Downvote'))
                                     ui.label(str(downvotes)).classes('text-sm font-medium')
 
                                 # Mark as answered button (for questions, author or admin only)
                                 if item_type == 'question' and (is_author or is_admin):
                                     is_answered = item.get('is_answered', False)
 
-                                    async def toggle_answered(nid=numeric_id, answered=is_answered):
-                                        result = await api_call("POST", f"/discoveries/{nid}/answer?answered={str(not answered).lower()}")
+                                    def do_toggle_answered(nid=numeric_id, answered=is_answered):
+                                        result = toggle_discovery_answered(int(nid), not answered)
                                         if "error" not in result:
                                             ui.notify(tr('Status updated'), type='positive')
                                             if on_refresh:
-                                                await on_refresh()
+                                                on_refresh()
 
                                     if is_answered:
-                                        ui.button(tr('Mark as unanswered'), icon='help_outline', on_click=toggle_answered).props('flat dense size=sm')
+                                        ui.button(tr('Mark as unanswered'), icon='help_outline', on_click=do_toggle_answered).props('flat dense size=sm')
                                     else:
-                                        ui.button(tr('Mark as answered'), icon='check_circle', on_click=toggle_answered).props('flat dense size=sm color=green')
+                                        ui.button(tr('Mark as answered'), icon='check_circle', on_click=do_toggle_answered).props('flat dense size=sm color=green')
 
                             # Responses section
                             ui.separator().classes('my-2')
                             responses_container = ui.column().classes('w-full gap-2')
 
-                            async def load_responses(container=responses_container, nid=numeric_id):
+                            def do_load_responses(container=responses_container, nid=numeric_id):
                                 try:
                                     if container.client.has_been_deleted: return
                                     container.clear()
                                     with container:
-                                        result = await api_call("GET", f"/discoveries/{nid}/responses")
+                                        responses = get_discovery_responses(int(nid))
                                         if container.client.has_been_deleted: return
-                                        if "error" not in result:
-                                            responses = result.get('items', [])
-                                            if responses:
-                                                ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
-                                                for resp in responses:
-                                                    create_response_item(resp)
-                                            else:
-                                                ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
+                                        if responses:
+                                            ui.label(f"{tr('Responses')} ({len(responses)})").classes('font-medium text-sm')
+                                            for resp in responses:
+                                                # Format response for display
+                                                profile = resp.get('profiles', {}) or {}
+                                                formatted_resp = {
+                                                    'content': resp.get('content', ''),
+                                                    'created_at': resp.get('created_at', ''),
+                                                    'author': {
+                                                        'full_name': profile.get('full_name'),
+                                                        'username': profile.get('username'),
+                                                        'is_anonymous': resp.get('is_anonymous', False)
+                                                    }
+                                                }
+                                                create_response_item(formatted_resp)
+                                        else:
+                                            ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
                                 except Exception:
                                     pass
 
@@ -825,27 +863,30 @@ def create_feed_item(item: dict, on_refresh=None):
                                         reply_input = ui.textarea(placeholder=tr('Write a reply...')).classes('w-full').props('outlined dense rows=2').style('direction: rtl;')
                                         anonymous_reply = ui.checkbox(tr('Reply anonymously'), value=False).classes('text-xs')
 
-                                        async def submit_reply(inp=reply_input, anon=anonymous_reply, nid=nid):
+                                        def do_submit_reply(inp=reply_input, anon=anonymous_reply, nid=nid):
                                             if not inp.value or not inp.value.strip():
                                                 ui.notify(tr('Please enter a reply'), type='warning')
                                                 return
-                                            result = await api_call("POST", f"/discoveries/{nid}/responses", {
-                                                "content": inp.value.strip(),
-                                                "is_anonymous": anon.value
-                                            })
+                                            user_id = GlobalAuthState.get_user_id()
+                                            result = create_discovery_response(
+                                                discovery_id=int(nid),
+                                                user_id=user_id,
+                                                content=inp.value.strip(),
+                                                is_anonymous=anon.value
+                                            )
                                             if "error" in result:
                                                 ui.notify(result["error"], type='negative')
                                             else:
                                                 ui.notify(tr('Reply posted'), type='positive')
                                                 inp.value = ''
-                                                await load_responses()
+                                                do_load_responses()
 
-                                        ui.button(tr('Reply'), icon='send', on_click=submit_reply).props('dense color=primary').classes('self-end')
+                                        ui.button(tr('Reply'), icon='send', on_click=do_submit_reply).props('dense color=primary').classes('self-end')
                                     else:
                                         ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
 
                             # Load responses when expansion opens
-                            ui.timer(0.1, load_responses, once=True)
+                            ui.timer(0.1, do_load_responses, once=True)
 
                 # Footer - collapsed view info
                 with ui.row().classes('w-full items-center justify-between mt-2'):
@@ -881,7 +922,7 @@ def create_response_item(resp: dict):
         ui.label(resp.get('content', '')).classes('text-sm whitespace-pre-wrap').style('direction: rtl; color: var(--text-primary);')
 
 
-async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
+def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
     """Open dialog to edit a discovery."""
     from web.state import state
 
@@ -1133,7 +1174,7 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-            async def save_changes():
+            def save_changes():
                 data = {
                     "title": title_input.value,
                     "content": content_input.value,
@@ -1141,24 +1182,21 @@ async def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=N
                     "shelfmark": selected_doc['shelfmark'],
                     "page_number": selected_doc['page_number']
                 }
-                result = await api_call("PUT", f"/discoveries/{discovery_id}", data)
+                result = update_discovery(int(discovery_id), data)
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
                     ui.notify(tr('Discovery updated'), type='positive')
                     dialog.close()
                     if on_refresh:
-                        if asyncio.iscoroutinefunction(on_refresh):
-                            await on_refresh()
-                        else:
-                            on_refresh()
+                        on_refresh()
 
             ui.button(tr('Save'), icon='save', on_click=save_changes).props('color=primary')
 
     dialog.open()
 
 
-async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
+def confirm_delete_discovery(discovery_id: str, on_refresh=None):
     """Confirm and delete a discovery."""
     dialog = ui.dialog()
 
@@ -1170,15 +1208,15 @@ async def confirm_delete_discovery(discovery_id: str, on_refresh=None):
         with ui.row().classes('justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-            async def do_delete():
-                result = await api_call("DELETE", f"/discoveries/{discovery_id}")
+            def do_delete():
+                result = delete_discovery(int(discovery_id))
                 dialog.close()
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
                     ui.notify(tr('Discovery deleted'), type='positive')
                     if on_refresh:
-                        await on_refresh()
+                        on_refresh()
 
             ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
 
@@ -1539,9 +1577,14 @@ def create_new_discovery_dialog(on_success=None):
                 ui.label(tr('Your name will not be shown publicly')).classes('text-xs ml-8').style('color: var(--text-tertiary);')
 
                 # Submit button
-                async def submit_discovery():
+                def submit_discovery():
                     if not title_input.value or not content_input.value:
                         ui.notify(tr('Please fill in title and description'), type='warning')
+                        return
+
+                    user_id = GlobalAuthState.get_user_id()
+                    if not user_id:
+                        ui.notify(tr('Please login to share discoveries'), type='warning')
                         return
 
                     page_num = None
@@ -1561,19 +1604,18 @@ def create_new_discovery_dialog(on_success=None):
                         if rm.get('shelfmark') or rm.get('document_id')
                     ]
 
-                    data = {
-                        "discovery_type": disc_type.value,
-                        "title": title_input.value,
-                        "content": content_input.value,
-                        "document_id": doc_id_input.value or None,
-                        "page_number": page_num,
-                        "shelfmark": shelfmark_hidden.value or None,
-                        "is_anonymous": anonymous_check.value,
-                        "additional_shelfmarks": valid_additional_shelfmarks if valid_additional_shelfmarks else None,
-                        "related_manuscripts": valid_related_manuscripts if valid_related_manuscripts else None
-                    }
-
-                    result = await api_call("POST", "/discoveries/", data)
+                    result = create_discovery(
+                        user_id=user_id,
+                        title=title_input.value,
+                        content=content_input.value,
+                        type=disc_type.value,
+                        document_id=doc_id_input.value or None,
+                        shelfmark=shelfmark_hidden.value or None,
+                        page_number=page_num,
+                        is_anonymous=anonymous_check.value,
+                        additional_shelfmarks=valid_additional_shelfmarks if valid_additional_shelfmarks else None,
+                        related_manuscripts=valid_related_manuscripts if valid_related_manuscripts else None
+                    )
 
                     if "error" in result:
                         ui.notify(result.get("error", tr('Error submitting')), type='negative')
@@ -1581,11 +1623,7 @@ def create_new_discovery_dialog(on_success=None):
                         ui.notify(tr('Discovery shared successfully!'), type='positive')
                         dialog.close()
                         if on_success:
-                            # Handle both sync and async callbacks
-                            if asyncio.iscoroutinefunction(on_success):
-                                await on_success()
-                            else:
-                                on_success()
+                            on_success()
 
                 with ui.row().classes('w-full justify-end gap-2 mt-4'):
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')

@@ -13,6 +13,7 @@ Replaces the FastAPI backend for data operations.
 
 import os
 from typing import Optional, Dict, List, Any
+from urllib.parse import urlencode
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 
@@ -167,31 +168,33 @@ def refresh_session() -> Dict:
 
 def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
     """
-    Get OAuth URL for social login.
+    Get OAuth URL for social login using implicit flow.
+
+    Uses response_type=token for implicit flow which returns tokens
+    directly in the URL hash, avoiding PKCE code_verifier storage issues
+    in server-side applications.
 
     Args:
         provider: OAuth provider ('google', 'github', etc.)
-        redirect_to: URL to redirect after auth (defaults to current site)
+        redirect_to: URL to redirect after auth
 
     Returns:
         Dict with 'url' on success, or 'error' on failure
     """
     try:
-        client = get_client()
+        # Build the OAuth URL for implicit flow
+        auth_url = f"{SUPABASE_URL}/auth/v1/authorize"
 
-        # Build options
-        options = {}
-        if redirect_to:
-            options['redirect_to'] = redirect_to
-
-        response = client.auth.sign_in_with_oauth({
+        params = {
             'provider': provider,
-            'options': options if options else None
-        })
+            'response_type': 'token',  # Implicit flow - returns tokens in hash
+        }
+        if redirect_to:
+            params['redirect_to'] = redirect_to
 
-        if response and response.url:
-            return {'success': True, 'url': response.url}
-        return {'error': 'Failed to get OAuth URL'}
+        url = f"{auth_url}?{urlencode(params)}"
+
+        return {'success': True, 'url': url}
 
     except Exception as e:
         return {'error': f'OAuth error: {str(e)}'}
@@ -227,6 +230,9 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
 def exchange_code_for_session(code: str) -> Dict:
     """
     Exchange OAuth code for session (PKCE flow).
+
+    Note: This is a fallback for PKCE flow. The primary OAuth flow uses
+    implicit flow (response_type=token) which returns tokens directly.
 
     Args:
         code: The authorization code from URL query parameter
@@ -735,7 +741,9 @@ def get_discoveries(user_id: str = None, type: str = None, status: str = None) -
 
 
 def create_discovery(user_id: str, title: str, content: str, type: str = 'discovery',
-                     shelfmarks: List[str] = None, is_anonymous: bool = False) -> Dict:
+                     document_id: str = None, shelfmark: str = None, page_number: int = None,
+                     is_anonymous: bool = False, additional_shelfmarks: List[Dict] = None,
+                     related_manuscripts: List[Dict] = None) -> Dict:
     """Create a new discovery."""
     try:
         client = get_client()
@@ -744,9 +752,19 @@ def create_discovery(user_id: str, title: str, content: str, type: str = 'discov
             'title': title,
             'content': content,
             'type': type,
-            'shelfmarks': shelfmarks or [],
             'is_anonymous': is_anonymous
         }
+        if document_id:
+            data['document_id'] = document_id
+        if shelfmark:
+            data['shelfmark'] = shelfmark
+        if page_number is not None:
+            data['page_number'] = page_number
+        if additional_shelfmarks:
+            data['additional_shelfmarks'] = additional_shelfmarks
+        if related_manuscripts:
+            data['related_manuscripts'] = related_manuscripts
+
         response = client.table('discoveries').insert(data).execute()
         if response.data:
             return {'success': True, 'discovery': response.data[0]}
@@ -804,3 +822,312 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
         return {'error': 'Failed to create join'}
     except Exception as e:
         return {'error': str(e)}
+
+
+def delete_fragment_join(join_id: int) -> Dict:
+    """Delete a fragment join."""
+    try:
+        client = get_client()
+        client.table('fragment_joins').delete().eq('id', join_id).execute()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
+# DELETE OPERATIONS
+# ============================================================================
+
+def delete_comment(comment_id: int) -> Dict:
+    """Delete a comment."""
+    try:
+        client = get_client()
+        client.table('comments').delete().eq('id', comment_id).execute()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def delete_correction(correction_id: int) -> Dict:
+    """Delete a correction."""
+    try:
+        client = get_client()
+        client.table('corrections').delete().eq('id', correction_id).execute()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def delete_discovery(discovery_id: int) -> Dict:
+    """Delete a discovery."""
+    try:
+        client = get_client()
+        client.table('discoveries').delete().eq('id', discovery_id).execute()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def update_discovery(discovery_id: int, data: Dict) -> Dict:
+    """Update a discovery."""
+    try:
+        client = get_client()
+        response = client.table('discoveries').update(data).eq('id', discovery_id).execute()
+        if response.data:
+            return {'success': True, 'discovery': response.data[0]}
+        return {'error': 'Failed to update discovery'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
+# DISCOVERY RESPONSES
+# ============================================================================
+
+def get_discovery_responses(discovery_id: int) -> List[Dict]:
+    """Get responses for a discovery."""
+    try:
+        client = get_client()
+        response = client.table('discovery_responses').select(
+            '*, profiles(username, full_name)'
+        ).eq('discovery_id', discovery_id).order('created_at', desc=False).execute()
+        return response.data or []
+    except Exception as e:
+        print(f"Error getting discovery responses: {e}")
+        return []
+
+
+def create_discovery_response(discovery_id: int, user_id: str, content: str,
+                               is_anonymous: bool = False) -> Dict:
+    """Create a response to a discovery."""
+    try:
+        client = get_client()
+        data = {
+            'discovery_id': discovery_id,
+            'user_id': user_id,
+            'content': content,
+            'is_anonymous': is_anonymous
+        }
+        response = client.table('discovery_responses').insert(data).execute()
+        if response.data:
+            return {'success': True, 'response': response.data[0]}
+        return {'error': 'Failed to create response'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
+# DISCOVERY VOTING AND STATUS
+# ============================================================================
+
+def vote_discovery(discovery_id: int, user_id: str, vote_type: str) -> Dict:
+    """Vote on a discovery (up or down)."""
+    try:
+        client = get_client()
+        # Check if user already voted
+        existing = client.table('discovery_votes').select('*').eq(
+            'discovery_id', discovery_id
+        ).eq('user_id', user_id).execute()
+
+        if existing.data:
+            # Update existing vote
+            vote = existing.data[0]
+            if vote.get('vote_type') == vote_type:
+                # Remove vote if same type
+                client.table('discovery_votes').delete().eq('id', vote['id']).execute()
+                return {'success': True, 'action': 'removed'}
+            else:
+                # Change vote
+                client.table('discovery_votes').update({'vote_type': vote_type}).eq(
+                    'id', vote['id']
+                ).execute()
+                return {'success': True, 'action': 'changed'}
+        else:
+            # Create new vote
+            client.table('discovery_votes').insert({
+                'discovery_id': discovery_id,
+                'user_id': user_id,
+                'vote_type': vote_type
+            }).execute()
+            return {'success': True, 'action': 'created'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def toggle_discovery_answered(discovery_id: int, answered: bool) -> Dict:
+    """Toggle answered status of a discovery."""
+    try:
+        client = get_client()
+        response = client.table('discoveries').update({
+            'is_answered': answered
+        }).eq('id', discovery_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Failed to update'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def toggle_discovery_pin(discovery_id: int, pinned: bool) -> Dict:
+    """Toggle pinned status of a discovery."""
+    try:
+        client = get_client()
+        response = client.table('discoveries').update({
+            'is_pinned': pinned
+        }).eq('id', discovery_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Failed to update'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def toggle_discovery_hidden(discovery_id: int, hidden: bool) -> Dict:
+    """Toggle hidden status of a discovery."""
+    try:
+        client = get_client()
+        response = client.table('discoveries').update({
+            'is_hidden': hidden
+        }).eq('id', discovery_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Failed to update'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ============================================================================
+# FEED OPERATIONS
+# ============================================================================
+
+def get_feed_items(item_type: str = None, period: str = None,
+                   limit: int = 50, offset: int = 0, include_hidden: bool = False) -> Dict:
+    """Get activity feed items combining discoveries, corrections, comments, and joins."""
+    try:
+        client = get_client()
+        items = []
+
+        # Get discoveries
+        if not item_type or item_type in ('discovery', 'question', 'identification', 'note'):
+            query = client.table('discoveries').select(
+                '*, profiles(id, username, full_name, affiliation)'
+            )
+            if not include_hidden:
+                query = query.eq('is_hidden', False)
+            if item_type:
+                query = query.eq('type', item_type)
+            discoveries = query.order('created_at', desc=True).limit(limit).execute()
+            for d in (discoveries.data or []):
+                profile = d.get('profiles', {}) or {}
+                items.append({
+                    'id': f"{d.get('type', 'discovery')}_{d.get('id')}",
+                    'item_type': d.get('type', 'discovery'),
+                    'title': d.get('title', ''),
+                    'content_preview': d.get('content', '')[:500] if d.get('content') else '',
+                    'document_id': d.get('document_id'),
+                    'shelfmark': d.get('shelfmark'),
+                    'page_number': d.get('page_number'),
+                    'created_at': d.get('created_at'),
+                    'is_pinned': d.get('is_pinned', False),
+                    'is_featured': d.get('is_featured', False),
+                    'is_answered': d.get('is_answered', False),
+                    'is_hidden': d.get('is_hidden', False),
+                    'upvotes': d.get('upvotes', 0),
+                    'downvotes': d.get('downvotes', 0),
+                    'response_count': d.get('response_count', 0),
+                    'additional_shelfmarks': d.get('additional_shelfmarks'),
+                    'related_manuscripts': d.get('related_manuscripts'),
+                    'author': {
+                        'id': profile.get('id'),
+                        'username': profile.get('username'),
+                        'full_name': profile.get('full_name'),
+                        'affiliation': profile.get('affiliation'),
+                        'is_anonymous': d.get('is_anonymous', False)
+                    }
+                })
+
+        # Get corrections
+        if not item_type or item_type == 'correction':
+            corrections = client.table('corrections').select(
+                '*, profiles(id, username, full_name, affiliation)'
+            ).eq('status', 'approved').order('created_at', desc=True).limit(limit).execute()
+            for c in (corrections.data or []):
+                profile = c.get('profiles', {}) or {}
+                items.append({
+                    'id': f"correction_{c.get('id')}",
+                    'item_type': 'correction',
+                    'title': '',
+                    'original_text': c.get('original_text', ''),
+                    'corrected_text': c.get('corrected_text', ''),
+                    'document_id': c.get('sys_id'),
+                    'shelfmark': c.get('shelfmark'),
+                    'page_number': c.get('page_number'),
+                    'created_at': c.get('created_at'),
+                    'author': {
+                        'id': profile.get('id'),
+                        'username': profile.get('username'),
+                        'full_name': profile.get('full_name'),
+                        'affiliation': profile.get('affiliation')
+                    }
+                })
+
+        # Get comments
+        if not item_type or item_type == 'comment':
+            comments = client.table('comments').select(
+                '*, profiles(id, username, full_name, affiliation)'
+            ).eq('is_public', True).order('created_at', desc=True).limit(limit).execute()
+            for c in (comments.data or []):
+                profile = c.get('profiles', {}) or {}
+                items.append({
+                    'id': f"comment_{c.get('id')}",
+                    'item_type': 'comment',
+                    'title': '',
+                    'content_preview': c.get('content', '')[:500] if c.get('content') else '',
+                    'document_id': c.get('sys_id'),
+                    'shelfmark': c.get('shelfmark'),
+                    'page_number': c.get('page_number'),
+                    'created_at': c.get('created_at'),
+                    'author': {
+                        'id': profile.get('id'),
+                        'username': profile.get('username'),
+                        'full_name': profile.get('full_name'),
+                        'affiliation': profile.get('affiliation')
+                    }
+                })
+
+        # Get joins
+        if not item_type or item_type == 'join':
+            joins = client.table('fragment_joins').select(
+                '*, profiles(id, username, full_name, affiliation)'
+            ).order('created_at', desc=True).limit(limit).execute()
+            for j in (joins.data or []):
+                profile = j.get('profiles', {}) or {}
+                items.append({
+                    'id': f"join_{j.get('id')}",
+                    'item_type': 'join',
+                    'title': f"{j.get('fragment_a_shelfmark', '')} ↔ {j.get('fragment_b_shelfmark', '')}",
+                    'content_preview': j.get('notes', ''),
+                    'document_id': j.get('fragment_a_sys_id'),
+                    'shelfmark': j.get('fragment_a_shelfmark'),
+                    'created_at': j.get('created_at'),
+                    'cluster_fragments': [j.get('fragment_a_shelfmark'), j.get('fragment_b_shelfmark')],
+                    'cluster_joins': [j],
+                    'author': {
+                        'id': profile.get('id'),
+                        'username': profile.get('username'),
+                        'full_name': profile.get('full_name'),
+                        'affiliation': profile.get('affiliation')
+                    }
+                })
+
+        # Sort by created_at descending
+        items.sort(key=lambda x: x.get('created_at', '') or '', reverse=True)
+
+        # Apply offset and limit
+        total = len(items)
+        items = items[offset:offset + limit]
+
+        return {'items': items, 'total': total}
+    except Exception as e:
+        print(f"Error getting feed items: {e}")
+        return {'items': [], 'total': 0, 'error': str(e)}

@@ -1705,8 +1705,8 @@ async def auth_callback_route(code: str = None):
     """
     OAuth callback handler.
     Supabase redirects here after Google login with either:
-    - ?code= parameter (PKCE flow) - needs code exchange
-    - #access_token= hash (implicit flow) - direct tokens
+    - ?code= parameter (PKCE flow) - needs code exchange (fallback)
+    - #access_token= hash (implicit flow) - direct tokens (preferred)
     """
     from web.supabase_client import set_session_from_url, get_profile, exchange_code_for_session
     from web.auth_state import GlobalAuthState
@@ -1739,7 +1739,7 @@ async def auth_callback_route(code: str = None):
         home_btn.classes(remove='hidden')
 
     try:
-        # Method 1: PKCE flow - code in query parameter
+        # Method 1: PKCE flow - code in query parameter (fallback if implicit not available)
         if code:
             print(f"OAuth callback: exchanging code {code[:20]}...")
             result = exchange_code_for_session(code)

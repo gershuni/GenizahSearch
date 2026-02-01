@@ -17,7 +17,8 @@ import html as html_module
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
 
 
@@ -1168,48 +1169,38 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         update_content()
 
         try:
-            if state.draft_id:
-                # 1. Update existing draft first
-                update_res = await api_call("PUT", f"/corrections/{state.draft_id}", {
-                    "corrected_text": state.edit_text,
-                    "notes": state.edit_notes,
-                    "original_text": state.original_edit_text,
-                    "correction_type": "text_correction"
-                })
-                
-                if "error" in update_res:
-                    err_msg = update_res['error'].lower()
-                    if "approved status" in err_msg or "cannot edit" in err_msg:
-                         state.edit_loading = False
-                         state.error_message = f"Correction is already approved/submitted. Changes cannot be saved to this version. Please reload."
-                         state.draft_id = None # Detach
-                         update_content()
-                         return
+            user_id = GlobalAuthState.get_user_id()
+            if not user_id:
+                state.edit_loading = False
+                state.error_message = "User not found"
+                update_content()
+                return
 
-                    state.edit_loading = False
-                    state.error_message = f"Update failed: {update_res['error']}"
-                    update_content()
-                    return
-                    
-                # 2. Submit the draft
-                result = await api_call("POST", f"/corrections/{state.draft_id}/submit", {
-                    "notes": state.edit_notes
+            # Determine status based on role
+            status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
+
+            if state.draft_id:
+                # Update existing draft and change status to pending/approved
+                result = update_correction(state.draft_id, {
+                    'corrected_text': state.edit_text,
+                    'notes': state.edit_notes,
+                    'status': status
                 })
             else:
-                # Create and auto-submit new correction
-                result = await api_call("POST", "/corrections/", {
-                    "document_id": state.current_page.sys_id,
-                    "system_id": state.current_page.sys_id,
-                    "shelfmark": state.current_page.shelfmark,
-                    "page_number": state.current_page.p_num,
-                    "original_text": state.original_edit_text,
-                    "corrected_text": state.edit_text,
-                    "correction_type": "text_correction",
-                    "notes": state.edit_notes if state.edit_notes else None
-                })
+                # Create new correction
+                result = create_correction(
+                    author_id=user_id,
+                    sys_id=state.current_page.sys_id,
+                    shelfmark=state.current_page.shelfmark or '',
+                    page_number=state.current_page.p_num,
+                    original_text=state.original_edit_text,
+                    corrected_text=state.edit_text,
+                    notes=state.edit_notes if state.edit_notes else '',
+                    status=status
+                )
 
             state.edit_loading = False
-            
+
             if "error" in result:
                 state.error_message = result["error"]
                 update_content()
@@ -1217,105 +1208,91 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.edit_mode = False
                 state.draft_saved = False
                 state.draft_id = None
-                
-                # Notifications here might still fail if reload cancels them, 
-                # but let's try avoiding them or moving them after reload logic if possible.
-                # Actually, success notification is important.
-                # If we reload page immediately, notification might be lost or crash context.
-                # Let's try relying on reload to show updated state.
-                
+
                 # Reload page to see changes
                 load_page(direction=0)
-                
-                # Try explicit temporary notification via Javascript or similar if needed, 
-                # but standard ui.notify might fail if context is dead.
-                # We'll skip notify for now to be safe, visually the reload confirms it.
         except Exception as e:
             state.edit_loading = False
             state.error_message = f"Error submitting: {str(e)}"
             update_content()
-            # print traceback for debugging
             print(f"Submit error: {e}")
 
-    async def handle_save_draft():
+    def handle_save_draft():
         """Save draft locally (simulated for now, or use backend draft)."""
         if not GlobalAuthState.is_logged_in():
-             ui.notify(tr('Please login to save drafts'), type='warning')
-             return
+            ui.notify(tr('Please login to save drafts'), type='warning')
+            return
 
-        payload = {
-            "document_id": state.current_page.sys_id,
-            "system_id": state.current_page.sys_id,
-            "shelfmark": state.current_page.shelfmark,
-            "page_number": state.current_page.p_num,
-            "original_text": state.original_edit_text,
-            "corrected_text": state.edit_text,
-            "correction_type": "text_correction",
-            "notes": state.edit_notes if state.edit_notes else None
-        }
+        user_id = GlobalAuthState.get_user_id()
+        if not user_id:
+            ui.notify(tr('User not found'), type='negative')
+            return
 
         if state.draft_id:
             # Update existing draft
-            result = await api_call("PUT", f"/corrections/{state.draft_id}", payload)
+            result = update_correction(state.draft_id, {
+                'corrected_text': state.edit_text,
+                'notes': state.edit_notes,
+                'status': 'draft'
+            })
         else:
-            # Create new draft using query param. Using 'true' (lowercase) is standard.
-            result = await api_call("POST", "/corrections/?save_as_draft=true", payload)
-        
+            # Create new draft
+            result = create_correction(
+                author_id=user_id,
+                sys_id=state.current_page.sys_id,
+                shelfmark=state.current_page.shelfmark or '',
+                page_number=state.current_page.p_num,
+                original_text=state.original_edit_text,
+                corrected_text=state.edit_text,
+                notes=state.edit_notes if state.edit_notes else '',
+                status='draft'
+            )
+
         if "error" in result:
             ui.notify(result["error"], type='negative')
         else:
-            # Verify status to ensure it wasn't auto-approved
-            status = result.get('status')
-            if status not in ('draft', 'needs_revision'):
-                ui.notify(tr('Error: Correction was submitted instead of saved as draft'), type='warning')
-                state.draft_id = None
-                state.draft_saved = False
-                return
-
             state.draft_saved = True
-            state.draft_id = result.get('id')
+            correction = result.get('correction', {})
+            state.draft_id = correction.get('id')
             ui.notify(tr('Draft saved'), type='positive')
-            update_content() # Update UI to show green border
+            update_content()  # Update UI to show green border
 
-    async def toggle_edit_mode():
+    def toggle_edit_mode():
         """Toggle edit mode with fetching existing corrections."""
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to edit'), type='warning')
             return
-            
+
         if state.edit_mode:
             cancel_edit()
         else:
             # Enter edit mode - Show loading state
             state.edit_loading = True
             update_content()
-            
+
             try:
                 # Fetch existing corrections to see if we should resume one
-                user = GlobalAuthState.get_user()
+                user_id = GlobalAuthState.get_user_id()
                 my_corrections = []
-                if user:
-                    user_id = user.get('id')
+                if user_id:
                     try:
-                         # Fetch ALL corrections including drafts
-                         result = await api_call("GET", f"/corrections/document/{state.current_page.sys_id}?include_drafts=true")
-                         if isinstance(result, list):
-                             # Filter for my corrections on THIS page
-                             current_p_num = state.current_page.p_num
-                             my_corrections = [
-                                 c for c in result 
-                                 if (c.get('user_id') == user_id or c.get('author', {}).get('id') == user_id)
-                                 and c.get('page_number') == current_p_num
-                             ]
-                             # Sort by updated_at desc
-                             my_corrections.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+                        # Fetch corrections for this document
+                        all_corrections = get_corrections(sys_id=state.current_page.sys_id, author_id=user_id)
+                        # Filter for THIS page
+                        current_p_num = state.current_page.p_num
+                        my_corrections = [
+                            c for c in all_corrections
+                            if c.get('page_number') == current_p_num
+                        ]
+                        # Sort by created_at desc
+                        my_corrections.sort(key=lambda x: x.get('created_at', ''), reverse=True)
                     except Exception as e:
-                         print(f"Error fetching corrections: {e}")
-                
+                        print(f"Error fetching corrections: {e}")
+
                 latest = my_corrections[0] if my_corrections else None
-                
+
                 state.edit_mode = True
-                
+
                 # Default to page text
                 base_text = state.current_page.text or ""
                 base_notes = ""

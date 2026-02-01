@@ -14,7 +14,8 @@ import asyncio
 
 from nicegui import ui
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import create_comment
 from web.state import state
 from typing import Optional, Callable
 
@@ -199,20 +200,25 @@ def create_comment_dialog(
                         error_label.classes('visible', remove='hidden')
                         return
 
-                    # Build comment data with valid fields
-                    comment_data = {
-                        "document_id": document_id,
-                        "content": comment_text.value.strip(),
-                        "comment_type": "general",
-                        "is_public": not private_check.value
-                    }
+                    # Get current user ID
+                    user_id = GlobalAuthState.get_user_id()
+                    if not user_id:
+                        error_label.text = tr('User not found')
+                        error_label.classes('visible', remove='hidden')
+                        return
 
-                    # If page-specific comment, set page_number for tracking
-                    if scope_select.value == 'page' and page_number:
-                        comment_data["page_number"] = page_number
+                    # Determine page number based on scope
+                    comment_page = page_number if scope_select.value == 'page' else None
 
-                    # Submit to backend
-                    result = await api_call("POST", "/comments/", comment_data)
+                    # Submit to Supabase
+                    result = create_comment(
+                        author_id=user_id,
+                        sys_id=document_id,
+                        content=comment_text.value.strip(),
+                        page_number=comment_page,
+                        scope=scope_select.value,
+                        is_public=not private_check.value
+                    )
 
                     if "error" in result:
                         error_label.text = result.get("error", "Error submitting comment")

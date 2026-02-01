@@ -8,7 +8,8 @@ Uses the simplified pairwise joins model with connected components.
 
 from nicegui import ui
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
+from web.supabase_client import get_fragment_joins, create_fragment_join, get_client
 from web.state import state
 from typing import Optional, Callable, Dict, List
 from urllib.parse import quote
@@ -19,7 +20,7 @@ _joins_cache: Dict[str, tuple] = {}
 _CACHE_TTL = 30  # Cache for 30 seconds
 
 
-async def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, force_refresh: bool = False) -> Dict:
+def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, force_refresh: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
     Prefers document_id if provided (more reliable).
@@ -38,16 +39,46 @@ async def fetch_connected_fragments(shelfmark: str = None, document_id: str = No
             return cached_data
 
     try:
-        # Prefer document_id lookup (more reliable)
+        # Fetch joins from Supabase
         if document_id:
-            result = await api_call("GET", "/joins/connected", data={"document_id": document_id})
+            joins = get_fragment_joins(fragment_sys_id=document_id)
         elif shelfmark:
-            result = await api_call("GET", "/joins/connected", data={"shelfmark": shelfmark})
+            # Try to find by shelfmark in the joins
+            joins = get_fragment_joins()
+            joins = [j for j in joins if
+                     j.get('fragment_a_shelfmark', '').upper() == shelfmark.upper() or
+                     j.get('fragment_b_shelfmark', '').upper() == shelfmark.upper()]
         else:
             return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0}
 
-        if "error" in result:
+        if not joins:
             return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0}
+
+        # Build connected fragments set
+        fragments_set = set()
+        formatted_joins = []
+        for j in joins:
+            frag_a = j.get('fragment_a_shelfmark', '')
+            frag_b = j.get('fragment_b_shelfmark', '')
+            if frag_a:
+                fragments_set.add(frag_a)
+            if frag_b:
+                fragments_set.add(frag_b)
+            formatted_joins.append({
+                'id': j.get('id'),
+                'fragment_a': frag_a,
+                'fragment_b': frag_b,
+                'relationship_type': j.get('join_type'),
+                'source': 'user',
+                'notes': j.get('notes', '')
+            })
+
+        result = {
+            "fragments": list(fragments_set),
+            "joins": formatted_joins,
+            "total_fragments": len(fragments_set),
+            "total_joins": len(formatted_joins)
+        }
 
         # Cache the result
         _joins_cache[cache_key] = (time.time(), result)
@@ -74,7 +105,7 @@ def invalidate_joins_cache(document_id: str = None, shelfmark: str = None, clear
         _joins_cache.pop(f"shelf:{shelfmark}", None)
 
 
-async def delete_join(join_id: int) -> bool:
+def delete_join(join_id: int) -> bool:
     """
     Delete a join by ID (admin only).
 
@@ -82,8 +113,9 @@ async def delete_join(join_id: int) -> bool:
         True if successful, False otherwise
     """
     try:
-        result = await api_call("DELETE", f"/joins/{join_id}")
-        return result.get('success', False) if isinstance(result, dict) else False
+        client = get_client()
+        client.table('fragment_joins').delete().eq('id', join_id).execute()
+        return True
     except Exception as e:
         print(f"Error deleting join: {e}")
         return False
@@ -111,9 +143,9 @@ def create_joins_button(
     join_count = {'value': 0}
     button_ref = {'btn': None}
 
-    async def load_count():
+    def load_count():
         """Load the count of connected fragments."""
-        data = await fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
         join_count['value'] = data.get('total_fragments', 1)
         # Update button style if we have joins - make it prominent
         if button_ref['btn'] and join_count['value'] > 1:
@@ -172,9 +204,9 @@ def create_joins_dialog(
         # Loading state - use dict to track if deleted
         spinner_state = {'spinner': ui.spinner(size='lg').classes('mx-auto my-8'), 'deleted': False}
 
-        async def load_content():
+        def load_content():
             """Load and display connected fragments."""
-            data = await fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+            data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
 
             # Delete spinner only if it exists and hasn't been deleted
             if not spinner_state['deleted']:
@@ -339,9 +371,9 @@ def create_joins_dialog(
                                                     with ui.row().classes('w-full justify-end gap-2 mt-4'):
                                                         ui.button(tr('Cancel'), on_click=confirm_dlg.close).props('flat')
 
-                                                        async def confirm_delete():
+                                                        def confirm_delete():
                                                             confirm_dlg.close()
-                                                            if await delete_join(jid):
+                                                            if delete_join(jid):
                                                                 ui.notify(tr('Join deleted'), type='positive')
                                                                 # Clear entire cache to ensure no stale transitive connections
                                                                 invalidate_joins_cache(clear_all=True)
@@ -599,7 +631,7 @@ def show_add_join_form(
                     with ui.row().classes('w-full justify-end gap-2 mt-4'):
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
-                        async def submit_join():
+                        def submit_join():
                             """Submit the new join."""
                             target = selected_fragment['shelfmark']
 
@@ -608,22 +640,23 @@ def show_add_join_form(
                                 error_label.classes('visible', remove='hidden')
                                 return
 
-                            # Prepare data
-                            join_data = {
-                                "fragment_a": current_shelfmark,
-                                "fragment_b": target,
-                                "relationship_type": relationship_select.value if relationship_select.value else None,
-                                "notes": notes_input.value.strip() if notes_input.value else None
-                            }
+                            # Get user ID
+                            user_id = GlobalAuthState.get_user_id()
+                            if not user_id:
+                                error_label.text = tr('User not found')
+                                error_label.classes('visible', remove='hidden')
+                                return
 
-                            # Add document IDs if available
-                            if document_id:
-                                join_data["document_id_a"] = document_id
-                            if selected_fragment['sys_id']:
-                                join_data["document_id_b"] = selected_fragment['sys_id']
-
-                            # Submit
-                            result = await api_call("POST", "/joins/", join_data)
+                            # Submit to Supabase
+                            result = create_fragment_join(
+                                user_id=user_id,
+                                fragment_a_sys_id=document_id or '',
+                                fragment_a_shelfmark=current_shelfmark,
+                                fragment_b_sys_id=selected_fragment.get('sys_id', ''),
+                                fragment_b_shelfmark=target,
+                                join_type=relationship_select.value if relationship_select.value else 'uncertain',
+                                notes=notes_input.value.strip() if notes_input.value else ''
+                            )
 
                             if "error" in result:
                                 error_msg = result.get("error", "Error creating join")
@@ -635,7 +668,7 @@ def show_add_join_form(
                                 invalidate_joins_cache(clear_all=True)
                                 dialog.close()
                                 if on_refresh:
-                                    await on_refresh()
+                                    on_refresh()
 
                         ui.button(
                             tr('Create Join'),
@@ -669,8 +702,8 @@ def create_joins_indicator(
     """
     container = ui.row().classes('items-center gap-1')
 
-    async def load_and_display():
-        data = await fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+    def load_and_display():
+        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
         total = data.get('total_fragments', 1)
 
         container.clear()

@@ -3,13 +3,15 @@
 Admin Panel - Dicta Genizah Search
 
 User management, corrections review, and system administration for admins.
+Uses Supabase directly for all data operations.
 """
 
 from nicegui import ui, app
 from web.translations import tr
-from web.auth_state import GlobalAuthState, api_call
+from web.auth_state import GlobalAuthState
 from web.state import state
 from web.components.typography import h1, h2, h3
+from web.supabase_client import get_client
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -23,6 +25,87 @@ def get_shelfmark_for_id(sys_id: str) -> tuple:
     return sys_id, ''
 
 
+def get_pending_corrections():
+    """Get pending corrections from Supabase."""
+    try:
+        client = get_client()
+        response = client.table('corrections').select(
+            '*, profiles(username, full_name)'
+        ).eq('status', 'pending').order('created_at', desc=True).execute()
+        return response.data or []
+    except Exception as e:
+        print(f"Error fetching pending corrections: {e}")
+        return []
+
+
+def get_all_users():
+    """Get all users from Supabase profiles table."""
+    try:
+        client = get_client()
+        response = client.table('profiles').select('*').order('created_at', desc=True).execute()
+        return response.data or []
+    except Exception as e:
+        print(f"Error fetching users: {e}")
+        return []
+
+
+def get_all_corrections_count():
+    """Get total corrections count."""
+    try:
+        client = get_client()
+        response = client.table('corrections').select('id', count='exact').execute()
+        return response.count or 0
+    except Exception as e:
+        print(f"Error fetching corrections count: {e}")
+        return 0
+
+
+def update_correction_status(correction_id: int, status: str, review_notes: str = None, rejection_reason: str = None):
+    """Update correction status in Supabase."""
+    try:
+        client = get_client()
+        data = {'status': status}
+        if review_notes:
+            data['notes'] = review_notes
+        if rejection_reason:
+            data['rejection_reason'] = rejection_reason
+
+        # Get current user as reviewer
+        user_id = GlobalAuthState.get_user_id()
+        if user_id:
+            data['reviewed_by'] = user_id
+            from datetime import datetime, timezone
+            data['reviewed_at'] = datetime.now(timezone.utc).isoformat()
+
+        response = client.table('corrections').update(data).eq('id', correction_id).execute()
+        return {'success': True} if response.data else {'error': 'Update failed'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def update_user_role(user_id: str, new_role: str):
+    """Update user role in Supabase profiles."""
+    try:
+        client = get_client()
+        response = client.table('profiles').update({'role': new_role}).eq('id', user_id).execute()
+        return {'success': True} if response.data else {'error': 'Update failed'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def delete_user(user_id: str):
+    """Delete user from Supabase (requires service role, typically done via dashboard)."""
+    # Note: Deleting auth users requires the service role key
+    # For now, we'll just mark them or remove from profiles
+    try:
+        client = get_client()
+        # Delete profile (user can't access anything without profile)
+        response = client.table('profiles').delete().eq('id', user_id).execute()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
 async def create_admin_page():
     """Create the Admin Panel page."""
 
@@ -30,7 +113,6 @@ async def create_admin_page():
     if not GlobalAuthState.is_admin():
         with ui.column().classes('w-full max-w-3xl mx-auto gap-8 fade-in items-center py-12'):
             ui.icon('lock').classes('text-6xl').style('color: var(--text-muted);')
-            # Changed to H2
             h2(tr('Access Denied'), classes='text-2xl font-bold', style='color: var(--text-primary);')
             ui.label(tr('You need admin privileges to access this page')).style('color: var(--text-secondary);')
             ui.button(tr('Go Home'), on_click=lambda: ui.navigate.to('/')).props('color=primary')
@@ -41,7 +123,6 @@ async def create_admin_page():
         # === Page Header ===
         with ui.row().classes('w-full items-center justify-between'):
             with ui.column().classes('gap-1'):
-                # Changed to H1
                 h1(tr('Admin Panel'), classes='text-3xl font-bold', style='color: var(--text-primary);')
                 ui.label(tr('User management and system administration')).style('color: var(--text-secondary);')
 
@@ -67,22 +148,14 @@ async def create_admin_page():
 
 async def create_pending_corrections_view():
     """View for reviewing pending corrections."""
-    result = await api_call("GET", "/corrections/pending")
-
-    if "error" in result:
-        ui.label(f"{tr('Error')}: {result['error']}").style('color: var(--danger);')
-        return
-
-    pending = result.get('items', []) if isinstance(result, dict) else result
+    pending = get_pending_corrections()
 
     if not pending:
         with ui.column().classes('w-full items-center py-12'):
             ui.icon('check_circle').classes('text-6xl').style('color: var(--success);')
-            # Changed to H3
             h3(tr('No pending corrections'), classes='text-xl', style='color: var(--text-secondary);')
             ui.label(tr('All corrections have been reviewed')).style('color: var(--text-muted);')
     else:
-        # Changed to H3
         h3(f"{len(pending)} {tr('corrections pending review')}", classes='text-lg font-medium mb-4')
 
         for corr in pending:
@@ -91,7 +164,7 @@ async def create_pending_corrections_view():
 
 async def create_pending_correction_card(corr):
     """Create a card for a pending correction."""
-    doc_id = corr.get('document_id') or corr.get('system_id', 'Unknown')
+    doc_id = corr.get('sys_id', 'Unknown')
     page_num = corr.get('page_number', 1)
     shelfmark, title = get_shelfmark_for_id(doc_id)
 
@@ -110,13 +183,14 @@ async def create_pending_correction_card(corr):
 
                 with ui.row().classes('items-center gap-3'):
                     # Author info
-                    author = corr.get('author', {})
-                    ui.label(f"{tr('by')} {author.get('full_name') or author.get('username', 'Unknown')}").style('color: var(--text-secondary);')
+                    profiles = corr.get('profiles', {}) or {}
+                    author_name = profiles.get('full_name') or profiles.get('username') or 'Unknown'
+                    ui.label(f"{tr('by')} {author_name}").style('color: var(--text-secondary);')
 
                     # Vote display
                     upvotes = corr.get('upvotes', 0)
                     downvotes = corr.get('downvotes', 0)
-                    vote_score = corr.get('vote_score', upvotes - downvotes)
+                    vote_score = upvotes - downvotes
 
                     with ui.row().classes('items-center gap-1'):
                         ui.icon('thumb_up').classes('text-sm').style('color: var(--success);')
@@ -147,24 +221,18 @@ async def create_pending_correction_card(corr):
             corr_id = corr.get('id')
 
             async def approve(cid=corr_id, notes=review_notes):
-                result = await api_call("POST", f"/corrections/{cid}/review", {
-                    "action": "approve",
-                    "review_notes": notes.value or None
-                })
+                result = update_correction_status(cid, 'approved', review_notes=notes.value)
                 if "error" in result:
-                    ui.notify(result.get("detail", result["error"]), type='negative')
+                    ui.notify(result["error"], type='negative')
                 else:
                     ui.notify(tr('Correction approved'), type='positive')
                     ui.navigate.reload()
 
             async def reject(cid=corr_id, notes=review_notes):
                 rejection_text = notes.value or tr('Rejected by reviewer')
-                result = await api_call("POST", f"/corrections/{cid}/review", {
-                    "action": "reject",
-                    "rejection_reason": rejection_text
-                })
+                result = update_correction_status(cid, 'rejected', rejection_reason=rejection_text)
                 if "error" in result:
-                    ui.notify(result.get("detail", result["error"]), type='negative')
+                    ui.notify(result["error"], type='negative')
                 else:
                     ui.notify(tr('Correction rejected'), type='info')
                     ui.navigate.reload()
@@ -176,13 +244,7 @@ async def create_pending_correction_card(corr):
 
 async def create_users_list_view():
     """View all users with management options."""
-    result = await api_call("GET", "/users/", {"skip": 0, "limit": 100})
-
-    if "error" in result:
-        ui.label(f"{tr('Error')}: {result['error']}").style('color: var(--danger);')
-        return
-
-    users = result if isinstance(result, list) else result.get('items', result.get('users', []))
+    users = get_all_users()
 
     if not users:
         ui.label(tr('No users found')).style('color: var(--text-secondary);')
@@ -203,6 +265,8 @@ async def create_users_list_view():
         ).props('outlined dense').classes('w-40')
 
     # Users table
+    h3(f"{len(users)} {tr('users')}", classes='text-lg font-medium mb-2')
+
     with ui.column().classes('w-full gap-2') as users_container:
         for user in users:
             create_user_row(user)
@@ -214,6 +278,7 @@ def create_user_row(user):
         'user': 'grey',
         'contributor': 'blue',
         'editor': 'purple',
+        'reviewer': 'orange',
         'admin': 'red'
     }
 
@@ -223,8 +288,10 @@ def create_user_row(user):
             with ui.row().classes('items-center gap-3 flex-1'):
                 ui.icon('account_circle').classes('text-2xl').style('color: var(--primary-600);')
                 with ui.column().classes('gap-0'):
-                    ui.label(user.get('full_name') or user.get('username', 'Unknown')).classes('font-medium')
-                    ui.label(user.get('email', '')).classes('text-xs').style('color: var(--text-muted);')
+                    ui.label(user.get('full_name') or user.get('username') or 'Unknown').classes('font-medium')
+                    # Note: email is not in profiles table, would need to join with auth.users
+                    if user.get('username'):
+                        ui.label(f"@{user.get('username')}").classes('text-xs').style('color: var(--text-muted);')
 
             # Affiliation
             if user.get('affiliation'):
@@ -238,79 +305,69 @@ def create_user_row(user):
 
             # Stats
             with ui.row().classes('items-center gap-4 w-32'):
-                ui.label(f"{user.get('corrections_count', 0)}").classes('text-sm').style('color: var(--text-secondary);')
-                ui.label(f"{user.get('reputation_score', 0)} pts").classes('text-sm font-medium')
+                ui.label(f"{user.get('reputation', 0)} pts").classes('text-sm font-medium')
 
             # Actions
+            user_id = user.get('id')
+
             with ui.row().classes('gap-1'):
-                async def change_role(uid=user.get('id'), new_role=None):
-                    if new_role is None:
-                        return
-                    # Map frontend role names to backend enum values
-                    role_map = {
-                        'user': 'contributor',
-                        'editor': 'editor',
-                        'admin': 'admin'
-                    }
-                    backend_role = role_map.get(new_role, new_role)
-                    result = await api_call("PUT", f"/users/{uid}/role?role={backend_role}", None)
+                def change_role(uid, new_role):
+                    result = update_user_role(uid, new_role)
                     if "error" in result:
                         ui.notify(result['error'], type='negative')
                     else:
                         ui.notify(tr('Role updated'), type='positive')
                         ui.navigate.reload()
 
-                async def delete_user(uid=user.get('id'), uname=user.get('username')):
+                def confirm_delete_user(uid, uname):
                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
-                        # Changed to H3
                         h3(tr('Delete User?'), classes='text-lg font-bold')
                         ui.label(f"{tr('Are you sure you want to delete')} {uname}?").classes('text-sm')
                         ui.label(tr('This action cannot be undone.')).classes('text-sm text-red-500')
                         with ui.row().classes('justify-end gap-2 mt-4'):
                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
-                            async def do_delete():
-                                result = await api_call("DELETE", f"/admin/users/{uid}")
+
+                            def do_delete():
+                                result = delete_user(uid)
                                 confirm_dialog.close()
                                 if "error" in result:
-                                    ui.notify(result.get('detail', result['error']), type='negative')
+                                    ui.notify(result['error'], type='negative')
                                 else:
                                     ui.notify(tr('User deleted'), type='positive')
                                     ui.navigate.reload()
+
                             ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                     confirm_dialog.open()
 
                 with ui.button(icon='more_vert').props('flat round dense'):
                     with ui.menu():
-                        ui.menu_item(tr('Set as User'), lambda u=user: change_role(u.get('id'), 'user'))
-                        ui.menu_item(tr('Set as Editor'), lambda u=user: change_role(u.get('id'), 'editor'))
-                        ui.menu_item(tr('Set as Admin'), lambda u=user: change_role(u.get('id'), 'admin'))
+                        ui.menu_item(tr('Set as User'), lambda uid=user_id: change_role(uid, 'user'))
+                        ui.menu_item(tr('Set as Editor'), lambda uid=user_id: change_role(uid, 'editor'))
+                        ui.menu_item(tr('Set as Admin'), lambda uid=user_id: change_role(uid, 'admin'))
                         ui.separator()
-                        ui.menu_item(tr('Delete User'), lambda u=user: delete_user(u.get('id'), u.get('username'))).classes('text-red-500')
+                        ui.menu_item(
+                            tr('Delete User'),
+                            lambda uid=user_id, uname=user.get('username', 'user'): confirm_delete_user(uid, uname)
+                        ).classes('text-red-500')
 
 
 async def create_stats_view():
     """Display system statistics."""
-    # Get various stats
-    users_result = await api_call("GET", "/users/", {"limit": 1000})
-    corrections_result = await api_call("GET", "/corrections/", {"limit": 1})
-    pending_result = await api_call("GET", "/corrections/pending")
-
-    users = users_result if isinstance(users_result, list) else users_result.get('items', users_result.get('users', []))
-    pending_corrections = pending_result.get('items', []) if isinstance(pending_result, dict) else pending_result
+    # Get stats from Supabase
+    users = get_all_users()
+    pending = get_pending_corrections()
+    total_corrections = get_all_corrections_count()
 
     # Calculate stats
-    total_users = len(users) if isinstance(users, list) else 0
-    editors = sum(1 for u in users if u.get('role') in ('editor', 'admin')) if isinstance(users, list) else 0
-    pending_count = len(pending_corrections) if isinstance(pending_corrections, list) else 0
-
-    total_corrections = corrections_result.get('total', 0) if isinstance(corrections_result, dict) else 0
+    total_users = len(users)
+    editors = sum(1 for u in users if u.get('role') in ('editor', 'admin', 'reviewer'))
+    pending_count = len(pending)
 
     with ui.row().classes('w-full gap-4 flex-wrap'):
         # Users stat card
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('people').classes('text-4xl').style('color: var(--primary-600);')
-                # Changed to H3
                 h3(str(total_users), classes='text-3xl font-bold')
                 ui.label(tr('Total Users')).style('color: var(--text-secondary);')
 
@@ -318,7 +375,6 @@ async def create_stats_view():
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('hourglass_empty').classes('text-4xl').style('color: var(--accent-amber);')
-                # Changed to H3
                 h3(str(pending_count), classes='text-3xl font-bold')
                 ui.label(tr('Pending Corrections')).style('color: var(--text-secondary);')
 
@@ -326,7 +382,6 @@ async def create_stats_view():
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('edit').classes('text-4xl').style('color: var(--success);')
-                # Changed to H3
                 h3(str(editors), classes='text-3xl font-bold')
                 ui.label(tr('Editors & Admins')).style('color: var(--text-secondary);')
 
@@ -334,6 +389,5 @@ async def create_stats_view():
         with ui.card().classes('p-6 flex-1 min-w-48'):
             with ui.column().classes('items-center gap-2'):
                 ui.icon('rate_review').classes('text-4xl').style('color: var(--info);')
-                # Changed to H3
                 h3(str(total_corrections), classes='text-3xl font-bold')
                 ui.label(tr('Total Corrections')).style('color: var(--text-secondary);')
