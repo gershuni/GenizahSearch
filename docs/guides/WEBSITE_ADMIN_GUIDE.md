@@ -1,6 +1,6 @@
 # GenizahSearch Website Admin Guide
 
-> Last updated: 2026-01-23
+> Last updated: 2026-01-31
 > For: Site administrators and non-technical users
 
 ---
@@ -10,10 +10,46 @@
 | What | Where/How |
 |------|-----------|
 | **Website URL** | https://genizahsearch.com |
-| **API Documentation** | https://genizahsearch.com/api/docs |
+| **Supabase Dashboard** | https://supabase.com/dashboard |
 | **Server Management** | https://admin.genizahsearch.com (Cockpit) |
 | **Server Access** | `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com` |
 | **Cloudflare Dashboard** | https://dash.cloudflare.com |
+
+---
+
+## Architecture Overview (Updated 2026-01-31)
+
+```
+User's Browser
+     │
+     ▼
+Cloudflare (DNS + Security + SSL)
+     │
+     ▼
+Nginx (Web Server on port 80/443)
+     │
+     └─── /* ───────► Frontend (NiceGUI on port 8081)
+                          │
+                          ├── Search/Browse ──► Tantivy Index (local)
+                          │
+                          └── User Data ──────► Supabase (cloud)
+                                                    │
+                                                    ├── PostgreSQL Database
+                                                    ├── Authentication
+                                                    └── Row Level Security
+```
+
+**Important Change:** The FastAPI backend has been removed. All user data (lists, corrections, comments, discoveries) is now stored directly in **Supabase** cloud database.
+
+### Key Components
+
+| Component | What it does |
+|-----------|--------------|
+| **Cloudflare** | Protects the site, provides SSL, caches content |
+| **Nginx** | Routes traffic to the web app |
+| **Frontend (NiceGUI)** | The visual interface users see |
+| **Supabase** | Cloud database for user data, auth, lists |
+| **Tantivy Index** | Powers the manuscript search (local) |
 
 ---
 
@@ -27,7 +63,7 @@
 
 **From command line:**
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl status genizah-backend genizah-web"
+ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl status genizah-web"
 ```
 Look for "Active: active (running)" in green.
 
@@ -38,7 +74,7 @@ Look for "Active: active (running)" in green.
 If the website is slow or not responding:
 
 ```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-backend genizah-web"
+ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
 ```
 
 Wait 10 seconds, then check if it's working.
@@ -60,23 +96,22 @@ This will:
 
 ---
 
-### 4. Create an Admin User
+### 4. Manage Users (via Supabase)
 
-To create a new admin account:
+User management is now done through **Supabase Dashboard**:
 
-```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && source venv/bin/activate && python create_admin.py EMAIL PASSWORD 'FULL NAME'"
-```
+1. Go to https://supabase.com/dashboard
+2. Select the GenizahSearch project
+3. Go to **Authentication** → **Users**
+4. From here you can:
+   - View all users
+   - Delete users
+   - Reset passwords
 
-Replace:
-- `EMAIL` with the user's email
-- `PASSWORD` with a secure password
-- `FULL NAME` with their name
-
-**Example:**
-```bash
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && source venv/bin/activate && python create_admin.py john@university.edu MySecurePass123 'John Smith'"
-```
+To change a user's role (admin, editor, etc.):
+1. Go to **Table Editor** → **profiles**
+2. Find the user by email
+3. Edit their `role` field
 
 ---
 
@@ -115,9 +150,9 @@ This shows:
 **What it means:** The web server can't connect to the application.
 
 **How to fix:**
-1. Restart the services:
+1. Restart the service:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-backend genizah-web"
+   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
    ```
 2. Wait 30 seconds and try again.
 
@@ -135,9 +170,9 @@ This shows:
    ```bash
    ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "free -h && df -h /"
    ```
-2. Restart services:
+2. Restart service:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-backend genizah-web"
+   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
    ```
 
 ---
@@ -153,56 +188,29 @@ This shows:
 
 ---
 
+### User data not syncing
+
+User data (lists, corrections) is stored in Supabase cloud. If data isn't syncing:
+
+1. Check Supabase status: https://status.supabase.com
+2. Verify the `.env` file has correct Supabase credentials
+3. Check browser console for API errors
+
+---
+
 ### Search not returning results
 
 **What it means:** The search index might be corrupted or not loaded.
 
 **How to fix:**
-1. Restart services first:
+1. Restart service first:
    ```bash
-   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-backend genizah-web"
+   ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
    ```
-2. If still not working, rebuild the index (this takes ~1 hour):
+2. If still not working, rebuild the index:
    ```bash
    ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && source venv/bin/activate && nohup python build_index.py > index_rebuild.log 2>&1 &"
    ```
-
----
-
-## Understanding the System
-
-### How the Website Works
-
-```
-User's Browser
-     │
-     ▼
-Cloudflare (DNS + Security + SSL)
-     │
-     ▼
-Nginx (Web Server on port 80/443)
-     │
-     ├─── /api/* ───► Backend (FastAPI on port 8000)
-     │                    │
-     │                    ▼
-     │               PostgreSQL Database
-     │
-     └─── /* ───────► Frontend (NiceGUI on port 8081)
-                          │
-                          ▼
-                     Tantivy Search Index
-```
-
-### Key Components
-
-| Component | What it does |
-|-----------|--------------|
-| **Cloudflare** | Protects the site, provides SSL, caches content |
-| **Nginx** | Routes traffic to the right service |
-| **Backend (FastAPI)** | Handles user accounts, corrections, comments |
-| **Frontend (NiceGUI)** | The visual interface users see |
-| **PostgreSQL** | Stores user data, corrections, comments |
-| **Tantivy Index** | Powers the manuscript search |
 
 ---
 
@@ -211,10 +219,23 @@ Nginx (Web Server on port 80/443)
 | File/Folder | Purpose |
 |-------------|---------|
 | `/home/ubuntu/GenizahSearch/` | Main application folder |
-| `/home/ubuntu/GenizahSearch/.env` | Configuration (passwords, etc.) |
+| `/home/ubuntu/GenizahSearch/.env` | Configuration (Supabase URL, keys) |
 | `/home/ubuntu/GenizahSearch/Genizah_Index/` | Search indexes |
 | `/home/ubuntu/GenizahSearch/Transcriptions.txt` | Source manuscript data |
 | `/home/ubuntu/GenizahSearch/deploy.sh` | Update script |
+
+---
+
+## Environment Variables
+
+The `.env` file should contain:
+
+```
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+```
+
+**Note:** Never share these keys publicly.
 
 ---
 
@@ -226,13 +247,12 @@ Nginx (Web Server on port 80/443)
 
 ### Monthly
 - [ ] Check disk space usage
-- [ ] Review logs for any recurring errors
+- [ ] Review Supabase usage (dashboard → Project Settings → Usage)
 - [ ] Update code if there are pending improvements
 
 ### When Needed
-- [ ] Create new admin users
 - [ ] Rebuild indexes after data updates
-- [ ] SSL certificate renewal (automatic, but verify)
+- [ ] SSL certificate renewal (automatic via Cloudflare)
 
 ---
 
@@ -240,7 +260,7 @@ Nginx (Web Server on port 80/443)
 
 ### For Technical Issues
 1. Check the logs (see "View Recent Activity/Logs" above)
-2. Try restarting the services
+2. Try restarting the service
 3. Consult the Technical Guide (`DEPLOYMENT_TECHNICAL.md`)
 4. Ask an AI assistant (Claude, ChatGPT) with the error message
 
@@ -261,19 +281,16 @@ ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
 # Once connected, you can run:
 
 # Check status
-sudo systemctl status genizah-backend genizah-web
+sudo systemctl status genizah-web
 
-# Restart everything
-sudo systemctl restart genizah-backend genizah-web
+# Restart website
+sudo systemctl restart genizah-web
 
 # View logs
 sudo journalctl -u genizah-web -n 50
 
 # Deploy updates
 cd /home/ubuntu/GenizahSearch && ./deploy.sh
-
-# Create admin user
-cd /home/ubuntu/GenizahSearch && source venv/bin/activate && python create_admin.py email password "Name"
 ```
 
 ---
@@ -308,9 +325,8 @@ Enter a password when prompted (you'll type it twice).
 
 1. Go to **Services**
 2. Search for `genizah`
-3. Click on `genizah-backend`
+3. Click on `genizah-web`
 4. Click the **Restart** button (circular arrow)
-5. Repeat for `genizah-web`
 
 ### What to Ignore
 You can safely ignore these sections - they're for advanced users:
@@ -321,6 +337,33 @@ You can safely ignore these sections - they're for advanced users:
 
 ---
 
+## Supabase Dashboard Guide
+
+### Viewing User Data
+
+1. Go to https://supabase.com/dashboard
+2. Select GenizahSearch project
+3. Click **Table Editor**
+
+**Tables:**
+| Table | Contains |
+|-------|----------|
+| `profiles` | User profiles and roles |
+| `user_lists` | Personal manuscript lists |
+| `list_items` | Items in each list |
+| `corrections` | Transcription corrections |
+| `comments` | User comments |
+| `discoveries` | Community discoveries |
+
+### Database Backups
+
+Supabase automatically backs up the database daily. To restore:
+1. Go to **Settings** → **Database**
+2. Scroll to **Backups**
+3. Click **Restore** on the desired backup
+
+---
+
 ## Emergency Contacts
 
 | Issue Type | Who to Contact |
@@ -328,3 +371,29 @@ You can safely ignore these sections - they're for advanced users:
 | Website code bugs | GitHub Issues |
 | Server/AWS issues | AWS account owner |
 | Domain/DNS issues | Cloudflare dashboard |
+| Database issues | Supabase dashboard/support |
+
+---
+
+## What Changed (January 2026)
+
+The architecture was simplified by migrating to Supabase:
+
+**Removed:**
+- FastAPI backend server (port 8000)
+- Local PostgreSQL/SQLite database
+- Complex backend services
+
+**Added:**
+- Direct Supabase connection from web app
+- Cloud-hosted database with automatic backups
+- Built-in authentication and rate limiting
+
+**Benefits:**
+- Simpler deployment (one service instead of two)
+- Better data safety (cloud backups)
+- Less maintenance required
+
+---
+
+*For technical details, see `DEPLOYMENT_TECHNICAL.md`*
