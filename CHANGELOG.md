@@ -32,6 +32,8 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 - **OAuth flow:** Fixed Google OAuth to use Supabase's `sign_in_with_oauth` method with proper state parameter
 - **Session handling:** Implicit flow tokens properly extracted from URL hash on callback
+- **Forgot password (desktop):** Added password reset link to desktop app login dialog for OAuth users
+- **OAuth user guidance:** Web Google signup now shows note about setting password for desktop app login
 
 ### Row Level Security (RLS) Fixes
 

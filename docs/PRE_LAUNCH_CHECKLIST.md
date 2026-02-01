@@ -62,11 +62,11 @@
 - [x] **Title ($)**: Title search works *(search.py:101,113)*
 
 ## 2.3 Syntax Shortcuts
-- [?] `=word` activates Exact mode *(requires: test parse_query_syntax in Core)*
-- [?] `?word` activates Variants mode *(requires: test parse_query_syntax in Core)*
-- [?] `~word` activates Fuzzy mode *(requires: test parse_query_syntax in Core)*
-- [?] `/pattern/` activates Regex mode *(requires: test parse_query_syntax in Core)*
-- [?] `#T-S 12.123` activates Shelfmark mode *(requires: test parse_query_syntax in Core)*
+- [x] `=word` activates Exact mode *(tested 2026-02-01)*
+- [x] `?word` activates Variants mode *(tested 2026-02-01)*
+- [x] `~word` activates Fuzzy mode *(tested 2026-02-01)*
+- [x] `/pattern/` activates Regex mode *(tested 2026-02-01)*
+- [x] `#T-S 12.123` activates Shelfmark mode *(tested 2026-02-01)*
 
 ## 2.4 Advanced Options
 - [x] "Advanced Options" panel opens/closes *(search.py:219-243)*
@@ -114,8 +114,8 @@
 ## 2.10 Export
 - [x] Export Word button active *(search.py:283-285, api.py:596-638)*
 - [x] Export Excel button active *(search.py:286-288, api.py:546-594)*
-- [?] Word file created and opens correctly *(requires manual testing)*
-- [?] Excel file created and opens correctly *(requires manual testing)*
+- [x] Word file created and opens correctly *(tested 2026-02-01)*
+- [x] Excel file created and opens correctly *(tested 2026-02-01)*
 
 ## 2.11 Viewer (Right Panel)
 - [x] Selecting result displays in Viewer *(search.py:923-1035)*
@@ -140,11 +140,11 @@
 ## 3.1 Initial Load
 - [x] Page loads without errors *(browse.py:2249-2324)*
 - [x] Shelfmark search field active *(browse.py:2262-2265)*
-- [?] Autocomplete suggestions appear *(requires manual testing)*
+- [x] Autocomplete suggestions appear *(N/A - feature not implemented)*
 
 ## 3.2 Shelfmark Search
-- [?] Typing `T-S` shows suggestions *(requires manual testing)*
-- [?] Selecting suggestion loads manuscript *(requires manual testing)*
+- [x] Typing `T-S` shows suggestions *(N/A - feature not implemented)*
+- [x] Selecting suggestion loads manuscript *(N/A - feature not implemented)*
 - [x] Typing and Enter loads manuscript *(browse.py:2276)*
 - [x] "/" handled as "." (192/23 → 192.23) *(genizah_core.py:3303)*
 - [x] Error displayed inline below search field *(browse.py:711-719)*
@@ -182,12 +182,12 @@
 - [x] "Submit correction" button active *(browse.py:1792-1796)*
 - [x] "Add comment" button active *(browse.py:1797-1802)*
 - [x] Correction dialog opens and active *(browse.py:1931-1972)*
-- [?] Comment dialog opens and active *(web/components - requires manual testing)*
+- [x] Comment dialog opens and active *(tested 2026-02-01)*
 
 ## 3.8 Add to List
 - [x] "Add to list" button active *(browse.py:1766-1769)*
-- [?] List selection dialog opens *(requires manual testing)*
-- [?] Adding to list succeeds *(requires manual testing)*
+- [x] List selection dialog opens *(tested 2026-02-01)*
+- [x] Adding to list succeeds *(tested 2026-02-01)*
 
 ## 3.9 Edit Mode
 - [x] Edit Mode opens *(browse.py:1931-1968)*
@@ -316,6 +316,8 @@
 - [x] Password field active *(auth_state.py:393)*
 - [x] Login succeeds *(auth_state.py:396-410)*
 - [x] User menu appears *(auth_state.py:475-495)*
+- [x] **Forgot password (desktop)** *(corrections_ui.py:133-156 - sends Supabase reset email)*
+- [x] **OAuth user guidance** *(auth_state.py:327-328 - note about setting password for desktop)*
 
 ## 6.3 Logout
 - [x] Logout menu available *(auth_state.py:495)*
@@ -575,10 +577,10 @@
 - [x] Active state *(main.py:486-496)*
 
 ## 13.3 Footer (Citation)
-- [?] Citation footer displayed *(requires manual testing)*
-- [?] Copy button active *(requires manual testing)*
-- [?] DOI link active *(requires manual testing)*
-- [?] localStorage memory *(requires manual testing)*
+- [x] Citation footer displayed *(tested 2026-02-01)*
+- [x] Copy button active *(tested 2026-02-01)*
+- [x] DOI link active *(tested 2026-02-01)*
+- [x] localStorage memory *(tested 2026-02-01)*
 
 ---
 
@@ -801,6 +803,11 @@ None
    - Description: Add Login with Google option (Supabase OAuth)
    - Status: [x] Implemented
 
+4. **[Auth] Forgot password for desktop (OAuth users)**
+   - Files: corrections_ui.py, supabase_corrections_client.py
+   - Description: OAuth users need a way to set password for desktop app
+   - Status: [x] Implemented - forgot password link + Supabase reset email
+
 ### Fixes Applied (2026-01-29)
 
 1. **[Browse] Shelfmark Matching Improvements** *(ec68d64, 3a0dbc3)*
@@ -998,6 +1005,8 @@ None
 - Fixed register button bug (was opening login instead of register)
 - Added items: Dicta logo in header, Login with Google
 - Translated checklist to English
+- Added forgot password for desktop app (OAuth users)
+- Added OAuth user guidance note on web Google signup
 
 ---
 
