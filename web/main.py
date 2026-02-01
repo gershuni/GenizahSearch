@@ -1251,9 +1251,9 @@ def create_layout():
             # Logo
             with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
                 ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
-                with ui.column().classes('gap-0 hidden sm:flex'):
-                    ui.label('Genizah Search').classes('text-lg font-bold text-white tracking-wide')
-                    ui.label('Pro').classes('text-xs text-white/60')
+                with ui.column().classes('gap-0'):
+                    ui.label('Dicta Genizah Search').classes('text-lg font-bold text-white tracking-wide')
+                    ui.label('אתר הגניזה מבית דיקטה').classes('text-xs text-white/60')
         return section
 
     def render_header_center():
