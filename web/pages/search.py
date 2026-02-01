@@ -723,12 +723,12 @@ def create_search_page(initial_query: str = None):
     def render_results(results):
         results_container.clear()
 
-        # Show loading spinner when search is running
+        # Show loading spinner when search is running - prominent so user knows it's working
         if search_state.is_running:
             with results_container:
                 with ui.column().classes('w-full h-64 items-center justify-center'):
-                    ui.spinner('dots', size='lg', color='primary')
-                    ui.label(tr("Searching...")).classes('mt-4 text-lg').style('color: var(--text-secondary);')
+                    ui.spinner('bars', size='xl', color='primary').classes('mb-4')
+                    ui.label(tr("Searching...")).classes('text-xl font-bold animate-pulse').style('color: var(--primary-600);')
             return
 
         if not results:

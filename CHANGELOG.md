@@ -6,6 +6,14 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [5.2.0] - 2026-02-01
 
+### UX Improvements
+
+- **Search spinners:** More prominent animated spinners (bars instead of dots, larger size, pulsing text)
+- **Parallels search feedback:** Spinner and status now visible in control panel without scrolling
+- **Stop button:** Changed from "Cancel" to "Stop" with "and show partial results" subtitle
+- **Filter sources badge:** Shows count of enabled filter sources on the expansion header
+- **Filter tooltip:** Explains filter feature in both English and Hebrew
+
 ### Header Branding
 
 - **Dicta branding:** Header now shows "Dicta Genizah Search" with Hebrew subtitle "אתר הגניזה מבית דיקטה"

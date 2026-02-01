@@ -326,16 +326,20 @@ def create_parallels_page(initial_text: str = None):
                         on_click=lambda: execute_parallels()
                     ).classes('btn-primary w-full')
 
-                    # Cancel Button (hidden by default)
-                    cancel_btn = ui.button(
-                        tr('Cancel'),
-                        icon='close',
-                        on_click=lambda: cancel_search()
-                    ).classes('w-full').props('outline color=red').style('display: none;')
+                    # Stop Button (hidden by default) - shows partial results
+                    with ui.column().classes('w-full items-center gap-0').style('display: none;') as cancel_btn:
+                        ui.button(
+                            tr('Stop'),
+                            icon='stop',
+                            on_click=lambda: cancel_search()
+                        ).classes('w-full').props('outline color=red')
+                        ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Progress
-                    progress_bar = ui.linear_progress(0).classes('w-full opacity-0').style('height: 8px;')
-                    status_label = ui.label('').classes('text-sm text-center font-medium').style('color: var(--text-secondary);')
+                    # Progress - visible spinner + status in the control panel
+                    progress_bar = ui.linear_progress(0).classes('w-full').style('height: 8px; opacity: 0;')
+                    with ui.row().classes('w-full items-center justify-center gap-2').style('display: none;') as search_indicator:
+                        ui.spinner('dots', size='sm', color='primary')
+                        status_label = ui.label('').classes('text-sm font-medium').style('color: var(--primary-600);')
 
         # === Filter Text (Collapsible) ===
         # State for loaded sources: {ref: cleaned_text}
@@ -343,7 +347,23 @@ def create_parallels_page(initial_text: str = None):
         # Full text is reloaded from cache files on page load (async)
         filter_sources = {'loaded': {}, 'enabled': set(), 'pending_restore': True, 'custom_count': 0}
 
-        with ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('w-full'):
+        # Filter expansion with dynamic badge
+        with ui.row().classes('w-full items-center'):
+            filter_expansion = ui.expansion(tr('Filter text (exclude known sources)'), icon='filter_alt').classes('flex-1')
+            filter_expansion.tooltip(tr('Choose known sources to exclude from results (e.g., Bible verses, Mishnah). Matches found in these sources will be moved to a separate list.'))
+            filter_badge = ui.badge('0').props('color=grey transparent').classes('ml-2').style('display: none;')
+
+        def update_filter_badge():
+            """Update badge with number of loaded sources."""
+            count = len(filter_sources['enabled'])
+            if count > 0:
+                filter_badge.set_text(f"{count}")
+                filter_badge.props('color=primary')
+                filter_badge.style('display: inline-flex;')
+            else:
+                filter_badge.style('display: none;')
+
+        with filter_expansion:
             with ui.column().classes('w-full p-4 gap-4'):
                 ui.label(tr('Select sources to filter results (matches found in checked sources will be moved to a separate list):')).classes('text-sm').style('color: var(--text-muted);')
 
@@ -511,14 +531,15 @@ def create_parallels_page(initial_text: str = None):
             filter_sources['enabled'].add(ref)
         else:
             filter_sources['enabled'].discard(ref)
-        update_filter_info()
+        update_filter_info()  # Also updates badge
         save_filter_sources()
 
     def update_filter_info():
-        """Update the info label."""
+        """Update the info label and badge."""
         enabled = len(filter_sources['enabled'])
         total = len(filter_sources['loaded'])
         filter_info_label.text = tr('Active: {} / {}').format(enabled, total)
+        update_filter_badge()
 
     def select_all_sources():
         filter_sources['enabled'] = set(filter_sources['loaded'].keys())
@@ -621,14 +642,9 @@ def create_parallels_page(initial_text: str = None):
         try:
             refresh_loaded_sources_ui()
 
-            # Notify user
-            if loaded_count > 0:
-                msg = f'{tr("Loaded")} {loaded_count} {tr("texts")}'
-                if failed_count > 0:
-                    msg += f' ({failed_count} {tr("failed")})'
-                ui.notify(msg, type='positive')
-            elif failed_count > 0:
-                ui.notify(f'{tr("Failed to load")} {failed_count} {tr("texts")}', type='negative')
+            # Notify only on failure
+            if failed_count > 0:
+                ui.notify(f'{tr("Failed to load")} {failed_count} {tr("sources")}', type='negative')
 
             # Hide progress
             sefaria_progress.style('display: none;')
@@ -893,16 +909,17 @@ def create_parallels_page(initial_text: str = None):
         try:
             if p_state.is_running:
                 run_btn.disable()
-                cancel_btn.style('display: block;')
+                cancel_btn.style('display: flex;')
+                search_indicator.style('display: flex;')
                 progress_bar.style('opacity: 1;')
                 progress_bar.set_value(p_state.progress)
                 status_label.text = p_state.status
             else:
                 run_btn.enable()
                 cancel_btn.style('display: none;')
+                search_indicator.style('display: none;')
                 if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
                     progress_bar.set_value(1.0)
-                    status_label.text = tr('Done')
                     p_state.finished_animation_shown = True
                     ui.timer(2.0, lambda: progress_bar.style('opacity: 0;'), once=True)
         except (RuntimeError, Exception):
@@ -952,15 +969,16 @@ def create_parallels_page(initial_text: str = None):
         p_state.filtered_results = []
         results_container.clear()
 
-        # Show loading spinner in results area
+        # Show loading spinner in results area - make it prominent so user knows it's working
         with results_container:
             with ui.column().classes('w-full items-center py-12'):
-                ui.spinner('dots', size='lg', color='primary')
-                ui.label(tr('Searching for parallels...')).classes('mt-4 text-lg').style('color: var(--text-secondary);')
-                ui.label(tr('This may take a moment...')).classes('text-sm').style('color: var(--text-muted);')
+                ui.spinner('bars', size='xl', color='primary').classes('mb-4')
+                ui.label(tr('Searching for parallels...')).classes('text-xl font-bold animate-pulse').style('color: var(--primary-600);')
+                ui.label(tr('This may take a while...')).classes('text-sm mt-2').style('color: var(--text-muted);')
 
-        # Show immediate feedback
+        # Show immediate feedback in control panel
         ui.notify(tr('Starting search...'), type='info', timeout=2000)
+        search_indicator.style('display: flex;')
         progress_bar.style('opacity: 1;')
         progress_bar.set_value(0)
         status_label.text = tr('Initializing search...')
@@ -1618,7 +1636,6 @@ def create_parallels_page(initial_text: str = None):
 
             if loaded_count > 0:
                 print(f"[DEBUG] Restored {loaded_count}/{len(stored_refs)} filter sources from cache")
-                ui.notify(f'{tr("Loaded")} {loaded_count} {tr("texts")}', type='info')
         except (RuntimeError, Exception):
             pass  # Client deleted
 
