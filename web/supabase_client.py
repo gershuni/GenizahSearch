@@ -224,6 +224,32 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
         return {'error': f'Session error: {str(e)}'}
 
 
+def exchange_code_for_session(code: str) -> Dict:
+    """
+    Exchange OAuth code for session (PKCE flow).
+
+    Args:
+        code: The authorization code from URL query parameter
+
+    Returns:
+        Dict with 'user' and 'session' on success, or 'error' on failure
+    """
+    try:
+        client = get_client()
+        response = client.auth.exchange_code_for_session({'auth_code': code})
+
+        if response and response.user:
+            return {
+                'success': True,
+                'user': _user_to_dict(response.user),
+                'session': _session_to_dict(response.session)
+            }
+        return {'error': 'Failed to exchange code for session'}
+
+    except Exception as e:
+        return {'error': f'Code exchange error: {str(e)}'}
+
+
 def _user_to_dict(user) -> Dict:
     """Convert Supabase user object to dictionary."""
     return {
