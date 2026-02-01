@@ -1011,116 +1011,104 @@ def get_feed_items(item_type: str = None, period: str = None,
 
         # Get discoveries
         if not item_type or item_type in ('discovery', 'question', 'identification', 'note'):
-            query = client.table('discoveries').select(
-                '*, profiles(id, username, full_name, affiliation)'
-            )
-            if not include_hidden:
-                query = query.eq('is_hidden', False)
-            if item_type:
-                query = query.eq('type', item_type)
-            discoveries = query.order('created_at', desc=True).limit(limit).execute()
-            for d in (discoveries.data or []):
-                profile = d.get('profiles', {}) or {}
-                items.append({
-                    'id': f"{d.get('type', 'discovery')}_{d.get('id')}",
-                    'item_type': d.get('type', 'discovery'),
-                    'title': d.get('title', ''),
-                    'content_preview': d.get('content', '')[:500] if d.get('content') else '',
-                    'document_id': d.get('document_id'),
-                    'shelfmark': d.get('shelfmark'),
-                    'page_number': d.get('page_number'),
-                    'created_at': d.get('created_at'),
-                    'is_pinned': d.get('is_pinned', False),
-                    'is_featured': d.get('is_featured', False),
-                    'is_answered': d.get('is_answered', False),
-                    'is_hidden': d.get('is_hidden', False),
-                    'upvotes': d.get('upvotes', 0),
-                    'downvotes': d.get('downvotes', 0),
-                    'response_count': d.get('response_count', 0),
-                    'additional_shelfmarks': d.get('additional_shelfmarks'),
-                    'related_manuscripts': d.get('related_manuscripts'),
-                    'author': {
-                        'id': profile.get('id'),
-                        'username': profile.get('username'),
-                        'full_name': profile.get('full_name'),
-                        'affiliation': profile.get('affiliation'),
-                        'is_anonymous': d.get('is_anonymous', False)
-                    }
-                })
+            try:
+                query = client.table('discoveries').select('*')
+                if not include_hidden:
+                    query = query.eq('is_hidden', False)
+                if item_type:
+                    query = query.eq('type', item_type)
+                discoveries = query.order('created_at', desc=True).limit(limit).execute()
+                for d in (discoveries.data or []):
+                    items.append({
+                        'id': f"{d.get('type', 'discovery')}_{d.get('id')}",
+                        'item_type': d.get('type', 'discovery'),
+                        'title': d.get('title', ''),
+                        'content_preview': d.get('content', '')[:500] if d.get('content') else '',
+                        'document_id': d.get('document_id'),
+                        'shelfmark': d.get('shelfmark'),
+                        'page_number': d.get('page_number'),
+                        'created_at': d.get('created_at'),
+                        'is_pinned': d.get('is_pinned', False),
+                        'is_featured': d.get('is_featured', False),
+                        'is_answered': d.get('is_answered', False),
+                        'is_hidden': d.get('is_hidden', False),
+                        'upvotes': d.get('upvotes', 0),
+                        'downvotes': d.get('downvotes', 0),
+                        'response_count': d.get('response_count', 0),
+                        'additional_shelfmarks': d.get('additional_shelfmarks'),
+                        'related_manuscripts': d.get('related_manuscripts'),
+                        'author': {
+                            'id': d.get('user_id'),
+                            'is_anonymous': d.get('is_anonymous', False)
+                        }
+                    })
+            except Exception as e:
+                print(f"Error loading discoveries: {e}")
 
         # Get corrections
         if not item_type or item_type == 'correction':
-            corrections = client.table('corrections').select(
-                '*, profiles(id, username, full_name, affiliation)'
-            ).eq('status', 'approved').order('created_at', desc=True).limit(limit).execute()
-            for c in (corrections.data or []):
-                profile = c.get('profiles', {}) or {}
-                items.append({
-                    'id': f"correction_{c.get('id')}",
-                    'item_type': 'correction',
-                    'title': '',
-                    'original_text': c.get('original_text', ''),
-                    'corrected_text': c.get('corrected_text', ''),
-                    'document_id': c.get('sys_id'),
-                    'shelfmark': c.get('shelfmark'),
-                    'page_number': c.get('page_number'),
-                    'created_at': c.get('created_at'),
-                    'author': {
-                        'id': profile.get('id'),
-                        'username': profile.get('username'),
-                        'full_name': profile.get('full_name'),
-                        'affiliation': profile.get('affiliation')
-                    }
-                })
+            try:
+                corrections = client.table('corrections').select('*').eq(
+                    'status', 'approved'
+                ).order('created_at', desc=True).limit(limit).execute()
+                for c in (corrections.data or []):
+                    items.append({
+                        'id': f"correction_{c.get('id')}",
+                        'item_type': 'correction',
+                        'title': '',
+                        'original_text': c.get('original_text', ''),
+                        'corrected_text': c.get('corrected_text', ''),
+                        'document_id': c.get('sys_id'),
+                        'shelfmark': c.get('shelfmark'),
+                        'page_number': c.get('page_number'),
+                        'created_at': c.get('created_at'),
+                        'author': {'id': c.get('user_id')}
+                    })
+            except Exception as e:
+                print(f"Error loading corrections: {e}")
 
         # Get comments
         if not item_type or item_type == 'comment':
-            comments = client.table('comments').select(
-                '*, profiles(id, username, full_name, affiliation)'
-            ).eq('is_public', True).order('created_at', desc=True).limit(limit).execute()
-            for c in (comments.data or []):
-                profile = c.get('profiles', {}) or {}
-                items.append({
-                    'id': f"comment_{c.get('id')}",
-                    'item_type': 'comment',
-                    'title': '',
-                    'content_preview': c.get('content', '')[:500] if c.get('content') else '',
-                    'document_id': c.get('sys_id'),
-                    'shelfmark': c.get('shelfmark'),
-                    'page_number': c.get('page_number'),
-                    'created_at': c.get('created_at'),
-                    'author': {
-                        'id': profile.get('id'),
-                        'username': profile.get('username'),
-                        'full_name': profile.get('full_name'),
-                        'affiliation': profile.get('affiliation')
-                    }
-                })
+            try:
+                comments = client.table('comments').select('*').eq(
+                    'is_public', True
+                ).order('created_at', desc=True).limit(limit).execute()
+                for c in (comments.data or []):
+                    items.append({
+                        'id': f"comment_{c.get('id')}",
+                        'item_type': 'comment',
+                        'title': '',
+                        'content_preview': c.get('content', '')[:500] if c.get('content') else '',
+                        'document_id': c.get('sys_id'),
+                        'shelfmark': c.get('shelfmark'),
+                        'page_number': c.get('page_number'),
+                        'created_at': c.get('created_at'),
+                        'author': {'id': c.get('user_id')}
+                    })
+            except Exception as e:
+                print(f"Error loading comments: {e}")
 
         # Get joins
         if not item_type or item_type == 'join':
-            joins = client.table('fragment_joins').select(
-                '*, profiles(id, username, full_name, affiliation)'
-            ).order('created_at', desc=True).limit(limit).execute()
-            for j in (joins.data or []):
-                profile = j.get('profiles', {}) or {}
-                items.append({
-                    'id': f"join_{j.get('id')}",
-                    'item_type': 'join',
-                    'title': f"{j.get('fragment_a_shelfmark', '')} ↔ {j.get('fragment_b_shelfmark', '')}",
-                    'content_preview': j.get('notes', ''),
-                    'document_id': j.get('fragment_a_sys_id'),
-                    'shelfmark': j.get('fragment_a_shelfmark'),
-                    'created_at': j.get('created_at'),
-                    'cluster_fragments': [j.get('fragment_a_shelfmark'), j.get('fragment_b_shelfmark')],
-                    'cluster_joins': [j],
-                    'author': {
-                        'id': profile.get('id'),
-                        'username': profile.get('username'),
-                        'full_name': profile.get('full_name'),
-                        'affiliation': profile.get('affiliation')
-                    }
-                })
+            try:
+                joins = client.table('fragment_joins').select('*').order(
+                    'created_at', desc=True
+                ).limit(limit).execute()
+                for j in (joins.data or []):
+                    items.append({
+                        'id': f"join_{j.get('id')}",
+                        'item_type': 'join',
+                        'title': f"{j.get('fragment_a_shelfmark', '')} ↔ {j.get('fragment_b_shelfmark', '')}",
+                        'content_preview': j.get('notes', ''),
+                        'document_id': j.get('fragment_a_sys_id'),
+                        'shelfmark': j.get('fragment_a_shelfmark'),
+                        'created_at': j.get('created_at'),
+                        'cluster_fragments': [j.get('fragment_a_shelfmark'), j.get('fragment_b_shelfmark')],
+                        'cluster_joins': [j],
+                        'author': {'id': j.get('user_id')}
+                    })
+            except Exception as e:
+                print(f"Error loading joins: {e}")
 
         # Sort by created_at descending
         items.sort(key=lambda x: x.get('created_at', '') or '', reverse=True)
@@ -1132,4 +1120,6 @@ def get_feed_items(item_type: str = None, period: str = None,
         return {'items': items, 'total': total}
     except Exception as e:
         print(f"Error getting feed items: {e}")
+        import traceback
+        traceback.print_exc()
         return {'items': [], 'total': 0, 'error': str(e)}
