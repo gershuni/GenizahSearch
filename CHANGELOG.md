@@ -14,6 +14,24 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - Built-in rate limiting and security features
 - Legacy backend moved to `backend_legacy/` (deprecated)
 
+### Authentication Fixes
+
+- **OAuth flow:** Fixed Google OAuth to use Supabase's `sign_in_with_oauth` method with proper state parameter
+- **Session handling:** Implicit flow tokens properly extracted from URL hash on callback
+
+### Row Level Security (RLS) Fixes
+
+- **RLS policies:** Fixed all INSERT/UPDATE/DELETE policies to use `authenticated` role instead of `public`
+- **Column naming:** Updated queries to use correct column names (`author_id` for comments/corrections, `user_id` for others)
+- **Profile joins removed:** Removed `profiles` table joins from queries that failed without FK relationships
+- **SQL script:** Added `scripts/fix_rls_policies.sql` for bulk RLS policy updates
+
+### Community Feed & Comments
+
+- **Feed loading:** Fixed `get_feed_items` to properly load discoveries, corrections, comments, and joins
+- **Comments display:** Fixed comments to appear on browse pages (removed failing profiles join)
+- **Profile page:** Fixed to load data from profile storage instead of auth user
+
 ### Lists & Projects Management
 
 - **Management mode toggle:** New "Manage lists" button reveals edit controls

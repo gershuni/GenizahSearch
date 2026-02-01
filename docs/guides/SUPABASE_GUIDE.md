@@ -128,7 +128,7 @@ Transcription corrections:
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | int | Primary key |
-| `user_id` | uuid | Submitter |
+| `author_id` | uuid | Submitter (**Note:** uses `author_id`, not `user_id`) |
 | `sys_id` | text | Manuscript system ID |
 | `fl_id` | text | Specific page |
 | `original_text` | text | Original transcription |
@@ -235,9 +235,9 @@ client = get_client()
 # Select
 result = client.table('profiles').select('*').eq('role', 'admin').execute()
 
-# Insert
+# Insert (note: comments uses author_id, not user_id)
 result = client.table('comments').insert({
-    'user_id': user_id,
+    'author_id': user_id,  # NOT user_id!
     'sys_id': 'MS-12345',
     'content': 'My comment'
 }).execute()
@@ -249,21 +249,62 @@ result = client.table('profiles').update({
 
 # Delete
 result = client.table('list_items').delete().eq('id', item_id).execute()
-
-# Complex queries
-result = client.table('corrections') \
-    .select('*, profiles(full_name)') \
-    .eq('status', 'pending') \
-    .order('created_at', desc=True) \
-    .limit(10) \
-    .execute()
 ```
+
+### ⚠️ Avoid Profile Joins
+
+**Do NOT use profile joins** in queries unless the FK relationship is configured:
+
+```python
+# WRONG - will fail without FK relationship:
+result = client.table('corrections').select('*, profiles(full_name)').execute()
+
+# CORRECT - simple select:
+result = client.table('corrections').select('*').execute()
+```
+
+If you need user info, fetch profiles separately after getting the author_id/user_id.
 
 ---
 
 ## Row Level Security (RLS)
 
-RLS policies ensure users can only access their own data:
+RLS policies ensure users can only access their own data.
+
+### Important: Policy Configuration
+
+**All INSERT/UPDATE/DELETE policies must use the `authenticated` role**, not `public`. Using `public` role causes `auth.uid()` to return null for anonymous users, breaking the policy.
+
+To fix RLS policies in bulk, run: `scripts/fix_rls_policies.sql`
+
+### Column Naming (Important!)
+
+The database has inconsistent column naming for user references:
+
+| Table | User Column |
+|-------|-------------|
+| `comments` | `author_id` |
+| `corrections` | `author_id` |
+| `discoveries` | `user_id` |
+| `fragment_joins` | `user_id` |
+| `user_lists` | `user_id` |
+| `list_items` | (via list_id → user_lists.user_id) |
+
+**Always check the actual column name** when writing queries or RLS policies.
+
+### Policy Examples
+
+```sql
+-- Correct: Uses authenticated role
+CREATE POLICY "Users can create comments" ON comments
+FOR INSERT TO authenticated
+WITH CHECK (auth.uid() = author_id);
+
+-- Wrong: Uses public role (will fail)
+CREATE POLICY "Users can create comments" ON comments
+FOR INSERT TO public
+WITH CHECK (auth.uid() = author_id);
+```
 
 ### profiles
 - Users can read all profiles (public info)
