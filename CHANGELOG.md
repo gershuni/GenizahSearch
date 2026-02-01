@@ -4,6 +4,36 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.2.0] - 2026-02-01
+
+### Backend Migration: Supabase
+
+- **Complete Supabase migration:** Replaced FastAPI backend with direct Supabase integration
+- All authentication now handled by Supabase Auth
+- User lists, corrections, and comments stored in Supabase
+- Built-in rate limiting and security features
+- Legacy backend moved to `backend_legacy/` (deprecated)
+
+### Lists & Projects Management
+
+- **Management mode toggle:** New "Manage lists" button reveals edit controls
+- **Icon-based actions:** Replaced dropdown menus with direct action buttons (rename, move to project, delete)
+- **Improved UI:** Cleaner interface with actions hidden by default
+- **Auto-sync:** Lists automatically sync between devices for logged-in users
+- **Soft delete support:** Lists can be recovered after deletion
+
+### Bug Fixes
+
+- **Register button:** Fixed bug where clicking "Register" opened login dialog instead of register
+- **Dependencies:** Added missing `gotrue` and `python-dotenv` to requirements.txt
+
+### Documentation
+
+- **English translation:** PRE_LAUNCH_CHECKLIST.md translated from Hebrew to English
+- **Documentation reorganization:** New `docs/` structure with guides, plans, and specs
+
+---
+
 ## [5.1.0] - 2026-01-27
 
 ### Web Platform: Dicta Genizah Search (אתר הגניזה של דיקטה)
