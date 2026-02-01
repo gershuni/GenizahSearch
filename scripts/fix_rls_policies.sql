@@ -100,6 +100,13 @@ FOR UPDATE TO authenticated
 USING (auth.uid() = id)
 WITH CHECK (auth.uid() = id);
 
+-- Allow admins to update any profile (for role management)
+DROP POLICY IF EXISTS "Admins can update any profile" ON profiles;
+CREATE POLICY "Admins can update any profile" ON profiles
+FOR UPDATE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))
+WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
 -- Allow reading all profiles (for displaying usernames)
 DROP POLICY IF EXISTS "Anyone can view profiles" ON profiles;
 CREATE POLICY "Anyone can view profiles" ON profiles
