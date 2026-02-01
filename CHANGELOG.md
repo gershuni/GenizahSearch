@@ -6,6 +6,12 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [5.2.0] - 2026-02-01
 
+### Header Branding
+
+- **Dicta branding:** Header now shows "Dicta Genizah Search" with Hebrew subtitle "אתר הגניזה מבית דיקטה"
+- **Mobile optimization:** Header hides on scroll down, reveals on scroll up (mobile only)
+- **Responsive logo:** Text hidden on small screens, only icon shows
+
 ### Backend Migration: Supabase
 
 - **Complete Supabase migration:** Replaced FastAPI backend with direct Supabase integration

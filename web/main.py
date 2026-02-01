@@ -1014,6 +1014,14 @@ COMMON_STYLES = '''
         }
         /* Hide help button on mobile (keyboard shortcuts not relevant for touch) */
         .help-btn-header { display: none !important; }
+        /* Hide logo text on mobile - only show icon */
+        .header-logo-text { display: none !important; }
+    }
+
+    /* Ensure logo text doesn't shrink */
+    .header-logo-text {
+        flex-shrink: 0 !important;
+        white-space: nowrap !important;
     }
 
     /* Header reveal only on mobile - disable on desktop */
@@ -1255,12 +1263,13 @@ def create_layout():
         with ui.row().classes('items-center gap-4') as section:
             refs['menu_btn'] = ui.button(icon='menu').props(f'flat round text-color=white aria-label="{tr("Open navigation menu")}"')
 
-            # Logo
+            # Logo - compact 2-line layout
             with ui.row().classes('items-center gap-3 cursor-pointer').on('click', lambda: ui.navigate.to('/')):
-                ui.icon('auto_stories').classes('text-3xl text-white opacity-90')
-                with ui.column().classes('gap-0'):
-                    ui.label('Dicta Genizah Search').classes('text-lg font-bold text-white tracking-wide')
-                    ui.label('אתר הגניזה מבית דיקטה').classes('text-xs text-white/60')
+                ui.icon('auto_stories').classes('text-2xl text-white opacity-90')
+                # Hide text on xs screens to prevent crowding; show on sm+
+                with ui.column().classes('header-logo-text justify-center').style('gap: 2px;'):
+                    ui.label('Dicta Genizah Search').classes('font-bold text-white tracking-wide').style('font-size: 15px; line-height: 1;')
+                    ui.label('אתר הגניזה מבית דיקטה').classes('text-white/60').style('font-size: 11px; line-height: 1;')
         return section
 
     def render_header_center():
