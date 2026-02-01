@@ -301,6 +301,7 @@ def create_login_dialog():
 
     # Store tabs reference for external access
     dialog.tabs = tabs
+    dialog.login_tab = login_tab
     dialog.register_tab = register_tab
     return dialog
 
@@ -343,7 +344,7 @@ def create_auth_buttons():
         dialog = create_login_dialog()
 
         def open_login():
-            dialog.tabs.set_value(dialog.tabs._tabs[0])  # First tab (Login)
+            dialog.tabs.set_value(dialog.login_tab)
             dialog.open()
 
         def open_register():
