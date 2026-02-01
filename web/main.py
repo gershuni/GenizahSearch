@@ -1699,6 +1699,78 @@ def download_page_route():
         create_download_page()
 
 
+@ui.page('/auth/callback')
+async def auth_callback_route():
+    """
+    OAuth callback handler.
+    Supabase redirects here after Google login with tokens in URL hash.
+    Since URL hash isn't sent to server, we use client-side JS to extract and process.
+    """
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    # JavaScript to extract tokens from URL hash and process OAuth callback
+    ui.add_body_html('''
+    <script>
+    (function() {
+        // Supabase returns tokens in URL hash: #access_token=...&refresh_token=...
+        const hash = window.location.hash.substring(1);
+        if (hash) {
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            const refreshToken = params.get('refresh_token');
+
+            if (accessToken && refreshToken) {
+                // Send tokens to server to set session
+                fetch('/api/auth/oauth-callback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        access_token: accessToken,
+                        refresh_token: refreshToken
+                    })
+                }).then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Redirect to home page
+                        window.location.href = '/';
+                    } else {
+                        document.getElementById('error-msg').textContent = data.error || 'Authentication failed';
+                        document.getElementById('error-container').style.display = 'block';
+                    }
+                }).catch(err => {
+                    document.getElementById('error-msg').textContent = 'Network error: ' + err.message;
+                    document.getElementById('error-container').style.display = 'block';
+                });
+            } else {
+                // Check for error in params
+                const error = params.get('error_description') || params.get('error');
+                if (error) {
+                    document.getElementById('error-msg').textContent = error;
+                    document.getElementById('error-container').style.display = 'block';
+                } else {
+                    // No tokens, redirect to home
+                    window.location.href = '/';
+                }
+            }
+        } else {
+            // No hash, redirect to home
+            window.location.href = '/';
+        }
+    })();
+    </script>
+    ''')
+
+    with ui.column().classes('w-full h-screen items-center justify-center'):
+        ui.spinner(size='xl')
+        ui.label('Completing login...').classes('text-lg mt-4')
+        with ui.column().classes('hidden mt-4 text-center').style('display: none;') as error_container:
+            error_container._props['id'] = 'error-container'
+            error_label = ui.label('').classes('text-red-500')
+            error_label._props['id'] = 'error-msg'
+            ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2')
+
+
 # ============================================================================
 # Startup Logic
 # ============================================================================

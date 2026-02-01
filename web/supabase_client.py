@@ -165,6 +165,65 @@ def refresh_session() -> Dict:
         return {'error': f'Refresh error: {str(e)}'}
 
 
+def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
+    """
+    Get OAuth URL for social login.
+
+    Args:
+        provider: OAuth provider ('google', 'github', etc.)
+        redirect_to: URL to redirect after auth (defaults to current site)
+
+    Returns:
+        Dict with 'url' on success, or 'error' on failure
+    """
+    try:
+        client = get_client()
+
+        # Build options
+        options = {}
+        if redirect_to:
+            options['redirect_to'] = redirect_to
+
+        response = client.auth.sign_in_with_oauth({
+            'provider': provider,
+            'options': options if options else None
+        })
+
+        if response and response.url:
+            return {'success': True, 'url': response.url}
+        return {'error': 'Failed to get OAuth URL'}
+
+    except Exception as e:
+        return {'error': f'OAuth error: {str(e)}'}
+
+
+def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
+    """
+    Set session from OAuth callback tokens.
+
+    Args:
+        access_token: The access token from URL
+        refresh_token: The refresh token from URL
+
+    Returns:
+        Dict with 'user' and 'session' on success, or 'error' on failure
+    """
+    try:
+        client = get_client()
+        response = client.auth.set_session(access_token, refresh_token)
+
+        if response and response.user:
+            return {
+                'success': True,
+                'user': _user_to_dict(response.user),
+                'session': _session_to_dict(response.session)
+            }
+        return {'error': 'Failed to set session'}
+
+    except Exception as e:
+        return {'error': f'Session error: {str(e)}'}
+
+
 def _user_to_dict(user) -> Dict:
     """Convert Supabase user object to dictionary."""
     return {

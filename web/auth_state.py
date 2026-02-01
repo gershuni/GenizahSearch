@@ -19,7 +19,8 @@ load_dotenv()
 # Import Supabase client
 from web.supabase_client import (
     get_client, sign_in as supabase_sign_in, sign_up as supabase_sign_up,
-    sign_out as supabase_sign_out, get_profile, update_profile
+    sign_out as supabase_sign_out, get_profile, update_profile,
+    get_oauth_url, set_session_from_url
 )
 
 
@@ -232,6 +233,28 @@ def create_login_dialog():
                     with ui.row().classes('w-full justify-end gap-2'):
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
                         ui.button(tr('Login'), on_click=handle_login).props('color=primary')
+
+                    # Divider
+                    with ui.row().classes('w-full items-center gap-2 my-2'):
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+                        ui.label(tr('or')).classes('text-gray-500 text-sm')
+                        ui.element('div').classes('flex-1 h-px bg-gray-300')
+
+                    # Google login button
+                    async def handle_google_login():
+                        login_error.classes('hidden', remove='visible')
+                        # Get current URL for redirect
+                        redirect_url = f"{os.environ.get('SITE_URL', 'https://genizahsearch.com')}/auth/callback"
+                        result = get_oauth_url('google', redirect_url)
+                        if "error" in result:
+                            login_error.text = result["error"]
+                            login_error.classes('visible', remove='hidden')
+                        else:
+                            # Redirect to Google OAuth
+                            ui.navigate.to(result['url'], new_tab=False)
+
+                    ui.button(tr('Login with Google'), icon='img:https://www.google.com/favicon.ico',
+                              on_click=handle_google_login).classes('w-full').props('outline')
 
             # Register panel
             with ui.tab_panel(register_tab):

@@ -307,7 +307,7 @@
 - [x] Password confirmation active *(auth_state.py:424)*
 - [x] Validation (match + required) *(auth_state.py:430-438)*
 - [x] Registration + auto-login *(auth_state.py:440-454)*
-- [ ] **Login with Google** *(missing - implement)*
+- [x] **Login with Google** *(implemented - Supabase OAuth)*
 
 ## 6.2 Login
 - [x] "Login" button displayed in header *(auth_state.py:500)*
@@ -797,9 +797,9 @@ None
    - Status: [ ] Implement
 
 3. **[Auth] Login with Google**
-   - File: auth_state.py
+   - Files: auth_state.py, supabase_client.py, api.py, main.py
    - Description: Add Login with Google option (Supabase OAuth)
-   - Status: [ ] Implement
+   - Status: [x] Implemented
 
 ### Fixes Applied (2026-01-29)
 
