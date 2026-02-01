@@ -168,11 +168,10 @@ def refresh_session() -> Dict:
 
 def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
     """
-    Get OAuth URL for social login using implicit flow.
+    Get OAuth URL for social login using Supabase's built-in OAuth method.
 
-    Uses response_type=token for implicit flow which returns tokens
-    directly in the URL hash, avoiding PKCE code_verifier storage issues
-    in server-side applications.
+    Uses the Supabase client's sign_in_with_oauth which handles state parameter
+    generation and PKCE flow automatically.
 
     Args:
         provider: OAuth provider ('google', 'github', etc.)
@@ -182,19 +181,22 @@ def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
         Dict with 'url' on success, or 'error' on failure
     """
     try:
-        # Build the OAuth URL for implicit flow
-        auth_url = f"{SUPABASE_URL}/auth/v1/authorize"
+        client = get_client()
 
-        params = {
-            'provider': provider,
-            'response_type': 'token',  # Implicit flow - returns tokens in hash
-        }
+        # Use Supabase's built-in OAuth method which handles state/PKCE
+        options = {}
         if redirect_to:
-            params['redirect_to'] = redirect_to
+            options['redirect_to'] = redirect_to
 
-        url = f"{auth_url}?{urlencode(params)}"
+        response = client.auth.sign_in_with_oauth({
+            'provider': provider,
+            'options': options
+        })
 
-        return {'success': True, 'url': url}
+        if response and response.url:
+            return {'success': True, 'url': response.url}
+
+        return {'error': 'Failed to generate OAuth URL'}
 
     except Exception as e:
         return {'error': f'OAuth error: {str(e)}'}
