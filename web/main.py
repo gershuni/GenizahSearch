@@ -12,6 +12,7 @@ Run with: python -m web.main (from project root)
 
 import os
 import sys
+import asyncio
 
 # Load environment variables first (for Supabase configuration)
 from dotenv import load_dotenv
@@ -1707,91 +1708,104 @@ async def auth_callback_route():
     """
     from web.supabase_client import set_session_from_url, get_profile
     from web.auth_state import GlobalAuthState
+    import json
 
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
-    status_label = ui.label('Completing login...').classes('text-lg')
-    spinner = ui.spinner(size='xl')
-    error_container = ui.column().classes('hidden mt-4 text-center')
-    with error_container:
-        error_label = ui.label('').classes('text-red-500')
-        ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2')
+    with ui.column().classes('w-full h-screen items-center justify-center'):
+        spinner = ui.spinner(size='xl')
+        status_label = ui.label('Completing login...').classes('text-lg mt-4')
+        error_label = ui.label('').classes('text-red-500 mt-4 hidden')
+        home_btn = ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2 hidden')
 
-    async def process_tokens(tokens_json: str):
-        """Process OAuth tokens received from JavaScript."""
-        import json
-        try:
-            tokens = json.loads(tokens_json)
-            access_token = tokens.get('access_token')
-            refresh_token = tokens.get('refresh_token')
-            error = tokens.get('error')
+    # Wait a moment for the page to fully load, then extract tokens
+    await asyncio.sleep(0.5)
 
-            if error:
-                spinner.set_visibility(False)
-                status_label.set_text('')
-                error_label.set_text(error)
-                error_container.classes(remove='hidden')
-                return
+    try:
+        # Get tokens from URL hash via JavaScript
+        tokens_json = await ui.run_javascript('''
+            (function() {
+                const hash = window.location.hash.substring(1);
+                console.log("Hash:", hash);
+                if (hash) {
+                    const params = new URLSearchParams(hash);
+                    return JSON.stringify({
+                        access_token: params.get('access_token'),
+                        refresh_token: params.get('refresh_token'),
+                        error: params.get('error_description') || params.get('error')
+                    });
+                }
+                return JSON.stringify({no_hash: true});
+            })();
+        ''')
 
-            if not access_token or not refresh_token:
-                # No tokens - redirect to home
-                ui.navigate.to('/')
-                return
+        print(f"OAuth callback received: {tokens_json}")
+        tokens = json.loads(tokens_json) if tokens_json else {}
 
-            # Set session in Supabase client
-            result = set_session_from_url(access_token, refresh_token)
+        if tokens.get('no_hash'):
+            # No hash in URL - redirect to home
+            ui.navigate.to('/')
+            return
 
-            if 'error' in result:
-                spinner.set_visibility(False)
-                status_label.set_text('')
-                error_label.set_text(result['error'])
-                error_container.classes(remove='hidden')
-                return
-
-            user = result.get('user')
-            if user:
-                # Get or create profile
-                profile = get_profile(user['id'])
-
-                # Store in NiceGUI session storage (same session as user)
-                app.storage.user[GlobalAuthState.USER_KEY] = user
-                if profile:
-                    app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
-
-                # Redirect to home
-                ui.navigate.to('/')
-            else:
-                spinner.set_visibility(False)
-                status_label.set_text('')
-                error_label.set_text('Login failed - no user returned')
-                error_container.classes(remove='hidden')
-
-        except Exception as e:
+        error = tokens.get('error')
+        if error:
             spinner.set_visibility(False)
-            status_label.set_text('')
-            error_label.set_text(f'Error: {str(e)}')
-            error_container.classes(remove='hidden')
+            status_label.set_visibility(False)
+            error_label.text = error
+            error_label.classes(remove='hidden')
+            home_btn.classes(remove='hidden')
+            return
 
-    # JavaScript to extract tokens from URL hash and send to Python
-    ui.run_javascript('''
-        (function() {
-            const hash = window.location.hash.substring(1);
-            if (hash) {
-                const params = new URLSearchParams(hash);
-                const accessToken = params.get('access_token');
-                const refreshToken = params.get('refresh_token');
-                const error = params.get('error_description') || params.get('error');
+        access_token = tokens.get('access_token')
+        refresh_token = tokens.get('refresh_token')
 
-                return JSON.stringify({
-                    access_token: accessToken,
-                    refresh_token: refreshToken,
-                    error: error
-                });
-            }
-            return JSON.stringify({});
-        })();
-    ''', callback=process_tokens)
+        if not access_token or not refresh_token:
+            ui.navigate.to('/')
+            return
+
+        # Set session in Supabase client
+        result = set_session_from_url(access_token, refresh_token)
+        print(f"set_session_from_url result: {result}")
+
+        if 'error' in result:
+            spinner.set_visibility(False)
+            status_label.set_visibility(False)
+            error_label.text = result['error']
+            error_label.classes(remove='hidden')
+            home_btn.classes(remove='hidden')
+            return
+
+        user = result.get('user')
+        if user:
+            # Get or create profile
+            profile = get_profile(user['id'])
+            print(f"Got profile: {profile}")
+
+            # Store in NiceGUI session storage
+            app.storage.user[GlobalAuthState.USER_KEY] = user
+            if profile:
+                app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+
+            status_label.text = 'Login successful! Redirecting...'
+            await asyncio.sleep(0.5)
+            ui.navigate.to('/')
+        else:
+            spinner.set_visibility(False)
+            status_label.set_visibility(False)
+            error_label.text = 'Login failed - no user returned'
+            error_label.classes(remove='hidden')
+            home_btn.classes(remove='hidden')
+
+    except Exception as e:
+        print(f"OAuth callback error: {e}")
+        import traceback
+        traceback.print_exc()
+        spinner.set_visibility(False)
+        status_label.set_visibility(False)
+        error_label.text = f'Error: {str(e)}'
+        error_label.classes(remove='hidden')
+        home_btn.classes(remove='hidden')
 
 
 # ============================================================================
