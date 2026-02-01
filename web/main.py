@@ -1704,71 +1704,94 @@ async def auth_callback_route():
     """
     OAuth callback handler.
     Supabase redirects here after Google login with tokens in URL hash.
-    Since URL hash isn't sent to server, we use client-side JS to extract and process.
     """
+    from web.supabase_client import set_session_from_url, get_profile
+    from web.auth_state import GlobalAuthState
+
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
-    # JavaScript to extract tokens from URL hash and process OAuth callback
-    ui.add_body_html('''
-    <script>
-    (function() {
-        // Supabase returns tokens in URL hash: #access_token=...&refresh_token=...
-        const hash = window.location.hash.substring(1);
-        if (hash) {
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
-            const refreshToken = params.get('refresh_token');
+    status_label = ui.label('Completing login...').classes('text-lg')
+    spinner = ui.spinner(size='xl')
+    error_container = ui.column().classes('hidden mt-4 text-center')
+    with error_container:
+        error_label = ui.label('').classes('text-red-500')
+        ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2')
 
-            if (accessToken && refreshToken) {
-                // Send tokens to server to set session
-                fetch('/api/auth/oauth-callback', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        access_token: accessToken,
-                        refresh_token: refreshToken
-                    })
-                }).then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Redirect to home page
-                        window.location.href = '/';
-                    } else {
-                        document.getElementById('error-msg').textContent = data.error || 'Authentication failed';
-                        document.getElementById('error-container').style.display = 'block';
-                    }
-                }).catch(err => {
-                    document.getElementById('error-msg').textContent = 'Network error: ' + err.message;
-                    document.getElementById('error-container').style.display = 'block';
-                });
-            } else {
-                // Check for error in params
+    async def process_tokens(tokens_json: str):
+        """Process OAuth tokens received from JavaScript."""
+        import json
+        try:
+            tokens = json.loads(tokens_json)
+            access_token = tokens.get('access_token')
+            refresh_token = tokens.get('refresh_token')
+            error = tokens.get('error')
+
+            if error:
+                spinner.set_visibility(False)
+                status_label.set_text('')
+                error_label.set_text(error)
+                error_container.classes(remove='hidden')
+                return
+
+            if not access_token or not refresh_token:
+                # No tokens - redirect to home
+                ui.navigate.to('/')
+                return
+
+            # Set session in Supabase client
+            result = set_session_from_url(access_token, refresh_token)
+
+            if 'error' in result:
+                spinner.set_visibility(False)
+                status_label.set_text('')
+                error_label.set_text(result['error'])
+                error_container.classes(remove='hidden')
+                return
+
+            user = result.get('user')
+            if user:
+                # Get or create profile
+                profile = get_profile(user['id'])
+
+                # Store in NiceGUI session storage (same session as user)
+                app.storage.user[GlobalAuthState.USER_KEY] = user
+                if profile:
+                    app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+
+                # Redirect to home
+                ui.navigate.to('/')
+            else:
+                spinner.set_visibility(False)
+                status_label.set_text('')
+                error_label.set_text('Login failed - no user returned')
+                error_container.classes(remove='hidden')
+
+        except Exception as e:
+            spinner.set_visibility(False)
+            status_label.set_text('')
+            error_label.set_text(f'Error: {str(e)}')
+            error_container.classes(remove='hidden')
+
+    # JavaScript to extract tokens from URL hash and send to Python
+    ui.run_javascript('''
+        (function() {
+            const hash = window.location.hash.substring(1);
+            if (hash) {
+                const params = new URLSearchParams(hash);
+                const accessToken = params.get('access_token');
+                const refreshToken = params.get('refresh_token');
                 const error = params.get('error_description') || params.get('error');
-                if (error) {
-                    document.getElementById('error-msg').textContent = error;
-                    document.getElementById('error-container').style.display = 'block';
-                } else {
-                    // No tokens, redirect to home
-                    window.location.href = '/';
-                }
-            }
-        } else {
-            // No hash, redirect to home
-            window.location.href = '/';
-        }
-    })();
-    </script>
-    ''')
 
-    with ui.column().classes('w-full h-screen items-center justify-center'):
-        ui.spinner(size='xl')
-        ui.label('Completing login...').classes('text-lg mt-4')
-        with ui.column().classes('hidden mt-4 text-center').style('display: none;') as error_container:
-            error_container._props['id'] = 'error-container'
-            error_label = ui.label('').classes('text-red-500')
-            error_label._props['id'] = 'error-msg'
-            ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2')
+                return JSON.stringify({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                    error: error
+                });
+            }
+            return JSON.stringify({});
+        })();
+    ''', callback=process_tokens)
 
 
 # ============================================================================
