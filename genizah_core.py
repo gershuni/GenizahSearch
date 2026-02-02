@@ -4478,13 +4478,11 @@ class SearchEngine:
             crossed_bounds = get_crossed_boundaries(i, i + chunk_size, boundaries)
             chunks_data.append((i, tokens[i:i + chunk_size], crossed_bounds))
 
-        doc_hits_main = defaultdict(lambda: {
+        # Single map for all results - track filtering status per uid
+        doc_hits = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
-            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set()
-        })
-        doc_hits_filtered = defaultdict(lambda: {
-            'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
-            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set()
+            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
+            'is_filtered': False  # True if ANY match came from filtered chunk
         })
 
         total_chunks = len(chunks_data)
@@ -4519,11 +4517,12 @@ class SearchEngine:
                     if regex.search(content):
                         uid = doc['unique_id'][0]
 
-                        # Route to appropriate map
+                        # Always use single map - accumulate all matches for same uid
+                        rec = doc_hits[uid]
+
+                        # Mark as filtered if ANY chunk match is filtered
                         if is_text_filtered or is_freq_filtered:
-                            rec = doc_hits_filtered[uid]
-                        else:
-                            rec = doc_hits_main[uid]
+                            rec['is_filtered'] = True
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
@@ -4642,7 +4641,9 @@ class SearchEngine:
                     # Boundary metadata
                     'has_boundary_matches': has_boundary_matches,
                     'boundary_match_count': len(data.get('crossed_boundaries', set())),
-                    'boundary_quality': boundary_quality_normalized
+                    'boundary_quality': boundary_quality_normalized,
+                    # Filtering flag
+                    'is_filtered': data.get('is_filtered', False)
                 })
 
             # Sort by final_score in combined mode, otherwise by base score
@@ -4653,18 +4654,20 @@ class SearchEngine:
 
             return final_items
 
-        main_list = build_items(doc_hits_main)
-        filtered_list = build_items(doc_hits_filtered)
+        # Build all items from single map, then separate by filter status
+        all_items = build_items(doc_hits)
 
-        # Apply boundary mode filtering
+        # Apply boundary mode filtering first
         if boundary_mode == 'boundary':
-            main_list = [item for item in main_list if item.get('has_boundary_matches', False)]
-            filtered_list = [item for item in filtered_list if item.get('has_boundary_matches', False)]
+            all_items = [item for item in all_items if item.get('has_boundary_matches', False)]
 
         # Apply min_boundary_matches filter
         if min_boundary_matches > 0:
-            main_list = [item for item in main_list if item.get('boundary_match_count', 0) >= min_boundary_matches]
-            filtered_list = [item for item in filtered_list if item.get('boundary_match_count', 0) >= min_boundary_matches]
+            all_items = [item for item in all_items if item.get('boundary_match_count', 0) >= min_boundary_matches]
+
+        # Separate into main and filtered lists
+        main_list = [item for item in all_items if not item.get('is_filtered', False)]
+        filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
         return {'main': main_list, 'filtered': filtered_list, 'boundary_stats': boundary_stats}
     
