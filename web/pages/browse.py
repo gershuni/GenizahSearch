@@ -842,6 +842,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 except Exception:
                     pass
 
+                # Update browser URL to reflect current manuscript (for language switch persistence)
+                try:
+                    new_url = f'/browse?sys_id={state.sys_id}&page={page.p_num}'
+                    if state.highlight_terms:
+                        new_url += f'&highlight={state.highlight_terms}'
+                    ui.run_javascript(f'history.replaceState(null, "", "{new_url}")')
+                except Exception:
+                    pass
+
                 # Track recently viewed item
                 if state.sys_id and service.is_ready:
                     try:
@@ -1434,9 +1443,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 'border: none;'
             ):
                 with ui.row().classes('w-full items-center justify-between'):
-                    # Prev Shelfmark Button
+                    # Prev Shelfmark Button (icon flips for RTL)
+                    prev_ms_icon = 'skip_next' if is_rtl() else 'skip_previous'
                     ui.button(
-                        icon='skip_previous',
+                        icon=prev_ms_icon,
                         on_click=lambda: navigate_shelfmark(-1)
                     ).props('flat round').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
@@ -1523,9 +1533,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=add_manuscript_to_list
                         ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('Add to List'))
 
-                    # Next Shelfmark Button
+                    # Next Shelfmark Button (icon flips for RTL)
+                    next_ms_icon = 'skip_previous' if is_rtl() else 'skip_next'
                     ui.button(
-                        icon='skip_next',
+                        icon=next_ms_icon,
                         on_click=lambda: navigate_shelfmark(1)
                     ).props('flat round').style('color: white !important;').tooltip(tr('Next manuscript'))
 
@@ -1741,10 +1752,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Navigation and controls
                         with ui.row().classes('items-center gap-2'):
-                            # Previous page button (left arrow < for going backwards)
+                            # Previous page button (icon flips for RTL)
                             prev_disabled = page.current_idx <= 1
+                            prev_page_icon = 'chevron_right' if is_rtl() else 'chevron_left'
                             ui.button(
-                                icon='chevron_left',
+                                icon=prev_page_icon,
                                 on_click=lambda: load_page(direction=-1)
                             ).props(f'flat round dense {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
@@ -1772,10 +1784,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=handle_go_click
                             ).props('flat dense color=green')
 
-                            # Next page button (right arrow > for going forwards)
+                            # Next page button (icon flips for RTL)
                             next_disabled = page.current_idx >= page.total_pages
+                            next_page_icon = 'chevron_left' if is_rtl() else 'chevron_right'
                             ui.button(
-                                icon='chevron_right',
+                                icon=next_page_icon,
                                 on_click=lambda: load_page(direction=1)
                             ).props(f'flat round dense {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
@@ -2307,10 +2320,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 search_input.on('keydown.enter', do_search)
 
-                # Go button
+                # Go button (icon flips for RTL)
+                go_icon = 'arrow_back' if is_rtl() else 'arrow_forward'
                 ui.button(
                     tr('Go'),
-                    icon='arrow_forward',
+                    icon=go_icon,
                     on_click=do_search
                 ).props('color=green').classes('px-6')
 
