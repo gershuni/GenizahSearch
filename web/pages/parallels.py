@@ -236,7 +236,7 @@ def create_parallels_page(initial_text: str = None):
 
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
-                        # Paragraph delimiter (to the left)
+                        # Paragraph delimiter (always editable - affects display even in full mode)
                         with ui.column().classes('gap-1') as delimiter_col:
                             delimiter_label = ui.label(tr('Paragraph separator')).classes('text-xs font-medium').style('color: var(--text-muted);')
                             boundary_delimiter = ui.select(
@@ -247,7 +247,7 @@ def create_parallels_page(initial_text: str = None):
                                     ':': tr('Colon (:)')
                                 },
                                 value='\n'
-                            ).classes('w-40').props('outlined dense disable')
+                            ).classes('w-40').props('outlined dense')
                             boundary_delimiter.tooltip(tr('Character or pattern that separates paragraphs in your text'))
 
                         # Boundary mode radio buttons (visible)
@@ -320,12 +320,10 @@ def create_parallels_page(initial_text: str = None):
                     def update_boundary_ui():
                         """Update boundary UI based on selected mode."""
                         is_boundary_mode = boundary_mode.value in ('boundary', 'combined')
-                        # Enable/disable delimiter dropdown
+                        # Show/hide advanced settings button based on mode
                         if is_boundary_mode:
-                            boundary_delimiter.props(remove='disable')
                             advanced_btn.style('display: inline-flex;')
                         else:
-                            boundary_delimiter.props(add='disable')
                             advanced_btn.style('display: none;')
                         update_boundary_help()
                         update_boundary_stats()
