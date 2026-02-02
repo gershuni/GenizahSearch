@@ -2064,6 +2064,8 @@ TRANSLATIONS = {
     "On first launch, download the transcription data from Zenodo": "בהפעלה הראשונה, הורד את נתוני התעתיק מ-Zenodo",
 
     # --- Search Mode ---
+    "Searching...": "מחפש...",
+    "No results": "אין תוצאות",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
     "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",

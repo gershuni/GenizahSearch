@@ -1120,6 +1120,10 @@ def create_parallels_page(initial_text: str = None):
         progress_bar.set_value(0)
         status_label.text = tr('Initializing search...')
 
+        # Clear previous results header and container when starting new search
+        results_header.text = tr('Searching...')
+        results_container.clear()
+
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
         print(f"[DEBUG] Captured filter text length: {len(captured_filter_text) if captured_filter_text else 0}, enabled: {len(filter_sources['enabled'])}, loaded: {len(filter_sources['loaded'])}")
@@ -1207,6 +1211,10 @@ def create_parallels_page(initial_text: str = None):
         p_state.is_running = False
         p_state.progress = 1.0
 
+        # Hide the search indicator animation
+        search_indicator.style('display: none;')
+        progress_bar.style('opacity: 0;')
+
         if result_data:
             main_results = result_data.get('main', [])
             filtered_results = result_data.get('filtered', [])
@@ -1235,9 +1243,11 @@ def create_parallels_page(initial_text: str = None):
             else:
                 if is_partial:
                     p_state.status = tr('Search cancelled - no results yet')
+                results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()
         else:
+            results_header.text = tr('No results')
             with results_container:
                 show_empty_state()
 
