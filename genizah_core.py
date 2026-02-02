@@ -1057,8 +1057,10 @@ class LabEngine:
         MAX_FINAL = self.settings.comp_max_final_results
         min_pct_ratio = self.settings.min_should_match / 100.0
 
-        # (Part 1: Tokenization)
-        tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
+        # (Part 1: Tokenization) - track positions for preserving formatting
+        token_matches = list(re.finditer(r"[\w\u0590-\u05FF\']+", full_text))
+        tokens = [m.group() for m in token_matches]
+        token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
         c_size = chunk_size if chunk_size else 15
         step = max(1, int(c_size * 0.5))
 
@@ -1215,8 +1217,26 @@ class LabEngine:
                 for cl in clusters:
                     start_ctx = max(0, cl[0] - 50); end_ctx = min(len(tokens), cl[-1] + 51)
                     cl_set = set(cl)
-                    words_out = [f"*{tokens[k]}*" if k in cl_set else tokens[k] for k in range(start_ctx, end_ctx)]
-                    src_snippets.append(f"... {' '.join(words_out)} ...")
+
+                    # Get character positions from token_positions - preserve original formatting
+                    char_start = token_positions[start_ctx][0]
+                    char_end = token_positions[end_ctx - 1][1]
+                    original_snippet = full_text[char_start:char_end]
+
+                    # Build highlights for matched words
+                    highlights = []
+                    for k in range(start_ctx, end_ctx):
+                        if k in cl_set:
+                            word_char_start = token_positions[k][0] - char_start
+                            word_char_end = token_positions[k][1] - char_start
+                            highlights.append((word_char_start, word_char_end))
+
+                    # Apply highlights in reverse order to preserve positions
+                    result = original_snippet
+                    for word_start, word_end in reversed(highlights):
+                        result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
+
+                    src_snippets.append(f"... {result} ...")
 
             ms_snips = []
             spans = sorted(data['ms_matches'], key=lambda x: x[0])
@@ -4421,8 +4441,11 @@ class SearchEngine:
         - 'boundary': Only return results with boundary-crossing matches
         - 'combined': Full search with score boost for boundary matches
         """
-        # 1. Tokenize original text
-        tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
+        # 1. Tokenize original text - track positions for preserving formatting
+        token_matches = list(re.finditer(Config.WORD_TOKEN_PATTERN, full_text))
+        tokens = [m.group() for m in token_matches]
+        token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
+
         if len(tokens) < chunk_size:
             return {'main': [], 'filtered': [], 'boundary_stats': None}
 
@@ -4519,21 +4542,35 @@ class SearchEngine:
                                 curr_cluster = [idx]
                         clusters.append(curr_cluster)
 
-                    # B. Build text for each cluster
+                    # B. Build text for each cluster - preserve original formatting
                     for cl in clusters:
                         start_ctx = max(0, cl[0] - 200)
                         end_ctx = min(len(tokens), cl[-1] + 201)
 
                         cl_set = set(cl)
-                        words_out = []
-                        for k in range(start_ctx, end_ctx):
-                            word = tokens[k]
-                            if k in cl_set:
-                                words_out.append(f"*{word}*")
-                            else:
-                                words_out.append(word)
 
-                        src_snippets.append(" ".join(words_out))
+                        # Get character positions from token_positions
+                        char_start = token_positions[start_ctx][0]
+                        char_end = token_positions[end_ctx - 1][1]
+
+                        # Extract original text with formatting preserved
+                        original_snippet = full_text[char_start:char_end]
+
+                        # Insert highlight markers for matched words (work backwards to preserve positions)
+                        # Build list of (offset_in_snippet, word_start, word_end) for matched words
+                        highlights = []
+                        for k in range(start_ctx, end_ctx):
+                            if k in cl_set:
+                                word_char_start = token_positions[k][0] - char_start
+                                word_char_end = token_positions[k][1] - char_start
+                                highlights.append((word_char_start, word_char_end))
+
+                        # Apply highlights in reverse order to preserve positions
+                        result = original_snippet
+                        for word_start, word_end in reversed(highlights):
+                            result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
+
+                        src_snippets.append(result)
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
