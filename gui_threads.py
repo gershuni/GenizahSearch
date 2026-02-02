@@ -119,10 +119,12 @@ class LabCompositionThread(QThread):
 
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
-    scan_finished_signal = pyqtSignal(object) 
+    scan_finished_signal = pyqtSignal(object)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
+    def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None,
+                 deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n',
+                 boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
@@ -132,6 +134,12 @@ class LabCompositionThread(QThread):
         self.filter_text = filter_text
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
+        # Boundary search parameters
+        self.boundary_mode = boundary_mode
+        self.boundary_delimiter = boundary_delimiter
+        self.boundary_boost = boundary_boost
+        self.min_boundary_matches = min_boundary_matches
+        self.min_delimiter_distance = min_delimiter_distance
 
     def run(self):
         try:
@@ -152,7 +160,12 @@ class LabCompositionThread(QThread):
                 excluded_ids=self.excluded_ids,
                 filter_text=self.filter_text,
                 deep_scan=self.deep_scan,
-                scan_limit=self.scan_limit
+                scan_limit=self.scan_limit,
+                boundary_mode=self.boundary_mode,
+                boundary_delimiter=self.boundary_delimiter,
+                boundary_boost=self.boundary_boost,
+                min_boundary_matches=self.min_boundary_matches,
+                min_delimiter_distance=self.min_delimiter_distance
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))

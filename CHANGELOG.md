@@ -4,6 +4,37 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.3.0] - 2026-02-02
+
+### New Feature: Cross-Paragraph Search
+
+A new parallel search mode that finds manuscripts with text spanning paragraph boundaries:
+
+- **Why it's useful:** Text within paragraphs often contains citations (Mishnah, Talmud, known phrases). Text that crosses paragraph boundaries is unlikely to be a citation, effectively filtering out noise.
+
+- **Three search modes:**
+  - **Full search** - All results (default)
+  - **Cross-paragraph only** - Only matches that span paragraph breaks
+  - **Combined** - All results, with boundary-crossing matches boosted
+
+- **Customizable delimiters:** Line break, blank line (paragraph), period, colon, or custom
+
+- **Visual indicators:** Results show amber "Cross-paragraph" badge; matched text shows red `|` at boundary points
+
+- **Advanced settings:** Configurable boost factor, minimum boundary matches, minimum delimiter distance
+
+### Bug Fixes
+
+- **Duplicate results fix:** Fixed bug where same manuscript appeared multiple times in Standard search when found by overlapping chunks routed to different filter maps
+- **Boundary detection:** Improved to require words on BOTH sides of the boundary (not just touching)
+
+### Documentation
+
+- Updated help page with cross-paragraph search documentation (English and Hebrew)
+- Added implementation status to BOUNDARY_SEARCH_SPEC.md
+
+---
+
 ## [5.2.0] - 2026-02-01
 
 ### Documentation

@@ -96,6 +96,179 @@ def text_to_fingerprint(text: str, freq_map=None) -> str:
     return " ".join(encoded_tokens)
 
 
+# ==============================================================================
+#  BOUNDARY SEARCH HELPERS
+# ==============================================================================
+
+def parse_boundaries(text: str, delimiter: str, min_distance: int = 3) -> list:
+    """
+    Find word indices where boundaries occur.
+
+    Args:
+        text: Source text
+        delimiter: Boundary marker (e.g., '\n\n', '.', ':')
+        min_distance: Minimum words between boundaries (ignore closer ones)
+
+    Returns:
+        List of word indices where boundaries occur (boundary is AFTER this index)
+    """
+    if not text or not delimiter:
+        return []
+
+    # Split by delimiter
+    parts = text.split(delimiter)
+
+    if len(parts) <= 1:
+        return []
+
+    boundaries = []
+    word_count = 0
+    last_boundary_pos = -min_distance  # Allow first boundary
+
+    for i, part in enumerate(parts[:-1]):  # Skip last part (no boundary after it)
+        words_in_part = len(re.findall(r"[\w\u0590-\u05FF\']+", part))
+        word_count += words_in_part
+
+        # Only add boundary if far enough from previous
+        if word_count - last_boundary_pos >= min_distance and word_count > 0:
+            boundaries.append(word_count - 1)  # Boundary after last word of this part
+            last_boundary_pos = word_count
+
+    return boundaries
+
+
+def chunk_crosses_boundary(chunk_start: int, chunk_end: int, boundaries: list) -> bool:
+    """
+    Check if a chunk spans any boundary with words on BOTH sides.
+
+    A chunk truly crosses a boundary if it includes at least one word
+    before/at the boundary AND at least one word after the boundary.
+
+    Args:
+        chunk_start: Starting word index of chunk
+        chunk_end: Ending word index of chunk (exclusive)
+        boundaries: List of boundary word indices (last word before delimiter)
+
+    Returns:
+        True if chunk spans at least one boundary with words on both sides
+    """
+    for b in boundaries:
+        # chunk_start <= b: chunk includes word at or before boundary
+        # b < chunk_end - 1: chunk includes at least one word after boundary
+        if chunk_start <= b < chunk_end - 1:
+            return True
+    return False
+
+
+def get_crossed_boundaries(chunk_start: int, chunk_end: int, boundaries: list) -> set:
+    """
+    Get the set of boundary indices that a chunk crosses.
+
+    Args:
+        chunk_start: Starting word index of chunk
+        chunk_end: Ending word index of chunk (exclusive)
+        boundaries: List of boundary word indices
+
+    Returns:
+        Set of boundary indices that this chunk crosses
+    """
+    crossed = set()
+    for b in boundaries:
+        if chunk_start <= b < chunk_end - 1:
+            crossed.add(b)
+    return crossed
+
+
+def calculate_boundary_quality(boundary_chunk_scores: list) -> float:
+    """
+    Calculate boundary match quality as average of match strengths.
+
+    Args:
+        boundary_chunk_scores: List of scores from chunks that crossed boundaries
+
+    Returns:
+        Average score (0 if no boundary matches)
+    """
+    if not boundary_chunk_scores:
+        return 0.0
+    return sum(boundary_chunk_scores) / len(boundary_chunk_scores)
+
+
+def calculate_final_score_with_boost(base_score: float,
+                                     boundary_quality: float,
+                                     has_boundary_matches: bool,
+                                     boundary_boost: float = 1.5) -> float:
+    """
+    Calculate final score with boundary boost.
+
+    Formula: base_score * (1 + (boost - 1) * normalized_quality)
+
+    Where normalized_quality = boundary_quality / base_score
+    This ensures the boost is proportional to how good the boundary matches are
+    relative to overall match quality.
+
+    Args:
+        base_score: Original score without boost
+        boundary_quality: Average score of boundary-crossing chunks
+        has_boundary_matches: Whether any boundary matches exist
+        boundary_boost: Multiplier for boundary matches (default 1.5)
+
+    Returns:
+        Boosted score (or original score if no boundary matches)
+    """
+    if not has_boundary_matches or base_score == 0:
+        return base_score
+
+    # Normalize boundary quality relative to base score
+    normalized_quality = min(boundary_quality / base_score, 1.0)
+
+    multiplier = 1 + (boundary_boost - 1) * normalized_quality
+    return base_score * multiplier
+
+
+def get_boundary_stats(text: str, delimiter: str, chunk_size: int, min_distance: int = 3) -> dict:
+    """
+    Get pre-search statistics about boundaries.
+
+    Args:
+        text: Source text
+        delimiter: Boundary marker
+        chunk_size: Size of search chunks
+        min_distance: Minimum words between boundaries
+
+    Returns:
+        Dictionary with boundary_count, crossing_chunk_count, total_chunks, and boundaries list
+    """
+    boundaries = parse_boundaries(text, delimiter, min_distance)
+    tokens = re.findall(r"[\w\u0590-\u05FF\']+", text or "")
+    total_words = len(tokens)
+
+    if total_words < chunk_size:
+        return {
+            'boundary_count': len(boundaries),
+            'crossing_chunk_count': 1 if boundaries else 0,
+            'total_chunks': 1,
+            'boundaries': boundaries  # Include parsed boundaries for reuse
+        }
+
+    # Count chunks that cross boundaries
+    crossing_chunks = 0
+    step = max(1, chunk_size // 2)
+    total_chunks = 0
+
+    for i in range(0, max(1, total_words - chunk_size + 1), step):
+        total_chunks += 1
+        if chunk_crosses_boundary(i, i + chunk_size, boundaries):
+            crossing_chunks += 1
+
+    return {
+        'boundary_count': len(boundaries),
+        'crossing_chunk_count': crossing_chunks,
+        'total_chunks': total_chunks,
+        'boundaries': boundaries  # Include parsed boundaries for reuse
+    }
+
+
 def natural_sort_key(text):
     """Sort strings containing numbers naturally (e.g. 'Item 2' < 'Item 10')."""
     normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
@@ -156,6 +329,13 @@ class LabSettings:
         self.variant_pairs_count = 50      # Number of top variant pairs to use (slider value)
         self.variant_use_slider = False    # If True, show slider instead of preset buttons
 
+        # Boundary Search Settings
+        self.boundary_mode = 'full'           # 'full', 'boundary', 'combined'
+        self.boundary_delimiter = '\n'        # What marks a paragraph boundary
+        self.boundary_boost = 1.5             # Score multiplier for boundary matches (1.0-3.0)
+        self.min_boundary_matches = 0         # Filter results with fewer matches (0-10)
+        self.min_delimiter_distance = 3       # Min words between delimiters
+
         self.load()
 
     def load(self):
@@ -193,6 +373,13 @@ class LabSettings:
                     self.variant_aggressive = data.get('variant_aggressive', False)
                     self.variant_pairs_count = data.get('variant_pairs_count', 50)
                     self.variant_use_slider = data.get('variant_use_slider', False)
+
+                    # Load boundary search settings
+                    self.boundary_mode = data.get('boundary_mode', 'full')
+                    self.boundary_delimiter = data.get('boundary_delimiter', '\n')
+                    self.boundary_boost = data.get('boundary_boost', 1.5)
+                    self.min_boundary_matches = data.get('min_boundary_matches', 0)
+                    self.min_delimiter_distance = data.get('min_delimiter_distance', 3)
             except Exception: pass
 
     def save(self):
@@ -229,7 +416,14 @@ class LabSettings:
                     'variant_max_changes': self.variant_max_changes,
                     'variant_aggressive': self.variant_aggressive,
                     'variant_pairs_count': self.variant_pairs_count,
-                    'variant_use_slider': self.variant_use_slider
+                    'variant_use_slider': self.variant_use_slider,
+
+                    # Boundary search settings
+                    'boundary_mode': self.boundary_mode,
+                    'boundary_delimiter': self.boundary_delimiter,
+                    'boundary_boost': self.boundary_boost,
+                    'min_boundary_matches': self.min_boundary_matches,
+                    'min_delimiter_distance': self.min_delimiter_distance
                 }, f, indent=4)
         except Exception: pass
 
@@ -843,7 +1037,10 @@ class LabEngine:
 
         return final_list
 
-    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None, excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000):
+    def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None,
+                                excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000,
+                                boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
+                                min_boundary_matches=0, min_delimiter_distance=3):
         """
         Scans a composition using Lab Mode.
         UPGRADES:
@@ -852,9 +1049,18 @@ class LabEngine:
         3. FIX: Separates excluded/known manuscripts.
         4. Supports Filter Text and Batching.
         5. Returns partial results if interrupted/cancelled.
+        6. Supports boundary-crossing search modes.
+
+        Boundary Search Modes:
+        - 'full': Regular search, track boundary matches for display
+        - 'boundary': Only return results with boundary-crossing matches
+        - 'combined': Full search with score boost for boundary matches
         """
         if not full_text:
-            return {'main': [], 'filtered': [], 'known': [], 'partial': False}
+            return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None}
+
+        # Reset debug counter for this search (prevents state leak between searches)
+        self._filter_match_count = 0
 
         # Determine strategy: Static or Dynamic
         use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
@@ -870,15 +1076,29 @@ class LabEngine:
         MAX_FINAL = self.settings.comp_max_final_results
         min_pct_ratio = self.settings.min_should_match / 100.0
 
-        # (Part 1: Tokenization)
-        tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
+        # (Part 1: Tokenization) - track positions for preserving formatting
+        token_matches = list(re.finditer(r"[\w\u0590-\u05FF\']+", full_text))
+        tokens = [m.group() for m in token_matches]
+        token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
         c_size = chunk_size if chunk_size else 15
-        step = max(1, int(c_size * 0.5)) 
-        
+        step = max(1, int(c_size * 0.5))
+
+        # Get boundary stats (includes parsed boundaries to avoid double parsing)
+        boundary_stats = get_boundary_stats(full_text, boundary_delimiter, c_size, min_delimiter_distance)
+        boundaries = boundary_stats.get('boundaries', [])
+
+        # Build chunks - handle short texts first to avoid wasteful iteration
         chunks_data = []
-        for i in range(0, max(1, len(tokens) - c_size + 1), step):
-            chunks_data.append((i, tokens[i : i + c_size]))
-        if len(tokens) < c_size: chunks_data = [(0, tokens)]
+        if len(tokens) < c_size:
+            # Short text: single chunk with all tokens
+            crossed_bounds = get_crossed_boundaries(0, len(tokens), boundaries)
+            chunks_data = [(0, tokens, crossed_bounds)]
+        else:
+            # Normal text: create overlapping chunks
+            for i in range(0, max(1, len(tokens) - c_size + 1), step):
+                chunk_end = i + c_size
+                crossed_bounds = get_crossed_boundaries(i, chunk_end, boundaries)
+                chunks_data.append((i, tokens[i : i + c_size], crossed_bounds))
 
         total_chunks = len(chunks_data)
         results_map = {}
@@ -887,7 +1107,7 @@ class LabEngine:
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
-            for i, (token_start_idx, chunk_tokens) in enumerate(chunks_data):
+            for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
                 chunks_processed = i
                 if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
                 chunk_text = " ".join(chunk_tokens)
@@ -965,12 +1185,20 @@ class LabEngine:
                                 'raw_header': doc['full_header'][0], 'source': doc['source'][0],
                                 'content': content, 'best_chunk_score': -1,
                                 'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
-                                'is_text_filtered': False
+                                'is_text_filtered': False,
+                                # Boundary tracking - use set to count each boundary only once
+                                'boundary_chunk_scores': [],
+                                'crossed_boundaries': set()
                             }
                         rec = results_map[uid]
 
                         if is_filtered_match:
                             rec['is_text_filtered'] = True
+
+                        # Track boundary-crossing matches - each boundary counted once
+                        if chunk_crossed_bounds:
+                            rec['boundary_chunk_scores'].append(match_score)
+                            rec['crossed_boundaries'].update(chunk_crossed_bounds)
 
                         rec['total_score'] += match_score
                         rec['hits_count'] += 1
@@ -1008,8 +1236,26 @@ class LabEngine:
                 for cl in clusters:
                     start_ctx = max(0, cl[0] - 50); end_ctx = min(len(tokens), cl[-1] + 51)
                     cl_set = set(cl)
-                    words_out = [f"*{tokens[k]}*" if k in cl_set else tokens[k] for k in range(start_ctx, end_ctx)]
-                    src_snippets.append(f"... {' '.join(words_out)} ...")
+
+                    # Get character positions from token_positions - preserve original formatting
+                    char_start = token_positions[start_ctx][0]
+                    char_end = token_positions[end_ctx - 1][1]
+                    original_snippet = full_text[char_start:char_end]
+
+                    # Build highlights for matched words
+                    highlights = []
+                    for k in range(start_ctx, end_ctx):
+                        if k in cl_set:
+                            word_char_start = token_positions[k][0] - char_start
+                            word_char_end = token_positions[k][1] - char_start
+                            highlights.append((word_char_start, word_char_end))
+
+                    # Apply highlights in reverse order to preserve positions
+                    result = original_snippet
+                    for word_start, word_end in reversed(highlights):
+                        result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
+
+                    src_snippets.append(f"... {result} ...")
 
             ms_snips = []
             spans = sorted(data['ms_matches'], key=lambda x: x[0])
@@ -1032,40 +1278,77 @@ class LabEngine:
             found_words = sorted(list(data['all_found_words']), key=len, reverse=True)[:50]
             hl_pattern = "|".join(re.escape(w) for w in found_words) if found_words else ""
 
+            # Calculate boundary match quality and final score with boost
+            base_score = data['total_score']
+            boundary_chunk_scores = data.get('boundary_chunk_scores', [])
+            has_boundary_matches = len(boundary_chunk_scores) > 0
+            boundary_quality = calculate_boundary_quality(boundary_chunk_scores)
+
+            # Apply score boost in combined mode
+            if boundary_mode == 'combined' and has_boundary_matches:
+                final_score = calculate_final_score_with_boost(
+                    base_score, boundary_quality, has_boundary_matches, boundary_boost
+                )
+            else:
+                final_score = base_score
+
+            # Calculate normalized boundary quality (0-1 range)
+            boundary_quality_normalized = 0.0
+            if has_boundary_matches and base_score > 0:
+                boundary_quality_normalized = min(boundary_quality / base_score, 1.0)
+
             item = {
-                'score': data['total_score'],
+                'score': base_score,
+                'final_score': final_score,
                 'uid': uid,
                 'raw_header': data['raw_header'],
                 'src_lbl': data['source'],
                 'source_ctx': "\n\n".join(src_snippets),
-                'text': "\n...\n".join(ms_snips),        
+                'text': "\n...\n".join(ms_snips),
                 'highlight_pattern': hl_pattern,
                 'full_text': data['content'],
-                'is_text_filtered': data.get('is_text_filtered', False)
+                'is_text_filtered': data.get('is_text_filtered', False),
+                # Boundary metadata
+                'has_boundary_matches': has_boundary_matches,
+                'boundary_match_count': len(data.get('crossed_boundaries', set())),
+                'boundary_quality': boundary_quality_normalized
             }
             raw_final_items.append(item)
 
         # --- Sorting & Splitting Logic ---
-        raw_final_items.sort(key=lambda x: x['score'], reverse=True)
-        
+        # In combined mode, sort by final_score; otherwise by base score
+        if boundary_mode == 'combined':
+            raw_final_items.sort(key=lambda x: x.get('final_score', x['score']), reverse=True)
+        else:
+            raw_final_items.sort(key=lambda x: x['score'], reverse=True)
+
         main_list = []
         known_list = []
         filtered_list = []
-        
+
         for item in raw_final_items:
+            # In boundary-only mode, skip items without boundary matches
+            if boundary_mode == 'boundary' and not item.get('has_boundary_matches', False):
+                continue
+
+            # Apply min_boundary_matches filter (applies to all modes as a post-hoc filter)
+            if min_boundary_matches > 0:
+                if item.get('boundary_match_count', 0) < min_boundary_matches:
+                    continue
+
             # Check if manuscript is excluded
             is_excluded = False
-            
+
             # 1. Check by UID (e.g. IE...)
             if str(item['uid']) in excluded_set:
                 is_excluded = True
-            
+
             # 2. Check by System ID (99...) found in header
             if not is_excluded:
                 m = re.search(r'(99\d+)', str(item['raw_header']))
                 if m and m.group(1) in excluded_set:
                     is_excluded = True
-            
+
             if is_excluded:
                 known_list.append(item)
             elif item.get('is_text_filtered'):
@@ -1078,7 +1361,13 @@ class LabEngine:
             main_list = main_list[:MAX_FINAL]
 
         # Split return so GUI builds tree correctly
-        return {'main': main_list, 'known': known_list, 'filtered': filtered_list, 'partial': was_interrupted}
+        return {
+            'main': main_list,
+            'known': known_list,
+            'filtered': filtered_list,
+            'partial': was_interrupted,
+            'boundary_stats': boundary_stats
+        }
     
     @lru_cache(maxsize=10000)
     def _is_word_too_common(self, word, threshold=5000):
@@ -4159,25 +4448,49 @@ class SearchEngine:
             if r['display']['source'] == "V0.7" and r['uid'] not in v8: final.append(r)
         return final
 
-    def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None):
+    def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,
+                                   boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
+                                   min_boundary_matches=0, min_delimiter_distance=3):
         """
         Scans composition chunks against the index.
         Returns aggregated results with WIDE source context.
+
+        Boundary Search Modes:
+        - 'full': Regular search, track boundary matches for display
+        - 'boundary': Only return results with boundary-crossing matches
+        - 'combined': Full search with score boost for boundary matches
         """
-        # 1. Tokenize original text
-        tokens = re.findall(Config.WORD_TOKEN_PATTERN, full_text)
-        if len(tokens) < chunk_size: return None
-        chunks = [tokens[i:i + chunk_size] for i in range(len(tokens) - chunk_size + 1)]
+        # 1. Tokenize original text - track positions for preserving formatting
+        token_matches = list(re.finditer(Config.WORD_TOKEN_PATTERN, full_text))
+        tokens = [m.group() for m in token_matches]
+        token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
 
-        doc_hits_main = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
-        doc_hits_filtered = defaultdict(lambda: {'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(), 'patterns': set()})
+        if len(tokens) < chunk_size:
+            return {'main': [], 'filtered': [], 'boundary_stats': None}
 
-        total_chunks = len(chunks)
-        
+        # Get boundary stats (includes parsed boundaries to avoid double parsing)
+        boundary_stats = get_boundary_stats(full_text, boundary_delimiter, chunk_size, min_delimiter_distance)
+        boundaries = boundary_stats.get('boundaries', [])
+
+        # Build chunks with boundary tracking
+        chunks_data = []
+        for i in range(len(tokens) - chunk_size + 1):
+            crossed_bounds = get_crossed_boundaries(i, i + chunk_size, boundaries)
+            chunks_data.append((i, tokens[i:i + chunk_size], crossed_bounds))
+
+        # Single map for all results - track filtering status per uid
+        doc_hits = defaultdict(lambda: {
+            'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
+            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
+            'is_filtered': False  # True if ANY match came from filtered chunk
+        })
+
+        total_chunks = len(chunks_data)
+
         # 2. Scan chunks
-        for i, chunk in enumerate(chunks):
+        for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
-            
+
             # Build query
             t_query = self.build_tantivy_query(chunk, mode)
             regex = self.build_regex_pattern(chunk, mode, 0)
@@ -4193,69 +4506,89 @@ class SearchEngine:
                 # Search index
                 query = self.index.parse_query(t_query, ["content"])
                 hits = self.searcher.search(query, 50).hits
-                
-                is_freq_filtered = len(hits) > max_freq 
-                
+
+                is_freq_filtered = len(hits) > max_freq
+
                 for score, doc_addr in hits:
                     doc = self.searcher.doc(doc_addr)
                     content = doc['content'][0]
-                    
+
                     # Verify exact Regex match
                     if regex.search(content):
                         uid = doc['unique_id'][0]
-                        
-                        # Route to appropriate map
+
+                        # Always use single map - accumulate all matches for same uid
+                        rec = doc_hits[uid]
+
+                        # Mark as filtered if ANY chunk match is filtered
                         if is_text_filtered or is_freq_filtered:
-                            rec = doc_hits_filtered[uid]
-                        else:
-                            rec = doc_hits_main[uid]
+                            rec['is_filtered'] = True
 
                         rec['head'] = doc['full_header'][0]
                         rec['src'] = doc['source'][0]
                         rec['content'] = content
                         rec['matches'].append(regex.search(content).span())
                         # Save indices of found words in *source* text
-                        rec['src_indices'].update(range(i, i + chunk_size))
+                        rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                         rec['patterns'].add(regex.pattern)
+
+                        # Track boundary-crossing matches - each boundary counted once
+                        if chunk_crossed_bounds:
+                            rec['boundary_chunk_scores'].append(score)
+                            rec['crossed_boundaries'].update(chunk_crossed_bounds)
             except Exception as e:
-                LAB_LOGGER.warning(f"Failed composition chunk processing at token {i}: {e}")
+                LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
 
         # 3. Build results with Wide Context
         def build_items(hits_dict):
             final_items = []
-            
+
             for uid, data in hits_dict.items():
                 src_indices = sorted(list(data['src_indices']))
                 src_snippets = []
-                
+
                 if src_indices:
                     # A. Group nearby indices
                     clusters = []
                     if src_indices:
                         curr_cluster = [src_indices[0]]
                         for idx in src_indices[1:]:
-                            if idx - curr_cluster[-1] < 60: 
+                            if idx - curr_cluster[-1] < 60:
                                 curr_cluster.append(idx)
                             else:
                                 clusters.append(curr_cluster)
                                 curr_cluster = [idx]
                         clusters.append(curr_cluster)
-                    
-                    # B. Build text for each cluster
+
+                    # B. Build text for each cluster - preserve original formatting
                     for cl in clusters:
                         start_ctx = max(0, cl[0] - 200)
                         end_ctx = min(len(tokens), cl[-1] + 201)
-                        
+
                         cl_set = set(cl)
-                        words_out = []
+
+                        # Get character positions from token_positions
+                        char_start = token_positions[start_ctx][0]
+                        char_end = token_positions[end_ctx - 1][1]
+
+                        # Extract original text with formatting preserved
+                        original_snippet = full_text[char_start:char_end]
+
+                        # Insert highlight markers for matched words (work backwards to preserve positions)
+                        # Build list of (offset_in_snippet, word_start, word_end) for matched words
+                        highlights = []
                         for k in range(start_ctx, end_ctx):
-                            word = tokens[k]
                             if k in cl_set:
-                                words_out.append(f"*{word}*") 
-                            else:
-                                words_out.append(word)
-                        
-                        src_snippets.append(" ".join(words_out))
+                                word_char_start = token_positions[k][0] - char_start
+                                word_char_end = token_positions[k][1] - char_start
+                                highlights.append((word_char_start, word_char_end))
+
+                        # Apply highlights in reverse order to preserve positions
+                        result = original_snippet
+                        for word_start, word_end in reversed(highlights):
+                            result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
+
+                        src_snippets.append(result)
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
@@ -4266,8 +4599,26 @@ class SearchEngine:
                         else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
                     merged.append((curr_s, curr_e))
 
-                score = sum(e-s for s,e in merged)
-                
+                base_score = sum(e-s for s,e in merged)
+
+                # Calculate boundary match quality and final score
+                boundary_chunk_scores = data.get('boundary_chunk_scores', [])
+                has_boundary_matches = len(boundary_chunk_scores) > 0
+                boundary_quality = calculate_boundary_quality(boundary_chunk_scores)
+
+                # Apply score boost in combined mode
+                if boundary_mode == 'combined' and has_boundary_matches:
+                    final_score = calculate_final_score_with_boost(
+                        base_score, boundary_quality, has_boundary_matches, boundary_boost
+                    )
+                else:
+                    final_score = base_score
+
+                # Calculate normalized boundary quality
+                boundary_quality_normalized = 0.0
+                if has_boundary_matches and base_score > 0:
+                    boundary_quality_normalized = min(boundary_quality / base_score, 1.0)
+
                 ms_snips = []
                 for s, e in merged:
                     start = max(0, s - 60); end = min(len(data['content']), e + 60)
@@ -4279,22 +4630,46 @@ class SearchEngine:
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 
                 final_items.append({
-                    'score': score, 
+                    'score': base_score,
+                    'final_score': final_score,
                     'uid': uid,
-                    'raw_header': data['head'], 
+                    'raw_header': data['head'],
                     'src_lbl': data['src'],
                     'source_ctx': "\n\n".join(src_snippets),
                     'text': "\n...\n".join(ms_snips),
-                    'highlight_pattern': combined_pattern
+                    'highlight_pattern': combined_pattern,
+                    # Boundary metadata
+                    'has_boundary_matches': has_boundary_matches,
+                    'boundary_match_count': len(data.get('crossed_boundaries', set())),
+                    'boundary_quality': boundary_quality_normalized,
+                    # Filtering flag
+                    'is_filtered': data.get('is_filtered', False)
                 })
-                
-            final_items.sort(key=lambda x: x['score'], reverse=True)
+
+            # Sort by final_score in combined mode, otherwise by base score
+            if boundary_mode == 'combined':
+                final_items.sort(key=lambda x: x.get('final_score', x['score']), reverse=True)
+            else:
+                final_items.sort(key=lambda x: x['score'], reverse=True)
+
             return final_items
 
-        main_list = build_items(doc_hits_main)
-        filtered_list = build_items(doc_hits_filtered) 
+        # Build all items from single map, then separate by filter status
+        all_items = build_items(doc_hits)
 
-        return {'main': main_list, 'filtered': filtered_list}
+        # Apply boundary mode filtering first
+        if boundary_mode == 'boundary':
+            all_items = [item for item in all_items if item.get('has_boundary_matches', False)]
+
+        # Apply min_boundary_matches filter
+        if min_boundary_matches > 0:
+            all_items = [item for item in all_items if item.get('boundary_match_count', 0) >= min_boundary_matches]
+
+        # Separate into main and filtered lists
+        main_list = [item for item in all_items if not item.get('is_filtered', False)]
+        filtered_list = [item for item in all_items if item.get('is_filtered', False)]
+
+        return {'main': main_list, 'filtered': filtered_list, 'boundary_stats': boundary_stats}
     
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items.
