@@ -473,7 +473,10 @@ def create_parallels_page(initial_text: str = None):
                         ui.label(tr('and show partial results')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Progress - visible spinner + status in the control panel
-                    progress_bar = ui.linear_progress(0).classes('w-full my-2').style('height: 8px; opacity: 0;')
+                    with ui.linear_progress(0, show_value=False).classes('w-full my-2').style('height: 12px; opacity: 0;') as progress_bar:
+                        ui.label().classes('absolute-center text-xs text-white').bind_text_from(
+                            progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
+                        )
                     with ui.row().classes('w-full items-center justify-center gap-2').style('display: none;') as search_indicator:
                         ui.spinner('dots', size='sm', color='primary')
                         status_label = ui.label('').classes('text-sm font-medium').style('color: var(--primary-600);')
@@ -1135,8 +1138,7 @@ def create_parallels_page(initial_text: str = None):
                 raise InterruptedError("Search cancelled")
             if total > 0:
                 p_state.progress = current / total
-                pct = round(p_state.progress * 100)
-                p_state.status = f"{pct}%"
+                p_state.status = f"{current} / {total}"
 
         # Capture search mode settings in main thread
         captured_lab_mode = lab_mode.value

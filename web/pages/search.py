@@ -256,7 +256,10 @@ def create_search_page(initial_query: str = None):
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
         with progress_container:
-            progress_bar = ui.linear_progress(0).props('stripe animate').classes('w-full opacity-0 my-2').style('height: 8px;')
+            with ui.linear_progress(0, show_value=False).props('stripe animate').classes('w-full opacity-0 my-2').style('height: 12px;') as progress_bar:
+                ui.label().classes('absolute-center text-xs text-white').bind_text_from(
+                    progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
+                )
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
         # === Main Content Area (Splitter) ===
@@ -693,8 +696,7 @@ def create_search_page(initial_query: str = None):
                 raise InterruptedError("Search cancelled")
             if total > 0:
                 search_state.progress = current / total
-                pct = round(search_state.progress * 100)
-                search_state.status = f"{pct}%"
+                search_state.status = f"{current} / {total}"
 
         # Get NOT filter words
         not_words = not_filter.value.split() if not_filter.value else []
