@@ -197,6 +197,25 @@ Talmud, or other known texts, you can **load these sources** so matches found in
 - The texts will automatically load in your next search as well, until you remove them.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
+        # Cross-Paragraph Search
+        h3('Cross-Paragraph Search', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
+        ui.markdown('''
+When searching for parallels to a text that contains paragraph breaks (e.g., a piyyut with stanzas, or a text with section divisions),
+you can enable **cross-paragraph search** to specifically find manuscripts that preserve text spanning across these boundaries.
+
+**Why is this useful?**
+- If your source text has a paragraph break between "...end of verse" and "beginning of next verse...", a regular search might find
+  matches for each part separately
+- Cross-paragraph search specifically looks for manuscripts where the text **crosses** the same paragraph boundary as in your source
+- This helps identify manuscripts that preserve the same textual structure
+
+**How to use:**
+1. Enter your text with paragraph breaks (or set a custom delimiter like period or colon)
+2. Select a search mode: **Full search** (all results), **Cross-paragraph only** (only matches that cross boundaries),
+   or **Combined** (all results, with boundary-crossing matches boosted)
+3. Results that cross paragraph boundaries are marked with a special indicator
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
         # Understanding Results
         h3('Understanding Results', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
         ui.markdown('''
@@ -428,6 +447,22 @@ def _create_hebrew_content():
 - התאמות שנמצאו בכתבי יד מקור מופיעות בתוצאות הראשיות
 - התאמות שנמצאו בטקסטי הסינון שלכם (פסוקים וכו') מופיעות בקטע **"תוצאות מסוננות"** נפרד
 - זה עוזר לכם להתמקד במקבילות *חדשות* ולא בציטוטים ידועים. הטקסטים ייטענו אוטומטית גם בחיפוש הבא, עד שתסירו אותם.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        # Cross-Paragraph Search
+        h3('חיפוש חוצה-פסקאות', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+כאשר מחפשים מקבילות לטקסט המכיל מעברי פסקה (למשל: פיוט עם בתים, או טקסט עם חלוקה לסעיפים), ניתן להפעיל **חיפוש חוצה-פסקאות** כדי למצוא באופן ספציפי כתבי יד ששומרים על טקסט החוצה גבולות אלה.
+
+**למה זה שימושי?**
+- אם בטקסט המקור יש מעבר פסקה בין "...סוף בית" ל"תחילת הבית הבא...", חיפוש רגיל עשוי למצוא התאמות לכל חלק בנפרד
+- חיפוש חוצה-פסקאות מחפש באופן ספציפי כתבי יד שבהם הטקסט **חוצה** את אותו גבול פסקה כמו במקור
+- זה עוזר לזהות כתבי יד ששומרים על אותו מבנה טקסטואלי
+
+**כיצד להשתמש:**
+1. הזינו את הטקסט עם מעברי פסקה (או הגדירו מפריד מותאם כמו נקודה או נקודתיים)
+2. בחרו מצב חיפוש: **חיפוש מלא** (כל התוצאות), **חוצה-פסקאות בלבד** (רק התאמות שחוצות גבולות), או **משולב** (כל התוצאות, עם הגברת התאמות חוצות-פסקאות)
+3. תוצאות שחוצות גבולות פסקה מסומנות בסימון מיוחד
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         # Understanding Results
