@@ -204,10 +204,9 @@ When searching for parallels to a text that contains paragraph breaks (e.g., a p
 you can enable **cross-paragraph search** to specifically find manuscripts that preserve text spanning across these boundaries.
 
 **Why is this useful?**
-- If your source text has a paragraph break between "...end of verse" and "beginning of next verse...", a regular search might find
-  matches for each part separately
-- Cross-paragraph search specifically looks for manuscripts where the text **crosses** the same paragraph boundary as in your source
-- This helps identify manuscripts that preserve the same textual structure
+- Text **within** paragraphs often contains citations from other sources (Mishnah, Talmud, known phrases) or sources that quote the composition you're searching for
+- Text that **crosses** paragraph boundaries is much less likely to be a citation, since citations rarely span across structural breaks
+- This effectively filters out most of the "noise" and helps you find genuine textual witnesses
 
 **How to use:**
 1. Enter your text with paragraph breaks (or set a custom delimiter like period or colon)
@@ -455,9 +454,9 @@ def _create_hebrew_content():
 כאשר מחפשים מקבילות לטקסט המכיל מעברי פסקה (למשל: פיוט עם בתים, או טקסט עם חלוקה לסעיפים), ניתן להפעיל **חיפוש חוצה-פסקאות** כדי למצוא באופן ספציפי כתבי יד ששומרים על טקסט החוצה גבולות אלה.
 
 **למה זה שימושי?**
-- אם בטקסט המקור יש מעבר פסקה בין "...סוף בית" ל"תחילת הבית הבא...", חיפוש רגיל עשוי למצוא התאמות לכל חלק בנפרד
-- חיפוש חוצה-פסקאות מחפש באופן ספציפי כתבי יד שבהם הטקסט **חוצה** את אותו גבול פסקה כמו במקור
-- זה עוזר לזהות כתבי יד ששומרים על אותו מבנה טקסטואלי
+- טקסט **בתוך** פסקאות מכיל לעיתים קרובות ציטוטים ממקורות אחרים (משנה, תלמוד, ביטויים ידועים) או מקורות שמצטטים את החיבור שאתם מחפשים
+- טקסט ש**חוצה** גבולות פסקה הוא הרבה פחות סביר להיות ציטוט, מכיוון שציטוטים לעיתים רחוקות חוצים שברים מבניים
+- זה מסנן ביעילות את רוב ה"רעש" ועוזר למצוא עדי נוסח אמיתיים
 
 **כיצד להשתמש:**
 1. הזינו את הטקסט עם מעברי פסקה (או הגדירו מפריד מותאם כמו נקודה או נקודתיים)
