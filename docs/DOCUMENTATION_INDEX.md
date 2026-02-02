@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-02-01
+> Last updated: 2026-02-02
 
 This directory contains all project documentation, organized by category.
 
@@ -97,6 +97,7 @@ Detailed specifications for complex features:
 |------|-------------|
 | [JOINS_TECHNICAL_SPEC.md](specs/JOINS_TECHNICAL_SPEC.md) | Fragment joins system architecture |
 | [JOINS_SIMPLIFIED_SPEC.md](specs/JOINS_SIMPLIFIED_SPEC.md) | Simplified joins for first release |
+| [BOUNDARY_SEARCH_SPEC.md](plans/BOUNDARY_SEARCH_SPEC.md) | Cross-paragraph search (implemented in web) |
 
 > Note: Old correction specs (USER_CORRECTIONS_SPEC.md, SEARCHABLE_CORRECTIONS_SPEC.md) moved to archive after Supabase migration.
 

@@ -1,7 +1,7 @@
 # Technical Specification: Boundary-Crossing Parallel Search
 
 > Date: February 2026
-> Status: Draft v2 - Post Review
+> Status: **Implemented (Web)** - Desktop pending
 > Author: Claude Code
 
 ## Executive Summary
@@ -855,7 +855,93 @@ Add to `genizah_translations.py`:
 | v1 | Feb 2026 | Initial Hebrew draft |
 | v2 | Feb 2026 | English rewrite, algorithm simplification, UX improvements |
 | v3 | Feb 2026 | Added code locations reference (Section 14) |
+| v4 | Feb 2026 | Implementation complete (Web), added status section |
 
 ---
 
-*This document is ready for implementation.*
+## 16. Implementation Status (February 2026)
+
+### 16.1 What Was Implemented
+
+**Core Algorithm** (`genizah_core.py`):
+- ✅ `parse_boundaries()` - Parse boundary positions from text
+- ✅ `chunk_crosses_boundary()` - Check if chunk spans a boundary
+- ✅ `get_crossed_boundaries()` - Return set of boundary indices a chunk crosses
+- ✅ `calculate_boundary_quality()` - Calculate average boundary match quality
+- ✅ Boundary tracking in both `lab_composition_search()` and `search_composition_logic()`
+- ✅ Score boost calculation in combined mode
+- ✅ Filtering for boundary-only mode
+- ✅ Deduplication fix for overlapping chunks (same manuscript, same boundary = 1 match)
+
+**Web UI** (`web/pages/parallels.py`):
+- ✅ Search mode radio buttons (Full / Cross-paragraph only / Combined)
+- ✅ Paragraph delimiter dropdown (Line break, Blank line, Period, Colon)
+- ✅ Advanced settings dialog (boost, min matches, min distance)
+- ✅ Tooltips for all options
+- ✅ Boundary-crossing badge on results (amber colored, shows percentage)
+- ✅ Red `|` indicator in "Your Text" showing where paragraph breaks occur
+- ✅ Hebrew translations for all UI strings
+
+**Help Page** (`web/pages/help.py`):
+- ✅ Cross-paragraph search documentation (English and Hebrew)
+
+### 16.2 Key Implementation Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Default delimiter | `\n` (line break) | More common in piyyut/poetry than blank lines |
+| Boundary detection | `chunk_start <= b < chunk_end - 1` | Ensures at least one word on EACH side of boundary |
+| Result merging | Single `doc_hits` map | Prevents duplicate results from overlapping chunks being routed to different maps |
+| Boundary count | Set of indices | Each unique boundary counted once, not per chunk |
+| UI placement | Below text input | More intuitive flow, options visible without scrolling |
+| Delimiter dropdown | Always editable | User might want to change delimiter even in "Full" mode |
+
+### 16.3 Bug Fixes During Implementation
+
+1. **Boundary detection too loose**: Changed `chunk_start <= b < chunk_end` to `chunk_start <= b < chunk_end - 1` to require words on BOTH sides of the boundary.
+
+2. **Duplicate results in Standard search**: Same manuscript was appearing multiple times because overlapping chunks could be routed to different maps (`doc_hits_main` vs `doc_hits_filtered`). Fixed by using a single map with `is_filtered` flag.
+
+3. **Boundary marker not displaying**: `<<<BOUNDARY>>>` was escaped by `html.escape()`. Changed to `~PARA_BREAK~` which has no special HTML characters.
+
+4. **Delimiter dropdown not working**: Initial `disable` prop prevented value changes. Removed to make always editable.
+
+5. **Original formatting lost**: `" ".join(words_out)` lost newlines. Fixed by tracking token positions and extracting from original text.
+
+### 16.4 Files Modified
+
+| File | Changes |
+|------|---------|
+| `genizah_core.py` | Added boundary functions, modified both search functions |
+| `gui_threads.py` | Updated `LabCompositionThread` with boundary parameters |
+| `web/pages/parallels.py` | Added UI controls, result display, boundary indicators |
+| `genizah_translations.py` | Added Hebrew translations |
+| `web/pages/help.py` | Added documentation section |
+
+### 16.5 Desktop Implementation Plan
+
+**Priority**: Medium (after web stabilization)
+
+**Phase 1: Core Integration**
+1. Update `LabCompositionThread` to pass boundary parameters (already partially done)
+2. Add boundary parameters to `run_composition()` in `genizah_app.py`
+
+**Phase 2: UI Controls** (in `create_composition_tab()`)
+1. Add `boundary_mode_combo` - QComboBox for search mode
+2. Add `delimiter_combo` - QComboBox for delimiter selection
+3. Add collapsible "Advanced" group with boost/min_matches/min_distance sliders
+4. Wire up signals to update LabSettings
+
+**Phase 3: Results Display** (in `display_comp_results()`)
+1. Add boundary-crossing indicator to tree items
+2. Highlight boundary-crossing matches differently
+3. Show boost indicator in score column
+
+**Estimated locations in `genizah_app.py`:**
+- UI creation: Lines 5794-5864 (controls row)
+- Search execution: Line 12115 (`run_composition()`)
+- Results display: Line 12617 (`display_comp_results()`)
+
+---
+
+*Web implementation complete. Desktop implementation pending.*
