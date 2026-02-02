@@ -1,111 +1,141 @@
-# מפרט טכני: חיפוש מקבילות חוצה-גבולות
+# Technical Specification: Boundary-Crossing Parallel Search
 
-> תאריך: פברואר 2026
-> סטטוס: טיוטה לאישור
+> Date: February 2026
+> Status: Draft for Review
+> Author: Claude Code
 
-## תקציר
+## Executive Summary
 
-תכונה חדשה לחיפוש מקבילות המתמקדת ברצפי מילים שחוצים גבולות בין פסקאות בטקסט המקור. הרציונל: רצפים כאלה הם מועמדים חזקים למקבילות ספרותיות אמיתיות, להבדיל מציטוטי מקרא או ביטויים שגורים שבדרך כלל מופיעים בתוך פסקה אחת.
-
----
-
-## 1. מטרות
-
-### 1.1 מטרה עיקרית
-לאפשר למשתמש למצוא מקבילות ספרותיות איתנות על-ידי חיפוש רצפי מילים שחוצים גבולות פסקאות.
-
-### 1.2 יתרונות הגישה
-| בעיה בחיפוש רגיל | פתרון בחיפוש חוצה-גבולות |
-|------------------|--------------------------|
-| ציטוטי מקרא מופיעים כתוצאות | ציטוטים שלמים בתוך פסקה לא נכללים |
-| ביטויים שגורים יוצרים רעש | ביטויים קצרים בתוך פסקה מסוננים |
-| קשה לזהות מקבילות מבניות | התאמה במעבר פסקה = מקביל מבני |
+A new parallel search feature that focuses on word sequences crossing paragraph boundaries in the source text. The rationale: such sequences are strong candidates for true literary parallels, as opposed to biblical quotations or formulaic phrases that typically appear within a single paragraph unit.
 
 ---
 
-## 2. שלושת מצבי החיפוש
+## 1. Goals and Rationale
 
-### 2.1 מצב "מלא" (Full) - ברירת מחדל
-- **תיאור**: חיפוש כל המקטעים, כמו היום
-- **תוספת**: אפשרות לסנן תוצאות לפי מינימום התאמות חוצות-גבול
-- **שימוש**: כשרוצים סקירה מקיפה
+### 1.1 Primary Goal
+Enable users to find robust literary parallels by searching for word sequences that span paragraph boundaries.
 
-### 2.2 מצב "חוצה-גבול בלבד" (Boundary Only)
-- **תיאור**: חיפוש רק מקטעים שחוצים גבולות פסקאות
-- **תוצאות**: פחות, אבל איכותיות יותר
-- **שימוש**: כשמחפשים מקבילות ספרותיות ברורות
+### 1.2 Key Insight
+When two manuscripts share text that crosses a structural boundary (end of one paragraph + beginning of another), this is unlikely to be:
+- A **biblical quotation** (which would be quoted as a complete unit)
+- A **formulaic phrase** (which are typically short, self-contained expressions)
+- A **coincidental match** (the probability of matching across boundaries is lower)
 
-### 2.3 מצב "משולב" (Combined)
-- **תיאור**: חיפוש מלא + boost לתוצאות עם התאמות חוצות-גבול
-- **ניקוד**: `final_score = base_score + (boundary_matches * boundary_boost)`
-- **שימוש**: האיזון הטוב ביותר בין כיסוי לרלוונטיות
+### 1.3 Problem-Solution Matrix
+
+| Problem with Current Search | Boundary Search Solution |
+|----------------------------|--------------------------|
+| Biblical quotes appear as results | Complete quotes within paragraphs are excluded |
+| Formulaic phrases create noise | Short in-paragraph phrases are filtered out |
+| Hard to identify structural parallels | Cross-boundary match = structural similarity |
+| Many low-quality matches | Fewer but higher-confidence results |
 
 ---
 
-## 3. לוגיקת ה-Chunking
+## 2. Three Search Modes
 
-### 3.1 זיהוי גבולות
+### 2.1 Full Mode (Default)
+- **Description**: Searches all chunks, same as current behavior
+- **Addition**: Option to filter results by minimum boundary-crossing matches
+- **Use case**: Comprehensive survey of all parallels
+
+### 2.2 Boundary-Only Mode
+- **Description**: Searches only chunks that cross paragraph boundaries
+- **Results**: Fewer results, but higher precision
+- **Use case**: Finding clear literary dependencies
+
+### 2.3 Combined Mode
+- **Description**: Full search with score boost for boundary-crossing matches
+- **Use case**: Best balance between coverage and relevance
+
+---
+
+## 3. Chunking Logic
+
+### 3.1 Boundary Detection
 
 ```python
 DELIMITERS = {
-    'paragraph': '\n\n',      # מעבר פסקה (שתי שורות ריקות)
-    'newline': '\n',          # שורה חדשה
-    'period': '.',            # נקודה
-    'colon': ':',             # נקודתיים
-    'custom': '<user_input>'  # מותאם אישית
+    'paragraph': '\n\n',      # Double newline (paragraph break)
+    'newline': '\n',          # Single newline
+    'period': '.',            # Period/full stop
+    'colon': ':',             # Colon
+    'custom': '<user_input>'  # User-defined
 }
 ```
 
-### 3.2 יצירת מקטעים חוצי-גבול (חלון נע)
+**Note on delimiter handling:**
+- Multiple consecutive delimiters are collapsed (e.g., `\n\n\n\n` = one boundary)
+- Empty paragraphs are ignored
+- Whitespace is trimmed from paragraph edges
 
-**עיקרון**: כל מקטע חייב לכלול לפחות מילה אחת מכל צד של הגבול.
+### 3.2 Sliding Window Around Boundaries
+
+**Core principle**: Every chunk must contain at least one word from each side of the boundary.
 
 ```
-טקסט: "פסקה א: ...מ5 מ4 מ3 מ2 מ1 |גבול| מ1 מ2 מ3 מ4 מ5... פסקה ב"
+Text: "...w5 w4 w3 w2 w1 |BOUNDARY| w1 w2 w3 w4 w5..."
+                         ↑
+                    paragraph break
 
-עם boundary_window_size=4, נוצרים המקטעים הבאים:
+With boundary_window_size=4, the following chunks are created:
 
-  מקטע 1: [מ3 מ2 מ1 | מ1]         ← 3 מהזנב + 1 מהראש
-  מקטע 2: [מ2 מ1 | מ1 מ2]         ← 2 + 2
-  מקטע 3: [מ1 | מ1 מ2 מ3]         ← 1 + 3
+  Chunk 1: [w3 w2 w1 | w1]     ← 3 from tail + 1 from head
+  Chunk 2: [w2 w1 | w1 w2]     ← 2 + 2
+  Chunk 3: [w1 | w1 w2 w3]     ← 1 + 3
 
-הערה: אין מקטעים של 4+0 או 0+4 - חייב להיות לפחות מילה אחת מכל צד!
+Note: No 4+0 or 0+4 chunks - must have at least 1 word from each side!
 ```
 
-### 3.3 פסאודו-קוד
+### 3.3 Why Window Size of 4?
+
+| Window Size | Chunks per Boundary | Trade-off |
+|-------------|---------------------|-----------|
+| 2 | 1 (1+1 only) | Too restrictive, misses near-boundary matches |
+| 3 | 2 (2+1, 1+2) | Limited coverage |
+| **4** | **3 (3+1, 2+2, 1+3)** | **Good balance: enough coverage, not too many chunks** |
+| 5 | 4 | More coverage, more computation |
+| 6 | 5 | Diminishing returns, overlaps with regular chunks |
+
+**Recommendation**: Default to 4, allow user adjustment from 2-12.
+
+### 3.4 Implementation
 
 ```python
 def create_boundary_chunks(text: str, delimiter: str, window_size: int = 4) -> list:
     """
-    יוצר מקטעים חוצי-גבול מטקסט.
+    Creates boundary-crossing chunks from text using a sliding window.
 
     Args:
-        text: הטקסט לחיפוש
-        delimiter: תו/רצף המפריד בין פסקאות
-        window_size: גודל החלון (מילים מכל צד, מינימום 2)
+        text: Source text to search
+        delimiter: Character/sequence separating paragraphs
+        window_size: Total chunk size (NOT per-side). Range: 2-12, default: 4
 
     Returns:
-        רשימת tuples: (chunk_tokens, boundary_index, paragraph_indices)
+        List of chunk dictionaries with metadata
     """
-    paragraphs = text.split(delimiter)
+    # Normalize delimiters (collapse multiple into one)
+    import re
+    normalized = re.sub(f'({re.escape(delimiter)})+', delimiter, text)
+
+    paragraphs = normalized.split(delimiter)
     paragraphs = [p.strip() for p in paragraphs if p.strip()]
+
+    if len(paragraphs) < 2:
+        return []  # No boundaries to cross
 
     chunks = []
 
-    for i in range(len(paragraphs) - 1):
-        # מילות הזנב (סוף פסקה נוכחית)
-        tail_words = paragraphs[i].split()
-        # מילות הראש (תחילת פסקה הבאה)
-        head_words = paragraphs[i + 1].split()
+    for boundary_idx in range(len(paragraphs) - 1):
+        tail_words = paragraphs[boundary_idx].split()
+        head_words = paragraphs[boundary_idx + 1].split()
 
-        # יצירת חלון נע סביב הגבול
-        # כל שילוב אפשרי של tail_count + head_count = window_size
-        # כאשר tail_count >= 1 AND head_count >= 1
-
+        # Generate all valid tail+head combinations
+        # Constraint: tail_count >= 1, head_count >= 1, total = window_size
         for tail_count in range(1, window_size):
             head_count = window_size - tail_count
 
-            # וידוא שיש מספיק מילים
+            # Skip if not enough words available
             if tail_count > len(tail_words) or head_count > len(head_words):
                 continue
 
@@ -113,10 +143,12 @@ def create_boundary_chunks(text: str, delimiter: str, window_size: int = 4) -> l
 
             chunks.append({
                 'tokens': chunk_tokens,
-                'boundary_index': i,  # אינדקס הגבול
+                'text': ' '.join(chunk_tokens),
+                'boundary_idx': boundary_idx,
                 'tail_count': tail_count,
                 'head_count': head_count,
-                'para_indices': (i, i + 1)  # אינדקסי הפסקאות
+                'para_indices': (boundary_idx, boundary_idx + 1),
+                'is_boundary_chunk': True  # Flag for identification
             })
 
     return chunks
@@ -124,107 +156,238 @@ def create_boundary_chunks(text: str, delimiter: str, window_size: int = 4) -> l
 
 ---
 
-## 4. פרמטרים
+## 4. Parameters
 
-### 4.1 פרמטרים חדשים
+### 4.1 New Parameters
 
-| פרמטר | ברירת מחדל | טווח | תיאור |
-|-------|------------|------|-------|
-| `boundary_mode` | `'full'` | `'full'`, `'boundary'`, `'combined'` | מצב החיפוש |
-| `boundary_window_size` | `4` | `2-12` | גודל החלון סביב הגבול |
-| `boundary_delimiter` | `'\n\n'` | string | תו/רצף מפריד |
-| `boundary_boost` | `1.5` | `1.0-5.0` | מכפיל ניקוד להתאמות חוצות-גבול (במצב משולב) |
-| `min_boundary_matches` | `0` | `0-10` | מינימום התאמות חוצות-גבול לסינון |
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `boundary_mode` | `'full'` | `'full'`, `'boundary'`, `'combined'` | Search mode selection |
+| `boundary_window_size` | `4` | `2-12` | Total words in boundary chunk |
+| `boundary_delimiter` | `'\n\n'` | string | Paragraph separator |
+| `boundary_boost` | `1.5` | `1.0-5.0` | Score multiplier for boundary matches (combined mode) |
+| `min_boundary_matches` | `0` | `0-10` | Filter: minimum boundary matches to include result |
 
-### 4.2 פרמטרים קיימים (ללא שינוי)
+### 4.2 Existing Parameters (Unchanged)
 
-| פרמטר | תיאור | רלוונטיות |
-|-------|-------|----------|
-| `chunk_size` | גודל מקטע רגיל | משמש במצב מלא ומשולב |
-| `mode` | exact/variants/fuzzy | משמש בכל המצבים |
-| `deep_scan` | סריקה מעמיקה | משמש בכל המצבים |
-| `filter_text` | טקסט לסינון (מקרא וכו') | משמש בכל המצבים |
+| Parameter | Description | Relevance |
+|-----------|-------------|-----------|
+| `chunk_size` | Regular chunk size | Used in Full and Combined modes |
+| `mode` | exact/variants/fuzzy | Used in all modes |
+| `deep_scan` | Exhaustive search | Used in all modes |
+| `filter_text` | Text to exclude (Bible, etc.) | Used in all modes |
 
----
+### 4.3 Parameter Interactions
 
-## 5. ממשק משתמש
-
-### 5.1 Web (NiceGUI)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  חיפוש מקבילות                                          │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  [textarea: טקסט המקור]                                 │
-│                                                         │
-│  ─────────────────────────────────────────────────────  │
-│                                                         │
-│  אפשרויות:                                              │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ מצב חיפוש:  ○ מלא  ○ חוצה-גבולות  ○ משולב      │   │
-│  │ גודל מקטע:  [====5====]                         │   │
-│  │ □ סריקה מעמיקה                                  │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  ▼ הגדרות חיפוש חוצה-גבולות  [נפתח בלחיצה]            │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ גודל חלון:      [====4====]                     │   │
-│  │ מפריד:          [מעבר פסקה ▼]                   │   │
-│  │ מינימום התאמות: [0 ▼]  (סינון תוצאות)          │   │
-│  │ תוספת ניקוד:    [====1.5====] (במצב משולב)     │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  [  🔍 חפש מקבילות  ]                                   │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 5.2 תפריט מפרידים
-
-```
-מעבר פסקה (שורה ריקה)  ← ברירת מחדל
-שורה חדשה
-נקודה (.)
-נקודתיים (:)
-מותאם אישית...  → [input field]
-```
-
-### 5.3 סימון בתוצאות
-
-תוצאות עם התאמות חוצות-גבול יסומנו באייקון:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ 🔗 T-S 12.345  [ניקוד: 1250]                           │
-│ ────────────────────────────────────────────────────── │
-│ ...טקסט *מודגש* מהמסמך...                               │
-│                                                         │
-│ 🔗 3 התאמות חוצות-גבול                                  │
-└─────────────────────────────────────────────────────────┘
-```
+| Mode | chunk_size | boundary_window_size | boundary_boost |
+|------|------------|---------------------|----------------|
+| Full | Used | Used for filtering only | N/A |
+| Boundary | N/A | Used | N/A |
+| Combined | Used | Used | Used |
 
 ---
 
-## 6. שינויים בקוד
+## 5. Scoring Algorithm (Combined Mode)
 
-### 6.1 genizah_core.py
+### 5.1 Design Considerations
 
-#### פונקציות חדשות
+The scoring formula must:
+1. Reward boundary matches without overwhelming base scores
+2. Show diminishing returns for many boundary matches (avoid runaway scores)
+3. Be tunable via the `boundary_boost` parameter
+
+### 5.2 Formula
 
 ```python
-def create_boundary_chunks(self, text: str, delimiter: str, window_size: int) -> list:
-    """יוצר מקטעי חלון נע סביב גבולות פסקאות."""
-    pass
+def calculate_combined_score(base_score: float,
+                            boundary_match_count: int,
+                            boundary_boost: float = 1.5) -> float:
+    """
+    Calculate final score in combined mode.
 
-def _merge_chunk_results(self, regular_results: dict, boundary_results: dict,
-                         boost: float) -> dict:
-    """ממזג תוצאות ממצב רגיל וחוצה-גבול עם boost."""
-    pass
+    Formula: base_score * (1 + (boost - 1) * log2(matches + 1))
+
+    Properties:
+    - 0 matches: base_score (no change)
+    - 1 match: base_score * boost
+    - Logarithmic growth prevents score explosion
+    """
+    if boundary_match_count == 0:
+        return base_score
+
+    import math
+    multiplier = 1 + (boundary_boost - 1) * math.log2(boundary_match_count + 1)
+    return base_score * multiplier
 ```
 
-#### שינויים ב-lab_composition_search
+### 5.3 Score Examples (boost=1.5)
 
+| Boundary Matches | Multiplier | Base 1000 → |
+|------------------|------------|-------------|
+| 0 | ×1.00 | 1000 |
+| 1 | ×1.50 | 1500 |
+| 2 | ×1.79 | 1792 |
+| 3 | ×2.00 | 2000 |
+| 5 | ×2.29 | 2292 |
+| 10 | ×2.73 | 2730 |
+
+**Note**: A manuscript with 10 boundary matches only scores ~2.7× base, not 10×. This prevents boundary-rich matches from completely dominating.
+
+---
+
+## 6. Combined Mode: Execution Strategy
+
+### 6.1 Option A: Sequential (Simpler)
+```
+1. Run regular chunk search → regular_results
+2. Run boundary chunk search → boundary_results
+3. Merge results, applying boost to boundary matches
+```
+**Pros**: Simple to implement, easy to debug
+**Cons**: ~2× search time
+
+### 6.2 Option B: Unified (More Efficient)
+```
+1. Generate all chunks (regular + boundary) with flags
+2. Run single search
+3. Post-process: identify boundary matches, apply boost
+```
+**Pros**: Single search pass
+**Cons**: More complex chunk management
+
+### 6.3 Recommendation
+Start with **Option A** for clarity. Optimize to Option B later if performance is an issue.
+
+---
+
+## 7. Result Deduplication
+
+### 7.1 Problem
+A manuscript may match both regular chunks and boundary chunks, potentially appearing twice in results.
+
+### 7.2 Solution
+```python
+def merge_results(regular: list, boundary: list, boost: float) -> list:
+    """
+    Merge regular and boundary results, deduplicating by manuscript ID.
+
+    For duplicates:
+    - Keep highest base score
+    - Add boundary_match_count from boundary results
+    - Apply boost
+    """
+    results_by_uid = {}
+
+    # Process regular results
+    for r in regular:
+        uid = r['uid']
+        results_by_uid[uid] = {
+            **r,
+            'boundary_match_count': 0,
+            'has_boundary_matches': False
+        }
+
+    # Process boundary results
+    for r in boundary:
+        uid = r['uid']
+        if uid in results_by_uid:
+            # Manuscript already found - add boundary info
+            existing = results_by_uid[uid]
+            existing['boundary_match_count'] += 1
+            existing['has_boundary_matches'] = True
+            # Keep higher base score
+            existing['score'] = max(existing['score'], r['score'])
+        else:
+            # New manuscript from boundary search
+            results_by_uid[uid] = {
+                **r,
+                'boundary_match_count': 1,
+                'has_boundary_matches': True
+            }
+
+    # Apply boost and return
+    results = list(results_by_uid.values())
+    for r in results:
+        r['final_score'] = calculate_combined_score(
+            r['score'], r['boundary_match_count'], boost
+        )
+
+    return sorted(results, key=lambda x: x['final_score'], reverse=True)
+```
+
+---
+
+## 8. User Interface
+
+### 8.1 Web UI (NiceGUI)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Find Parallels                                         │
+├─────────────────────────────────────────────────────────┤
+│  [textarea: Source text]                                │
+│                                                         │
+│  Options:                                               │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Search Mode: ○ Full  ○ Boundary-Only  ○ Combined│   │
+│  │ Chunk Size:  [====5====]                        │   │
+│  │ □ Deep Scan                                     │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ▼ Boundary Search Settings [collapsed by default]     │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Window Size:       [====4====]                  │   │
+│  │ Delimiter:         [Paragraph break ▼]          │   │
+│  │ Min. Matches:      [0 ▼] (result filter)        │   │
+│  │ Score Boost:       [====1.5====] (combined)     │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  [ 🔍 Find Parallels ]                                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Delimiter Menu
+
+```
+Paragraph break (blank line)  ← default
+Line break
+Period (.)
+Colon (:)
+Custom...  → [input field]
+```
+
+### 8.3 Result Display
+
+Results with boundary matches show an indicator:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 🔗 T-S 12.345  [Score: 1250]                           │
+│ ─────────────────────────────────────────────────────  │
+│ ...highlighted *matching* text from manuscript...       │
+│                                                         │
+│ 🔗 3 boundary-crossing matches                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. Code Changes
+
+### 9.1 genizah_core.py
+
+**New functions:**
+```python
+def create_boundary_chunks(self, text: str, delimiter: str,
+                          window_size: int) -> list:
+    """Creates sliding window chunks around paragraph boundaries."""
+
+def _merge_chunk_results(self, regular_results: dict,
+                        boundary_results: dict, boost: float) -> dict:
+    """Merges results from regular and boundary searches with boost."""
+```
+
+**Modified function signature:**
 ```python
 def lab_composition_search(
     self,
@@ -236,8 +399,8 @@ def lab_composition_search(
     filter_text: str = None,
     deep_scan: bool = False,
     scan_limit: int = None,
-    # --- פרמטרים חדשים ---
-    boundary_mode: str = 'full',           # 'full', 'boundary', 'combined'
+    # --- New parameters ---
+    boundary_mode: str = 'full',
     boundary_window_size: int = 4,
     boundary_delimiter: str = '\n\n',
     boundary_boost: float = 1.5,
@@ -245,211 +408,252 @@ def lab_composition_search(
 ) -> dict:
 ```
 
-#### שינויים במבנה התוצאה
-
+**Extended result structure:**
 ```python
-# תוצאה נוכחית
 {
-    'main': [...],
-    'known': [...],
-    'filtered': [...],
-    'partial': bool
-}
-
-# תוצאה חדשה
-{
-    'main': [...],
+    'main': [
+        {
+            'uid': '...',
+            'score': 1000,
+            'final_score': 1500,           # NEW: after boost
+            'boundary_match_count': 2,      # NEW
+            'has_boundary_matches': True,   # NEW
+            # ... existing fields
+        }
+    ],
     'known': [...],
     'filtered': [...],
     'partial': bool,
-    'boundary_stats': {           # חדש
+    'boundary_stats': {                     # NEW
+        'total_boundaries': int,
         'total_boundary_chunks': int,
         'chunks_with_matches': int
     }
 }
-
-# כל פריט בתוצאה יכיל גם:
-{
-    'uid': ...,
-    'score': ...,
-    # ...
-    'boundary_match_count': int,  # חדש - מספר התאמות חוצות-גבול
-    'has_boundary_matches': bool  # חדש - דגל נוחות
-}
 ```
 
-### 6.2 web/pages/parallels.py
+### 9.2 web/pages/parallels.py
 
-- הוספת בחירת מצב (radio buttons)
-- הוספת פאנל הגדרות חוצה-גבולות (collapsible)
-- עדכון קריאה ל-`lab_composition_search` עם הפרמטרים החדשים
-- הוספת אייקון 🔗 לתוצאות עם התאמות חוצות-גבול
+- Add mode selection (radio buttons)
+- Add collapsible boundary settings panel
+- Update call to `lab_composition_search` with new parameters
+- Add 🔗 icon to results with boundary matches
+- Update results persistence to include boundary data
 
-### 6.3 genizah_app.py (Desktop)
+### 9.3 genizah_app.py (Desktop)
 
-- הוספת ComboBox לבחירת מצב
-- הוספת widget להגדרות חוצה-גבולות
-- עדכון קריאה לפונקציית החיפוש
+- Add ComboBox for mode selection
+- Add boundary settings widget group
+- Update search function call
+- Add boundary indicator to results tree
 
 ---
 
-## 7. אלגוריתם הניקוד (מצב משולב)
+## 10. Performance Considerations
 
-### 7.1 חישוב בסיסי
+### 10.1 Chunk Count Impact
 
-```python
-def calculate_combined_score(base_score: float,
-                            boundary_match_count: int,
-                            boundary_boost: float) -> float:
-    """
-    מחשב ניקוד סופי במצב משולב.
+| Scenario | Regular Chunks | Boundary Chunks | Total |
+|----------|----------------|-----------------|-------|
+| 100 words, no breaks | 20 | 0 | 20 |
+| 100 words, 5 paragraphs | 20 | 12 (4 boundaries × 3) | 32 |
+| 500 words, 20 paragraphs | 100 | 57 (19 × 3) | 157 |
 
-    הנוסחה:
-    - אם אין התאמות חוצות-גבול: base_score
-    - אם יש: base_score * (1 + (boundary_boost - 1) * log2(boundary_match_count + 1))
+**Observation**: Boundary chunks add ~30-60% overhead in typical texts.
 
-    זה נותן:
-    - 1 התאמה: base_score * boundary_boost
-    - 2 התאמות: base_score * (1 + 1.58 * (boost-1))
-    - 4 התאמות: base_score * (1 + 2.32 * (boost-1))
-    """
-    if boundary_match_count == 0:
-        return base_score
+### 10.2 Mitigation Strategies
 
-    import math
-    multiplier = 1 + (boundary_boost - 1) * math.log2(boundary_match_count + 1)
-    return base_score * multiplier
-```
-
-### 7.2 דוגמאות (עם boundary_boost=1.5)
-
-| התאמות חוצות-גבול | מכפיל | ניקוד בסיס 1000 |
-|-------------------|--------|-----------------|
-| 0 | ×1.0 | 1000 |
-| 1 | ×1.5 | 1500 |
-| 2 | ×1.79 | 1790 |
-| 3 | ×2.0 | 2000 |
-| 5 | ×2.29 | 2290 |
+1. **Boundary-only mode**: Searches only boundary chunks (much faster)
+2. **Lazy evaluation**: Only compute boundary chunks if mode requires them
+3. **Parallel processing**: Boundary and regular searches can run concurrently
 
 ---
 
-## 8. תרחישי בדיקה
+## 11. Test Scenarios
 
-### 8.1 בדיקות יחידה
+### 11.1 Unit Tests
 
 ```python
-def test_boundary_chunk_creation():
-    """וידוא שמקטעים נוצרים נכון סביב גבולות."""
-    text = "מילה1 מילה2 מילה3\n\nמילה4 מילה5 מילה6"
+def test_boundary_chunk_creation_basic():
+    """Basic boundary chunk generation."""
+    text = "word1 word2 word3\n\nword4 word5 word6"
     chunks = create_boundary_chunks(text, '\n\n', window_size=4)
 
-    # צריך ליצור 3 מקטעים: 3+1, 2+2, 1+3
-    assert len(chunks) == 3
-    assert chunks[0]['tail_count'] == 3
-    assert chunks[0]['head_count'] == 1
-    # ...
+    assert len(chunks) == 3  # 3+1, 2+2, 1+3
+    assert all(c['is_boundary_chunk'] for c in chunks)
+    assert chunks[0]['tail_count'] + chunks[0]['head_count'] == 4
 
-def test_no_zero_side_chunks():
-    """וידוא שאין מקטעים עם 0 מילים מצד אחד."""
-    text = "א ב ג\n\nד ה ו"
+def test_no_single_side_chunks():
+    """Verify no chunks with 0 words on either side."""
+    text = "a b c\n\nd e f"
     chunks = create_boundary_chunks(text, '\n\n', window_size=4)
 
     for chunk in chunks:
         assert chunk['tail_count'] >= 1
         assert chunk['head_count'] >= 1
 
-def test_combined_mode_scoring():
-    """וידוא שהניקוד במצב משולב עובד נכון."""
-    # ...
+def test_short_paragraphs():
+    """Handle paragraphs shorter than window size."""
+    text = "a b\n\nc d e f g"  # First para has only 2 words
+    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
+
+    # Should create: 2+2, 1+3 (not 3+1 - not enough tail words)
+    assert len(chunks) == 2
+
+def test_multiple_boundaries():
+    """Multiple paragraph boundaries."""
+    text = "a b c\n\nd e f\n\ng h i"
+    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
+
+    # 2 boundaries × 3 chunks each = 6
+    assert len(chunks) == 6
+
+def test_collapsed_delimiters():
+    """Multiple consecutive delimiters should count as one boundary."""
+    text = "a b c\n\n\n\nd e f"  # 4 newlines
+    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
+
+    # Should still be 1 boundary
+    assert len(chunks) == 3
 ```
 
-### 8.2 בדיקות אינטגרציה
+### 11.2 Integration Tests
 
-| תרחיש | קלט | תוצאה צפויה |
-|-------|-----|-------------|
-| טקסט ללא גבולות | "מילה אחת ארוכה" | מצב boundary: אין תוצאות |
-| גבול אחד | "פסקה א\n\nפסקה ב" | מקטעים סביב הגבול |
-| מספר גבולות | "א\n\nב\n\nג" | מקטעים סביב כל גבול |
-| מפריד מותאם | "א:ב:ג" | זיהוי : כמפריד |
+| Scenario | Input | Expected |
+|----------|-------|----------|
+| No boundaries | "continuous text" | Boundary mode: empty results |
+| Single boundary | "para1\n\npara2" | 3 boundary chunks (with size=4) |
+| Custom delimiter | "a:b:c" with delimiter=":" | 6 boundary chunks |
+| Mixed search | Combined mode | Both regular and boundary matches |
 
-### 8.3 בדיקות UI
+### 11.3 UI Tests
 
-- [ ] בחירת מצב עובדת
-- [ ] הגדרות נפתחות רק כשצריך
-- [ ] אייקון 🔗 מופיע נכון
-- [ ] סינון לפי מינימום עובד
-
----
-
-## 9. שלבי יישום מוצעים
-
-### שלב 1: תשתית (Core)
-1. הוספת `create_boundary_chunks` ל-genizah_core.py
-2. הוספת פרמטרים חדשים ל-`lab_composition_search`
-3. יישום מצב "חוצה-גבול בלבד"
-4. בדיקות יחידה
-
-### שלב 2: Web UI
-1. הוספת בחירת מצב
-2. הוספת פאנל הגדרות (collapsible)
-3. עדכון קריאה לפונקציה
-4. הוספת אייקון לתוצאות
-
-### שלב 3: מצב משולב
-1. יישום מיזוג תוצאות
-2. יישום ניקוד עם boost
-3. בדיקות
-
-### שלב 4: Desktop
-1. העתקת הלוגיקה מה-Web
-2. התאמת UI ל-PyQt6
-3. בדיקות
-
-### שלב 5: כיוונון
-1. בדיקה עם טקסטים אמיתיים
-2. כיוונון ערכי ברירת מחדל
-3. כיוונון נוסחת הניקוד
+- [ ] Mode selection works correctly
+- [ ] Settings panel expands/collapses
+- [ ] Boundary settings only enabled when relevant
+- [ ] 🔗 icon displays correctly
+- [ ] Min boundary filter works
+- [ ] Results persist across page reloads
 
 ---
 
-## 10. נושאים לבחינה בהמשך
+## 12. Implementation Phases
 
-### 10.1 אופטימיזציה
-- [ ] האם לשמור cache של מקטעים חוצי-גבול?
-- [ ] האם לחשב boundary chunks בנפרד או יחד עם רגילים?
+### Phase 1: Core Infrastructure
+1. Add `create_boundary_chunks()` to genizah_core.py
+2. Add new parameters to `lab_composition_search()`
+3. Implement boundary-only mode
+4. Write unit tests
+5. **Deliverable**: Working boundary-only search via API
 
-### 10.2 UX
-- [ ] האם להציג סטטיסטיקות על התאמות חוצות-גבול?
-- [ ] האם לאפשר מיון לפי מספר התאמות חוצות-גבול?
-- [ ] האם להדגיש את הגבול בתצוגת המקור?
+### Phase 2: Web UI
+1. Add mode selection UI
+2. Add boundary settings panel
+3. Update search execution
+4. Add result indicators
+5. **Deliverable**: Fully functional web interface
 
-### 10.3 ערכי ברירת מחדל
-- [ ] מהו ערך ה-boost האופטימלי? (להתחיל עם 1.5, לכוונן)
-- [ ] מהו גודל החלון האופטימלי? (להתחיל עם 4)
+### Phase 3: Combined Mode
+1. Implement result merging
+2. Implement boost scoring
+3. Add deduplication logic
+4. Test with real texts
+5. **Deliverable**: Combined mode working
 
-### 10.4 הרחבות עתידיות
-- [ ] חיפוש מספריות (מקרא, משנה) - זיהוי אוטומטי של גבולות פסוקים/הלכות
-- [ ] זיהוי אוטומטי של סוג המפריד בטקסט
-- [ ] ייצוא תוצאות עם סימון התאמות חוצות-גבול
+### Phase 4: Desktop App
+1. Port UI changes to PyQt6
+2. Ensure feature parity
+3. Test thoroughly
+4. **Deliverable**: Desktop version complete
 
----
-
-## 11. תלויות ומגבלות
-
-### 11.1 תלויות
-- אין תלויות חדשות נדרשות
-- משתמש בתשתית הקיימת של Tantivy ו-fingerprinting
-
-### 11.2 מגבלות ידועות
-- אם אין גבולות בטקסט, מצב "חוצה-גבול" לא יחזיר תוצאות
-- ביצועים עשויים להיות איטיים יותר במצב משולב (כפל חיפושים)
-
----
-
-## 12. סיכום
-
-הפיצ'ר מוסיף שכבת אינטליגנציה לחיפוש המקבילות על-ידי התמקדות באזורים שסביר יותר שיכילו מקבילות ספרותיות אמיתיות. היישום מתבסס על התשתית הקיימת ומוסיף אפשרויות חדשות ללא שבירת תאימות לאחור.
+### Phase 5: Tuning & Polish
+1. Real-world testing with scholars
+2. Tune default values
+3. Optimize performance if needed
+4. Documentation update
+5. **Deliverable**: Production-ready feature
 
 ---
 
-*מסמך זה הוא טיוטה לדיון ואישור לפני תחילת היישום.*
+## 13. Open Questions and Future Work
+
+### 13.1 Questions Requiring Testing
+- [ ] What is the optimal default boost value? (Start with 1.5)
+- [ ] What is the optimal default window size? (Start with 4)
+- [ ] Does boundary search improve precision in practice?
+
+### 13.2 Future Enhancements
+- [ ] **Library search**: Auto-detect verse/halakha boundaries in source texts
+- [ ] **Auto-delimiter detection**: Guess delimiter from text structure
+- [ ] **Visual boundary marking**: Highlight boundary points in source display
+- [ ] **Export enhancement**: Include boundary match info in exports
+- [ ] **Statistics view**: Show boundary match distribution
+
+### 13.3 Edge Cases to Monitor
+- Very short paragraphs (1-2 words)
+- Texts with inconsistent paragraph formatting
+- Performance with many boundaries (>50)
+- Interaction with filter text feature
+
+---
+
+## 14. Dependencies and Constraints
+
+### 14.1 Dependencies
+- No new external dependencies required
+- Uses existing Tantivy index and fingerprinting infrastructure
+
+### 14.2 Backwards Compatibility
+- All new parameters have defaults matching current behavior
+- Existing API calls continue to work unchanged
+- No database schema changes required
+
+### 14.3 Known Limitations
+- If source text has no boundaries, boundary-only mode returns empty
+- Combined mode approximately doubles search time
+- Boundary detection is text-based only (no semantic understanding)
+
+---
+
+## 15. Glossary
+
+| Term | Definition |
+|------|------------|
+| **Boundary** | The division point between two paragraphs in the source text |
+| **Boundary chunk** | A word sequence that spans a boundary (has words from both sides) |
+| **Window size** | Total number of words in a boundary chunk |
+| **Tail** | Words from the end of the paragraph before the boundary |
+| **Head** | Words from the beginning of the paragraph after the boundary |
+| **Boost** | Score multiplier applied to manuscripts with boundary matches |
+
+---
+
+## Critical Review: Potential Issues for External Readers
+
+### Issue 1: Ambiguous "Window Size" Definition
+**Problem**: The spec says "window size" but it's unclear if this means total words or words per side.
+**Resolution**: Clarified in Section 3.3 that it means TOTAL words, not per-side.
+
+### Issue 2: Combined Mode Execution Not Specified
+**Problem**: Original spec didn't explain whether combined mode runs one search or two.
+**Resolution**: Added Section 6 explaining execution strategies.
+
+### Issue 3: Deduplication Logic Missing
+**Problem**: If a manuscript matches both regular and boundary chunks, how is it handled?
+**Resolution**: Added Section 7 with explicit deduplication algorithm.
+
+### Issue 4: Performance Impact Unquantified
+**Problem**: No indication of how many extra chunks are created.
+**Resolution**: Added Section 10 with concrete examples.
+
+### Issue 5: Edge Cases Not Addressed
+**Problem**: What happens with very short paragraphs? Consecutive delimiters?
+**Resolution**: Added handling notes and test cases.
+
+### Issue 6: Scoring Formula Inconsistency
+**Problem**: Section 2.3 showed a simple formula, Section 7 showed logarithmic.
+**Resolution**: Removed the simple formula, kept only the logarithmic one with full explanation.
+
+---
+
+*This document is a draft for discussion and approval before implementation.*
