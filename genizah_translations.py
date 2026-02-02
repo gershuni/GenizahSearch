@@ -2090,7 +2090,7 @@ TRANSLATIONS = {
     "Score multiplier for cross-paragraph matches": "מכפיל ניקוד להתאמות חוצות-פסקאות",
     "Min. cross-paragraph matches": "מינימום התאמות חוצות-פסקאות",
     "Min. words between separators": "מינימום מילים בין מפרידים",
-    "{} boundaries detected, {} chunks will cross them": "{} גבולות זוהו, {} חלקים יחצו אותם",
+    "{} boundaries detected, {} chunks will cross them": "זוהו {} גבולות, {} מקטעים חוצי-גבול",
     "No paragraph breaks detected in text!": "לא זוהו מעברי פסקה בטקסט!",
     "Cross-paragraph": "חוצה-פסקה",
     "cross-paragraph matches": "התאמות חוצות-פסקאות",

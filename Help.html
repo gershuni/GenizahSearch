@@ -171,13 +171,46 @@
         <li><b>Filter Text:</b> Allows entering specific texts to mark as "Filtered" in the results. For example, if your text quotes verses, Mishnah, or Gemara, you can enter these texts into the filter so this "noise" is not displayed.</li>
         <li><b>Recursive Search:</b> After getting results, this button searches again using the texts of the found manuscripts as a basis for further searching. The search can be fully recursive, or only on results you select after the initial search.</li>
     </ul>
+
+    <h3>Cross-Paragraph Search</h3>
+    <p>When searching for parallels to a text that contains paragraph breaks (e.g., a piyyut with stanzas, or a text with section divisions), you can enable <b>cross-paragraph search</b> to specifically find manuscripts that preserve text spanning across these boundaries.</p>
+
+    <h4>Why is this useful?</h4>
+    <ul>
+        <li>Text <b>within</b> paragraphs often contains citations from other sources (Mishnah, Talmud, known phrases) or sources that quote the composition you're searching for.</li>
+        <li>Text that <b>crosses</b> paragraph boundaries is much less likely to be a citation, since citations rarely span across structural breaks.</li>
+        <li>This effectively filters out most of the "noise" and helps you find genuine textual witnesses.</li>
+    </ul>
+
+    <h4>How to use</h4>
+    <ol>
+        <li>Enter your text with paragraph breaks (or set a custom delimiter like period or colon).</li>
+        <li>Select a <b>Paragraph search</b> mode:
+            <ul>
+                <li><b>Full search</b> – All results (default behavior)</li>
+                <li><b>Cross-paragraph only</b> – Only matches that span paragraph breaks</li>
+                <li><b>Full + Cross-paragraph boost</b> – All results, with boundary-crossing matches ranked higher</li>
+            </ul>
+        </li>
+        <li>Choose a <b>Paragraph separator</b>: Line break, Blank line, Period (.), or Colon (:).</li>
+        <li>The status label shows how many boundaries are detected and how many chunks will cross them.</li>
+        <li>Results that cross paragraph boundaries are marked with a 🔗 indicator in the score column.</li>
+    </ol>
+
+    <h4>Advanced Settings (⚙)</h4>
+    <p>Click the gear button (visible in non-full modes) to configure:</p>
+    <ul>
+        <li><b>Cross-paragraph boost:</b> Score multiplier for boundary-crossing matches (1.0–3.0).</li>
+        <li><b>Min. cross-paragraph matches:</b> Filter out results with fewer boundary matches.</li>
+        <li><b>Min. words between separators:</b> Ignore delimiters too close together.</li>
+    </ul>
     </div>
 
     <div class="section">
     <h2 id="browse">Browse Manuscript</h2>
     <p>This tab enables convenient continuous reading of a full manuscript, synchronized with source images.</p>
     <ul>
-        <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS 13 15</code> finds <code>T-S 13.15</code>). Autocomplete is available for shelfmarks.</li>
+        <li><b>Load:</b> Enter a System ID, Shelfmark, or FL ID. The search is flexible and ignores spaces or punctuation (e.g., <code>TS NS 13 15</code> finds <code>T-S NS 13.15</code>). Autocomplete is available for shelfmarks.</li>
         <li><b>Navigate Pages:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> to flip between pages within the current manuscript.</li>
         <li><b>Navigate Manuscripts:</b> Use the arrows <span style="border:1px solid #ccc; padding:0 4px;">◀</span> <span style="border:1px solid #ccc; padding:0 4px;">▶</span> at the top left to move to the previous or next manuscript in the database file order.</li>
         <li><b>Images:</b> An image viewer is displayed on the side. You can rotate, zoom, and select the image source (NLI or Cambridge/Oxford where supported). Use 🖼️ to show/hide the image panel.</li>
@@ -354,13 +387,46 @@
         <li><b>סנן טקסט:</b> מאפשר להזין טקסטים ספציפיים שברצונכם לסמן כ"מסוננים" בתוצאות. לדוגמה, אם הטקסט שלכם מצטט פסוקים או משנה או גמרא, תוכלו להכניס את הטקסטים האלה לתוך הסינון וכך "רעש" זה לא יוצג.</li>
         <li><b>חיפוש רקורסיבי:</b> לאחר קבלת תוצאות, כפתור זה יחפש שוב במאגר, הפעם תוך שימוש בטקסטים של כתבי היד שנמצאו כבסיס לחיפוש נוסף. החיפוש יכול להיות רקורסיבי מלא, או רק בתוצאות שתבחרו לאחר החיפוש הראשוני.</li>
     </ul>
+
+    <h3>חיפוש חוצה-פסקאות</h3>
+    <p>כאשר מחפשים מקבילות לטקסט המכיל מעברי פסקה (למשל: פיוט עם בתים, או טקסט עם חלוקה לסעיפים), ניתן להפעיל <b>חיפוש חוצה-פסקאות</b> כדי למצוא באופן ספציפי כתבי יד ששומרים על טקסט החוצה גבולות אלה.</p>
+
+    <h4>למה זה שימושי?</h4>
+    <ul>
+        <li>טקסט <b>בתוך</b> פסקאות לעתים קרובות מכיל ציטוטים ממקורות אחרים (משנה, תלמוד, ביטויים ידועים) או מקורות שמצטטים את החיבור שאתם מחפשים.</li>
+        <li>טקסט ש<b>חוצה</b> גבולות פסקה הוא בסבירות נמוכה בהרבה ציטוט, מכיוון שציטוטים לעיתים רחוקות חוצים גבולות מבניים.</li>
+        <li>זה מסנן ביעילות את רוב ה"רעש" ועוזר לכם למצוא עדי נוסח אמיתיים.</li>
+    </ul>
+
+    <h4>כיצד להשתמש</h4>
+    <ol>
+        <li>הזינו את הטקסט שלכם עם מעברי פסקה (או הגדירו מפריד מותאם אישית כמו נקודה או נקודתיים).</li>
+        <li>בחרו מצב <b>חיפוש פסקאות</b>:
+            <ul>
+                <li><b>חיפוש מלא</b> – כל התוצאות (ברירת מחדל)</li>
+                <li><b>חוצה-פסקאות בלבד</b> – רק התאמות שחוצות מעברי פסקה</li>
+                <li><b>מלא + העדפת חוצה-פסקאות</b> – כל התוצאות, כשהתאמות חוצות-פסקאות מדורגות גבוה יותר</li>
+            </ul>
+        </li>
+        <li>בחרו <b>מפריד פסקאות</b>: מעבר שורה, שורה ריקה, נקודה (.) או נקודתיים (:).</li>
+        <li>תווית הסטטוס מציגה כמה גבולות זוהו וכמה מקטעים יחצו אותם.</li>
+        <li>תוצאות שחוצות גבולות פסקה מסומנות באינדיקטור 🔗 בעמודת הציון.</li>
+    </ol>
+
+    <h4>הגדרות מתקדמות (⚙)</h4>
+    <p>לחצו על כפתור גלגל השיניים (מופיע במצבים שאינם "מלא") כדי להגדיר:</p>
+    <ul>
+        <li><b>תוספת חוצה-פסקאות:</b> מכפיל ציון להתאמות חוצות-גבול (1.0–3.0).</li>
+        <li><b>מינימום התאמות חוצות-פסקאות:</b> סינון תוצאות עם פחות התאמות חוצות-גבול.</li>
+        <li><b>מינימום מילים בין מפרידים:</b> התעלמות ממפרידים קרובים מדי.</li>
+    </ul>
     </div>
 
     <div class="section">
     <h2 id="browse">עיון בכתב יד</h2>
     <p>לשונית זו מאפשרת קריאה רציפה ונוחה של כתב יד שלם, עם סנכרון לתמונות המקור.</p>
     <ul>
-        <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
+        <li><b>טעינה:</b> הזינו מספר מערכת, מספר מדף או מזהה FL. החיפוש גמיש ומתעלם מרווחים או סימני פיסוק (למשל <code><bdi dir="ltr">TS NS 13 15</bdi></code> ימצא את <code><bdi dir="ltr">T-S NS 13.15</bdi></code>). השלמה אוטומטית זמינה למספרי מדף.</li>
         <li><b>דפדוף בעמודים:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">&lt;</span> <span style="border:1px solid #ccc; padding:0 4px;">&gt;</span> כדי לדפדף בין העמודים בתוך כתב היד הנוכחי.</li>
         <li><b>דפדוף בין כתבי יד:</b> השתמשו בחיצים <span style="border:1px solid #ccc; padding:0 4px;">▶</span> <span style="border:1px solid #ccc; padding:0 4px;">◀</span> בפינה העליונה כדי לעבור לכתב היד הבא או הקודם במאגר (לפי סדר הקבצים).</li>
         <li><b>תמונות:</b> בצד ימין (או שמאל, תלוי בשפה) מוצג צפיין תמונות. ניתן לסובב, להגדיל, ולבחור מקור תמונה (הספרייה הלאומית או ספריית קמברידג'/אוקספורד במקרים נתמכים). השתמשו ב-🖼️ כדי להציג/להסתיר את פאנל התמונות.</li>

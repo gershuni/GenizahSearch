@@ -5860,9 +5860,9 @@ class GenizahGUI(QMainWindow):
         self.boundary_delimiter_combo.setToolTip(tr("Character or pattern that separates paragraphs in your text"))
         self.boundary_delimiter_combo.currentIndexChanged.connect(self._on_boundary_delimiter_changed)
 
-        # Boundary Stats Label
+        # Boundary Stats Label (colors chosen for both light and dark mode visibility)
         self.boundary_stats_label = QLabel("")
-        self.boundary_stats_label.setStyleSheet("color: #2980b9; font-size: 11px;")
+        self.boundary_stats_label.setStyleSheet("color: #5dade2; font-size: 11px;")
 
         # Advanced Settings Button
         self.btn_boundary_advanced = QPushButton("⚙")
@@ -10426,12 +10426,12 @@ class GenizahGUI(QMainWindow):
                         stats['boundary_count'], stats['crossing_chunk_count']
                     )
                 )
-                self.boundary_stats_label.setStyleSheet("color: #2980b9; font-size: 11px;")
+                self.boundary_stats_label.setStyleSheet("color: #5dade2; font-size: 11px;")
             else:
                 mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
                 if mode in ('boundary', 'combined'):
                     self.boundary_stats_label.setText(tr("No paragraph breaks detected in text!"))
-                    self.boundary_stats_label.setStyleSheet("color: #c0392b; font-size: 11px;")
+                    self.boundary_stats_label.setStyleSheet("color: #e74c3c; font-size: 11px;")
                 else:
                     self.boundary_stats_label.setText("")
         except Exception as e:
