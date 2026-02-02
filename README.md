@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.1
+# Genizah Search Pro 5.3
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,19 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.1?
+## What's New in Version 5.3?
 
-### Accessibility (WCAG 2.0 / IS 5568)
+### Cross-Paragraph Search
 
-Full compliance with Israeli Standard 5568 and WCAG 2.0 AA accessibility guidelines.
+A powerful new search mode that finds manuscripts with text spanning paragraph boundaries. This helps filter out common citations (Mishnah, Talmud, known phrases) that typically appear within paragraphs.
 
-### New Features
+* **Three search modes:** Full search, Cross-paragraph only, Combined (with boost)
+* **Customizable delimiters:** Line break, blank line (paragraph), period, colon
+* **Visual indicators:** 🔗 emoji prefix on scores, tooltips showing match count
+* **Advanced settings:** Boost factor, minimum boundary matches, minimum delimiter distance
 
-* **Automatic Text Source Filtering:** Intelligent filtering based on Sefaria text database
-* **Enhanced Variant Search:** Improved letter variation handling
-* **Fullscreen Edit Mode:** Image controls with side-by-side viewing
-* **Fragment Joins:** Connect related fragments via Discovery Center
-* **Exclude Words:** Exclude specific words from search results
+### Cloud Sync with Supabase
+
+* **Automatic list sync** across devices when logged in
+* **Direct cloud connection** for faster performance
+* **Offline support** - changes sync when reconnected
 
 ### Web Platform: Dicta Genizah Search (אתר הגניזה של דיקטה)
 
@@ -100,7 +103,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.3.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -134,29 +137,32 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.1 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.3 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.1 כוללת **נגישות מלאה לפי WCAG 2.0**, **תכונות חיפוש חדשות** ושיפורים רבים בממשק.
+גרסה 5.3 כוללת **חיפוש חוצה-פסקאות**, **סנכרון ענן**, ושיפורים רבים בממשק.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.1?
+## מה חדש בגרסה 5.3?
 
-### נגישות (WCAG 2.0 / ת"י 5568)
+### חיפוש חוצה-פסקאות
 
-עמידה מלאה בתקן הישראלי 5568 והנחיות הנגישות WCAG 2.0 AA.
+מצב חיפוש חדש שמוצא כתבי יד עם טקסט החוצה גבולות פסקאות. זה עוזר לסנן ציטוטים נפוצים (משנה, תלמוד, ביטויים מוכרים) שבדרך כלל מופיעים בתוך פסקאות.
 
-### תכונות חדשות
+* **שלושה מצבי חיפוש:** חיפוש מלא, חוצה-פסקאות בלבד, משולב (עם דירוג מוגבר)
+* **מפרידים מותאמים אישית:** שבירת שורה, שורה ריקה (פסקה), נקודה, נקודתיים
+* **חיווי חזותי:** סימן 🔗 לפני הציון, טולטיפים עם מספר התאמות
+* **הגדרות מתקדמות:** מקדם דירוג, מינימום גבולות, מרחק מפריד מינימלי
 
-* **סינון אוטומטי של מקורות טקסט:** סינון חכם המבוסס על מאגר הטקסטים של ספריא
-* **חיפוש וריאנטים משופר:** טיפול משופר בוריאציות אותיות
-* **מצב עריכה במסך מלא:** פקדי תמונה עם תצוגה זה לצד זה
-* **חיבורי קטעים:** חיבור קטעים קשורים דרך מרכז הגילויים
-* **החרגת מילים:** החרגת מילים ספציפיות מתוצאות החיפוש
+### סנכרון ענן עם Supabase
+
+* **סנכרון רשימות אוטומטי** בין מכשירים כשמחוברים
+* **חיבור ישיר לענן** לביצועים מהירים יותר
+* **תמיכה אופליין** - שינויים מסתנכרנים בחיבור מחדש
 
 ### פלטפורמת אינטרנט
 
@@ -236,7 +242,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.1_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.3.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 
