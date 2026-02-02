@@ -632,7 +632,211 @@ This means **no performance penalty** for Combined mode vs Full mode.
 
 ---
 
-## 14. Glossary
+## 14. Code Locations Reference
+
+This section maps each required change to specific files and line numbers.
+
+### 14.1 Core Algorithm (`genizah_core.py`)
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Add boundary parsing** | After Line 88 | Add `parse_boundaries()` function near `text_to_fingerprint()` |
+| **Add chunk crossing check** | After Line 88 | Add `chunk_crosses_boundary()` function |
+| **Add boundary quality calc** | After Line 88 | Add `calculate_boundary_quality()` function |
+| **Add pre-search stats** | After Line 88 | Add `get_boundary_stats()` function |
+| **Modify lab_composition_search** | Line 846 | Add new parameters to function signature |
+| **Add boundary detection in chunking** | Lines 873-881 | Mark which chunks cross boundaries during tokenization |
+| **Add boundary metadata to results** | Lines 932-1080 | Include boundary info when building result objects |
+| **Add boost calculation** | Lines 1000-1050 | Apply score boost for boundary-crossing matches |
+
+**Key function to modify:**
+```
+def lab_composition_search(self, full_text, mode='variants', ...)  # Line 846
+```
+
+**Chunking logic (mark boundary crossings here):**
+```python
+# Lines 873-881 - Add boundary crossing detection
+tokens = re.findall(r"[\w\u0590-\u05FF\']+", full_text)
+c_size = chunk_size if chunk_size else 15
+step = max(1, int(c_size * 0.5))
+
+chunks_data = []
+for i in range(0, max(1, len(tokens) - c_size + 1), step):
+    chunks_data.append((i, tokens[i : i + c_size]))
+    # ADD: Mark if this chunk crosses any boundary
+```
+
+### 14.2 Desktop Application (`genizah_app.py`)
+
+#### UI Creation
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Add mode selection** | Lines 5794-5840 | Add radio buttons/combo for boundary mode |
+| **Add delimiter dropdown** | Lines 5794-5840 | Add dropdown for delimiter selection |
+| **Add Simple/Advanced toggle** | Lines 5794-5840 | Add expandable section for advanced options |
+| **Add pre-search stats label** | Lines 5776-5780 | Add label showing boundary count |
+| **Add warning label** | Lines 5776-5780 | Add warning for no boundaries |
+
+**Key location - Controls row:**
+```python
+# Lines 5794-5864 - Add new controls here
+cr = QHBoxLayout()
+# Existing: spin_chunk, spin_freq, comp_mode_combo, spin_filter
+# ADD: boundary_mode_combo, delimiter_combo, advanced_settings_group
+```
+
+#### Search Execution
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Update run_composition** | Line 12701 | Pass new parameters to lab_composition_search |
+| **Update toggle_composition** | Line 12673 | Validate boundaries before search |
+| **Update display_comp_results** | Line 13203 | Add boundary highlighting to results |
+
+**Key function to modify:**
+```python
+def run_composition(self, custom_text=None):  # Line 12701
+    # ADD: Get boundary settings from UI
+    # ADD: Call get_boundary_stats() and display
+    # ADD: Show warning if no boundaries
+```
+
+#### Results Display
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Add boundary indicator** | Lines 13203-13500 | Add 🔗 icon and highlighting |
+| **Update tree item creation** | Lines 12906-13060 | Include boundary metadata in items |
+| **Add score boost display** | Lines 13203+ | Show "Score: X → Y" for boosted results |
+
+### 14.3 Desktop Thread (`gui_threads.py`)
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Update LabCompositionThread** | Lines 117-158 | Add new parameters to __init__ and run() |
+
+**Key class to modify:**
+```python
+class LabCompositionThread(QThread):  # Line 117
+    def __init__(self, lab_engine, text, mode, chunk_size=None, ...):  # Line 125
+        # ADD: boundary_mode, boundary_delimiter, boundary_boost, min_boundary_matches
+```
+
+### 14.4 Web Application (`web/pages/parallels.py`)
+
+#### UI Creation
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Add mode selection** | Lines 231-240 | Add radio buttons after existing mode_select |
+| **Add delimiter dropdown** | Lines 310-316 | Add after chunk_size slider |
+| **Add Simple/Advanced section** | Lines 317-320 | Add collapsible section |
+| **Add pre-search stats** | Lines 193-205 | Add info box showing boundary count |
+| **Add warning display** | Lines 193-205 | Add warning for no boundaries |
+
+**Key location - Options panel:**
+```python
+# Lines 226-320 - Right: Options Panel
+with ui.column().classes('w-80 gap-4'):
+    # Existing: mode_select, chunk_size, deep_scan
+    # ADD: boundary_mode_radio, delimiter_select, advanced_expansion
+```
+
+#### Search Execution
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Update execute_parallels** | Lines 935-1050 | Pass new parameters, handle stats |
+| **Add boundary validation** | Lines 935-950 | Check for boundaries before search |
+| **Update run_search** | Lines 999-1019 | Add boundary parameters to API call |
+
+**Key function to modify:**
+```python
+async def execute_parallels():  # Line 935
+    # ADD: Get boundary settings from UI
+    # ADD: Call get_boundary_stats() before search
+    # ADD: Show warning if no boundaries detected
+```
+
+#### Results Display
+
+| Change | Location | Description |
+|--------|----------|-------------|
+| **Update result cards** | Lines 1050-1200 | Add boundary highlighting |
+| **Add boundary indicator** | Lines 1050-1200 | Show 🔗 icon and quality |
+| **Update score display** | Lines 1050-1200 | Show "Score: X → Y" |
+
+### 14.5 Settings Classes
+
+| File | Class | Line | Change |
+|------|-------|------|--------|
+| `genizah_core.py` | `LabSettings` | 119 | Add default values for new parameters |
+
+**Add to LabSettings.__init__:**
+```python
+# Line 121+
+self.boundary_mode = 'full'
+self.boundary_delimiter = '\n\n'
+self.boundary_boost = 1.5
+self.min_boundary_matches = 0
+self.min_delimiter_distance = 3
+```
+
+### 14.6 File Summary
+
+| File | Changes Required | Priority |
+|------|------------------|----------|
+| `genizah_core.py` | Algorithm + Settings | **Phase 1** |
+| `gui_threads.py` | Thread parameters | **Phase 1** |
+| `web/pages/parallels.py` | UI + Integration | **Phase 2** |
+| `genizah_app.py` | UI + Integration | **Phase 4** |
+| `genizah_translations.py` | New strings | All phases |
+
+### 14.7 New Translation Strings Required
+
+Add to `genizah_translations.py`:
+
+```python
+# English
+"Full search": "Full search",
+"Cross-paragraph only": "Cross-paragraph only",
+"Full + Cross-paragraph boost": "Full + Cross-paragraph boost",
+"Paragraph separator": "Paragraph separator",
+"Blank line (paragraph)": "Blank line (paragraph)",
+"Line break": "Line break",
+"Period (.)": "Period (.)",
+"Colon (:)": "Colon (:)",
+"Custom...": "Custom...",
+"Cross-paragraph boost": "Cross-paragraph boost",
+"Min. cross-paragraph matches": "Min. cross-paragraph matches",
+"Advanced settings": "Advanced settings",
+"No paragraph breaks detected": "No paragraph breaks detected",
+"boundaries detected": "boundaries detected",
+"Cross-paragraph match": "Cross-paragraph match",
+
+# Hebrew
+"Full search": "חיפוש מלא",
+"Cross-paragraph only": "חוצה-פסקאות בלבד",
+"Full + Cross-paragraph boost": "מלא + העדפת חוצה-פסקאות",
+"Paragraph separator": "מפריד פסקאות",
+"Blank line (paragraph)": "שורה ריקה (פסקה)",
+"Line break": "מעבר שורה",
+"Period (.)": "נקודה (.)",
+"Colon (:)": "נקודתיים (:)",
+"Custom...": "מותאם אישית...",
+"Cross-paragraph boost": "תוספת חוצה-פסקאות",
+"Min. cross-paragraph matches": "מינימום התאמות חוצות-פסקאות",
+"Advanced settings": "הגדרות מתקדמות",
+"No paragraph breaks detected": "לא זוהו מעברי פסקה",
+"boundaries detected": "גבולות זוהו",
+"Cross-paragraph match": "התאמה חוצת-פסקה",
+```
+
+---
+
+## 15. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -641,6 +845,16 @@ This means **no performance penalty** for Combined mode vs Full mode.
 | **Boundary quality** | Average match score of crossing chunks (0-1 normalized) |
 | **Boost** | Score multiplier applied based on boundary quality |
 | **min_distance** | Minimum words between delimiters to avoid false boundaries |
+
+---
+
+## Document History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| v1 | Feb 2026 | Initial Hebrew draft |
+| v2 | Feb 2026 | English rewrite, algorithm simplification, UX improvements |
+| v3 | Feb 2026 | Added code locations reference (Section 14) |
 
 ---
 
