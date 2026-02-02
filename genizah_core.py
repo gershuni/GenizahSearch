@@ -160,6 +160,25 @@ def chunk_crosses_boundary(chunk_start: int, chunk_end: int, boundaries: list) -
     return False
 
 
+def get_crossed_boundaries(chunk_start: int, chunk_end: int, boundaries: list) -> set:
+    """
+    Get the set of boundary indices that a chunk crosses.
+
+    Args:
+        chunk_start: Starting word index of chunk
+        chunk_end: Ending word index of chunk (exclusive)
+        boundaries: List of boundary word indices
+
+    Returns:
+        Set of boundary indices that this chunk crosses
+    """
+    crossed = set()
+    for b in boundaries:
+        if chunk_start <= b < chunk_end - 1:
+            crossed.add(b)
+    return crossed
+
+
 def calculate_boundary_quality(boundary_chunk_scores: list) -> float:
     """
     Calculate boundary match quality as average of match strengths.
@@ -1072,14 +1091,14 @@ class LabEngine:
         chunks_data = []
         if len(tokens) < c_size:
             # Short text: single chunk with all tokens
-            crosses_boundary = chunk_crosses_boundary(0, len(tokens), boundaries)
-            chunks_data = [(0, tokens, crosses_boundary)]
+            crossed_bounds = get_crossed_boundaries(0, len(tokens), boundaries)
+            chunks_data = [(0, tokens, crossed_bounds)]
         else:
             # Normal text: create overlapping chunks
             for i in range(0, max(1, len(tokens) - c_size + 1), step):
                 chunk_end = i + c_size
-                crosses_boundary = chunk_crosses_boundary(i, chunk_end, boundaries)
-                chunks_data.append((i, tokens[i : i + c_size], crosses_boundary))
+                crossed_bounds = get_crossed_boundaries(i, chunk_end, boundaries)
+                chunks_data.append((i, tokens[i : i + c_size], crossed_bounds))
 
         total_chunks = len(chunks_data)
         results_map = {}
@@ -1088,7 +1107,7 @@ class LabEngine:
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
-            for i, (token_start_idx, chunk_tokens, chunk_crosses_bound) in enumerate(chunks_data):
+            for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
                 chunks_processed = i
                 if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
                 chunk_text = " ".join(chunk_tokens)
@@ -1167,19 +1186,19 @@ class LabEngine:
                                 'content': content, 'best_chunk_score': -1,
                                 'all_found_words': set(), 'src_indices': set(), 'ms_matches': [],
                                 'is_text_filtered': False,
-                                # Boundary tracking
+                                # Boundary tracking - use set to count each boundary only once
                                 'boundary_chunk_scores': [],
-                                'boundary_match_count': 0
+                                'crossed_boundaries': set()
                             }
                         rec = results_map[uid]
 
                         if is_filtered_match:
                             rec['is_text_filtered'] = True
 
-                        # Track boundary-crossing matches
-                        if chunk_crosses_bound:
+                        # Track boundary-crossing matches - each boundary counted once
+                        if chunk_crossed_bounds:
                             rec['boundary_chunk_scores'].append(match_score)
-                            rec['boundary_match_count'] += 1
+                            rec['crossed_boundaries'].update(chunk_crossed_bounds)
 
                         rec['total_score'] += match_score
                         rec['hits_count'] += 1
@@ -1291,7 +1310,7 @@ class LabEngine:
                 'is_text_filtered': data.get('is_text_filtered', False),
                 # Boundary metadata
                 'has_boundary_matches': has_boundary_matches,
-                'boundary_match_count': data.get('boundary_match_count', 0),
+                'boundary_match_count': len(data.get('crossed_boundaries', set())),
                 'boundary_quality': boundary_quality_normalized
             }
             raw_final_items.append(item)
@@ -4456,22 +4475,22 @@ class SearchEngine:
         # Build chunks with boundary tracking
         chunks_data = []
         for i in range(len(tokens) - chunk_size + 1):
-            crosses_boundary = chunk_crosses_boundary(i, i + chunk_size, boundaries)
-            chunks_data.append((i, tokens[i:i + chunk_size], crosses_boundary))
+            crossed_bounds = get_crossed_boundaries(i, i + chunk_size, boundaries)
+            chunks_data.append((i, tokens[i:i + chunk_size], crossed_bounds))
 
         doc_hits_main = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
-            'patterns': set(), 'boundary_chunk_scores': [], 'boundary_match_count': 0
+            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set()
         })
         doc_hits_filtered = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
-            'patterns': set(), 'boundary_chunk_scores': [], 'boundary_match_count': 0
+            'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set()
         })
 
         total_chunks = len(chunks_data)
 
         # 2. Scan chunks
-        for i, (token_idx, chunk, chunk_crosses_bound) in enumerate(chunks_data):
+        for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
             if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
 
             # Build query
@@ -4514,10 +4533,10 @@ class SearchEngine:
                         rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                         rec['patterns'].add(regex.pattern)
 
-                        # Track boundary-crossing matches
-                        if chunk_crosses_bound:
+                        # Track boundary-crossing matches - each boundary counted once
+                        if chunk_crossed_bounds:
                             rec['boundary_chunk_scores'].append(score)
-                            rec['boundary_match_count'] += 1
+                            rec['crossed_boundaries'].update(chunk_crossed_bounds)
             except Exception as e:
                 LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
 
@@ -4622,7 +4641,7 @@ class SearchEngine:
                     'highlight_pattern': combined_pattern,
                     # Boundary metadata
                     'has_boundary_matches': has_boundary_matches,
-                    'boundary_match_count': data.get('boundary_match_count', 0),
+                    'boundary_match_count': len(data.get('crossed_boundaries', set())),
                     'boundary_quality': boundary_quality_normalized
                 })
 
