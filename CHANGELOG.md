@@ -33,6 +33,10 @@ A new parallel search mode that finds manuscripts with text spanning paragraph b
 - **Boundary detection:** Improved to require words on BOTH sides of the boundary (not just touching)
 - **Desktop boundary stats:** Fixed silent exception handling, now logs errors properly
 - **Desktop translation:** Fixed fragmented translation string for cross-paragraph tooltips
+- **Anonymous display bug:** Fixed discoveries showing as "Anonymous" even when user didn't check anonymous - now fetches profile data properly
+- **Dialog Esc key:** Fixed Share Discovery dialog flickering when pressing Esc (removed 'persistent' prop)
+- **Simplified Share Discovery:** Removed superfluous "Related manuscripts" section from dialog
+- **Database constraint:** Updated discoveries type constraint to include 'identification' and 'note' types
 
 ### Technical Changes
 
