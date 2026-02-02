@@ -317,68 +317,68 @@ def create_parallels_page(initial_text: str = None):
                     # Deep Scan
                     deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
 
-                    ui.separator().classes('my-2')
-
-                    # === Boundary Search Settings ===
-                    h3(tr('Paragraph search'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-
-                    # Boundary mode radio buttons
-                    boundary_mode = ui.radio(
-                        options={
-                            'full': tr('Full search'),
-                            'boundary': tr('Cross-paragraph only'),
-                            'combined': tr('Full + Cross-paragraph boost')
-                        },
-                        value='full'
-                    ).classes('w-full').props('dense')
-
-                    # Tooltips for boundary modes
-                    boundary_mode_tooltips = {
-                        'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
-                        'combined': tr('Search everything, but rank cross-paragraph matches higher')
-                    }
-
-                    # Paragraph delimiter dropdown
-                    with ui.column().classes('gap-1 mt-2'):
-                        h3(tr('Paragraph separator'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        boundary_delimiter = ui.select(
-                            options={
-                                '\n\n': tr('Blank line (paragraph)'),
-                                '\n': tr('Line break'),
-                                '.': tr('Period (.)'),
-                                ':': tr('Colon (:)')
-                            },
-                            value='\n\n'
-                        ).classes('w-full').props('outlined dense')
-
-                    # Pre-search stats display (updated when text or delimiter changes)
-                    boundary_stats_label = ui.label('').classes('text-xs mt-1').style('color: var(--primary-600); display: none;')
-                    boundary_warning_label = ui.label('').classes('text-xs mt-1').style('color: var(--error); display: none;')
-
-                    # Advanced settings (collapsed by default)
-                    with ui.expansion(tr('Advanced settings'), icon='tune').classes('w-full mt-2') as advanced_settings:
+                    # === Boundary Search Settings (hidden by default) ===
+                    with ui.expansion(tr('More options'), icon='settings').classes('w-full mt-2') as more_options_panel:
                         with ui.column().classes('w-full gap-3 p-2'):
-                            # Cross-paragraph boost slider
-                            with ui.column().classes('gap-1'):
-                                h3(tr('Cross-paragraph boost'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                boundary_boost = ui.slider(min=1.0, max=3.0, value=1.5, step=0.1).props('label-always')
-                                ui.label(tr('Score multiplier for cross-paragraph matches')).classes('text-xs').style('color: var(--text-muted);')
+                            h3(tr('Paragraph search'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
-                            # Min boundary matches filter
-                            with ui.column().classes('gap-1'):
-                                h3(tr('Min. cross-paragraph matches'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                min_boundary_matches = ui.select(
-                                    options={i: str(i) for i in range(11)},
-                                    value=0
-                                ).classes('w-32').props('outlined dense')
+                            # Boundary mode radio buttons
+                            boundary_mode = ui.radio(
+                                options={
+                                    'full': tr('Full search'),
+                                    'boundary': tr('Cross-paragraph only'),
+                                    'combined': tr('Full + Cross-paragraph boost')
+                                },
+                                value='full'
+                            ).classes('w-full').props('dense')
 
-                            # Min delimiter distance
-                            with ui.column().classes('gap-1'):
-                                h3(tr('Min. words between separators'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                min_delimiter_distance = ui.select(
-                                    options={i: str(i) for i in range(1, 11)},
-                                    value=3
-                                ).classes('w-32').props('outlined dense')
+                            # Tooltips for boundary modes
+                            boundary_mode_tooltips = {
+                                'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
+                                'combined': tr('Search everything, but rank cross-paragraph matches higher')
+                            }
+
+                            # Paragraph delimiter dropdown
+                            with ui.column().classes('gap-1 mt-2'):
+                                h3(tr('Paragraph separator'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                boundary_delimiter = ui.select(
+                                    options={
+                                        '\n\n': tr('Blank line (paragraph)'),
+                                        '\n': tr('Line break'),
+                                        '.': tr('Period (.)'),
+                                        ':': tr('Colon (:)')
+                                    },
+                                    value='\n\n'
+                                ).classes('w-full').props('outlined dense')
+
+                            # Pre-search stats display (updated when text or delimiter changes)
+                            boundary_stats_label = ui.label('').classes('text-xs mt-1').style('color: var(--primary-600); display: none;')
+                            boundary_warning_label = ui.label('').classes('text-xs mt-1').style('color: var(--error); display: none;')
+
+                            # Advanced settings (collapsed by default)
+                            with ui.expansion(tr('Advanced settings'), icon='tune').classes('w-full mt-2') as advanced_settings:
+                                with ui.column().classes('w-full gap-3 p-2'):
+                                    # Cross-paragraph boost slider
+                                    with ui.column().classes('gap-1'):
+                                        h3(tr('Cross-paragraph boost'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                        boundary_boost = ui.slider(min=1.0, max=3.0, value=1.5, step=0.1).props('label-always')
+                                        ui.label(tr('Score multiplier for cross-paragraph matches')).classes('text-xs').style('color: var(--text-muted);')
+
+                                    # Min boundary matches filter
+                                    with ui.column().classes('gap-1'):
+                                        h3(tr('Min. cross-paragraph matches'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                        min_boundary_matches = ui.select(
+                                            options={i: str(i) for i in range(11)},
+                                            value=0
+                                        ).classes('w-32').props('outlined dense')
+
+                                    # Min delimiter distance
+                                    with ui.column().classes('gap-1'):
+                                        h3(tr('Min. words between separators'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                                        min_delimiter_distance = ui.select(
+                                            options={i: str(i) for i in range(1, 11)},
+                                            value=3
+                                        ).classes('w-32').props('outlined dense')
 
                     def update_boundary_stats():
                         """Update pre-search boundary statistics."""

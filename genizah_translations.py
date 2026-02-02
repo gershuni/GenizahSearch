@@ -2064,6 +2064,7 @@ TRANSLATIONS = {
     "On first launch, download the transcription data from Zenodo": "בהפעלה הראשונה, הורד את נתוני התעתיק מ-Zenodo",
 
     # --- Boundary Search ---
+    "More options": "אפשרויות נוספות",
     "Paragraph search": "חיפוש פסקאות",
     "Full search": "חיפוש מלא",
     "Cross-paragraph only": "חוצה-פסקאות בלבד",
