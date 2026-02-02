@@ -1227,14 +1227,12 @@ def create_new_discovery_dialog(on_success=None):
     """Create dialog for posting a new discovery/question."""
     from web.state import state
 
-    dialog = ui.dialog().props('persistent')
+    dialog = ui.dialog()  # No 'persistent' to allow Esc to close
 
     # State for document selection
     selected_doc = {'sys_id': None, 'shelfmark': None, 'title': None, 'total_pages': 0}
     # State for additional shelfmarks
     additional_shelfmarks_list = []
-    # State for related manuscripts
-    related_manuscripts_list = []
 
     def truncate_title(title: str, max_words: int = 4) -> tuple:
         """Truncate title to max_words, return (short, full) for tooltip."""
@@ -1509,69 +1507,6 @@ def create_new_discovery_dialog(on_success=None):
 
                     ui.button(tr('Add shelfmark'), icon='add', on_click=add_additional_shelfmark).props('outlined dense').classes('mt-2')
 
-                # Related Manuscripts section
-                with ui.expansion(tr('Related manuscripts (optional)'), icon='link').classes('w-full'):
-                    related_manuscripts_container = ui.column().classes('w-full gap-2')
-
-                    relationship_types = {
-                        'parallel': tr('Parallel text'),
-                        'continuation': tr('Continuation'),
-                        'fragment': tr('Fragment of'),
-                        'related': tr('Related'),
-                        'citation': tr('Citation')
-                    }
-
-                    def add_related_manuscript():
-                        """Add a related manuscript entry."""
-                        new_entry = {'shelfmark': '', 'document_id': '', 'relationship_type': 'related', 'notes': ''}
-                        related_manuscripts_list.append(new_entry)
-                        idx = len(related_manuscripts_list) - 1
-
-                        with related_manuscripts_container:
-                            with ui.card().classes('w-full p-2').style('background: var(--surface-secondary);') as card:
-                                with ui.column().classes('w-full gap-2'):
-                                    with ui.row().classes('w-full items-center gap-2'):
-                                        shelfmark_input = ui.input(
-                                            label=tr('Shelfmark'),
-                                            placeholder='T-S 8.1'
-                                        ).classes('flex-1').props('outlined dense')
-
-                                        rel_type_select = ui.select(
-                                            options=relationship_types,
-                                            value='related',
-                                            label=tr('Relationship')
-                                        ).classes('w-32').props('outlined dense')
-
-                                        def remove_entry(i=idx, c=card):
-                                            if i < len(related_manuscripts_list):
-                                                related_manuscripts_list.pop(i)
-                                            c.delete()
-
-                                        ui.button(icon='close', on_click=remove_entry).props('flat round dense size=sm color=negative')
-
-                                    notes_input = ui.input(
-                                        label=tr('Notes'),
-                                        placeholder=tr('Optional notes about the relationship')
-                                    ).classes('w-full').props('outlined dense')
-
-                                def update_rel_shelfmark(e, i=idx):
-                                    if i < len(related_manuscripts_list):
-                                        related_manuscripts_list[i]['shelfmark'] = e.value
-
-                                def update_rel_type(e, i=idx):
-                                    if i < len(related_manuscripts_list):
-                                        related_manuscripts_list[i]['relationship_type'] = e.value
-
-                                def update_rel_notes(e, i=idx):
-                                    if i < len(related_manuscripts_list):
-                                        related_manuscripts_list[i]['notes'] = e.value
-
-                                shelfmark_input.on('update:model-value', update_rel_shelfmark)
-                                rel_type_select.on('update:model-value', update_rel_type)
-                                notes_input.on('update:model-value', update_rel_notes)
-
-                    ui.button(tr('Add related manuscript'), icon='add', on_click=add_related_manuscript).props('outlined dense').classes('mt-2')
-
                 # Anonymous option
                 anonymous_check = ui.checkbox(tr('Post anonymously'), value=False).classes('text-sm')
                 ui.label(tr('Your name will not be shown publicly')).classes('text-xs ml-8').style('color: var(--text-tertiary);')
@@ -1599,10 +1534,6 @@ def create_new_discovery_dialog(on_success=None):
                         sm for sm in additional_shelfmarks_list
                         if sm.get('shelfmark')
                     ]
-                    valid_related_manuscripts = [
-                        rm for rm in related_manuscripts_list
-                        if rm.get('shelfmark') or rm.get('document_id')
-                    ]
 
                     result = create_discovery(
                         user_id=user_id,
@@ -1613,8 +1544,7 @@ def create_new_discovery_dialog(on_success=None):
                         shelfmark=shelfmark_hidden.value or None,
                         page_number=page_num,
                         is_anonymous=anonymous_check.value,
-                        additional_shelfmarks=valid_additional_shelfmarks if valid_additional_shelfmarks else None,
-                        related_manuscripts=valid_related_manuscripts if valid_related_manuscripts else None
+                        additional_shelfmarks=valid_additional_shelfmarks if valid_additional_shelfmarks else None
                     )
 
                     if "error" in result:

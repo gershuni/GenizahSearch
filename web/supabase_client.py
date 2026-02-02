@@ -1117,6 +1117,30 @@ def get_feed_items(item_type: str = None, period: str = None,
         total = len(items)
         items = items[offset:offset + limit]
 
+        # Fetch profile data for authors (to get full_name and username)
+        try:
+            user_ids = set()
+            for item in items:
+                author_id = item.get('author', {}).get('id')
+                if author_id:
+                    user_ids.add(author_id)
+
+            if user_ids:
+                profiles_response = client.table('profiles').select('id, full_name, username, affiliation').in_('id', list(user_ids)).execute()
+                profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+
+                # Merge profile data into author dicts
+                for item in items:
+                    author = item.get('author', {})
+                    author_id = author.get('id')
+                    if author_id and author_id in profiles_map:
+                        profile = profiles_map[author_id]
+                        author['full_name'] = profile.get('full_name')
+                        author['username'] = profile.get('username')
+                        author['affiliation'] = profile.get('affiliation')
+        except Exception as e:
+            print(f"Error fetching profiles for feed: {e}")
+
         return {'items': items, 'total': total}
     except Exception as e:
         print(f"Error getting feed items: {e}")

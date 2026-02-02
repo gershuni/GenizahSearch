@@ -130,7 +130,7 @@ CREATE TABLE public.comments (
 CREATE TABLE public.discoveries (
     id SERIAL PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    type TEXT DEFAULT 'discovery' CHECK (type IN ('discovery', 'question', 'observation', 'correction', 'join', 'comment')),
+    type TEXT DEFAULT 'discovery' CHECK (type IN ('discovery', 'question', 'observation', 'correction', 'join', 'comment', 'identification', 'note')),
     title TEXT,
     content TEXT,
     shelfmarks JSONB DEFAULT '[]',
