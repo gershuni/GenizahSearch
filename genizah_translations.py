@@ -2094,4 +2094,9 @@ TRANSLATIONS = {
     "No paragraph breaks detected in text!": "לא זוהו מעברי פסקה בטקסט!",
     "Cross-paragraph": "חוצה-פסקה",
     "cross-paragraph matches": "התאמות חוצות-פסקאות",
+    "Advanced cross-paragraph settings": "הגדרות חוצה-פסקאות מתקדמות",
+    "Minimum number of cross-paragraph matches required": "מספר מינימלי של התאמות חוצות-פסקאות נדרש",
+    "Ignore separators that are too close together": "התעלם ממפרידים קרובים מדי",
+    "Character or pattern that separates paragraphs in your text": "תו או דפוס שמפריד בין פסקאות בטקסט שלך",
+    "Search all text chunks regardless of paragraph breaks": "חפש בכל חלקי הטקסט ללא קשר למעברי פסקה",
 }

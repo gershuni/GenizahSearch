@@ -123,7 +123,7 @@ class LabCompositionThread(QThread):
     error_signal = pyqtSignal(str)
 
     def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None,
-                 deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n\n',
+                 deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n',
                  boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3):
         super().__init__()
         self.lab_engine = lab_engine

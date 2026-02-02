@@ -139,21 +139,23 @@ def parse_boundaries(text: str, delimiter: str, min_distance: int = 3) -> list:
 
 def chunk_crosses_boundary(chunk_start: int, chunk_end: int, boundaries: list) -> bool:
     """
-    Check if a chunk spans any boundary.
+    Check if a chunk spans any boundary with words on BOTH sides.
 
-    A chunk crosses a boundary if the boundary index falls
-    strictly between chunk_start and chunk_end.
+    A chunk truly crosses a boundary if it includes at least one word
+    before/at the boundary AND at least one word after the boundary.
 
     Args:
         chunk_start: Starting word index of chunk
         chunk_end: Ending word index of chunk (exclusive)
-        boundaries: List of boundary word indices
+        boundaries: List of boundary word indices (last word before delimiter)
 
     Returns:
-        True if chunk spans at least one boundary
+        True if chunk spans at least one boundary with words on both sides
     """
     for b in boundaries:
-        if chunk_start <= b < chunk_end:
+        # chunk_start <= b: chunk includes word at or before boundary
+        # b < chunk_end - 1: chunk includes at least one word after boundary
+        if chunk_start <= b < chunk_end - 1:
             return True
     return False
 
@@ -310,7 +312,7 @@ class LabSettings:
 
         # Boundary Search Settings
         self.boundary_mode = 'full'           # 'full', 'boundary', 'combined'
-        self.boundary_delimiter = '\n\n'      # What marks a paragraph boundary
+        self.boundary_delimiter = '\n'        # What marks a paragraph boundary
         self.boundary_boost = 1.5             # Score multiplier for boundary matches (1.0-3.0)
         self.min_boundary_matches = 0         # Filter results with fewer matches (0-10)
         self.min_delimiter_distance = 3       # Min words between delimiters
@@ -355,7 +357,7 @@ class LabSettings:
 
                     # Load boundary search settings
                     self.boundary_mode = data.get('boundary_mode', 'full')
-                    self.boundary_delimiter = data.get('boundary_delimiter', '\n\n')
+                    self.boundary_delimiter = data.get('boundary_delimiter', '\n')
                     self.boundary_boost = data.get('boundary_boost', 1.5)
                     self.min_boundary_matches = data.get('min_boundary_matches', 0)
                     self.min_delimiter_distance = data.get('min_delimiter_distance', 3)
@@ -1018,7 +1020,7 @@ class LabEngine:
 
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None,
                                 excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000,
-                                boundary_mode='full', boundary_delimiter='\n\n', boundary_boost=1.5,
+                                boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
                                 min_boundary_matches=0, min_delimiter_distance=3):
         """
         Scans a composition using Lab Mode.
@@ -4408,7 +4410,7 @@ class SearchEngine:
         return final
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,
-                                   boundary_mode='full', boundary_delimiter='\n\n', boundary_boost=1.5,
+                                   boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
                                    min_boundary_matches=0, min_delimiter_distance=3):
         """
         Scans composition chunks against the index.

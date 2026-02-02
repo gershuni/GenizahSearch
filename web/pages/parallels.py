@@ -222,6 +222,168 @@ def create_parallels_page(initial_text: str = None):
                     # Update after a short delay to ensure textarea has initial value from storage
                     ui.timer(0.3, update_word_count, once=True)
 
+                    # === Lab Mode and Boundary Search Settings (below text input) ===
+                    ui.separator().classes('my-3')
+
+                    # Lab Mode Toggle Row
+                    with ui.row().classes('w-full items-center gap-4'):
+                        lab_mode = ui.checkbox(tr('Lab Mode (experimental)'))
+                        lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
+
+                        # Deep Scan (Lab Mode only - initially hidden)
+                        deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
+                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
+
+                    # === Boundary Search Settings ===
+                    with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
+                        # Paragraph delimiter (to the left)
+                        with ui.column().classes('gap-1') as delimiter_col:
+                            delimiter_label = ui.label(tr('Paragraph separator')).classes('text-xs font-medium').style('color: var(--text-muted);')
+                            boundary_delimiter = ui.select(
+                                options={
+                                    '\n': tr('Line break'),
+                                    '\n\n': tr('Blank line (paragraph)'),
+                                    '.': tr('Period (.)'),
+                                    ':': tr('Colon (:)')
+                                },
+                                value='\n'
+                            ).classes('w-40').props('outlined dense disable')
+                            boundary_delimiter.tooltip(tr('Character or pattern that separates paragraphs in your text'))
+
+                        # Boundary mode radio buttons (visible)
+                        boundary_mode = ui.radio(
+                            options={
+                                'full': tr('Full search'),
+                                'boundary': tr('Cross-paragraph only'),
+                                'combined': tr('Full + Cross-paragraph boost')
+                            },
+                            value='full'
+                        ).props('inline dense')
+
+                        # Advanced settings button (initially hidden)
+                        advanced_btn = ui.button(icon='tune', on_click=lambda: advanced_dialog.open()).props('flat dense').style('display: none;')
+                        advanced_btn.tooltip(tr('Advanced cross-paragraph settings'))
+
+                    # Help text for current selection
+                    boundary_mode_help = ui.label('').classes('text-xs').style('color: var(--text-muted); display: none;')
+
+                    # Tooltip descriptions for each mode
+                    mode_tooltips = {
+                        'full': tr('Search all text chunks regardless of paragraph breaks'),
+                        'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
+                        'combined': tr('Search everything, but rank cross-paragraph matches higher')
+                    }
+
+                    def update_boundary_help():
+                        mode = boundary_mode.value
+                        if mode in mode_tooltips:
+                            boundary_mode_help.text = mode_tooltips[mode]
+                            boundary_mode_help.style('display: block;')
+                        else:
+                            boundary_mode_help.style('display: none;')
+
+                    # Pre-search stats display
+                    boundary_stats_label = ui.label('').classes('text-xs mt-1').style('color: var(--primary-600); display: none;')
+                    boundary_warning_label = ui.label('').classes('text-xs mt-1').style('color: var(--error); display: none;')
+
+                    # Advanced settings dialog
+                    with ui.dialog() as advanced_dialog:
+                        with ui.card().classes('p-4 w-96'):
+                            h3(tr('Advanced cross-paragraph settings'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
+
+                            # Cross-paragraph boost slider
+                            with ui.column().classes('gap-1 mb-4'):
+                                ui.label(tr('Cross-paragraph boost')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                boundary_boost = ui.slider(min=1.0, max=3.0, value=1.5, step=0.1).props('label-always')
+                                ui.label(tr('Score multiplier for cross-paragraph matches')).classes('text-xs').style('color: var(--text-muted);')
+
+                            # Min boundary matches filter
+                            with ui.column().classes('gap-1 mb-4'):
+                                ui.label(tr('Min. cross-paragraph matches')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                min_boundary_matches = ui.select(
+                                    options={i: str(i) for i in range(11)},
+                                    value=0
+                                ).classes('w-32').props('outlined dense')
+                                ui.label(tr('Minimum number of cross-paragraph matches required')).classes('text-xs').style('color: var(--text-muted);')
+
+                            # Min delimiter distance
+                            with ui.column().classes('gap-1 mb-4'):
+                                ui.label(tr('Min. words between separators')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                min_delimiter_distance = ui.select(
+                                    options={i: str(i) for i in range(1, 11)},
+                                    value=3
+                                ).classes('w-32').props('outlined dense')
+                                ui.label(tr('Ignore separators that are too close together')).classes('text-xs').style('color: var(--text-muted);')
+
+                            ui.button(tr('Close'), on_click=advanced_dialog.close).props('flat')
+
+                    def update_boundary_ui():
+                        """Update boundary UI based on selected mode."""
+                        is_boundary_mode = boundary_mode.value in ('boundary', 'combined')
+                        # Enable/disable delimiter dropdown
+                        if is_boundary_mode:
+                            boundary_delimiter.props(remove='disable')
+                            advanced_btn.style('display: inline-flex;')
+                        else:
+                            boundary_delimiter.props(add='disable')
+                            advanced_btn.style('display: none;')
+                        update_boundary_help()
+                        update_boundary_stats()
+
+                    def update_boundary_stats():
+                        """Update pre-search boundary statistics."""
+                        try:
+                            from genizah_core import get_boundary_stats
+                            text = text_input.value or ""
+                            if not text.strip():
+                                boundary_stats_label.style('display: none;')
+                                boundary_warning_label.style('display: none;')
+                                return
+
+                            c_size = int(chunk_size.value) if chunk_size.value else 5
+                            delimiter = boundary_delimiter.value or '\n'
+                            min_dist = int(min_delimiter_distance.value) if min_delimiter_distance.value else 3
+
+                            stats = get_boundary_stats(text, delimiter, c_size, min_dist)
+
+                            if stats['boundary_count'] > 0:
+                                boundary_stats_label.text = tr('{} boundaries detected, {} chunks will cross them').format(
+                                    stats['boundary_count'], stats['crossing_chunk_count']
+                                )
+                                boundary_stats_label.style('display: block;')
+                                boundary_warning_label.style('display: none;')
+                            else:
+                                boundary_stats_label.style('display: none;')
+                                if boundary_mode.value in ('boundary', 'combined'):
+                                    boundary_warning_label.text = tr('No paragraph breaks detected in text!')
+                                    boundary_warning_label.style('display: block;')
+                                else:
+                                    boundary_warning_label.style('display: none;')
+                        except Exception:
+                            boundary_stats_label.style('display: none;')
+                            boundary_warning_label.style('display: none;')
+
+                    # Update stats when relevant controls change
+                    boundary_mode.on('update:model-value', update_boundary_ui)
+                    boundary_delimiter.on('update:model-value', update_boundary_stats)
+                    min_delimiter_distance.on('update:model-value', update_boundary_stats)
+                    text_input.on('blur', update_boundary_stats)
+
+                    # Lab Mode toggle handler
+                    def on_lab_mode_change():
+                        """Show/hide lab mode options based on toggle."""
+                        if lab_mode.value:
+                            deep_scan.style('display: inline-flex;')
+                            freq_threshold_row.style('display: none;')
+                        else:
+                            deep_scan.style('display: none;')
+                            freq_threshold_row.style('display: block;')
+
+                    lab_mode.on('update:model-value', on_lab_mode_change)
+
+                    # Initialize help text
+                    update_boundary_help()
+
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
                     # Changed to H2
@@ -319,140 +481,6 @@ def create_parallels_page(initial_text: str = None):
                         h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
                         ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
-
-                    ui.separator().classes('my-2')
-
-                    # Lab Mode Toggle
-                    lab_mode = ui.checkbox(tr('Lab Mode (experimental)')).classes('mt-2')
-                    lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
-
-                    # === Lab Mode Options (hidden by default) ===
-                    with ui.column().classes('w-full gap-2 mt-2').style('display: none;') as lab_mode_options:
-                        # Deep Scan (Lab Mode only)
-                        deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
-                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
-
-                    # === Boundary Search Settings (available for both modes) ===
-                    with ui.expansion(tr('More options'), icon='settings').classes('w-full mt-2') as more_options_panel:
-                        with ui.column().classes('w-full gap-3 p-2'):
-                            h3(tr('Paragraph search'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-
-                            # Boundary mode radio buttons
-                            boundary_mode = ui.radio(
-                                options={
-                                    'full': tr('Full search'),
-                                    'boundary': tr('Cross-paragraph only'),
-                                    'combined': tr('Full + Cross-paragraph boost')
-                                },
-                                value='full'
-                            ).classes('w-full').props('dense')
-
-                            # Tooltips for boundary modes
-                            boundary_mode_tooltips = {
-                                'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
-                                'combined': tr('Search everything, but rank cross-paragraph matches higher')
-                            }
-
-                        # Paragraph delimiter dropdown
-                        with ui.column().classes('gap-1 mt-2'):
-                            h3(tr('Paragraph separator'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                            boundary_delimiter = ui.select(
-                                options={
-                                    '\n\n': tr('Blank line (paragraph)'),
-                                    '\n': tr('Line break'),
-                                    '.': tr('Period (.)'),
-                                    ':': tr('Colon (:)')
-                                },
-                                value='\n\n'
-                            ).classes('w-full').props('outlined dense')
-
-                        # Pre-search stats display (updated when text or delimiter changes)
-                        boundary_stats_label = ui.label('').classes('text-xs mt-1').style('color: var(--primary-600); display: none;')
-                        boundary_warning_label = ui.label('').classes('text-xs mt-1').style('color: var(--error); display: none;')
-
-                        # Advanced settings (collapsed by default)
-                        with ui.expansion(tr('Advanced settings'), icon='tune').classes('w-full mt-2') as advanced_settings:
-                            with ui.column().classes('w-full gap-3 p-2'):
-                                # Cross-paragraph boost slider
-                                with ui.column().classes('gap-1'):
-                                    h3(tr('Cross-paragraph boost'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                    boundary_boost = ui.slider(min=1.0, max=3.0, value=1.5, step=0.1).props('label-always')
-                                    ui.label(tr('Score multiplier for cross-paragraph matches')).classes('text-xs').style('color: var(--text-muted);')
-
-                                # Min boundary matches filter
-                                with ui.column().classes('gap-1'):
-                                    h3(tr('Min. cross-paragraph matches'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                    min_boundary_matches = ui.select(
-                                        options={i: str(i) for i in range(11)},
-                                        value=0
-                                    ).classes('w-32').props('outlined dense')
-
-                                # Min delimiter distance
-                                with ui.column().classes('gap-1'):
-                                    h3(tr('Min. words between separators'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                    min_delimiter_distance = ui.select(
-                                        options={i: str(i) for i in range(1, 11)},
-                                        value=3
-                                    ).classes('w-32').props('outlined dense')
-
-                    def update_boundary_stats():
-                        """Update pre-search boundary statistics."""
-                        try:
-                            from genizah_core import get_boundary_stats
-                            text = text_input.value or ""
-                            if not text.strip():
-                                boundary_stats_label.style('display: none;')
-                                boundary_warning_label.style('display: none;')
-                                return
-
-                            c_size = int(chunk_size.value) if chunk_size.value else 5
-                            delimiter = boundary_delimiter.value or '\n\n'
-                            min_dist = int(min_delimiter_distance.value) if min_delimiter_distance.value else 3
-
-                            stats = get_boundary_stats(text, delimiter, c_size, min_dist)
-
-                            if stats['boundary_count'] > 0:
-                                boundary_stats_label.text = tr('{} boundaries detected, {} chunks will cross them').format(
-                                    stats['boundary_count'], stats['crossing_chunk_count']
-                                )
-                                boundary_stats_label.style('display: block;')
-                                boundary_warning_label.style('display: none;')
-                            else:
-                                boundary_stats_label.style('display: none;')
-                                if boundary_mode.value in ('boundary', 'combined'):
-                                    boundary_warning_label.text = tr('No paragraph breaks detected in text!')
-                                    boundary_warning_label.style('display: block;')
-                                else:
-                                    boundary_warning_label.style('display: none;')
-                        except Exception:
-                            boundary_stats_label.style('display: none;')
-                            boundary_warning_label.style('display: none;')
-
-                    # Update stats when relevant controls change
-                    boundary_delimiter.on('update:model-value', update_boundary_stats)
-                    chunk_size.on('update:model-value', update_boundary_stats)
-                    min_delimiter_distance.on('update:model-value', update_boundary_stats)
-                    text_input.on('blur', update_boundary_stats)
-
-                    # Auto-expand advanced settings when switching to combined mode
-                    def on_boundary_mode_change():
-                        if boundary_mode.value == 'combined':
-                            advanced_settings.open()
-                        update_boundary_stats()
-
-                    boundary_mode.on('update:model-value', on_boundary_mode_change)
-
-                    # Lab Mode toggle handler
-                    def on_lab_mode_change():
-                        """Show/hide lab mode options based on toggle."""
-                        if lab_mode.value:
-                            lab_mode_options.style('display: block;')
-                            freq_threshold_row.style('display: none;')  # Hide freq threshold in lab mode
-                        else:
-                            lab_mode_options.style('display: none;')
-                            freq_threshold_row.style('display: block;')  # Show freq threshold in standard mode
-
-                    lab_mode.on('update:model-value', on_lab_mode_change)
 
                     ui.separator().classes('my-2')
 
@@ -1149,7 +1177,7 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture boundary settings (only used in lab mode)
         captured_boundary_mode = boundary_mode.value or 'full'
-        captured_boundary_delimiter = boundary_delimiter.value or '\n\n'
+        captured_boundary_delimiter = boundary_delimiter.value or '\n'
         captured_boundary_boost = float(boundary_boost.value) if boundary_boost.value else 1.5
         captured_min_boundary_matches = int(min_boundary_matches.value) if min_boundary_matches.value else 0
         captured_min_delimiter_distance = int(min_delimiter_distance.value) if min_delimiter_distance.value else 3
@@ -1504,7 +1532,17 @@ def create_parallels_page(initial_text: str = None):
         ms_text = html.escape(item.get('text', '').replace('\n', ' '))
         ms_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', ms_text)
 
-        src_text = html.escape(item.get('source_ctx', '').replace('\n', ' '))
+        # For source text, show paragraph breaks with red | marker
+        src_raw = item.get('source_ctx', '')
+        delim = boundary_delimiter.value or '\n'
+        # Replace delimiter with placeholder, then other newlines with space
+        BOUNDARY_MARKER = '<<<BOUNDARY>>>'
+        if delim in src_raw:
+            src_raw = src_raw.replace(delim, BOUNDARY_MARKER)
+        src_raw = src_raw.replace('\n', ' ')
+        src_text = html.escape(src_raw)
+        # Replace placeholder with red pipe HTML
+        src_text = src_text.replace(BOUNDARY_MARKER, ' <span style="color: #ef4444; font-weight: bold;">|</span> ')
         src_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', src_text)
 
         # Create short preview (first 80 chars)
@@ -1555,7 +1593,7 @@ def create_parallels_page(initial_text: str = None):
                 with ui.row().classes('w-full gap-3'):
                     # Source context
                     with ui.column().classes('flex-1 gap-2'):
-                        ui.label(tr('Your Text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                        ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
                         with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                         ):
@@ -1705,7 +1743,15 @@ def create_parallels_page(initial_text: str = None):
         ms_text = html.escape(item.get('text', '').replace('\n', ' '))
         ms_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', ms_text)
 
-        src_text = html.escape(item.get('source_ctx', '').replace('\n', ' '))
+        # For source text, show paragraph breaks with red | marker
+        src_raw = item.get('source_ctx', '')
+        delim = boundary_delimiter.value or '\n'
+        BOUNDARY_MARKER = '<<<BOUNDARY>>>'
+        if delim in src_raw:
+            src_raw = src_raw.replace(delim, BOUNDARY_MARKER)
+        src_raw = src_raw.replace('\n', ' ')
+        src_text = html.escape(src_raw)
+        src_text = src_text.replace(BOUNDARY_MARKER, ' <span style="color: #ef4444; font-weight: bold;">|</span> ')
         src_text_html = re.sub(r'\*(.*?)\*', r'<span style="background: #bbf7d0; padding: 2px 4px; border-radius: 3px;">\1</span>', src_text)
 
         with ui.card().classes('w-full p-5 hover:shadow-lg transition-all'):
@@ -1729,7 +1775,7 @@ def create_parallels_page(initial_text: str = None):
             with ui.row().classes('w-full gap-4'):
                 # Source context
                 with ui.column().classes('flex-1 gap-2'):
-                    ui.label(tr('Source Context')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                    ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
                     with ui.element('div').classes('p-4 rounded-lg text-sm').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                     ):
