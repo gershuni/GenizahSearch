@@ -1,7 +1,7 @@
 # Technical Specification: Boundary-Crossing Parallel Search
 
 > Date: February 2026
-> Status: **Implemented (Web)** - Desktop pending
+> Status: **Implemented (Web + Desktop)**
 > Author: Claude Code
 
 ## Executive Summary
@@ -918,30 +918,65 @@ Add to `genizah_translations.py`:
 | `genizah_translations.py` | Added Hebrew translations |
 | `web/pages/help.py` | Added documentation section |
 
-### 16.5 Desktop Implementation Plan
+### 16.5 Desktop Implementation (Completed February 2026)
 
-**Priority**: Medium (after web stabilization)
+**Status**: ✅ Complete
 
-**Phase 1: Core Integration**
-1. Update `LabCompositionThread` to pass boundary parameters (already partially done)
-2. Add boundary parameters to `run_composition()` in `genizah_app.py`
+#### UI Controls Added (`genizah_app.py` - `create_composition_tab()`)
 
-**Phase 2: UI Controls** (in `create_composition_tab()`)
-1. Add `boundary_mode_combo` - QComboBox for search mode
-2. Add `delimiter_combo` - QComboBox for delimiter selection
-3. Add collapsible "Advanced" group with boost/min_matches/min_distance sliders
-4. Wire up signals to update LabSettings
+| Control | Type | Description |
+|---------|------|-------------|
+| `boundary_mode_combo` | QComboBox | Search mode selection (Full/Cross-paragraph only/Combined) |
+| `boundary_delimiter_combo` | QComboBox | Paragraph separator (Line break/Blank line/Period/Colon) |
+| `boundary_stats_label` | QLabel | Real-time stats showing boundaries and crossing chunks |
+| `btn_boundary_advanced` | QPushButton | Opens advanced settings dialog (⚙ button) |
 
-**Phase 3: Results Display** (in `display_comp_results()`)
-1. Add boundary-crossing indicator to tree items
-2. Highlight boundary-crossing matches differently
-3. Show boost indicator in score column
+#### Advanced Settings Dialog
 
-**Estimated locations in `genizah_app.py`:**
-- UI creation: Lines 5794-5864 (controls row)
-- Search execution: Line 12115 (`run_composition()`)
-- Results display: Line 12617 (`display_comp_results()`)
+Opens via ⚙ button (visible only in non-full modes):
+- **Cross-paragraph boost**: QDoubleSpinBox (1.0-3.0)
+- **Min. cross-paragraph matches**: QSpinBox (0-10)
+- **Min. words between separators**: QSpinBox (1-10)
+
+#### Search Execution (`run_composition()`)
+
+Both `CompositionThread` and `LabCompositionThread` now accept and pass:
+- `boundary_mode` - Search mode from combo
+- `boundary_delimiter` - Delimiter from combo
+- `boundary_boost` - From LabSettings or temporary storage
+- `min_boundary_matches` - From LabSettings or temporary storage
+- `min_delimiter_distance` - From LabSettings or temporary storage
+
+#### Results Display (`display_comp_results()`)
+
+- 🔗 emoji prefix on scores for boundary-crossing results
+- Tooltips showing cross-paragraph match count
+- Score column shows boosted scores when applicable
+
+#### Helper Methods Added
+
+| Method | Purpose |
+|--------|---------|
+| `_on_boundary_mode_changed()` | Updates UI and saves mode setting |
+| `_on_boundary_delimiter_changed()` | Saves delimiter and updates stats |
+| `_update_boundary_stats()` | Shows real-time boundary detection statistics |
+| `_open_boundary_advanced_dialog()` | Dialog for boost, min matches, min distance |
+| `_format_score_with_boundary()` | Formats score with 🔗 indicator |
+| `_get_boundary_tooltip()` | Generates tooltip for boundary match info |
+
+#### Settings Persistence
+
+- Settings stored in `LabSettings` class (persisted to JSON)
+- Fallback to temporary instance variables when `lab_engine` not initialized
+- Settings round-trip correctly through dialog reopening
+
+#### Bug Fixes During Implementation
+
+1. **Silent exception handling**: Added `traceback.print_exc()` to boundary stats calculation
+2. **Unnecessary lambda complexity**: Simplified signal connection for chunk size spinner
+3. **Translation string fragmentation**: Fixed tooltip to use single translatable format string
+4. **Settings not persisting in non-Lab mode**: Added temporary storage (`_boundary_*_temp` attributes)
 
 ---
 
-*Web implementation complete. Desktop implementation pending.*
+*Implementation complete for both Web and Desktop.*

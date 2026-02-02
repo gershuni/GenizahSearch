@@ -5797,7 +5797,7 @@ class GenizahGUI(QMainWindow):
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
-        self.spin_chunk.valueChanged.connect(lambda: self._update_boundary_stats() if hasattr(self, '_update_boundary_stats') else None)
+        self.spin_chunk.valueChanged.connect(self._update_boundary_stats)
         
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
         self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
@@ -10413,7 +10413,10 @@ class GenizahGUI(QMainWindow):
 
             chunk_size = self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5
             delimiter = self.boundary_delimiter_combo.currentData() if hasattr(self, 'boundary_delimiter_combo') else '\n'
-            min_distance = getattr(self.lab_engine.settings, 'min_delimiter_distance', 3) if hasattr(self, 'lab_engine') and self.lab_engine else 3
+            if hasattr(self, 'lab_engine') and self.lab_engine:
+                min_distance = self.lab_engine.settings.min_delimiter_distance
+            else:
+                min_distance = getattr(self, '_min_delimiter_distance_temp', 3)
 
             stats = get_boundary_stats(text, delimiter, chunk_size, min_distance)
 
@@ -10431,7 +10434,8 @@ class GenizahGUI(QMainWindow):
                     self.boundary_stats_label.setStyleSheet("color: #c0392b; font-size: 11px;")
                 else:
                     self.boundary_stats_label.setText("")
-        except Exception:
+        except Exception as e:
+            traceback.print_exc()
             self.boundary_stats_label.setText("")
 
     def _open_boundary_advanced_dialog(self):
@@ -10452,21 +10456,21 @@ class GenizahGUI(QMainWindow):
         boost_spin = QDoubleSpinBox()
         boost_spin.setRange(1.0, 3.0)
         boost_spin.setSingleStep(0.1)
-        boost_spin.setValue(settings.boundary_boost if settings else 1.5)
+        boost_spin.setValue(settings.boundary_boost if settings else getattr(self, '_boundary_boost_temp', 1.5))
         boost_spin.setToolTip(tr("Score multiplier for cross-paragraph matches"))
         form.addRow(tr("Cross-paragraph boost") + ":", boost_spin)
 
         # Min boundary matches
         min_matches_spin = QSpinBox()
         min_matches_spin.setRange(0, 10)
-        min_matches_spin.setValue(settings.min_boundary_matches if settings else 0)
+        min_matches_spin.setValue(settings.min_boundary_matches if settings else getattr(self, '_min_boundary_matches_temp', 0))
         min_matches_spin.setToolTip(tr("Minimum number of cross-paragraph matches required"))
         form.addRow(tr("Min. cross-paragraph matches") + ":", min_matches_spin)
 
         # Min delimiter distance
         min_distance_spin = QSpinBox()
         min_distance_spin.setRange(1, 10)
-        min_distance_spin.setValue(settings.min_delimiter_distance if settings else 3)
+        min_distance_spin.setValue(settings.min_delimiter_distance if settings else getattr(self, '_min_delimiter_distance_temp', 3))
         min_distance_spin.setToolTip(tr("Ignore separators that are too close together"))
         form.addRow(tr("Min. words between separators") + ":", min_distance_spin)
 
@@ -10484,6 +10488,11 @@ class GenizahGUI(QMainWindow):
                 settings.min_boundary_matches = min_matches_spin.value()
                 settings.min_delimiter_distance = min_distance_spin.value()
                 settings.save()
+            else:
+                # Store values temporarily on self for this session (won't persist)
+                self._boundary_boost_temp = boost_spin.value()
+                self._min_boundary_matches_temp = min_matches_spin.value()
+                self._min_delimiter_distance_temp = min_distance_spin.value()
             self._update_boundary_stats()
 
     def _set_variant_preset(self, pairs_count):
@@ -12935,15 +12944,16 @@ class GenizahGUI(QMainWindow):
         boundary_mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
         boundary_delimiter = self.boundary_delimiter_combo.currentData() if hasattr(self, 'boundary_delimiter_combo') else '\n'
 
-        # Get advanced boundary settings from LabSettings
+        # Get advanced boundary settings from LabSettings or temporary values
         if hasattr(self, 'lab_engine') and self.lab_engine:
             boundary_boost = self.lab_engine.settings.boundary_boost
             min_boundary_matches = self.lab_engine.settings.min_boundary_matches
             min_delimiter_distance = self.lab_engine.settings.min_delimiter_distance
         else:
-            boundary_boost = 1.5
-            min_boundary_matches = 0
-            min_delimiter_distance = 3
+            # Use temporary values if set, otherwise defaults
+            boundary_boost = getattr(self, '_boundary_boost_temp', 1.5)
+            min_boundary_matches = getattr(self, '_min_boundary_matches_temp', 0)
+            min_delimiter_distance = getattr(self, '_min_delimiter_distance_temp', 3)
 
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -13307,8 +13317,7 @@ class GenizahGUI(QMainWindow):
         boundary_quality = item.get('boundary_quality', 0)
 
         if has_boundary and boundary_count > 0:
-            quality_pct = int(boundary_quality * 100) if boundary_quality <= 1 else int(min(boundary_quality / item.get('score', 1) * 100, 100))
-            return tr("Cross-paragraph") + f": {boundary_count} " + tr("cross-paragraph matches")
+            return tr("{} cross-paragraph matches").format(boundary_count)
         return ""
 
     def _process_snippet_queue(self):

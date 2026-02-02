@@ -8,7 +8,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ### New Feature: Cross-Paragraph Search
 
-A new parallel search mode that finds manuscripts with text spanning paragraph boundaries:
+A new parallel search mode that finds manuscripts with text spanning paragraph boundaries, now available on **both Web and Desktop**.
 
 - **Why it's useful:** Text within paragraphs often contains citations (Mishnah, Talmud, known phrases). Text that crosses paragraph boundaries is unlikely to be a citation, effectively filtering out noise.
 
@@ -17,21 +17,33 @@ A new parallel search mode that finds manuscripts with text spanning paragraph b
   - **Cross-paragraph only** - Only matches that span paragraph breaks
   - **Combined** - All results, with boundary-crossing matches boosted
 
-- **Customizable delimiters:** Line break, blank line (paragraph), period, colon, or custom
+- **Customizable delimiters:** Line break, blank line (paragraph), period, colon
 
-- **Visual indicators:** Results show amber "Cross-paragraph" badge; matched text shows red `|` at boundary points
+- **Visual indicators:**
+  - Web: Amber "Cross-paragraph" badge; red `|` at boundary points in matched text
+  - Desktop: 🔗 emoji prefix on scores; tooltips showing match count
 
-- **Advanced settings:** Configurable boost factor, minimum boundary matches, minimum delimiter distance
+- **Advanced settings:** Configurable boost factor (1.0-3.0), minimum boundary matches filter, minimum delimiter distance
+
+- **Real-time feedback:** Desktop shows boundary count and crossing chunks before search
 
 ### Bug Fixes
 
 - **Duplicate results fix:** Fixed bug where same manuscript appeared multiple times in Standard search when found by overlapping chunks routed to different filter maps
 - **Boundary detection:** Improved to require words on BOTH sides of the boundary (not just touching)
+- **Desktop boundary stats:** Fixed silent exception handling, now logs errors properly
+- **Desktop translation:** Fixed fragmented translation string for cross-paragraph tooltips
+
+### Technical Changes
+
+- `CompositionThread` and `LabCompositionThread` now accept boundary parameters
+- `LabSettings` stores boundary preferences (mode, delimiter, boost, min matches, min distance)
+- Added temporary storage fallback for settings when `lab_engine` not initialized
 
 ### Documentation
 
 - Updated help page with cross-paragraph search documentation (English and Hebrew)
-- Added implementation status to BOUNDARY_SEARCH_SPEC.md
+- Updated BOUNDARY_SEARCH_SPEC.md with completed desktop implementation details
 
 ---
 

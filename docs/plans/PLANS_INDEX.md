@@ -6,15 +6,22 @@
 
 ## Active Plans
 
-### 1. Cross-Paragraph Search (COMPLETED - Web)
+### 1. Cross-Paragraph Search (COMPLETED)
 **File:** `BOUNDARY_SEARCH_SPEC.md`
-**Status:** ✅ Implemented (Web), Pending (Desktop)
+**Status:** ✅ Implemented (Web + Desktop)
 **Goal:** Find parallels that cross paragraph boundaries to filter citation noise
 
 A new parallel search mode that identifies text spanning paragraph boundaries. Useful because citations rarely cross structural breaks, so this effectively filters out Mishnah/Talmud quotes and known phrases.
 
 **Web implementation:** Complete (Feb 2026)
-**Desktop implementation:** Planned
+**Desktop implementation:** Complete (Feb 2026)
+
+**Desktop features:**
+- Mode selection combo (Full/Cross-paragraph only/Combined)
+- Delimiter selection (Line break/Blank line/Period/Colon)
+- Real-time boundary stats label
+- Advanced settings dialog (boost, min matches, min distance)
+- 🔗 indicator on boundary-crossing results with tooltips
 
 ### 2. Supabase Migration
 **File:** `SUPABASE_MIGRATION_PLAN.md`
