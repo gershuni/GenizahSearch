@@ -1535,13 +1535,13 @@ def create_parallels_page(initial_text: str = None):
         # For source text, show paragraph breaks with red | marker
         src_raw = item.get('source_ctx', '')
         delim = boundary_delimiter.value or '\n'
-        # Replace delimiter with placeholder, then other newlines with space
-        BOUNDARY_MARKER = '<<<BOUNDARY>>>'
+        # Replace delimiter with placeholder (no special HTML chars), then other newlines with space
+        BOUNDARY_MARKER = '~PARA_BREAK~'
         if delim in src_raw:
             src_raw = src_raw.replace(delim, BOUNDARY_MARKER)
         src_raw = src_raw.replace('\n', ' ')
         src_text = html.escape(src_raw)
-        # Replace placeholder with red pipe HTML
+        # Replace placeholder with red pipe HTML (marker survives html.escape since it has no special chars)
         src_text = src_text.replace(BOUNDARY_MARKER, ' <span style="color: #ef4444; font-weight: bold;">|</span> ')
         src_text_html = re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', src_text)
 
@@ -1746,7 +1746,7 @@ def create_parallels_page(initial_text: str = None):
         # For source text, show paragraph breaks with red | marker
         src_raw = item.get('source_ctx', '')
         delim = boundary_delimiter.value or '\n'
-        BOUNDARY_MARKER = '<<<BOUNDARY>>>'
+        BOUNDARY_MARKER = '~PARA_BREAK~'
         if delim in src_raw:
             src_raw = src_raw.replace(delim, BOUNDARY_MARKER)
         src_raw = src_raw.replace('\n', ' ')
