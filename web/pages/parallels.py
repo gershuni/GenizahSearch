@@ -314,29 +314,44 @@ def create_parallels_page(initial_text: str = None):
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Deep Scan
-                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
+                    # Frequency threshold (for standard mode - filters results appearing in too many documents)
+                    with ui.column().classes('gap-1') as freq_threshold_row:
+                        h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
+                        ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # === Boundary Search Settings (hidden by default) ===
-                    with ui.expansion(tr('More options'), icon='settings').classes('w-full mt-2') as more_options_panel:
-                        with ui.column().classes('w-full gap-3 p-2'):
-                            h3(tr('Paragraph search'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    ui.separator().classes('my-2')
 
-                            # Boundary mode radio buttons
-                            boundary_mode = ui.radio(
-                                options={
-                                    'full': tr('Full search'),
-                                    'boundary': tr('Cross-paragraph only'),
-                                    'combined': tr('Full + Cross-paragraph boost')
-                                },
-                                value='full'
-                            ).classes('w-full').props('dense')
+                    # Lab Mode Toggle
+                    lab_mode = ui.checkbox(tr('Lab Mode (experimental)')).classes('mt-2')
+                    lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
 
-                            # Tooltips for boundary modes
-                            boundary_mode_tooltips = {
-                                'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
-                                'combined': tr('Search everything, but rank cross-paragraph matches higher')
-                            }
+                    # === Lab Mode Options (hidden by default) ===
+                    with ui.column().classes('w-full gap-2 mt-2').style('display: none;') as lab_mode_options:
+                        # Deep Scan
+                        deep_scan = ui.checkbox(tr('Deep Scan')).classes('mt-2')
+                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
+
+                        # Boundary Search Settings
+                        with ui.expansion(tr('More options'), icon='settings').classes('w-full mt-2') as more_options_panel:
+                            with ui.column().classes('w-full gap-3 p-2'):
+                                h3(tr('Paragraph search'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+
+                                # Boundary mode radio buttons
+                                boundary_mode = ui.radio(
+                                    options={
+                                        'full': tr('Full search'),
+                                        'boundary': tr('Cross-paragraph only'),
+                                        'combined': tr('Full + Cross-paragraph boost')
+                                    },
+                                    value='full'
+                                ).classes('w-full').props('dense')
+
+                                # Tooltips for boundary modes
+                                boundary_mode_tooltips = {
+                                    'boundary': tr('Show only matches where the matching text spans a paragraph break in your source'),
+                                    'combined': tr('Search everything, but rank cross-paragraph matches higher')
+                                }
 
                             # Paragraph delimiter dropdown
                             with ui.column().classes('gap-1 mt-2'):
@@ -426,6 +441,18 @@ def create_parallels_page(initial_text: str = None):
                         update_boundary_stats()
 
                     boundary_mode.on('update:model-value', on_boundary_mode_change)
+
+                    # Lab Mode toggle handler
+                    def on_lab_mode_change():
+                        """Show/hide lab mode options based on toggle."""
+                        if lab_mode.value:
+                            lab_mode_options.style('display: block;')
+                            freq_threshold_row.style('display: none;')  # Hide freq threshold in lab mode
+                        else:
+                            lab_mode_options.style('display: none;')
+                            freq_threshold_row.style('display: block;')  # Show freq threshold in standard mode
+
+                    lab_mode.on('update:model-value', on_lab_mode_change)
 
                     ui.separator().classes('my-2')
 
@@ -1106,7 +1133,14 @@ def create_parallels_page(initial_text: str = None):
                 p_state.progress = current / total
                 p_state.status = f"{current} / {total}"
 
-        # Capture boundary settings in main thread
+        # Capture search mode settings in main thread
+        captured_lab_mode = lab_mode.value
+        captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
+        captured_deep_scan = deep_scan.value if captured_lab_mode else False
+        captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
+        captured_mode = mode_select.value
+
+        # Capture boundary settings (only used in lab mode)
         captured_boundary_mode = boundary_mode.value or 'full'
         captured_boundary_delimiter = boundary_delimiter.value or '\n\n'
         captured_boundary_boost = float(boundary_boost.value) if boundary_boost.value else 1.5
@@ -1115,27 +1149,45 @@ def create_parallels_page(initial_text: str = None):
 
         def run_search():
             try:
-                print(f"[DEBUG] Starting search: mode={mode_select.value}, chunk_size={chunk_size.value}, deep_scan={deep_scan.value}")
-                print(f"[DEBUG] Boundary settings: mode={captured_boundary_mode}, delimiter='{repr(captured_boundary_delimiter)}', boost={captured_boundary_boost}")
-                print(f"[DEBUG] Text length: {len(text)} chars, {len(text.split())} words")
-                # Use the correct method signature from genizah_core
-                # Note: lab_composition_search now returns partial results if interrupted
-                result = state.lab_engine.lab_composition_search(
-                    text,
-                    mode=mode_select.value,
-                    progress_callback=progress_cb,
-                    chunk_size=int(chunk_size.value),
-                    filter_text=captured_filter_text or None,
-                    deep_scan=deep_scan.value,
-                    boundary_mode=captured_boundary_mode,
-                    boundary_delimiter=captured_boundary_delimiter,
-                    boundary_boost=captured_boundary_boost,
-                    min_boundary_matches=captured_min_boundary_matches,
-                    min_delimiter_distance=captured_min_delimiter_distance
-                )
-                print(f"[DEBUG] Search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}, partial={result.get('partial', False)}")
-                if result.get('boundary_stats'):
-                    print(f"[DEBUG] Boundary stats: {result['boundary_stats']}")
+                print(f"[DEBUG] Starting search: lab_mode={captured_lab_mode}, mode={captured_mode}, chunk_size={captured_chunk_size}")
+
+                if captured_lab_mode:
+                    # LAB MODE: Use fingerprint-based search with advanced features
+                    print(f"[DEBUG] Using LAB search: deep_scan={captured_deep_scan}")
+                    print(f"[DEBUG] Boundary settings: mode={captured_boundary_mode}, delimiter='{repr(captured_boundary_delimiter)}', boost={captured_boundary_boost}")
+                    result = state.lab_engine.lab_composition_search(
+                        text,
+                        mode=captured_mode,
+                        progress_callback=progress_cb,
+                        chunk_size=captured_chunk_size,
+                        filter_text=captured_filter_text or None,
+                        deep_scan=captured_deep_scan,
+                        boundary_mode=captured_boundary_mode,
+                        boundary_delimiter=captured_boundary_delimiter,
+                        boundary_boost=captured_boundary_boost,
+                        min_boundary_matches=captured_min_boundary_matches,
+                        min_delimiter_distance=captured_min_delimiter_distance
+                    )
+                    print(f"[DEBUG] Lab search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}, partial={result.get('partial', False)}")
+                    if result.get('boundary_stats'):
+                        print(f"[DEBUG] Boundary stats: {result['boundary_stats']}")
+                else:
+                    # STANDARD MODE: Use direct Tantivy search (faster, simpler)
+                    print(f"[DEBUG] Using STANDARD search: freq_threshold={captured_freq_threshold}")
+                    result = state.searcher.search_composition_logic(
+                        text,
+                        chunk_size=captured_chunk_size,
+                        max_freq=captured_freq_threshold,
+                        mode=captured_mode,
+                        filter_text=captured_filter_text or None,
+                        progress_callback=progress_cb
+                    )
+                    print(f"[DEBUG] Standard search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}")
+                    # Add empty fields for compatibility with result display
+                    if result:
+                        result['partial'] = False
+                        result['boundary_stats'] = None
+
                 return result
             except Exception as e:
                 print(f"Parallels Error: {e}")

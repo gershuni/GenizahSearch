@@ -2063,6 +2063,13 @@ TRANSLATIONS = {
     "Follow the installation prompts": "עקוב אחר הנחיות ההתקנה",
     "On first launch, download the transcription data from Zenodo": "בהפעלה הראשונה, הורד את נתוני התעתיק מ-Zenodo",
 
+    # --- Search Mode ---
+    "Max frequency": "תדירות מקסימלית",
+    "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
+    "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",
+    "Advanced search using fingerprint algorithm. Slower but more features.": "חיפוש מתקדם באמצעות אלגוריתם טביעת אצבע. איטי יותר אך עם יותר תכונות.",
+    "Exhaustive search - slower but finds more results": "חיפוש ממצה - איטי יותר אך מוצא יותר תוצאות",
+
     # --- Boundary Search ---
     "More options": "אפשרויות נוספות",
     "Paragraph search": "חיפוש פסקאות",
