@@ -1,19 +1,21 @@
 # Technical Specification: Boundary-Crossing Parallel Search
 
 > Date: February 2026
-> Status: Draft for Review
+> Status: Draft v2 - Post Review
 > Author: Claude Code
 
 ## Executive Summary
 
-A new parallel search feature that focuses on word sequences crossing paragraph boundaries in the source text. The rationale: such sequences are strong candidates for true literary parallels, as opposed to biblical quotations or formulaic phrases that typically appear within a single paragraph unit.
+A new parallel search feature that identifies and prioritizes word sequences crossing paragraph boundaries in the source text. The rationale: such sequences are strong candidates for true literary parallels, as opposed to biblical quotations or formulaic phrases that typically appear within a single paragraph unit.
+
+**Key Design Decision**: Rather than creating separate boundary chunks, the algorithm identifies which *existing* regular chunks cross user-defined boundaries and boosts their scores accordingly.
 
 ---
 
 ## 1. Goals and Rationale
 
 ### 1.1 Primary Goal
-Enable users to find robust literary parallels by searching for word sequences that span paragraph boundaries.
+Enable users to find robust literary parallels by prioritizing matches on word sequences that span paragraph boundaries.
 
 ### 1.2 Key Insight
 When two manuscripts share text that crosses a structural boundary (end of one paragraph + beginning of another), this is unlikely to be:
@@ -35,356 +37,345 @@ When two manuscripts share text that crosses a structural boundary (end of one p
 ## 2. Three Search Modes
 
 ### 2.1 Full Mode (Default)
+- **UI Label**: "Full search"
 - **Description**: Searches all chunks, same as current behavior
-- **Addition**: Option to filter results by minimum boundary-crossing matches
+- **Addition**: Option to filter results by minimum boundary-crossing matches (post-hoc filter)
 - **Use case**: Comprehensive survey of all parallels
 
-### 2.2 Boundary-Only Mode
-- **Description**: Searches only chunks that cross paragraph boundaries
+### 2.2 Cross-Paragraph Only Mode
+- **UI Label**: "Cross-paragraph only"
+- **Description**: Returns only results that matched on chunks crossing paragraph boundaries
 - **Results**: Fewer results, but higher precision
 - **Use case**: Finding clear literary dependencies
+- **Tooltip**: "Show only matches where the matching text spans a paragraph break in your source"
 
 ### 2.3 Combined Mode
+- **UI Label**: "Full + Cross-paragraph boost"
 - **Description**: Full search with score boost for boundary-crossing matches
 - **Use case**: Best balance between coverage and relevance
+- **Tooltip**: "Search everything, but rank cross-paragraph matches higher"
 
 ---
 
-## 3. Chunking Logic
+## 3. Core Algorithm
 
-### 3.1 Boundary Detection
+### 3.1 Key Insight: Reuse Existing Chunks
 
-```python
-DELIMITERS = {
-    'paragraph': '\n\n',      # Double newline (paragraph break)
-    'newline': '\n',          # Single newline
-    'period': '.',            # Period/full stop
-    'colon': ':',             # Colon
-    'custom': '<user_input>'  # User-defined
-}
-```
+The current chunking algorithm already creates overlapping chunks that may cross paragraph boundaries. Rather than creating separate "boundary chunks", we:
 
-**Note on delimiter handling:**
-- Multiple consecutive delimiters are collapsed (e.g., `\n\n\n\n` = one boundary)
-- Empty paragraphs are ignored
-- Whitespace is trimmed from paragraph edges
+1. **Parse boundaries** from the source text based on user-selected delimiter
+2. **Run regular chunk search** as usual
+3. **Identify which chunks crossed boundaries** by checking word positions
+4. **Apply boost** to results from boundary-crossing chunks
+5. **Calculate boundary match quality** as average match strength
 
-### 3.2 Sliding Window Around Boundaries
-
-**Core principle**: Every chunk must contain at least one word from each side of the boundary.
-
-```
-Text: "...w5 w4 w3 w2 w1 |BOUNDARY| w1 w2 w3 w4 w5..."
-                         ↑
-                    paragraph break
-
-With boundary_window_size=4, the following chunks are created:
-
-  Chunk 1: [w3 w2 w1 | w1]     ← 3 from tail + 1 from head
-  Chunk 2: [w2 w1 | w1 w2]     ← 2 + 2
-  Chunk 3: [w1 | w1 w2 w3]     ← 1 + 3
-
-Note: No 4+0 or 0+4 chunks - must have at least 1 word from each side!
-```
-
-### 3.3 Why Window Size of 4?
-
-| Window Size | Chunks per Boundary | Trade-off |
-|-------------|---------------------|-----------|
-| 2 | 1 (1+1 only) | Too restrictive, misses near-boundary matches |
-| 3 | 2 (2+1, 1+2) | Limited coverage |
-| **4** | **3 (3+1, 2+2, 1+3)** | **Good balance: enough coverage, not too many chunks** |
-| 5 | 4 | More coverage, more computation |
-| 6 | 5 | Diminishing returns, overlaps with regular chunks |
-
-**Recommendation**: Default to 4, allow user adjustment from 2-12.
-
-### 3.4 Implementation
+### 3.2 Boundary Detection
 
 ```python
-def create_boundary_chunks(text: str, delimiter: str, window_size: int = 4) -> list:
+def parse_boundaries(text: str, delimiter: str, min_distance: int = 3) -> list[int]:
     """
-    Creates boundary-crossing chunks from text using a sliding window.
+    Find word indices where boundaries occur.
 
     Args:
-        text: Source text to search
-        delimiter: Character/sequence separating paragraphs
-        window_size: Total chunk size (NOT per-side). Range: 2-12, default: 4
+        text: Source text
+        delimiter: Boundary marker (e.g., '\n\n', '.', ':')
+        min_distance: Minimum words between boundaries (ignore closer ones)
 
     Returns:
-        List of chunk dictionaries with metadata
+        List of word indices where boundaries occur (boundary is AFTER this index)
     """
-    # Normalize delimiters (collapse multiple into one)
-    import re
-    normalized = re.sub(f'({re.escape(delimiter)})+', delimiter, text)
+    # Split by delimiter
+    parts = text.split(delimiter)
 
-    paragraphs = normalized.split(delimiter)
-    paragraphs = [p.strip() for p in paragraphs if p.strip()]
+    boundaries = []
+    word_count = 0
+    last_boundary_pos = -min_distance  # Allow first boundary
 
-    if len(paragraphs) < 2:
-        return []  # No boundaries to cross
+    for i, part in enumerate(parts[:-1]):  # Skip last part (no boundary after it)
+        words_in_part = len(part.split())
+        word_count += words_in_part
 
-    chunks = []
+        # Only add boundary if far enough from previous
+        if word_count - last_boundary_pos >= min_distance:
+            boundaries.append(word_count - 1)  # Boundary after last word of this part
+            last_boundary_pos = word_count
 
-    for boundary_idx in range(len(paragraphs) - 1):
-        tail_words = paragraphs[boundary_idx].split()
-        head_words = paragraphs[boundary_idx + 1].split()
-
-        # Generate all valid tail+head combinations
-        # Constraint: tail_count >= 1, head_count >= 1, total = window_size
-        for tail_count in range(1, window_size):
-            head_count = window_size - tail_count
-
-            # Skip if not enough words available
-            if tail_count > len(tail_words) or head_count > len(head_words):
-                continue
-
-            chunk_tokens = tail_words[-tail_count:] + head_words[:head_count]
-
-            chunks.append({
-                'tokens': chunk_tokens,
-                'text': ' '.join(chunk_tokens),
-                'boundary_idx': boundary_idx,
-                'tail_count': tail_count,
-                'head_count': head_count,
-                'para_indices': (boundary_idx, boundary_idx + 1),
-                'is_boundary_chunk': True  # Flag for identification
-            })
-
-    return chunks
+    return boundaries
 ```
+
+### 3.3 Identifying Boundary-Crossing Chunks
+
+```python
+def chunk_crosses_boundary(chunk_start: int, chunk_end: int,
+                           boundaries: list[int]) -> bool:
+    """
+    Check if a chunk spans any boundary.
+
+    A chunk crosses a boundary if the boundary index falls
+    strictly between chunk_start and chunk_end.
+    """
+    for b in boundaries:
+        if chunk_start <= b < chunk_end:
+            return True
+    return False
+```
+
+### 3.4 Boundary Match Quality Score
+
+Instead of counting boundary matches, we calculate average match strength:
+
+```python
+def calculate_boundary_quality(boundary_chunk_scores: list[float]) -> float:
+    """
+    Calculate boundary match quality as average of match strengths.
+
+    Args:
+        boundary_chunk_scores: List of scores from chunks that crossed boundaries
+
+    Returns:
+        Average score (0 if no boundary matches)
+    """
+    if not boundary_chunk_scores:
+        return 0.0
+    return sum(boundary_chunk_scores) / len(boundary_chunk_scores)
+```
+
+### 3.5 Final Score Calculation
+
+```python
+def calculate_final_score(base_score: float,
+                         boundary_quality: float,
+                         has_boundary_matches: bool,
+                         boundary_boost: float = 1.5) -> float:
+    """
+    Calculate final score with boundary boost.
+
+    Formula: base_score * (1 + (boost - 1) * normalized_quality)
+
+    Where normalized_quality = boundary_quality / base_score
+    This ensures the boost is proportional to how good the boundary matches are
+    relative to overall match quality.
+    """
+    if not has_boundary_matches or base_score == 0:
+        return base_score
+
+    # Normalize boundary quality relative to base score
+    normalized_quality = min(boundary_quality / base_score, 1.0)
+
+    multiplier = 1 + (boundary_boost - 1) * normalized_quality
+    return base_score * multiplier
+```
+
+### 3.6 Score Examples (boost=1.5)
+
+| Base Score | Boundary Quality | Normalized | Multiplier | Final Score |
+|------------|------------------|------------|------------|-------------|
+| 1000 | 0 (no matches) | 0 | ×1.00 | 1000 |
+| 1000 | 500 (weak) | 0.5 | ×1.25 | 1250 |
+| 1000 | 800 (good) | 0.8 | ×1.40 | 1400 |
+| 1000 | 1000 (strong) | 1.0 | ×1.50 | 1500 |
 
 ---
 
-## 4. Parameters
+## 4. Minimum Delimiter Distance
 
-### 4.1 New Parameters
+### 4.1 Problem
+With period (`.`) as delimiter, text like `"Dr. Smith met Mr. Jones."` creates many false boundaries.
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `boundary_mode` | `'full'` | `'full'`, `'boundary'`, `'combined'` | Search mode selection |
-| `boundary_window_size` | `4` | `2-12` | Total words in boundary chunk |
-| `boundary_delimiter` | `'\n\n'` | string | Paragraph separator |
-| `boundary_boost` | `1.5` | `1.0-5.0` | Score multiplier for boundary matches (combined mode) |
-| `min_boundary_matches` | `0` | `0-10` | Filter: minimum boundary matches to include result |
+### 4.2 Solution
+Ignore delimiters that occur within `min_distance` words of the previous delimiter.
 
-### 4.2 Existing Parameters (Unchanged)
+```python
+# Example: min_distance = 3
+
+Text: "Hello. Hi. How are you today. Fine thanks."
+       ^     ^    ^                ^
+       0     1    2                6  (word positions)
+
+Delimiters at word positions: 0, 1, 5, 7
+
+With min_distance=3:
+- Position 0: OK (first delimiter)
+- Position 1: SKIP (only 1 word from previous)
+- Position 5: OK (4 words from position 0)
+- Position 7: SKIP (only 2 words from position 5)
+
+Final boundaries: [0, 5]
+```
+
+### 4.3 Default Values
+
+| Delimiter | Default min_distance | Rationale |
+|-----------|---------------------|-----------|
+| Paragraph (`\n\n`) | 1 | Paragraphs are intentional |
+| Line (`\n`) | 1 | Lines are intentional |
+| Period (`.`) | 3 | Avoid abbreviations |
+| Colon (`:`) | 2 | Some colons are structural |
+| Custom | 3 | Safe default |
+
+---
+
+## 5. Parameters
+
+### 5.1 New Parameters
+
+| Parameter | UI Label | Default | Range | Description |
+|-----------|----------|---------|-------|-------------|
+| `boundary_mode` | "Search Mode" | `'full'` | `'full'`, `'boundary'`, `'combined'` | Search mode selection |
+| `boundary_delimiter` | "Paragraph separator" | `'\n\n'` | string | What marks a boundary |
+| `boundary_boost` | "Cross-paragraph boost" | `1.5` | `1.0-3.0` | Score multiplier (combined mode) |
+| `min_boundary_matches` | "Min. cross-paragraph matches" | `0` | `0-10` | Filter results (post-hoc) |
+| `min_delimiter_distance` | (Advanced) | `3` | `1-10` | Min words between delimiters |
+
+### 5.2 Existing Parameters (Unchanged)
 
 | Parameter | Description | Relevance |
 |-----------|-------------|-----------|
-| `chunk_size` | Regular chunk size | Used in Full and Combined modes |
+| `chunk_size` | Regular chunk size | Used in all modes |
 | `mode` | exact/variants/fuzzy | Used in all modes |
 | `deep_scan` | Exhaustive search | Used in all modes |
 | `filter_text` | Text to exclude (Bible, etc.) | Used in all modes |
 
-### 4.3 Parameter Interactions
+### 5.3 Parameter Behavior by Mode
 
-| Mode | chunk_size | boundary_window_size | boundary_boost |
-|------|------------|---------------------|----------------|
-| Full | Used | Used for filtering only | N/A |
-| Boundary | N/A | Used | N/A |
-| Combined | Used | Used | Used |
-
----
-
-## 5. Scoring Algorithm (Combined Mode)
-
-### 5.1 Design Considerations
-
-The scoring formula must:
-1. Reward boundary matches without overwhelming base scores
-2. Show diminishing returns for many boundary matches (avoid runaway scores)
-3. Be tunable via the `boundary_boost` parameter
-
-### 5.2 Formula
-
-```python
-def calculate_combined_score(base_score: float,
-                            boundary_match_count: int,
-                            boundary_boost: float = 1.5) -> float:
-    """
-    Calculate final score in combined mode.
-
-    Formula: base_score * (1 + (boost - 1) * log2(matches + 1))
-
-    Properties:
-    - 0 matches: base_score (no change)
-    - 1 match: base_score * boost
-    - Logarithmic growth prevents score explosion
-    """
-    if boundary_match_count == 0:
-        return base_score
-
-    import math
-    multiplier = 1 + (boundary_boost - 1) * math.log2(boundary_match_count + 1)
-    return base_score * multiplier
-```
-
-### 5.3 Score Examples (boost=1.5)
-
-| Boundary Matches | Multiplier | Base 1000 → |
-|------------------|------------|-------------|
-| 0 | ×1.00 | 1000 |
-| 1 | ×1.50 | 1500 |
-| 2 | ×1.79 | 1792 |
-| 3 | ×2.00 | 2000 |
-| 5 | ×2.29 | 2292 |
-| 10 | ×2.73 | 2730 |
-
-**Note**: A manuscript with 10 boundary matches only scores ~2.7× base, not 10×. This prevents boundary-rich matches from completely dominating.
+| Mode | chunk_size | boundary_boost | min_boundary_matches |
+|------|------------|----------------|---------------------|
+| Full | Used | N/A | Post-hoc filter |
+| Cross-paragraph only | Used | N/A | N/A (all results have matches) |
+| Combined | Used | Applied | Post-hoc filter |
 
 ---
 
-## 6. Combined Mode: Execution Strategy
+## 6. User Interface
 
-### 6.1 Option A: Sequential (Simpler)
-```
-1. Run regular chunk search → regular_results
-2. Run boundary chunk search → boundary_results
-3. Merge results, applying boost to boundary matches
-```
-**Pros**: Simple to implement, easy to debug
-**Cons**: ~2× search time
+### 6.1 Simple / Advanced Toggle
 
-### 6.2 Option B: Unified (More Efficient)
-```
-1. Generate all chunks (regular + boundary) with flags
-2. Run single search
-3. Post-process: identify boundary matches, apply boost
-```
-**Pros**: Single search pass
-**Cons**: More complex chunk management
+**Simple Mode** (default):
+- Search mode selection (3 radio buttons)
+- Delimiter selection (dropdown)
+- Chunk size slider
 
-### 6.3 Recommendation
-Start with **Option A** for clarity. Optimize to Option B later if performance is an issue.
+**Advanced Mode** (expandable):
+- All Simple options, plus:
+- Cross-paragraph boost slider
+- Min. cross-paragraph matches
+- Min. delimiter distance
 
----
-
-## 7. Result Deduplication
-
-### 7.1 Problem
-A manuscript may match both regular chunks and boundary chunks, potentially appearing twice in results.
-
-### 7.2 Solution
-```python
-def merge_results(regular: list, boundary: list, boost: float) -> list:
-    """
-    Merge regular and boundary results, deduplicating by manuscript ID.
-
-    For duplicates:
-    - Keep highest base score
-    - Add boundary_match_count from boundary results
-    - Apply boost
-    """
-    results_by_uid = {}
-
-    # Process regular results
-    for r in regular:
-        uid = r['uid']
-        results_by_uid[uid] = {
-            **r,
-            'boundary_match_count': 0,
-            'has_boundary_matches': False
-        }
-
-    # Process boundary results
-    for r in boundary:
-        uid = r['uid']
-        if uid in results_by_uid:
-            # Manuscript already found - add boundary info
-            existing = results_by_uid[uid]
-            existing['boundary_match_count'] += 1
-            existing['has_boundary_matches'] = True
-            # Keep higher base score
-            existing['score'] = max(existing['score'], r['score'])
-        else:
-            # New manuscript from boundary search
-            results_by_uid[uid] = {
-                **r,
-                'boundary_match_count': 1,
-                'has_boundary_matches': True
-            }
-
-    # Apply boost and return
-    results = list(results_by_uid.values())
-    for r in results:
-        r['final_score'] = calculate_combined_score(
-            r['score'], r['boundary_match_count'], boost
-        )
-
-    return sorted(results, key=lambda x: x['final_score'], reverse=True)
-```
-
----
-
-## 8. User Interface
-
-### 8.1 Web UI (NiceGUI)
+### 6.2 Web UI Layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Find Parallels                                         │
-├─────────────────────────────────────────────────────────┤
-│  [textarea: Source text]                                │
-│                                                         │
-│  Options:                                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ Search Mode: ○ Full  ○ Boundary-Only  ○ Combined│   │
-│  │ Chunk Size:  [====5====]                        │   │
-│  │ □ Deep Scan                                     │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  ▼ Boundary Search Settings [collapsed by default]     │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ Window Size:       [====4====]                  │   │
-│  │ Delimiter:         [Paragraph break ▼]          │   │
-│  │ Min. Matches:      [0 ▼] (result filter)        │   │
-│  │ Score Boost:       [====1.5====] (combined)     │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  [ 🔍 Find Parallels ]                                  │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Find Parallels                                             │
+├─────────────────────────────────────────────────────────────┤
+│  [textarea: Source text]                                    │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ ℹ️ 5 paragraph breaks detected, 12 chunks will be   │   │
+│  │   checked for cross-paragraph matches               │   │  ← PRE-SEARCH STATS
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Search Mode: ○ Full  ○ Cross-paragraph only ⓘ  ○ Combined ⓘ│  ← TOOLTIPS
+│                                                             │
+│  Paragraph separator: [Blank line ▼]                        │
+│  Chunk size: [====5====]                                    │
+│  □ Deep Scan                                                │
+│                                                             │
+│  ▼ Advanced settings                                        │  ← COLLAPSED BY DEFAULT
+│  ┌─────────────────────────────────────────────────────┐   │    AUTO-EXPANDS ON MODE CHANGE
+│  │ Cross-paragraph boost: [====1.5====]                │   │
+│  │ Min. matches to show:  [0 ▼]                        │   │
+│  │ Min. words between separators: [3 ▼]                │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ⚠️ No paragraph breaks detected in text!                   │  ← WARNING (if applicable)
+│                                                             │
+│  [ 🔍 Find Parallels ]                                      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 Delimiter Menu
+### 6.3 Delimiter Menu
 
 ```
-Paragraph break (blank line)  ← default
+Blank line (paragraph)  ← default
 Line break
 Period (.)
 Colon (:)
 Custom...  → [input field]
 ```
 
-### 8.3 Result Display
+### 6.4 Pre-Search Validation
 
-Results with boundary matches show an indicator:
+Before search starts, display:
+- Number of boundaries detected
+- Number of chunks that will cross boundaries
+- Warning if no boundaries found (for boundary/combined modes)
+
+```python
+def get_boundary_stats(text: str, delimiter: str, chunk_size: int) -> dict:
+    boundaries = parse_boundaries(text, delimiter)
+    total_words = len(text.split())
+
+    # Estimate chunks that cross boundaries
+    crossing_chunks = 0
+    step = max(1, chunk_size // 2)
+    for i in range(0, total_words - chunk_size + 1, step):
+        if chunk_crosses_boundary(i, i + chunk_size, boundaries):
+            crossing_chunks += 1
+
+    return {
+        'boundary_count': len(boundaries),
+        'crossing_chunk_count': crossing_chunks,
+        'total_chunks': (total_words - chunk_size) // step + 1
+    }
+```
+
+### 6.5 Result Display
+
+Results with boundary matches are highlighted:
+
+**Web (light theme)**: Yellow background highlight
+**Web (dark theme)**: Amber/gold background highlight
+**Desktop**: Configurable (default: yellow background)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ 🔗 T-S 12.345  [Score: 1250]                           │
-│ ─────────────────────────────────────────────────────  │
-│ ...highlighted *matching* text from manuscript...       │
-│                                                         │
-│ 🔗 3 boundary-crossing matches                          │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ T-S 12.345  [Score: 1250 → 1450]                           │  ← SHOWS BOOST
+│ ─────────────────────────────────────────────────────────  │
+│ ...text before ██ boundary ██ text after...                │  ← BOUNDARY HIGHLIGHTED
+│                                                             │
+│ 🔗 Cross-paragraph match (quality: 85%)                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+For results WITHOUT boundary matches (in combined mode):
+```
+┌─────────────────────────────────────────────────────────────┐
+│ T-S 67.890  [Score: 1100]                                  │
+│ ─────────────────────────────────────────────────────────  │
+│ ...matching text from manuscript...                         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 9. Code Changes
+## 7. Implementation Changes
 
-### 9.1 genizah_core.py
+### 7.1 genizah_core.py
 
 **New functions:**
 ```python
-def create_boundary_chunks(self, text: str, delimiter: str,
-                          window_size: int) -> list:
-    """Creates sliding window chunks around paragraph boundaries."""
+def parse_boundaries(text: str, delimiter: str, min_distance: int = 3) -> list[int]:
+    """Parse boundary positions from text."""
 
-def _merge_chunk_results(self, regular_results: dict,
-                        boundary_results: dict, boost: float) -> dict:
-    """Merges results from regular and boundary searches with boost."""
+def chunk_crosses_boundary(chunk_start: int, chunk_end: int, boundaries: list[int]) -> bool:
+    """Check if chunk spans a boundary."""
+
+def calculate_boundary_quality(scores: list[float]) -> float:
+    """Calculate average boundary match quality."""
+
+def get_boundary_stats(text: str, delimiter: str, chunk_size: int) -> dict:
+    """Get pre-search statistics about boundaries."""
 ```
 
 **Modified function signature:**
@@ -400,11 +391,11 @@ def lab_composition_search(
     deep_scan: bool = False,
     scan_limit: int = None,
     # --- New parameters ---
-    boundary_mode: str = 'full',
-    boundary_window_size: int = 4,
+    boundary_mode: str = 'full',           # 'full', 'boundary', 'combined'
     boundary_delimiter: str = '\n\n',
     boundary_boost: float = 1.5,
-    min_boundary_matches: int = 0
+    min_boundary_matches: int = 0,
+    min_delimiter_distance: int = 3
 ) -> dict:
 ```
 
@@ -414,246 +405,243 @@ def lab_composition_search(
     'main': [
         {
             'uid': '...',
-            'score': 1000,
-            'final_score': 1500,           # NEW: after boost
-            'boundary_match_count': 2,      # NEW
-            'has_boundary_matches': True,   # NEW
+            'score': 1000,                    # Base score
+            'final_score': 1400,              # After boost (if applicable)
+            'boundary_quality': 0.85,         # Average quality (0-1)
+            'has_boundary_matches': True,
+            'boundary_match_count': 3,        # Number of crossing chunks matched
             # ... existing fields
         }
     ],
     'known': [...],
     'filtered': [...],
     'partial': bool,
-    'boundary_stats': {                     # NEW
-        'total_boundaries': int,
-        'total_boundary_chunks': int,
-        'chunks_with_matches': int
+    'boundary_stats': {                       # Pre-search stats
+        'boundary_count': 5,
+        'crossing_chunk_count': 12,
+        'total_chunks': 45
     }
 }
 ```
 
-### 9.2 web/pages/parallels.py
+### 7.2 web/pages/parallels.py
 
-- Add mode selection (radio buttons)
-- Add collapsible boundary settings panel
-- Update call to `lab_composition_search` with new parameters
-- Add 🔗 icon to results with boundary matches
-- Update results persistence to include boundary data
+- Add mode selection (radio buttons with tooltips)
+- Add delimiter dropdown
+- Add Simple/Advanced toggle
+- Add pre-search statistics display
+- Add warning for no boundaries
+- Auto-expand advanced settings on mode change
+- Update result cards with boundary highlighting
+- Add score boost indicator
 
-### 9.3 genizah_app.py (Desktop)
+### 7.3 genizah_app.py (Desktop)
 
 - Add ComboBox for mode selection
-- Add boundary settings widget group
-- Update search function call
-- Add boundary indicator to results tree
+- Add boundary settings group (collapsible)
+- Add pre-search stats label
+- Add boundary highlighting in results tree
+- Sync highlighting colors with theme
+
+---
+
+## 8. Execution Flow
+
+### 8.1 Search Flow
+
+```
+1. User enters text and selects options
+2. System parses boundaries from text
+3. System displays pre-search stats
+   - If boundary_mode != 'full' and boundary_count == 0:
+     Show warning, optionally block search
+4. User clicks "Find Parallels"
+5. System generates regular chunks (existing logic)
+6. For each chunk, mark if it crosses a boundary
+7. Run search (existing logic)
+8. For each result:
+   a. Collect scores from boundary-crossing chunks
+   b. Calculate boundary_quality
+   c. If boundary_mode == 'combined': apply boost
+   d. If boundary_mode == 'boundary': filter out non-crossing results
+9. Apply min_boundary_matches filter (if set)
+10. Sort by final_score
+11. Return results with boundary metadata
+```
+
+### 8.2 Mode-Specific Behavior
+
+**Full Mode:**
+- Search all chunks
+- Track boundary matches for display
+- Filter by min_boundary_matches (post-hoc)
+- No score modification
+
+**Cross-paragraph Only Mode:**
+- Search all chunks
+- Return ONLY results with boundary matches
+- No score modification
+
+**Combined Mode:**
+- Search all chunks
+- Apply boost to results with boundary matches
+- Filter by min_boundary_matches (post-hoc)
+- Sort by final_score
+
+---
+
+## 9. Test Scenarios
+
+### 9.1 Unit Tests
+
+```python
+def test_parse_boundaries_paragraph():
+    text = "First paragraph.\n\nSecond paragraph.\n\nThird."
+    boundaries = parse_boundaries(text, '\n\n')
+    assert len(boundaries) == 2
+
+def test_parse_boundaries_min_distance():
+    text = "A. B. C. D. E. F."  # Periods every word
+    boundaries = parse_boundaries(text, '.', min_distance=3)
+    # Should skip some boundaries
+    assert len(boundaries) < 6
+
+def test_chunk_crosses_boundary():
+    boundaries = [4, 10]  # Boundaries after words 4 and 10
+    assert chunk_crosses_boundary(2, 6, boundaries) == True   # Crosses 4
+    assert chunk_crosses_boundary(0, 3, boundaries) == False  # Before 4
+    assert chunk_crosses_boundary(5, 9, boundaries) == False  # Between 4 and 10
+
+def test_boundary_quality_calculation():
+    scores = [800, 900, 850]
+    quality = calculate_boundary_quality(scores)
+    assert quality == 850.0
+
+def test_no_boundaries_warning():
+    text = "Continuous text without any paragraph breaks at all"
+    stats = get_boundary_stats(text, '\n\n', chunk_size=5)
+    assert stats['boundary_count'] == 0
+```
+
+### 9.2 Integration Tests
+
+| Scenario | Input | Expected |
+|----------|-------|----------|
+| No boundaries, Full mode | Continuous text | Normal results, no boost |
+| No boundaries, Boundary mode | Continuous text | Warning, empty results |
+| Single boundary | "Para1\n\nPara2" | Chunks 2-4 cross boundary |
+| Period delimiter | "Sentence one. Sentence two." | 1 boundary detected |
+| Too-close periods | "Dr. Smith went to Mt. Everest." | Skipped (min_distance) |
+
+### 9.3 UI Tests
+
+- [ ] Mode selection updates stats display
+- [ ] Delimiter change updates stats display
+- [ ] Advanced panel auto-expands on mode change
+- [ ] Warning shows when no boundaries detected
+- [ ] Boundary highlighting visible in results
+- [ ] Tooltips display on hover
 
 ---
 
 ## 10. Performance Considerations
 
-### 10.1 Chunk Count Impact
+### 10.1 Overhead Analysis
 
-| Scenario | Regular Chunks | Boundary Chunks | Total |
-|----------|----------------|-----------------|-------|
-| 100 words, no breaks | 20 | 0 | 20 |
-| 100 words, 5 paragraphs | 20 | 12 (4 boundaries × 3) | 32 |
-| 500 words, 20 paragraphs | 100 | 57 (19 × 3) | 157 |
+| Operation | Overhead | Notes |
+|-----------|----------|-------|
+| Parse boundaries | O(n) | Single pass through text |
+| Check chunk crossing | O(b) per chunk | b = number of boundaries |
+| Quality calculation | O(1) per result | Simple average |
+| Score boost | O(1) per result | Single multiplication |
 
-**Observation**: Boundary chunks add ~30-60% overhead in typical texts.
+**Total overhead**: Negligible compared to existing search time.
 
-### 10.2 Mitigation Strategies
+### 10.2 No Additional Index Queries
 
-1. **Boundary-only mode**: Searches only boundary chunks (much faster)
-2. **Lazy evaluation**: Only compute boundary chunks if mode requires them
-3. **Parallel processing**: Boundary and regular searches can run concurrently
+Unlike the original design, this approach:
+- Does NOT create additional chunks
+- Does NOT run separate searches
+- Uses existing search infrastructure
 
----
-
-## 11. Test Scenarios
-
-### 11.1 Unit Tests
-
-```python
-def test_boundary_chunk_creation_basic():
-    """Basic boundary chunk generation."""
-    text = "word1 word2 word3\n\nword4 word5 word6"
-    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
-
-    assert len(chunks) == 3  # 3+1, 2+2, 1+3
-    assert all(c['is_boundary_chunk'] for c in chunks)
-    assert chunks[0]['tail_count'] + chunks[0]['head_count'] == 4
-
-def test_no_single_side_chunks():
-    """Verify no chunks with 0 words on either side."""
-    text = "a b c\n\nd e f"
-    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
-
-    for chunk in chunks:
-        assert chunk['tail_count'] >= 1
-        assert chunk['head_count'] >= 1
-
-def test_short_paragraphs():
-    """Handle paragraphs shorter than window size."""
-    text = "a b\n\nc d e f g"  # First para has only 2 words
-    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
-
-    # Should create: 2+2, 1+3 (not 3+1 - not enough tail words)
-    assert len(chunks) == 2
-
-def test_multiple_boundaries():
-    """Multiple paragraph boundaries."""
-    text = "a b c\n\nd e f\n\ng h i"
-    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
-
-    # 2 boundaries × 3 chunks each = 6
-    assert len(chunks) == 6
-
-def test_collapsed_delimiters():
-    """Multiple consecutive delimiters should count as one boundary."""
-    text = "a b c\n\n\n\nd e f"  # 4 newlines
-    chunks = create_boundary_chunks(text, '\n\n', window_size=4)
-
-    # Should still be 1 boundary
-    assert len(chunks) == 3
-```
-
-### 11.2 Integration Tests
-
-| Scenario | Input | Expected |
-|----------|-------|----------|
-| No boundaries | "continuous text" | Boundary mode: empty results |
-| Single boundary | "para1\n\npara2" | 3 boundary chunks (with size=4) |
-| Custom delimiter | "a:b:c" with delimiter=":" | 6 boundary chunks |
-| Mixed search | Combined mode | Both regular and boundary matches |
-
-### 11.3 UI Tests
-
-- [ ] Mode selection works correctly
-- [ ] Settings panel expands/collapses
-- [ ] Boundary settings only enabled when relevant
-- [ ] 🔗 icon displays correctly
-- [ ] Min boundary filter works
-- [ ] Results persist across page reloads
+This means **no performance penalty** for Combined mode vs Full mode.
 
 ---
 
-## 12. Implementation Phases
+## 11. Implementation Phases
 
 ### Phase 1: Core Infrastructure
-1. Add `create_boundary_chunks()` to genizah_core.py
-2. Add new parameters to `lab_composition_search()`
-3. Implement boundary-only mode
-4. Write unit tests
-5. **Deliverable**: Working boundary-only search via API
+1. Add `parse_boundaries()` function
+2. Add boundary crossing detection to chunk processing
+3. Add boundary metadata to results
+4. Add `get_boundary_stats()` function
+5. Write unit tests
+6. **Deliverable**: API supports boundary detection
 
-### Phase 2: Web UI
-1. Add mode selection UI
-2. Add boundary settings panel
-3. Update search execution
-4. Add result indicators
-5. **Deliverable**: Fully functional web interface
+### Phase 2: Web UI - Basic
+1. Add mode selection radio buttons
+2. Add delimiter dropdown
+3. Add pre-search stats display
+4. Add warning for no boundaries
+5. **Deliverable**: Basic boundary search working
 
-### Phase 3: Combined Mode
-1. Implement result merging
-2. Implement boost scoring
-3. Add deduplication logic
-4. Test with real texts
-5. **Deliverable**: Combined mode working
+### Phase 3: Web UI - Enhanced
+1. Add Simple/Advanced toggle
+2. Add tooltips
+3. Add boundary highlighting in results
+4. Add score boost display
+5. Auto-expand advanced on mode change
+6. **Deliverable**: Full web UI complete
 
 ### Phase 4: Desktop App
-1. Port UI changes to PyQt6
+1. Port all UI changes to PyQt6
 2. Ensure feature parity
-3. Test thoroughly
+3. Test highlighting on different themes
 4. **Deliverable**: Desktop version complete
 
-### Phase 5: Tuning & Polish
+### Phase 5: Tuning
 1. Real-world testing with scholars
-2. Tune default values
-3. Optimize performance if needed
-4. Documentation update
-5. **Deliverable**: Production-ready feature
+2. Tune default values (boost, min_distance)
+3. Documentation update
+4. **Deliverable**: Production-ready feature
 
 ---
 
-## 13. Open Questions and Future Work
+## 12. Open Questions (Resolved)
 
-### 13.1 Questions Requiring Testing
-- [ ] What is the optimal default boost value? (Start with 1.5)
-- [ ] What is the optimal default window size? (Start with 4)
-- [ ] Does boundary search improve precision in practice?
+| Question | Resolution |
+|----------|------------|
+| What counts as a "boundary match"? | Average quality of crossing-chunk scores |
+| Overlap with regular chunks? | Reuse regular chunks, just identify which cross |
+| Support period delimiter? | Yes, with min_distance protection |
+| Too many options? | Simple/Advanced toggle |
+| How to name modes? | Cross-paragraph only, Full + Cross-paragraph boost |
+| User feedback? | Pre-search stats + warnings |
+| Manual boundary editing? | Not needed - user defines delimiter |
+| Panel auto-expand? | Yes, on mode change |
 
-### 13.2 Future Enhancements
-- [ ] **Library search**: Auto-detect verse/halakha boundaries in source texts
+---
+
+## 13. Future Enhancements
+
+- [ ] **Library search**: Auto-detect verse/halakha boundaries
 - [ ] **Auto-delimiter detection**: Guess delimiter from text structure
-- [ ] **Visual boundary marking**: Highlight boundary points in source display
-- [ ] **Export enhancement**: Include boundary match info in exports
-- [ ] **Statistics view**: Show boundary match distribution
-
-### 13.3 Edge Cases to Monitor
-- Very short paragraphs (1-2 words)
-- Texts with inconsistent paragraph formatting
-- Performance with many boundaries (>50)
-- Interaction with filter text feature
+- [ ] **Visual boundary marking**: Show boundary positions in source textarea
+- [ ] **Export enhancement**: Include boundary match info in Excel/Word exports
+- [ ] **Statistics view**: Distribution of boundary vs non-boundary matches
 
 ---
 
-## 14. Dependencies and Constraints
-
-### 14.1 Dependencies
-- No new external dependencies required
-- Uses existing Tantivy index and fingerprinting infrastructure
-
-### 14.2 Backwards Compatibility
-- All new parameters have defaults matching current behavior
-- Existing API calls continue to work unchanged
-- No database schema changes required
-
-### 14.3 Known Limitations
-- If source text has no boundaries, boundary-only mode returns empty
-- Combined mode approximately doubles search time
-- Boundary detection is text-based only (no semantic understanding)
-
----
-
-## 15. Glossary
+## 14. Glossary
 
 | Term | Definition |
 |------|------------|
-| **Boundary** | The division point between two paragraphs in the source text |
-| **Boundary chunk** | A word sequence that spans a boundary (has words from both sides) |
-| **Window size** | Total number of words in a boundary chunk |
-| **Tail** | Words from the end of the paragraph before the boundary |
-| **Head** | Words from the beginning of the paragraph after the boundary |
-| **Boost** | Score multiplier applied to manuscripts with boundary matches |
+| **Boundary** | A user-defined break point in the source text (paragraph, sentence, etc.) |
+| **Crossing chunk** | A regular search chunk that spans a boundary |
+| **Boundary quality** | Average match score of crossing chunks (0-1 normalized) |
+| **Boost** | Score multiplier applied based on boundary quality |
+| **min_distance** | Minimum words between delimiters to avoid false boundaries |
 
 ---
 
-## Critical Review: Potential Issues for External Readers
-
-### Issue 1: Ambiguous "Window Size" Definition
-**Problem**: The spec says "window size" but it's unclear if this means total words or words per side.
-**Resolution**: Clarified in Section 3.3 that it means TOTAL words, not per-side.
-
-### Issue 2: Combined Mode Execution Not Specified
-**Problem**: Original spec didn't explain whether combined mode runs one search or two.
-**Resolution**: Added Section 6 explaining execution strategies.
-
-### Issue 3: Deduplication Logic Missing
-**Problem**: If a manuscript matches both regular and boundary chunks, how is it handled?
-**Resolution**: Added Section 7 with explicit deduplication algorithm.
-
-### Issue 4: Performance Impact Unquantified
-**Problem**: No indication of how many extra chunks are created.
-**Resolution**: Added Section 10 with concrete examples.
-
-### Issue 5: Edge Cases Not Addressed
-**Problem**: What happens with very short paragraphs? Consecutive delimiters?
-**Resolution**: Added handling notes and test cases.
-
-### Issue 6: Scoring Formula Inconsistency
-**Problem**: Section 2.3 showed a simple formula, Section 7 showed logarithmic.
-**Resolution**: Removed the simple formula, kept only the logarithmic one with full explanation.
-
----
-
-*This document is a draft for discussion and approval before implementation.*
+*This document is ready for implementation.*
