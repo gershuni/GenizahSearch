@@ -91,7 +91,9 @@ class CompositionThread(QThread):
     scan_finished_signal = pyqtSignal(object) # Changed from list to object to support dict return
     error_signal = pyqtSignal(str)
 
-    def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5):
+    def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5,
+                 boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
+                 min_boundary_matches=0, min_delimiter_distance=3):
         super().__init__()
         self.searcher = searcher
         self.text = text
@@ -100,6 +102,12 @@ class CompositionThread(QThread):
         self.mode = mode
         self.filter_text = filter_text
         self.threshold = threshold
+        # Boundary search parameters
+        self.boundary_mode = boundary_mode
+        self.boundary_delimiter = boundary_delimiter
+        self.boundary_boost = boundary_boost
+        self.min_boundary_matches = min_boundary_matches
+        self.min_delimiter_distance = min_delimiter_distance
 
     def run(self):
         try:
@@ -109,7 +117,12 @@ class CompositionThread(QThread):
             # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
             result = self.searcher.search_composition_logic(
                 self.text, self.chunk, self.freq, self.mode,
-                filter_text=self.filter_text, progress_callback=cb
+                filter_text=self.filter_text, progress_callback=cb,
+                boundary_mode=self.boundary_mode,
+                boundary_delimiter=self.boundary_delimiter,
+                boundary_boost=self.boundary_boost,
+                min_boundary_matches=self.min_boundary_matches,
+                min_delimiter_distance=self.min_delimiter_distance
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))

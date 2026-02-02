@@ -5797,6 +5797,7 @@ class GenizahGUI(QMainWindow):
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
+        self.spin_chunk.valueChanged.connect(lambda: self._update_boundary_stats() if hasattr(self, '_update_boundary_stats') else None)
         
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
         self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
@@ -5837,6 +5838,59 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.comp_variant_slider_container)
         cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+
+        # Boundary Search Controls Row
+        boundary_row = QHBoxLayout()
+        boundary_row.setContentsMargins(0, 0, 0, 0)
+
+        # Boundary Mode ComboBox
+        self.boundary_mode_combo = QComboBox()
+        self.boundary_mode_combo.addItem(tr("Full search"), "full")
+        self.boundary_mode_combo.addItem(tr("Cross-paragraph only"), "boundary")
+        self.boundary_mode_combo.addItem(tr("Full + Cross-paragraph boost"), "combined")
+        self.boundary_mode_combo.setToolTip(tr("Search all text chunks regardless of paragraph breaks"))
+        self.boundary_mode_combo.currentIndexChanged.connect(self._on_boundary_mode_changed)
+
+        # Delimiter ComboBox
+        self.boundary_delimiter_combo = QComboBox()
+        self.boundary_delimiter_combo.addItem(tr("Line break"), "\n")
+        self.boundary_delimiter_combo.addItem(tr("Blank line (paragraph)"), "\n\n")
+        self.boundary_delimiter_combo.addItem(tr("Period (.)"), ".")
+        self.boundary_delimiter_combo.addItem(tr("Colon (:)"), ":")
+        self.boundary_delimiter_combo.setToolTip(tr("Character or pattern that separates paragraphs in your text"))
+        self.boundary_delimiter_combo.currentIndexChanged.connect(self._on_boundary_delimiter_changed)
+
+        # Boundary Stats Label
+        self.boundary_stats_label = QLabel("")
+        self.boundary_stats_label.setStyleSheet("color: #2980b9; font-size: 11px;")
+
+        # Advanced Settings Button
+        self.btn_boundary_advanced = QPushButton("⚙")
+        self.btn_boundary_advanced.setFixedWidth(30)
+        self.btn_boundary_advanced.setToolTip(tr("Advanced cross-paragraph settings"))
+        self.btn_boundary_advanced.clicked.connect(self._open_boundary_advanced_dialog)
+        self.btn_boundary_advanced.setVisible(False)  # Only show in non-full modes
+
+        boundary_row.addWidget(QLabel(tr("Paragraph search") + ":"))
+        boundary_row.addWidget(self.boundary_mode_combo)
+        boundary_row.addWidget(QLabel(tr("Paragraph separator") + ":"))
+        boundary_row.addWidget(self.boundary_delimiter_combo)
+        boundary_row.addWidget(self.btn_boundary_advanced)
+        boundary_row.addWidget(self.boundary_stats_label)
+        boundary_row.addStretch()
+
+        in_l.addLayout(boundary_row)
+
+        # Initialize boundary settings from LabSettings if available
+        if hasattr(self, 'lab_engine') and self.lab_engine:
+            settings = self.lab_engine.settings
+            mode_index = {'full': 0, 'boundary': 1, 'combined': 2}.get(settings.boundary_mode, 0)
+            self.boundary_mode_combo.setCurrentIndex(mode_index)
+            delim_index = {'\n': 0, '\n\n': 1, '.': 2, ':': 3}.get(settings.boundary_delimiter, 0)
+            self.boundary_delimiter_combo.setCurrentIndex(delim_index)
+
+        # Connect text area changes to update stats
+        self.comp_text_area.textChanged.connect(self._update_boundary_stats)
 
         # 3. Lab & Action
         self.btn_lab_mode_toggle_comp = QPushButton(tr("Lab Mode"))
@@ -10307,6 +10361,131 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'comp_variant_slider_container'):
             self.comp_variant_slider_container.setVisible(is_variants)
 
+    def _on_boundary_mode_changed(self, index):
+        """Update UI based on boundary mode selection."""
+        mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
+
+        # Show/hide advanced button for non-full modes
+        if hasattr(self, 'btn_boundary_advanced'):
+            self.btn_boundary_advanced.setVisible(mode in ('boundary', 'combined'))
+
+        # Update tooltip based on mode
+        tooltips = {
+            'full': tr("Search all text chunks regardless of paragraph breaks"),
+            'boundary': tr("Show only matches where the matching text spans a paragraph break in your source"),
+            'combined': tr("Search everything, but rank cross-paragraph matches higher")
+        }
+        if hasattr(self, 'boundary_mode_combo'):
+            self.boundary_mode_combo.setToolTip(tooltips.get(mode, ''))
+
+        # Update stats
+        self._update_boundary_stats()
+
+        # Save to settings
+        if hasattr(self, 'lab_engine') and self.lab_engine:
+            self.lab_engine.settings.boundary_mode = mode
+            self.lab_engine.settings.save()
+
+    def _on_boundary_delimiter_changed(self, index):
+        """Save delimiter setting and update stats when delimiter changes."""
+        delimiter = self.boundary_delimiter_combo.currentData() if hasattr(self, 'boundary_delimiter_combo') else '\n'
+
+        # Save to settings
+        if hasattr(self, 'lab_engine') and self.lab_engine:
+            self.lab_engine.settings.boundary_delimiter = delimiter
+            self.lab_engine.settings.save()
+
+        # Update stats
+        self._update_boundary_stats()
+
+    def _update_boundary_stats(self):
+        """Update the boundary statistics label based on current text and settings."""
+        if not hasattr(self, 'boundary_stats_label') or not hasattr(self, 'comp_text_area'):
+            return
+
+        text = self.comp_text_area.toPlainText().strip()
+        if not text:
+            self.boundary_stats_label.setText("")
+            return
+
+        try:
+            from genizah_core import get_boundary_stats
+
+            chunk_size = self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5
+            delimiter = self.boundary_delimiter_combo.currentData() if hasattr(self, 'boundary_delimiter_combo') else '\n'
+            min_distance = getattr(self.lab_engine.settings, 'min_delimiter_distance', 3) if hasattr(self, 'lab_engine') and self.lab_engine else 3
+
+            stats = get_boundary_stats(text, delimiter, chunk_size, min_distance)
+
+            if stats['boundary_count'] > 0:
+                self.boundary_stats_label.setText(
+                    tr("{} boundaries detected, {} chunks will cross them").format(
+                        stats['boundary_count'], stats['crossing_chunk_count']
+                    )
+                )
+                self.boundary_stats_label.setStyleSheet("color: #2980b9; font-size: 11px;")
+            else:
+                mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
+                if mode in ('boundary', 'combined'):
+                    self.boundary_stats_label.setText(tr("No paragraph breaks detected in text!"))
+                    self.boundary_stats_label.setStyleSheet("color: #c0392b; font-size: 11px;")
+                else:
+                    self.boundary_stats_label.setText("")
+        except Exception:
+            self.boundary_stats_label.setText("")
+
+    def _open_boundary_advanced_dialog(self):
+        """Open dialog for advanced boundary search settings."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QDoubleSpinBox, QSpinBox, QDialogButtonBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(tr("Advanced cross-paragraph settings"))
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+
+        # Get current settings
+        settings = self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None
+
+        # Cross-paragraph boost slider
+        boost_spin = QDoubleSpinBox()
+        boost_spin.setRange(1.0, 3.0)
+        boost_spin.setSingleStep(0.1)
+        boost_spin.setValue(settings.boundary_boost if settings else 1.5)
+        boost_spin.setToolTip(tr("Score multiplier for cross-paragraph matches"))
+        form.addRow(tr("Cross-paragraph boost") + ":", boost_spin)
+
+        # Min boundary matches
+        min_matches_spin = QSpinBox()
+        min_matches_spin.setRange(0, 10)
+        min_matches_spin.setValue(settings.min_boundary_matches if settings else 0)
+        min_matches_spin.setToolTip(tr("Minimum number of cross-paragraph matches required"))
+        form.addRow(tr("Min. cross-paragraph matches") + ":", min_matches_spin)
+
+        # Min delimiter distance
+        min_distance_spin = QSpinBox()
+        min_distance_spin.setRange(1, 10)
+        min_distance_spin.setValue(settings.min_delimiter_distance if settings else 3)
+        min_distance_spin.setToolTip(tr("Ignore separators that are too close together"))
+        form.addRow(tr("Min. words between separators") + ":", min_distance_spin)
+
+        layout.addLayout(form)
+
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if settings:
+                settings.boundary_boost = boost_spin.value()
+                settings.min_boundary_matches = min_matches_spin.value()
+                settings.min_delimiter_distance = min_distance_spin.value()
+                settings.save()
+            self._update_boundary_stats()
+
     def _set_variant_preset(self, pairs_count):
         """Set variant level from preset button."""
         self._current_variant_preset = pairs_count
@@ -12752,6 +12931,20 @@ class GenizahGUI(QMainWindow):
 
         excluded_ids = self.excluded_raw_entries
 
+        # Get boundary search parameters from UI
+        boundary_mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
+        boundary_delimiter = self.boundary_delimiter_combo.currentData() if hasattr(self, 'boundary_delimiter_combo') else '\n'
+
+        # Get advanced boundary settings from LabSettings
+        if hasattr(self, 'lab_engine') and self.lab_engine:
+            boundary_boost = self.lab_engine.settings.boundary_boost
+            min_boundary_matches = self.lab_engine.settings.min_boundary_matches
+            min_delimiter_distance = self.lab_engine.settings.min_delimiter_distance
+        else:
+            boundary_boost = 1.5
+            min_boundary_matches = 0
+            min_delimiter_distance = 3
+
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
             if not self.lab_engine:
@@ -12769,14 +12962,19 @@ class GenizahGUI(QMainWindow):
             limit = self.lab_engine.settings.lab_scan_limit
 
             self.comp_thread = LabCompositionThread(
-                self.lab_engine, 
-                txt, 
-                mode, 
+                self.lab_engine,
+                txt,
+                mode,
                 chunk_size=chunk_size,
                 excluded_ids=final_excluded_ids,
                 filter_text=self._get_filter_text(),
                 deep_scan=deep,
-                scan_limit=limit
+                scan_limit=limit,
+                boundary_mode=boundary_mode,
+                boundary_delimiter=boundary_delimiter,
+                boundary_boost=boundary_boost,
+                min_boundary_matches=min_boundary_matches,
+                min_delimiter_distance=min_delimiter_distance
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -12789,13 +12987,18 @@ class GenizahGUI(QMainWindow):
 
             # --- התיקון הקריטי כאן: הסרת progress_callback ---
             self.comp_thread = CompositionThread(
-                self.searcher, 
-                txt, 
+                self.searcher,
+                txt,
                 chunk=chunk_size,
                 freq=self.spin_freq.value(),
                 mode=mode,
                 filter_text=self._get_filter_text(),
-                threshold=self.spin_filter.value()
+                threshold=self.spin_filter.value(),
+                boundary_mode=boundary_mode,
+                boundary_delimiter=boundary_delimiter,
+                boundary_boost=boundary_boost,
+                min_boundary_matches=min_boundary_matches,
+                min_delimiter_distance=min_delimiter_distance
             )
             if hasattr(self.comp_thread, 'scan_finished_signal'):
                  self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
@@ -13086,6 +13289,28 @@ class GenizahGUI(QMainWindow):
         node.setText(column, text)
         self._update_comp_tree_tooltip(node, column)
 
+    def _format_score_with_boundary(self, item):
+        """Format score string with boundary indicator if applicable."""
+        score = int(item.get('score', 0))
+        has_boundary = item.get('has_boundary_matches', False)
+        boundary_count = item.get('boundary_match_count', 0)
+
+        if has_boundary and boundary_count > 0:
+            # Show "🔗 score" for boundary matches
+            return f"🔗 {score}"
+        return str(score)
+
+    def _get_boundary_tooltip(self, item):
+        """Get tooltip text for boundary match indicator."""
+        has_boundary = item.get('has_boundary_matches', False)
+        boundary_count = item.get('boundary_match_count', 0)
+        boundary_quality = item.get('boundary_quality', 0)
+
+        if has_boundary and boundary_count > 0:
+            quality_pct = int(boundary_quality * 100) if boundary_quality <= 1 else int(min(boundary_quality / item.get('score', 1) * 100, 100))
+            return tr("Cross-paragraph") + f": {boundary_count} " + tr("cross-paragraph matches")
+        return ""
+
     def _process_snippet_queue(self):
         if not hasattr(self, 'snippet_queue') or not self.snippet_queue:
             return
@@ -13292,6 +13517,13 @@ class GenizahGUI(QMainWindow):
 
         def add_manuscript_node(parent, ms_item):
             item_type = ms_item.get('type', '')
+
+            def set_boundary_tooltip(node, item):
+                """Set tooltip for boundary indicator if applicable."""
+                boundary_tip = self._get_boundary_tooltip(item)
+                if boundary_tip:
+                    node.setToolTip(0, boundary_tip)
+
             if item_type == 'part':
                 # Part node - show Part display name with 📖 icon
                 part_display = ms_item.get('part_display', '')
@@ -13301,7 +13533,8 @@ class GenizahGUI(QMainWindow):
                 t = oxford_title or ""
 
                 ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
+                set_boundary_tooltip(ms_node, ms_item)
                 self._set_comp_tree_text(ms_node, 1, shelf)
                 self._set_comp_tree_text(ms_node, 2, t)
                 self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
@@ -13328,7 +13561,8 @@ class GenizahGUI(QMainWindow):
                         p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                         folio_info = f" [{p_shelf}]" if p_shelf else ""
                         page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                        self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
+                        set_boundary_tooltip(page_node, p_item)
                         self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
                         self._set_comp_tree_text(page_node, 2, "")
                         self._set_comp_tree_text(page_node, 3, p_sid or "")
@@ -13343,7 +13577,8 @@ class GenizahGUI(QMainWindow):
                     if header_shelf: shelf = header_shelf
 
                 ms_node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
+                set_boundary_tooltip(ms_node, ms_item)
                 self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
                 self._set_comp_tree_text(ms_node, 2, t or "")
                 self._set_comp_tree_text(ms_node, 3, sid)
@@ -13366,7 +13601,8 @@ class GenizahGUI(QMainWindow):
                     for p_item in pages:
                         _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                         page_node = QTreeWidgetItem(ms_node)
-                        self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
+                        self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
+                        set_boundary_tooltip(page_node, p_item)
                         self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
                         self._set_comp_tree_text(page_node, 2, "")
                         self._set_comp_tree_text(page_node, 3, "")
@@ -13377,7 +13613,8 @@ class GenizahGUI(QMainWindow):
                 # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                 node = QTreeWidgetItem(parent)
-                self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
+                self._set_comp_tree_text(node, 0, self._format_score_with_boundary(ms_item))
+                set_boundary_tooltip(node, ms_item)
                 self._set_comp_tree_text(node, 1, shelf)
                 self._set_comp_tree_text(node, 2, title)
                 self._set_comp_tree_text(node, 3, sid)
