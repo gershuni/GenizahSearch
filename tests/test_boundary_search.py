@@ -212,7 +212,9 @@ class TestGetBoundaryStats:
         assert 'boundary_count' in stats
         assert 'crossing_chunk_count' in stats
         assert 'total_chunks' in stats
+        assert 'boundaries' in stats  # Should include parsed boundaries for reuse
         assert stats['boundary_count'] == 2
+        assert len(stats['boundaries']) == 2
 
     def test_no_boundaries_stats(self):
         """Test stats with no boundaries."""
@@ -220,12 +222,14 @@ class TestGetBoundaryStats:
         stats = get_boundary_stats(text, '\n\n', chunk_size=5)
         assert stats['boundary_count'] == 0
         assert stats['crossing_chunk_count'] == 0
+        assert stats['boundaries'] == []
 
     def test_short_text(self):
         """Test stats with text shorter than chunk size."""
         text = "Short"
         stats = get_boundary_stats(text, '\n\n', chunk_size=5)
         assert stats['total_chunks'] == 1
+        assert 'boundaries' in stats
 
     def test_crossing_chunks_counted(self):
         """Test that crossing chunks are counted correctly."""
@@ -240,3 +244,4 @@ class TestGetBoundaryStats:
         text = "מילה ראשונה שנייה שלישית רביעית\n\nחמישית שישית שביעית"
         stats = get_boundary_stats(text, '\n\n', chunk_size=3)
         assert stats['boundary_count'] == 1
+        assert len(stats['boundaries']) == 1

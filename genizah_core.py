@@ -216,7 +216,7 @@ def get_boundary_stats(text: str, delimiter: str, chunk_size: int, min_distance:
         min_distance: Minimum words between boundaries
 
     Returns:
-        Dictionary with boundary_count, crossing_chunk_count, total_chunks
+        Dictionary with boundary_count, crossing_chunk_count, total_chunks, and boundaries list
     """
     boundaries = parse_boundaries(text, delimiter, min_distance)
     tokens = re.findall(r"[\w\u0590-\u05FF\']+", text or "")
@@ -226,7 +226,8 @@ def get_boundary_stats(text: str, delimiter: str, chunk_size: int, min_distance:
         return {
             'boundary_count': len(boundaries),
             'crossing_chunk_count': 1 if boundaries else 0,
-            'total_chunks': 1
+            'total_chunks': 1,
+            'boundaries': boundaries  # Include parsed boundaries for reuse
         }
 
     # Count chunks that cross boundaries
@@ -242,7 +243,8 @@ def get_boundary_stats(text: str, delimiter: str, chunk_size: int, min_distance:
     return {
         'boundary_count': len(boundaries),
         'crossing_chunk_count': crossing_chunks,
-        'total_chunks': total_chunks
+        'total_chunks': total_chunks,
+        'boundaries': boundaries  # Include parsed boundaries for reuse
     }
 
 
@@ -1036,6 +1038,9 @@ class LabEngine:
         if not full_text:
             return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None}
 
+        # Reset debug counter for this search (prevents state leak between searches)
+        self._filter_match_count = 0
+
         # Determine strategy: Static or Dynamic
         use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
         target_field = "fingerprint_dyn" if use_dyn else self.LAB_FINGERPRINT_FIELD
@@ -1055,18 +1060,22 @@ class LabEngine:
         c_size = chunk_size if chunk_size else 15
         step = max(1, int(c_size * 0.5))
 
-        # Parse boundary positions for boundary search modes
-        boundaries = parse_boundaries(full_text, boundary_delimiter, min_delimiter_distance)
+        # Get boundary stats (includes parsed boundaries to avoid double parsing)
         boundary_stats = get_boundary_stats(full_text, boundary_delimiter, c_size, min_delimiter_distance)
+        boundaries = boundary_stats.get('boundaries', [])
 
+        # Build chunks - handle short texts first to avoid wasteful iteration
         chunks_data = []
-        for i in range(0, max(1, len(tokens) - c_size + 1), step):
-            chunk_end = i + c_size
-            crosses_boundary = chunk_crosses_boundary(i, chunk_end, boundaries)
-            chunks_data.append((i, tokens[i : i + c_size], crosses_boundary))
         if len(tokens) < c_size:
+            # Short text: single chunk with all tokens
             crosses_boundary = chunk_crosses_boundary(0, len(tokens), boundaries)
             chunks_data = [(0, tokens, crosses_boundary)]
+        else:
+            # Normal text: create overlapping chunks
+            for i in range(0, max(1, len(tokens) - c_size + 1), step):
+                chunk_end = i + c_size
+                crosses_boundary = chunk_crosses_boundary(i, chunk_end, boundaries)
+                chunks_data.append((i, tokens[i : i + c_size], crosses_boundary))
 
         total_chunks = len(chunks_data)
         results_map = {}
@@ -1281,7 +1290,7 @@ class LabEngine:
             if boundary_mode == 'boundary' and not item.get('has_boundary_matches', False):
                 continue
 
-            # Apply min_boundary_matches filter (for full and combined modes)
+            # Apply min_boundary_matches filter (applies to all modes as a post-hoc filter)
             if min_boundary_matches > 0:
                 if item.get('boundary_match_count', 0) < min_boundary_matches:
                     continue

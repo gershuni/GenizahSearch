@@ -1421,8 +1421,9 @@ def create_parallels_page(initial_text: str = None):
 
     def create_parallel_item(idx, item, sys_id, shelfmark):
         """Create a single parallel match item within a manuscript group."""
-        score = int(item.get('score', 0))
-        final_score = int(item.get('final_score', score))
+        # Use round() instead of int() to avoid hiding small boosts
+        score = round(item.get('score', 0))
+        final_score = round(item.get('final_score', score))
         has_boundary_matches = item.get('has_boundary_matches', False)
         boundary_quality = item.get('boundary_quality', 0)
         boundary_match_count = item.get('boundary_match_count', 0)
@@ -1452,11 +1453,12 @@ def create_parallels_page(initial_text: str = None):
                     )
 
                     # Score badge - show boost if applied
+                    # Note: Raw scores are typically 100-10000+, not percentages
                     if final_score > score:
-                        score_color = 'green' if final_score > 70 else 'amber' if final_score > 40 else 'gray'
+                        score_color = 'green' if final_score > 2000 else 'amber' if final_score > 500 else 'gray'
                         ui.badge(f"{score} → {final_score}", color=score_color).classes('text-xs')
                     else:
-                        score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'
+                        score_color = 'green' if score > 2000 else 'amber' if score > 500 else 'gray'
                         ui.badge(f"{score}", color=score_color).classes('text-xs')
 
                     # Boundary match indicator
