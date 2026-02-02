@@ -1,14 +1,24 @@
 # GenizahSearch - Plans & Documentation Index
 
-**Last Updated:** 2026-01-30
+**Last Updated:** 2026-02-02
 
 ---
 
 ## Active Plans
 
-### 1. Supabase Migration (NEW - Highest Priority)
+### 1. Cross-Paragraph Search (COMPLETED - Web)
+**File:** `BOUNDARY_SEARCH_SPEC.md`
+**Status:** ✅ Implemented (Web), Pending (Desktop)
+**Goal:** Find parallels that cross paragraph boundaries to filter citation noise
+
+A new parallel search mode that identifies text spanning paragraph boundaries. Useful because citations rarely cross structural breaks, so this effectively filters out Mishnah/Talmud quotes and known phrases.
+
+**Web implementation:** Complete (Feb 2026)
+**Desktop implementation:** Planned
+
+### 2. Supabase Migration
 **File:** `SUPABASE_MIGRATION_PLAN.md`
-**Status:** Planning
+**Status:** ✅ Completed
 **Goal:** Replace self-hosted backend with Supabase cloud service
 
 This is now the **primary plan** that supersedes the lists unification plan. By moving to Supabase:
@@ -17,7 +27,7 @@ This is now the **primary plan** that supersedes the lists unification plan. By 
 - Both web and desktop can share the same cloud database
 - Authentication handled by Supabase
 
-### 2. Lists & Projects Unification
+### 3. Lists & Projects Unification
 **File:** `LISTS_UNIFICATION_PLAN.md`
 **Status:** Superseded by Supabase plan
 **Goal:** Unified lists with project-based color inheritance
