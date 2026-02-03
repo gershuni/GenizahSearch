@@ -763,6 +763,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def show_shelfmark_suggestions(results):
         """Show a dialog with shelfmark suggestions for user to select."""
+        from genizah_core import get_library_display
+
         with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
             # Header
             with ui.row().classes('w-full items-center justify-between mb-4'):
@@ -786,15 +788,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         state.current_page = None
                         load_page(p_num=1)
 
+                    # Get library display name (short form)
+                    library_short = ''
+                    if result.library_code:
+                        library_short = get_library_display(result.library_code, short=True)
+
                     with ui.card().classes(
                         'w-full p-3 cursor-pointer hover:bg-gray-100'
                     ).style(
                         'background: var(--bg-surface); border: 1px solid var(--border-subtle);'
                     ).on('click', select_result):
-                        # Shelfmark (LTR)
-                        ui.label(result.shelfmark).classes('font-medium').style(
-                            'color: var(--text-primary); direction: ltr; text-align: left;'
-                        )
+                        # Library and Shelfmark row
+                        with ui.row().classes('items-center gap-2'):
+                            # Library badge (if available)
+                            if library_short:
+                                ui.badge(library_short).classes(
+                                    'text-xs'
+                                ).style('background: var(--primary-100); color: var(--primary-700);')
+                            # Shelfmark (LTR)
+                            ui.label(result.shelfmark).classes('font-medium').style(
+                                'color: var(--text-primary); direction: ltr; text-align: left;'
+                            )
                         # Title (RTL for Hebrew)
                         if result.title:
                             ui.label(result.title).classes('text-sm').style(

@@ -252,6 +252,8 @@ TRANSLATIONS = {
     "Could not load full text for selected results.": "לא ניתן לטעון טקסט מלא עבור התוצאות שנבחרו.",
 
     # --- Browse Tab ---
+    "Select Manuscript": "בחר כתב יד",
+    "Multiple matches found for": "נמצאו מספר התאמות עבור",
     "Enter System ID...": "הכנס מספר מערכת...",
     "Enter shelfmark...": "הכנס מספר מדף...",
     "Go": "עבור",
