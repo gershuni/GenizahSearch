@@ -1602,6 +1602,7 @@ TRANSLATIONS = {
     "Full Text": "טקסט מלא",
     "Metadata": "מטא-דאטא",
     "Library": "ספרייה",
+    "Library:": "ספרייה:",
     "Cross-page match": "התאמה חוצת עמודים",
     "Showing match context only": "מציג הקשר התאמה בלבד",
     "Click \"Browse Full Manuscript\" to view the complete page with navigation": "לחץ על \"עיין בכתב יד מלא\" לצפייה בעמוד המלא עם ניווט",
