@@ -47,14 +47,14 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Deferred | Total |
 |----------|------|----------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 2 | 4 | 6 |
-| P3 Low Priority | 4 | 0 | 4 |
+| P2 Medium Bugs | 1 | 5 | 6 |
+| P3 Low Priority | 3 | 1 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **10** | **25** | **35** |
+| **Total** | **8** | **27** | **35** |
 
 ---
 
@@ -73,7 +73,7 @@ Move to "Completed Issues" section at bottom with date
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
 | **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |
-| **Bare `except:` statements** | Multiple files | ❌ Open | 16+ instances in web/ alone |
+| **Bare `except:` statements** | Multiple files | ✅ Fixed (2026-02-03) | Changed all 16 instances to `except Exception:` |
 | **Shelfmark normalization inconsistency** | 5 implementations | ❌ Open | `genizah_app.py` (2), `genizah_core.py` (2), `corrections_ui.py` (1) |
 | **Star button visual feedback** | `browse.py`, `search.py` | ✅ Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
 
@@ -81,7 +81,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Auto-save not working** | `text_editor.py:374` | ❌ Open | Timer is placeholder, does nothing |
+| **Auto-save not working** | `text_editor.py:374` | ✅ Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
 | **Race conditions in UI timers** | `joins_panel.py`, `parallels.py` | ❌ Open | Multiple timers can run in parallel |
 | **Cache thread-safety** | `joins_panel.py:17-19` | ❌ Open | Global dict without lock |
 | **CSRF protection missing** | API endpoints | ❌ Deferred | Low risk - NiceGUI uses WebSocket |
@@ -194,6 +194,8 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-03 | Fixed bare `except:` statements - changed all 16 to `except Exception:` | Claude |
+| 2026-02-03 | Verified auto-save in text_editor.py is working (lines 443-454) | Claude |
 | 2026-02-03 | Fixed all 4 documentation gaps: RLS policies, OAuth callback, Cloudflare config, Desktop client | Claude |
 | 2026-02-03 | Moved 4 completed plans to archive (Supabase, Library Location, Boundary Search) | Claude |
 | 2026-02-03 | Updated README.md version to 5.4, fixed download reference to V5.4.1 | Claude |

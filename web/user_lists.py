@@ -690,7 +690,7 @@ class UserListsManager:
                     if str(list_data.get('project_id')) == project_id:
                         try:
                             sb_update_list(int(list_id), {'project_id': None})
-                        except:
+                        except Exception:
                             pass
 
             result = sb_delete_project(project_id_int)

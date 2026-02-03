@@ -212,7 +212,7 @@ def create_joins_dialog(
             if not spinner_state['deleted']:
                 try:
                     spinner_state['spinner'].delete()
-                except:
+                except Exception:
                     pass
                 spinner_state['deleted'] = True
 
@@ -306,7 +306,7 @@ def create_joins_dialog(
                                         title_preview = ' '.join(words)
                                         if len(title.split()) > 4:
                                             title_preview += "..."
-                                except:
+                                except Exception:
                                     pass
 
                             # Create click handler - capture is_current properly
@@ -487,7 +487,7 @@ def show_add_join_form(
                                                     if not item_shelfmark and item_sys_id and state.meta_mgr:
                                                         try:
                                                             item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
-                                                        except:
+                                                        except Exception:
                                                             pass
 
                                                     # Fallback to sys_id only if we can't find shelfmark
@@ -552,7 +552,7 @@ def show_add_join_form(
                                                                         if not item_shelfmark and item_sys_id and state.meta_mgr:
                                                                             try:
                                                                                 item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
-                                                                            except:
+                                                                            except Exception:
                                                                                 pass
 
                                                                         # Fallback to sys_id only if we can't find shelfmark
