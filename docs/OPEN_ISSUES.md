@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03 (verified P1 bug already fixed)
+> **Last Updated:** 2026-02-03 (verified all P1-P2 bugs)
 > **Status:** Active working document
 
 ---
@@ -47,12 +47,12 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed | Total |
 |----------|------|-------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 6 | 0 | 6 |
+| P2 Medium Bugs | 5 | 1 | 6 |
 | P3 Low Priority | 4 | 0 | 4 |
 | Documentation Issues | 8 | 0 | 8 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 4 | 0 | 4 |
-| **Total** | **26** | **1** | **27** |
+| **Total** | **25** | **2** | **27** |
 
 ---
 
@@ -68,12 +68,12 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ❌ Open | ~60+ `[DEBUG]` lines - info leakage risk |
-| **Missing List Rename** | `web/pages/lists.py` | ❌ Open | Can create/delete but not rename |
-| **Missing CSV/Word exports for Lists** | `lists.py:419-436` | ❌ Open | Only Excel export implemented |
-| **Bare `except:` statements** | Multiple files | ❌ Open | 50+ instances of silent exception handling |
-| **Shelfmark normalization inconsistency** | 4 implementations | ❌ Open | Should unify to `shared/shelfmark_utils.py` |
-| **Star button visual feedback** | `browse.py`, `search.py` | ❌ Open | Should show filled ★ when item is in a list |
+| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ❌ Open | 69 `[DEBUG]` lines found - info leakage risk |
+| **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
+| **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ❌ Open | Only Excel export at line 629 |
+| **Bare `except:` statements** | Multiple files | ❌ Open | 16+ instances in web/ alone |
+| **Shelfmark normalization inconsistency** | 5 implementations | ❌ Open | `genizah_app.py` (2), `genizah_core.py` (2), `corrections_ui.py` (1) |
+| **Star button visual feedback** | `browse.py`, `search.py` | ❌ Open | Always shows `star_border`, should be `star` when in list |
 
 ### P3 - Low Priority
 
@@ -190,6 +190,7 @@ These completed items should be moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-03 | Verified all P2 bugs - list rename already fixed, updated counts | Claude |
 | 2026-02-03 | Verified P1 path traversal bug already fixed in `filter_text_dialog.py` | Claude |
 | 2026-02-03 | Initial creation from documentation audit | Claude |
 
