@@ -241,6 +241,31 @@ def create_search_page(initial_query: str = None):
                         ).classes('h-10 px-4').style('display: none;').props('outline color=red')
                         stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
+                # Advanced Options Row (inside expanded_panel, collapses with search bar)
+                with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
+                    'background: var(--bg-tertiary); border-radius: 12px;'
+                ):
+                    with ui.column().classes('w-full p-4 gap-6'):
+                        # Options Grid
+                        with ui.row().classes('w-full gap-8 flex-wrap'):
+                            # Lab Mode Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
+                                with ui.row().classes('gap-2 items-center'):
+                                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
+                                    ui.icon('info').classes('text-sm cursor-help').tooltip(
+                                        tr('Searches more candidates for comprehensive results')
+                                    )
+
+                            # NOT Filter Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                not_filter = ui.input(
+                                    placeholder=tr('Words to exclude (space separated)')
+                                ).classes('w-full').props('outlined dense').style('direction: rtl;')
+                                ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
+
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
             if use_slider:
@@ -286,33 +311,6 @@ def create_search_page(initial_query: str = None):
                 app.storage.user['search_mode'] = mode
 
             mode_select.on('update:model-value', on_mode_change)
-
-            # Advanced Options Row
-            with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
-                'background: var(--bg-tertiary); border-radius: 12px;'
-            ):
-                with ui.column().classes('w-full p-4 gap-6'):
-
-                    # Options Grid
-                    with ui.row().classes('w-full gap-8 flex-wrap'):
-
-                        # Lab Mode Section
-                        with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
-                            with ui.row().classes('gap-2 items-center'):
-                                deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
-                                ui.icon('info').classes('text-sm cursor-help').tooltip(
-                                    tr('Searches more candidates for comprehensive results')
-                                )
-
-                        # NOT Filter Section
-                        with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            not_filter = ui.input(
-                                placeholder=tr('Words to exclude (space separated)')
-                            ).classes('w-full').props('outlined dense').style('direction: rtl;')
-                            ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
 
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
@@ -511,19 +509,14 @@ def create_search_page(initial_query: str = None):
                         collapseTimeout = setTimeout(() => {{
                             const expandedEl = document.getElementById('{expanded_id}');
                             const collapsedEl = document.getElementById('{collapsed_id}');
-                            console.log('Attempting collapse:', {{ expanded: expandedEl, collapsed: collapsedEl, expandedDisplay: expandedEl?.style?.display }});
                             if (expandedEl && collapsedEl) {{
                                 const isVisible = !expandedEl.style.display || !expandedEl.style.display.includes('none');
-                                console.log('Panel visible:', isVisible);
                                 if (isVisible) {{
                                     expandedEl.style.cssText = 'display: none !important;';
                                     collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
-                                    console.log('Collapsed search panel');
                                 }}
-                            }} else {{
-                                console.warn('Elements not found:', {{ expandedId: '{expanded_id}', collapsedId: '{collapsed_id}' }});
                             }}
-                        }}, 100);  // Faster response
+                        }}, 100);
                     }}
 
                     lastScrollTop = currentScrollTop;
