@@ -14,6 +14,8 @@ from nicegui import ui
 from web.translations import tr
 from web.components.typography import h3
 from web.auth_state import GlobalAuthState
+from web.state import state
+from genizah_core import get_library_display
 from typing import Optional, Callable
 import asyncio
 
@@ -52,7 +54,14 @@ def show_add_to_list_dialog(
 
     with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96'):
         h3(tr('Add to List'), classes='text-xl font-bold mb-2')
-        ui.label(f"{tr('Item')}: {shelfmark}").style('color: var(--text-secondary);')
+        # Get library name for display
+        library_name = ''
+        if state.meta_mgr:
+            library_code = state.meta_mgr.get_library_for_id(sys_id)
+            if library_code:
+                library_name = get_library_display(library_code, short=False)
+        display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+        ui.label(f"{tr('Item')}: {display_shelfmark}").style('color: var(--text-secondary);')
 
         lists = lists_mgr.data.get('lists', {})
         print(f"[DEBUG] lists_mgr.data = {lists_mgr.data}")

@@ -1170,10 +1170,18 @@ def create_search_page(initial_query: str = None):
             )
 
             with ui.column().classes('p-6 gap-4'):
-                # Shelfmark as main heading
+                # Shelfmark with Library Name as main heading
+                display_shelfmark = shelfmark
+                library_name = ''
+                if library_code:
+                    from genizah_core import get_library_display
+                    library_name = get_library_display(library_code, short=False)
+                    if library_name:
+                        display_shelfmark = f"{library_name}, {shelfmark}"
+
                 with ui.row().classes('items-start justify-between w-full'):
                     with ui.column().classes('gap-2 flex-grow'):
-                        h1(shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
+                        h1(display_shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
                         if title:
                             ui.label(title).classes('text-lg').style(
                                 'color: var(--text-secondary); direction: rtl; text-align: right;'
@@ -1418,8 +1426,14 @@ def create_search_page(initial_query: str = None):
         with viewer_container:
             # Header
             with ui.column().classes('w-full gap-2 mb-4'):
-                # Changed to H2
-                h2(shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
+                # Shelfmark with Library Name - H2
+                display_shelfmark = shelfmark
+                if library_code:
+                    from genizah_core import get_library_display
+                    library_name = get_library_display(library_code, short=False)
+                    if library_name:
+                        display_shelfmark = f"{library_name}, {shelfmark}"
+                h2(display_shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
                 if title:
                     ui.label(title).style('color: var(--text-secondary); direction: rtl;')
 

@@ -1478,14 +1478,25 @@ def create_parallels_page(initial_text: str = None):
         max_score = group_data['max_score']
         avg_score = group_data['avg_score']
 
-        # Get title
+        # Get title and library
         title = ''
+        library_name = ''
         if sys_id and state.meta_mgr:
             try:
                 _, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                 title = title_temp or ''
+                # Get library name
+                library_code = state.meta_mgr.get_library_for_id(sys_id)
+                if library_code:
+                    from genizah_core import get_library_display
+                    library_name = get_library_display(library_code, short=False)
             except Exception:
                 pass
+
+        # Build display shelfmark with library name
+        display_shelfmark = shelfmark
+        if library_name:
+            display_shelfmark = f"{library_name}, {shelfmark}"
 
         border_style = 'border: 2px solid var(--accent-amber);' if is_filtered else 'border: 2px solid var(--border-light);'
         with ui.card().classes('w-full p-0 overflow-hidden').style(border_style):
@@ -1495,9 +1506,9 @@ def create_parallels_page(initial_text: str = None):
                     with ui.row().classes('items-center gap-3'):
                         icon_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-600);'
                         ui.icon('menu_book').classes('text-xl').style(icon_color)
-                        # Changed to H3
+                        # Changed to H3 - with library name
                         shelfmark_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-700);'
-                        h3(shelfmark, classes='text-lg font-bold', style=shelfmark_color)
+                        h3(display_shelfmark, classes='text-lg font-bold', style=shelfmark_color)
                         badge_color = 'amber' if is_filtered else 'blue'
                         ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
@@ -1664,10 +1675,16 @@ def create_parallels_page(initial_text: str = None):
         """Show metadata dialog for a parallel result."""
         # Get full metadata
         title = ''
+        library_name = ''
         if sys_id and state.meta_mgr:
             try:
                 _, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                 title = title_temp or ''
+                # Get library name
+                library_code = state.meta_mgr.get_library_for_id(sys_id)
+                if library_code:
+                    from genizah_core import get_library_display
+                    library_name = get_library_display(library_code, short=False)
             except Exception:
                 pass
 
@@ -1677,6 +1694,7 @@ def create_parallels_page(initial_text: str = None):
 
             with ui.column().classes('w-full gap-3'):
                 metadata_items = [
+                    (tr('Library'), library_name or tr('Not available')),
                     (tr('Shelfmark'), shelfmark),
                     (tr('Title'), title or tr('Not available')),
                     (tr('System ID'), sys_id or tr('Not available')),
@@ -1725,6 +1743,7 @@ def create_parallels_page(initial_text: str = None):
         sys_id = None
         shelfmark = 'Unknown'
         title = ''
+        library_name = ''
 
         if raw_header and state.meta_mgr:
             try:
@@ -1734,8 +1753,18 @@ def create_parallels_page(initial_text: str = None):
                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                     shelfmark = shelf_temp or shelfmark
                     title = title_temp or ''
+                    # Get library name
+                    library_code = state.meta_mgr.get_library_for_id(sys_id)
+                    if library_code:
+                        from genizah_core import get_library_display
+                        library_name = get_library_display(library_code, short=False)
             except Exception:
                 pass
+
+        # Build display shelfmark with library name
+        display_shelfmark = shelfmark
+        if library_name:
+            display_shelfmark = f"{library_name}, {shelfmark}"
 
         # Format text snippets (escape HTML first to prevent XSS)
         ms_text = html.escape(item.get('text', '').replace('\n', ' '))
@@ -1760,7 +1789,7 @@ def create_parallels_page(initial_text: str = None):
                         ui.label(f"#{idx + 1}").classes('text-xs px-2 py-1 rounded').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
                         )
-                        ui.label(shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
+                        ui.label(display_shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
                     if title:
                         title_short = (title[:80] + '...') if len(title) > 80 else title
                         ui.label(title_short).classes('text-sm').style('color: var(--text-secondary); direction: rtl;')

@@ -20,6 +20,7 @@ class DocumentState:
         self.sys_id: str = ''
         self.shelfmark: str = ''
         self.title: str = ''
+        self.library_name: str = ''
         self.is_loading: bool = True
         self.error: Optional[str] = None
         self.show_image: bool = False
@@ -77,6 +78,7 @@ def create_document_page(uid: str):
                 )]
                 state.shelfmark = browse_result.shelfmark
                 state.title = browse_result.title
+                state.library_name = getattr(browse_result, 'library_name', '')
                 state.is_loading = False
                 return
 
@@ -240,8 +242,11 @@ def create_document_page(uid: str):
         with ui.card().classes('w-full p-4 mb-4'):
             with ui.row().classes('w-full items-start justify-between'):
                 with ui.column():
-                    # Shelfmark
-                    shelfmark_label = ui.label(state.shelfmark or f"ID: {state.sys_id or uid}").classes(
+                    # Shelfmark with library name
+                    display_shelfmark = state.shelfmark or f"ID: {state.sys_id or uid}"
+                    if state.library_name:
+                        display_shelfmark = f"{state.library_name}, {display_shelfmark}"
+                    shelfmark_label = ui.label(display_shelfmark).classes(
                         'text-xl font-bold text-blue-800'
                     )
 

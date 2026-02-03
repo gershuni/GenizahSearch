@@ -19,6 +19,7 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
 from web.components.project_tree import create_project_tree
 from web.auth_state import GlobalAuthState
+from genizah_core import get_library_display
 from typing import Optional
 import time
 import asyncio
@@ -312,7 +313,15 @@ def create_lists_page():
             h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
             shelfmark = item_data.get('shelfmark', 'Unknown')
-            ui.label(f"{tr('Item')}: {shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
+            # Get library name for display
+            sys_id = item_data.get('sys_id', item_id)
+            library_name = ''
+            if state.meta_mgr:
+                library_code = state.meta_mgr.get_library_for_id(sys_id)
+                if library_code:
+                    library_name = get_library_display(library_code, short=False)
+            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+            ui.label(f"{tr('Item')}: {display_shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
 
             note_input = ui.textarea(
                 label=tr('Notes'),
@@ -457,12 +466,24 @@ def create_lists_page():
                             shelfmark = shelf_temp or shelfmark
                             title = title or title_temp
 
+                    # Get library name for display
+                    library_name = ''
+                    if state.meta_mgr:
+                        library_code = state.meta_mgr.get_library_for_id(sys_id)
+                        if library_code:
+                            library_name = get_library_display(library_code, short=False)
+
+                    # Build display shelfmark with library name
+                    display_shelfmark = shelfmark
+                    if library_name:
+                        display_shelfmark = f"{library_name}, {shelfmark}"
+
                     with ui.card().classes('w-full p-4 hover:shadow-lg transition-shadow'):
                         with ui.row().classes('w-full justify-between items-start'):
                             # Main content
                             with ui.column().classes('flex-grow gap-2'):
-                                # Shelfmark - Changed to H3
-                                h3(shelfmark, classes='text-lg font-bold text-primary')
+                                # Shelfmark with library name
+                                h3(display_shelfmark, classes='text-lg font-bold text-primary')
 
                                 # Title
                                 if title:

@@ -1442,8 +1442,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4'):
-                        # Shelfmark - H2
-                        h2(page.shelfmark or f"ID: {page.sys_id}", classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
+                        # Shelfmark with Library Name - H2
+                        display_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                        if page.library_name:
+                            display_shelfmark = f"{page.library_name}, {display_shelfmark}"
+                        h2(display_shelfmark, classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
 
                         # Oxford Part Label (e.g. [part 6])
                         if page.oxford_part_display:
