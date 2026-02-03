@@ -10,11 +10,22 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 - **RTL navigation arrows:** Fixed all directional icons (arrows, chevrons, skip buttons) that were reversed in Hebrew UI mode. Icons now correctly flip direction based on language setting.
 - **Removed directional icons from action buttons:** Removed `send` arrow icons from Submit/Share/Reply buttons and `arrow_forward` from Go button, as these looked incorrect in RTL mode.
+- **Missing title metadata in search results:** Fixed bug where title and other metadata wasn't displayed in search results. The `get_display_data()` method now uses proper fallback logic (CSV bank → NLI cache) matching the browse page behavior.
+- **Search panel auto-collapse:** Fixed scroll-based auto-collapse that wasn't working. Added proper class targeting for the results scroll area and improved JavaScript detection.
+- **Search panel collapse/expand visibility:** Fixed panels not showing/hiding properly by using explicit styles with `!important` flags.
+- **Advanced Options inside search panel:** Moved the Advanced Options expansion inside the collapsible search panel so it hides when the search bar collapses.
+- **Search results layout overflow:** Fixed text getting cut off when zooming or resizing window. Removed `max-width` restrictions and added proper flex wrapping and word-wrap styles.
+- **Removed Edit/Comment buttons from result cards:** Cleaned up search result cards by removing Edit and Send Comment buttons (still available in the detailed viewer).
+
+### Enhancements
+
+- **Full Text pane highlighting:** Added search term highlighting to the Full Text tab in search results, matching the highlighting in the Match pane.
 
 ### Files Changed
 
+- `genizah_core.py` - Fixed `get_display_data()` metadata fallback
+- `web/pages/search.py` - Search panel collapse, Advanced Options placement, result card layout, Full Text highlighting
 - `browse.py` - Page/shelfmark navigation, Go button, Back buttons, Submit buttons
-- `search.py` - Result dialog navigation, page browsing
 - `document.py` - Back button, page navigation
 - `home.py` - Start Search, Find Parallels, Browse, View All buttons
 - `discoveries.py` - Back buttons, Reply/Share buttons
