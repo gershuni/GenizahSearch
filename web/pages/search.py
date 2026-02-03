@@ -35,6 +35,8 @@ def create_search_page(initial_query: str = None):
             self.total_count = 0
             self.current_page_idx = 0  # For browse within viewer
             self.selected_indices = set()  # For bulk operations
+            self.is_panel_collapsed = False  # For collapsible search panel
+            self.last_scroll_top = 0  # For scroll-based auto-collapse
 
     search_state = SearchUIState()
 
@@ -65,120 +67,179 @@ def create_search_page(initial_query: str = None):
     # === UI Layout ===
     with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
 
-        # === Search Header Panel ===
-        with ui.card().classes('w-full p-6 rounded-none border-0 border-b').style(
-            'background: var(--bg-card); border-color: var(--border-light) !important;'
-        ):
-            # Main Search Row
-            with ui.row().classes('w-full items-end gap-4 flex-wrap'):
+        # === Search Header Panel (Collapsible) ===
+        search_panel_container = ui.column().classes('w-full gap-0 search-panel-container')
 
-                # Search Input (Main)
-                with ui.column().classes('flex-grow min-w-80 gap-1'):
-                    # Changed to H2 semantic label
-                    h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    query_input = ui.input(
-                        placeholder=tr('Enter Hebrew text to search'),
-                        value=initial_query or saved_query
-                    ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
-                    query_input.on('keydown.enter', lambda: execute_search())
+        with search_panel_container:
+            # --- Collapsed View (Hidden by default) ---
+            collapsed_panel = ui.card().classes(
+                'w-full px-4 py-2 rounded-none border-0 border-b search-panel-collapsed'
+            ).style(
+                'background: var(--bg-card); border-color: var(--border-light) !important; display: none;'
+            )
 
-                    # Save query on change
-                    def save_query():
-                        app.storage.user['search_query'] = query_input.value or ''
-                    query_input.on('blur', save_query)
+            with collapsed_panel:
+                with ui.row().classes('w-full items-center justify-between gap-3'):
+                    # Left: Query summary
+                    with ui.row().classes('items-center gap-3 flex-grow min-w-0'):
+                        ui.icon('search').classes('text-lg').style('color: var(--primary-600);')
+                        collapsed_query_label = ui.label('').classes(
+                            'text-sm font-medium truncate'
+                        ).style('color: var(--text-primary); direction: rtl; max-width: 300px;')
+                        collapsed_mode_badge = ui.badge('').props('outline').classes('text-xs')
 
-                # Mode Selector - includes variant levels when not using slider
-                with ui.column().classes('gap-1'):
-                    h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    # Right: Search button and expand
+                    with ui.row().classes('items-center gap-2 shrink-0'):
+                        collapsed_search_btn = ui.button(
+                            tr('Search'), icon='search', on_click=lambda: execute_search()
+                        ).classes('btn-primary h-8 px-4 text-sm')
 
-                    if use_slider:
-                        # Slider mode: single variants option, level controlled by slider
-                        mode_options = {
-                            'exact': tr('Exact') + ' (=)',
-                            'variants': tr('Variants') + ' (?)',
-                            'fuzzy': tr('Fuzzy') + ' (~)',
-                            'Regex': tr('Regex') + ' (/)',
-                            'Shelfmark': tr('Shelfmark') + ' (#)',
-                            'Title': tr('Title') + ' ($)',
-                        }
-                    else:
-                        # Preset mode: separate variant levels in dropdown
-                        mode_options = {
-                            'exact': tr('Exact') + ' (=)',
-                            'variants': tr('Variants Basic') + ' (?)',
-                            'variants_extended': tr('Variants Extended') + ' (??)',
-                            'variants_maximum': tr('Variants Maximum') + ' (???)',
-                            'fuzzy': tr('Fuzzy') + ' (~)',
-                            'Regex': tr('Regex') + ' (/)',
-                            'Shelfmark': tr('Shelfmark') + ' (#)',
-                            'Title': tr('Title') + ' ($)',
-                        }
+                        def expand_panel():
+                            search_state.is_panel_collapsed = False
+                            collapsed_panel.style('display: none;')
+                            expanded_panel.style('')
 
-                    mode_select = ui.select(
-                        mode_options,
-                        value=saved_mode
-                    ).classes('w-48').props('outlined dense')
+                        ui.button(
+                            icon='expand_more', on_click=expand_panel
+                        ).props('flat round dense size=sm').tooltip(tr('Expand search options'))
 
-                # Track current preset level based on mode
-                def get_level_from_mode(mode):
-                    """Get variant level from mode name."""
-                    if mode == 'variants_extended':
-                        return 70
-                    elif mode == 'variants_maximum':
-                        return 150
-                    elif mode == 'variants':
+            # --- Expanded View (Full panel) ---
+            expanded_panel = ui.card().classes(
+                'w-full p-6 rounded-none border-0 border-b search-panel-expanded'
+            ).style(
+                'background: var(--bg-card); border-color: var(--border-light) !important;'
+            )
+
+            with expanded_panel:
+                # Collapse toggle button (top-right corner)
+                with ui.row().classes('w-full justify-end mb-2'):
+                    def collapse_panel():
+                        search_state.is_panel_collapsed = True
+                        # Update collapsed view with current values
+                        query_val = query_input.value or ''
+                        collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
+                        mode_val = mode_select.value
+                        mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                                     'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                                     'Shelfmark': '#', 'Title': '$'}
+                        collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+                        expanded_panel.style('display: none;')
+                        collapsed_panel.style('')
+
+                    ui.button(
+                        icon='expand_less', on_click=collapse_panel
+                    ).props('flat round dense size=sm').tooltip(tr('Collapse search panel'))
+
+                # Main Search Row
+                with ui.row().classes('w-full items-end gap-4 flex-wrap'):
+
+                    # Search Input (Main)
+                    with ui.column().classes('flex-grow min-w-80 gap-1'):
+                        # Changed to H2 semantic label
+                        h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        query_input = ui.input(
+                            placeholder=tr('Enter Hebrew text to search'),
+                            value=initial_query or saved_query
+                        ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
+                        query_input.on('keydown.enter', lambda: execute_search())
+
+                        # Save query on change
+                        def save_query():
+                            app.storage.user['search_query'] = query_input.value or ''
+                        query_input.on('blur', save_query)
+
+                    # Mode Selector - includes variant levels when not using slider
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+
+                        if use_slider:
+                            # Slider mode: single variants option, level controlled by slider
+                            mode_options = {
+                                'exact': tr('Exact') + ' (=)',
+                                'variants': tr('Variants') + ' (?)',
+                                'fuzzy': tr('Fuzzy') + ' (~)',
+                                'Regex': tr('Regex') + ' (/)',
+                                'Shelfmark': tr('Shelfmark') + ' (#)',
+                                'Title': tr('Title') + ' ($)',
+                            }
+                        else:
+                            # Preset mode: separate variant levels in dropdown
+                            mode_options = {
+                                'exact': tr('Exact') + ' (=)',
+                                'variants': tr('Variants Basic') + ' (?)',
+                                'variants_extended': tr('Variants Extended') + ' (??)',
+                                'variants_maximum': tr('Variants Maximum') + ' (???)',
+                                'fuzzy': tr('Fuzzy') + ' (~)',
+                                'Regex': tr('Regex') + ' (/)',
+                                'Shelfmark': tr('Shelfmark') + ' (#)',
+                                'Title': tr('Title') + ' ($)',
+                            }
+
+                        mode_select = ui.select(
+                            mode_options,
+                            value=saved_mode
+                        ).classes('w-48').props('outlined dense')
+
+                    # Track current preset level based on mode
+                    def get_level_from_mode(mode):
+                        """Get variant level from mode name."""
+                        if mode == 'variants_extended':
+                            return 70
+                        elif mode == 'variants_maximum':
+                            return 150
+                        elif mode == 'variants':
+                            return 30
                         return 30
-                    return 30
 
-                raw_preset = saved_preset if saved_preset else get_level_from_mode(saved_mode)
-                current_preset = {'value': raw_preset}
+                    raw_preset = saved_preset if saved_preset else get_level_from_mode(saved_mode)
+                    current_preset = {'value': raw_preset}
 
-                # Create variables for elements (needed for callbacks)
-                variant_slider = None
-                max_changes_select = None
+                    # Create variables for elements (needed for callbacks)
+                    variant_slider = None
+                    max_changes_select = None
 
-                # Max Changes selector (visible for all variant modes in non-slider mode)
-                with ui.column().classes('gap-1') as max_changes_col:
-                    h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
-                    ui.tooltip(tr('Max character changes per word'))
+                    # Max Changes selector (visible for all variant modes in non-slider mode)
+                    with ui.column().classes('gap-1') as max_changes_col:
+                        h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
+                        ui.tooltip(tr('Max character changes per word'))
 
-                # Show max changes only for variant modes when not using slider
-                is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
-                max_changes_col.set_visibility(is_variant_mode and not use_slider)
+                    # Show max changes only for variant modes when not using slider
+                    is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
+                    max_changes_col.set_visibility(is_variant_mode and not use_slider)
 
-                def set_level(level_value):
-                    """Set variant level."""
-                    current_preset['value'] = level_value
-                    app.storage.user['search_preset'] = level_value
-                    if state.var_mgr:
-                        state.var_mgr.set_variant_level(level_value)
+                    def set_level(level_value):
+                        """Set variant level."""
+                        current_preset['value'] = level_value
+                        app.storage.user['search_preset'] = level_value
+                        if state.var_mgr:
+                            state.var_mgr.set_variant_level(level_value)
 
-                # Gap Control - restore from storage
-                with ui.column().classes('gap-1'):
-                    # Changed to H3 semantic label
-                    h3(tr('Gap'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                    gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props('outlined dense')
-                    ui.tooltip(tr('Gap description'))
+                    # Gap Control - restore from storage
+                    with ui.column().classes('gap-1'):
+                        # Changed to H3 semantic label
+                        h3(tr('Gap'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props('outlined dense')
+                        ui.tooltip(tr('Gap description'))
 
-                    def save_gap():
-                        app.storage.user['search_gap'] = int(gap_input.value or 0)
-                    gap_input.on('blur', save_gap)
+                        def save_gap():
+                            app.storage.user['search_gap'] = int(gap_input.value or 0)
+                        gap_input.on('blur', save_gap)
 
-                # Search/Stop Button Container - buttons swap in same position
-                with ui.column().classes('items-center gap-0'):
-                    # Search Button
-                    search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
-                        'btn-primary h-10 px-8'
-                    )
+                    # Search/Stop Button Container - buttons swap in same position
+                    with ui.column().classes('items-center gap-0'):
+                        # Search Button
+                        search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
+                            'btn-primary h-10 px-8'
+                        )
 
-                    # Stop Button (hidden by default) - replaces search button
-                    stop_btn = ui.button(
-                        tr('Stop'),
-                        icon='stop',
-                        on_click=lambda: cancel_search()
-                    ).classes('h-10 px-4').style('display: none;').props('outline color=red')
-                    stop_btn.tooltip(tr('Stops the search and shows partial results'))
+                        # Stop Button (hidden by default) - replaces search button
+                        stop_btn = ui.button(
+                            tr('Stop'),
+                            icon='stop',
+                            on_click=lambda: cancel_search()
+                        ).classes('h-10 px-4').style('display: none;').props('outline color=red')
+                        stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -344,6 +405,119 @@ def create_search_page(initial_query: str = None):
                     with ui.column().classes('w-full h-full items-center justify-center'):
                         ui.icon('menu_book').classes('text-6xl').style('color: var(--text-muted);')
                         ui.label(tr('Select a result to view')).classes('mt-4').style('color: var(--text-muted);')
+
+    # === Panel Toggle Functions ===
+
+    def toggle_search_panel():
+        """Toggle between collapsed and expanded search panel."""
+        if search_state.is_panel_collapsed:
+            # Expand
+            search_state.is_panel_collapsed = False
+            collapsed_panel.style('display: none;')
+            expanded_panel.style('')
+        else:
+            # Collapse
+            search_state.is_panel_collapsed = True
+            query_val = query_input.value or ''
+            collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
+            mode_val = mode_select.value
+            mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                         'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                         'Shelfmark': '#', 'Title': '$'}
+            collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+            expanded_panel.style('display: none;')
+            collapsed_panel.style('')
+
+    # === Keyboard Shortcut Handler ===
+
+    # Add keyboard shortcut for panel toggle (Escape to toggle, / to focus search)
+    ui.keyboard(on_key=lambda e: handle_keyboard_shortcut(e), ignore=['input', 'textarea'])
+
+    def handle_keyboard_shortcut(e):
+        """Handle keyboard shortcuts for search panel."""
+        if e.action.keydown:
+            if e.key == 'Escape':
+                toggle_search_panel()
+            elif e.key == '/' and not e.action.repeat:
+                # Focus search input and expand panel if collapsed
+                if search_state.is_panel_collapsed:
+                    search_state.is_panel_collapsed = False
+                    collapsed_panel.style('display: none;')
+                    expanded_panel.style('')
+                query_input.run_method('focus')
+
+    # === Auto-collapse on Scroll (Simplified Approach) ===
+    # Using a debounced scroll detection that only collapses - user manually expands
+    # This avoids complex bidirectional sync issues
+
+    scroll_collapse_enabled = {'value': True}  # Can be disabled during search
+
+    async def setup_scroll_collapse():
+        """Set up scroll-based auto-collapse using JavaScript."""
+        # Get a stable reference to the results container
+        collapsed_id = f'collapsed-{id(collapsed_panel)}'
+        expanded_id = f'expanded-{id(expanded_panel)}'
+        collapsed_panel.props(f'id="{collapsed_id}"')
+        expanded_panel.props(f'id="{expanded_id}"')
+
+        js_code = f'''
+        (function() {{
+            // Find the scroll area within the results container
+            const findScrollArea = () => {{
+                const splitter = document.querySelector('.search-splitter');
+                if (!splitter) return null;
+                const scrollArea = splitter.querySelector('.q-scrollarea__container');
+                return scrollArea;
+            }};
+
+            let attempts = 0;
+            const setupScroll = () => {{
+                const scrollArea = findScrollArea();
+                if (!scrollArea && attempts < 10) {{
+                    attempts++;
+                    setTimeout(setupScroll, 500);
+                    return;
+                }}
+                if (!scrollArea) return;
+
+                let lastScrollTop = 0;
+                let scrollThreshold = 80;
+                let collapseTimeout = null;
+
+                scrollArea.addEventListener('scroll', function() {{
+                    const currentScrollTop = scrollArea.scrollTop;
+                    const scrollDelta = currentScrollTop - lastScrollTop;
+
+                    // Clear any pending collapse
+                    if (collapseTimeout) {{
+                        clearTimeout(collapseTimeout);
+                        collapseTimeout = null;
+                    }}
+
+                    // Only collapse when scrolling down past threshold
+                    if (scrollDelta > scrollThreshold && currentScrollTop > 150) {{
+                        collapseTimeout = setTimeout(() => {{
+                            const expandedEl = document.getElementById('{expanded_id}');
+                            const collapsedEl = document.getElementById('{collapsed_id}');
+                            if (expandedEl && collapsedEl && expandedEl.style.display !== 'none') {{
+                                expandedEl.style.display = 'none';
+                                collapsedEl.style.display = '';
+                            }}
+                        }}, 150);  // Small delay to avoid jitter
+                    }}
+
+                    lastScrollTop = currentScrollTop;
+                }});
+            }};
+
+            // Start looking for scroll area
+            setTimeout(setupScroll, 500);
+        }})();
+        '''
+        await ui.run_javascript(js_code)
+
+    # Set up scroll handlers after a short delay
+    ui.timer(1.0, setup_scroll_collapse, once=True)
 
     # === Helper Functions ===
 
