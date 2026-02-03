@@ -933,7 +933,7 @@ def create_search_page(initial_query: str = None):
                                 ui.icon('insights').classes('text-sm')
                                 ui.label(f"{tr('Score')}: {score_pct}").classes('text-sm font-medium')
 
-                        # Navigation Buttons (RTL-aware: right arrow = previous, left arrow = next)
+                        # Navigation Buttons
                         def navigate_result(direction):
                             new_idx = index + direction
                             if 0 <= new_idx < len(search_state.results):
@@ -941,12 +941,12 @@ def create_search_page(initial_query: str = None):
                                 open_advanced_dialog(new_idx, search_state.results[new_idx])
 
                         ui.button(
-                            icon='chevron_right',
+                            icon='chevron_right' if is_rtl() else 'chevron_left',
                             on_click=lambda: navigate_result(-1)
                         ).props('flat round color=white').tooltip(tr('Previous')).set_enabled(index > 0)
 
                         ui.button(
-                            icon='chevron_left',
+                            icon='chevron_left' if is_rtl() else 'chevron_right',
                             on_click=lambda: navigate_result(1)
                         ).props('flat round color=white').tooltip(tr('Next')).set_enabled(index < len(search_state.results) - 1)
 
@@ -1262,10 +1262,9 @@ def create_search_page(initial_query: str = None):
                         with ui.row().classes('w-full items-center justify-center gap-4 mb-4 p-2 rounded').style(
                             'background: var(--bg-tertiary);'
                         ):
-                            # RTL: chevron_right = previous, chevron_left = next
-                            ui.button(icon='chevron_right', on_click=browse_prev).props('flat round').tooltip(tr('Previous'))
+                            ui.button(icon='chevron_right' if is_rtl() else 'chevron_left', on_click=browse_prev).props('flat round').tooltip(tr('Previous'))
                             page_label = ui.label(f"{tr('Page')} {search_state.current_page_idx}").style('color: var(--text-secondary);')
-                            ui.button(icon='chevron_left', on_click=browse_next).props('flat round').tooltip(tr('Next'))
+                            ui.button(icon='chevron_left' if is_rtl() else 'chevron_right', on_click=browse_next).props('flat round').tooltip(tr('Next'))
 
                     if full_text:
                         with ui.scroll_area().classes('w-full h-64'):

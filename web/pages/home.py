@@ -105,7 +105,7 @@ def create_page():
                             for mode in ['Exact', 'Variants', 'Regex']:
                                 ui.badge(tr(mode)).props('outline').classes('text-xs')
 
-                        ui.button(tr('Start Search'), icon='arrow_forward').classes('btn-primary mt-2').props('tabindex=-1')
+                        ui.button(tr('Start Search'), icon='arrow_back' if is_rtl() else 'arrow_forward').classes('btn-primary mt-2').props('tabindex=-1')
 
             # Parallels Card
             with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
@@ -130,7 +130,7 @@ def create_page():
                             ui.badge(tr('Lab Mode')).props('outline color=blue').classes('text-xs')
                             ui.badge(tr('Chunk Analysis')).props('outline color=blue').classes('text-xs')
 
-                        ui.button(tr('Find Parallels'), icon='arrow_forward').props('color=blue tabindex=-1').classes('mt-2')
+                        ui.button(tr('Find Parallels'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('color=blue tabindex=-1').classes('mt-2')
 
             # Browse Card
             with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
@@ -155,7 +155,7 @@ def create_page():
                             ui.badge(tr('Transcriptions')).props('outline color=amber').classes('text-xs')
                             ui.badge(tr('Images')).props('outline color=amber').classes('text-xs')
 
-                        ui.button(tr('Browse'), icon='arrow_forward').props('color=amber tabindex=-1').classes('mt-2')
+                        ui.button(tr('Browse'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('color=amber tabindex=-1').classes('mt-2')
 
         # === Secondary Actions Row ===
         with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):
@@ -220,7 +220,7 @@ def create_page():
             with ui.row().classes('w-full items-center justify-between mb-4'):
                 # Changed to H2
                 h2(tr('Recent Activity'), classes='text-lg font-bold', style='color: var(--text-primary);')
-                ui.button(tr('View All'), icon='arrow_forward').props('flat dense').on(
+                ui.button(tr('View All'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('flat dense').on(
                     'click', lambda: ui.navigate.to('/lists')
                 )
 

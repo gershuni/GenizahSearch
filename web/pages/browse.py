@@ -1397,7 +1397,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
                     ui.label(state.error).classes('text-red-600 mt-4 text-lg')
-                    ui.button(tr('Back'), icon='arrow_back', on_click=lambda: load_page()).classes('mt-4')
+                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: load_page()).classes('mt-4')
                 return
 
             if not state.current_page:
@@ -1436,7 +1436,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.row().classes('w-full items-center justify-between'):
                     # Prev Shelfmark Button
                     ui.button(
-                        icon='skip_previous',
+                        icon='skip_next' if is_rtl() else 'skip_previous',
                         on_click=lambda: navigate_shelfmark(-1)
                     ).props('flat round').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
@@ -1525,7 +1525,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Next Shelfmark Button
                     ui.button(
-                        icon='skip_next',
+                        icon='skip_previous' if is_rtl() else 'skip_next',
                         on_click=lambda: navigate_shelfmark(1)
                     ).props('flat round').style('color: white !important;').tooltip(tr('Next manuscript'))
 
@@ -1635,7 +1635,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Back to single page button
                         ui.button(
                             tr('Back to Page View'),
-                            icon='arrow_back',
+                            icon='arrow_forward' if is_rtl() else 'arrow_back',
                             on_click=toggle_view_all
                         ).props('flat dense color=green')
 
@@ -1741,10 +1741,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Navigation and controls
                         with ui.row().classes('items-center gap-2'):
-                            # Previous page button (left arrow < for going backwards)
+                            # Previous page button (arrow pointing back)
                             prev_disabled = page.current_idx <= 1
                             ui.button(
-                                icon='chevron_left',
+                                icon='chevron_right' if is_rtl() else 'chevron_left',
                                 on_click=lambda: load_page(direction=-1)
                             ).props(f'flat round dense {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
@@ -1772,10 +1772,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=handle_go_click
                             ).props('flat dense color=green')
 
-                            # Next page button (right arrow > for going forwards)
+                            # Next page button (arrow pointing forward)
                             next_disabled = page.current_idx >= page.total_pages
                             ui.button(
-                                icon='chevron_right',
+                                icon='chevron_left' if is_rtl() else 'chevron_right',
                                 on_click=lambda: load_page(direction=1)
                             ).props(f'flat round dense {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
@@ -1969,7 +1969,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='fullscreen', on_click=toggle_fullscreen_edit).props('flat round dense').tooltip(tr('Fullscreen Edit'))
                                     ui.button(tr('Cancel'), icon='close', on_click=cancel_edit).props('flat dense color=grey')
                                     ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
-                                    ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props('unelevated dense color=green')
+                                    ui.button(tr('Submit'), on_click=handle_submit_correction).props('unelevated dense color=green')
 
                             # Error Message Display
                             if state.error_message:
@@ -2078,7 +2078,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.row().classes('items-center gap-2'):
                                 # Save/Submit/Exit controls only
                                 ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
-                                ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props('unelevated dense color=green')
+                                ui.button(tr('Submit'), on_click=handle_submit_correction).props('unelevated dense color=green')
                                 ui.button(icon='fullscreen_exit', on_click=toggle_fullscreen_edit).props('flat round dense data-action="exit-fullscreen-edit"').tooltip(tr('Exit Fullscreen'))
 
                         # Content area: Image + Splitter + Text
@@ -2310,7 +2310,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Go button
                 ui.button(
                     tr('Go'),
-                    icon='arrow_forward',
                     on_click=do_search
                 ).props('color=green').classes('px-6')
 

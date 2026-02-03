@@ -407,7 +407,6 @@ def create_edit_text_dialog(
 
                     submit_btn = ui.button(
                         tr('Submit Correction'),
-                        icon='send',
                         on_click=save_and_submit
                     ).props('color=primary')
 

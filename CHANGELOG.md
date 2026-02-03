@@ -4,6 +4,26 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.3.1] - 2026-02-03
+
+### Bug Fixes
+
+- **RTL navigation arrows:** Fixed all directional icons (arrows, chevrons, skip buttons) that were reversed in Hebrew UI mode. Icons now correctly flip direction based on language setting.
+- **Removed directional icons from action buttons:** Removed `send` arrow icons from Submit/Share/Reply buttons and `arrow_forward` from Go button, as these looked incorrect in RTL mode.
+
+### Files Changed
+
+- `browse.py` - Page/shelfmark navigation, Go button, Back buttons, Submit buttons
+- `search.py` - Result dialog navigation, page browsing
+- `document.py` - Back button, page navigation
+- `home.py` - Start Search, Find Parallels, Browse, View All buttons
+- `discoveries.py` - Back buttons, Reply/Share buttons
+- `comment_dialog.py` - Back button, Submit button
+- `joins_panel.py` - Navigation indicator, Back button
+- `text_editor.py` - Submit Correction button
+
+---
+
 ## [5.3.0] - 2026-02-02
 
 ### New Feature: Cross-Paragraph Search

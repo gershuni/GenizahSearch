@@ -7,7 +7,7 @@ Uses the simplified pairwise joins model with connected components.
 """
 
 from nicegui import ui
-from web.translations import tr
+from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import get_fragment_joins, create_fragment_join, get_client
 from web.state import state
@@ -334,7 +334,7 @@ def create_joins_dialog(
                                             ui.badge(tr('Current')).props('color=green outline')
 
                                     if not is_current:
-                                        ui.icon('arrow_forward').classes('text-gray-400')
+                                        ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-gray-400')
 
                                 # Show relationship type if known
                                 rel_info = relationship_map.get(frag, {})
@@ -539,7 +539,7 @@ def show_add_join_form(
                                                         items = state.lists_mgr.get_items_in_list_sync(lid)
                                                         with lists_container:
                                                             # Back button
-                                                            ui.button(tr('Back'), icon='arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
+                                                            ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
                                                             ui.label(lname).classes('font-bold mb-2')
 
                                                             if items:

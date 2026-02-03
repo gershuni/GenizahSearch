@@ -12,7 +12,7 @@ Shows:
 import difflib
 import html
 from nicegui import ui, app, run
-from web.translations import tr
+from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import (
     get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
@@ -881,7 +881,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                                 inp.value = ''
                                                 do_load_responses()
 
-                                        ui.button(tr('Reply'), icon='send', on_click=do_submit_reply).props('dense color=primary').classes('self-end')
+                                        ui.button(tr('Reply'), on_click=do_submit_reply).props('dense color=primary').classes('self-end')
                                     else:
                                         ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
 
@@ -1032,7 +1032,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                     with ui.card().classes('w-96 p-4'):
                         with ui.row().classes('w-full items-center justify-between mb-3'):
                             if back_callback:
-                                ui.button(icon='arrow_back', on_click=back_callback).props('flat round dense')
+                                ui.button(icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=back_callback).props('flat round dense')
                             ui.label(title_text).classes('font-bold flex-grow')
                             ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
 
@@ -1361,7 +1361,7 @@ def create_new_discovery_dialog(on_success=None):
                             with ui.card().classes('w-96 p-4'):
                                 with ui.row().classes('w-full items-center justify-between mb-3'):
                                     if back_callback:
-                                        ui.button(icon='arrow_back', on_click=back_callback).props('flat round dense')
+                                        ui.button(icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=back_callback).props('flat round dense')
                                     ui.label(title_text).classes('font-bold flex-grow')
                                     ui.button(icon='close', on_click=doc_picker_dialog.close).props('flat round dense')
 
@@ -1557,7 +1557,7 @@ def create_new_discovery_dialog(on_success=None):
 
                 with ui.row().classes('w-full justify-end gap-2 mt-4'):
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
-                    ui.button(tr('Share'), icon='send', on_click=submit_discovery).props('color=primary')
+                    ui.button(tr('Share'), on_click=submit_discovery).props('color=primary')
 
     return dialog
 

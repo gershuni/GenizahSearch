@@ -13,7 +13,7 @@ Supports shelfmark mentions in format: [[shelfmark:T-S 8J6.1|id:123456]]
 import asyncio
 
 from nicegui import ui
-from web.translations import tr
+from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_comment
 from web.state import state
@@ -137,7 +137,7 @@ def create_comment_dialog(
                                                         items = state.lists_mgr.get_items_in_list_sync(lid)
                                                         with lists_container:
                                                             # Back button
-                                                            ui.button(tr('Back'), icon='arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
+                                                            ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=load_lists).props('flat dense size=sm').classes('mb-2')
                                                             ui.label(lname).classes('font-bold mb-2')
 
                                                             if items:
@@ -233,7 +233,7 @@ def create_comment_dialog(
                             else:
                                 on_submit()
 
-                submit_btn = ui.button(tr('Submit'), icon='send', on_click=submit_comment).props('color=primary')
+                submit_btn = ui.button(tr('Submit'), on_click=submit_comment).props('color=primary')
 
                 if not GlobalAuthState.is_logged_in():
                     submit_btn.props('disable')

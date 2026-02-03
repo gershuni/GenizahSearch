@@ -232,7 +232,7 @@ def create_document_page(uid: str):
         with ui.row().classes('w-full mb-4'):
             ui.button(
                 tr('Back'),
-                icon='arrow_back',
+                icon='arrow_forward' if is_rtl() else 'arrow_back',
                 on_click=lambda: ui.run_javascript('history.back()')
             ).props('flat')
 
