@@ -12,6 +12,132 @@ Add library/holding institution information to manuscript records throughout Gen
 
 ---
 
+## Risk Assessment and Mitigation
+
+### 1. Data Integrity & Parsing (High Risk)
+
+**Risk:** The `call_numbers` column is unstructured text with library names appearing in various positions. Regex-based extraction is fragile.
+
+**Mitigations:**
+1. **Strict Priority Order**: Apply detection rules in a fixed priority order. First match wins:
+   ```
+   1. Cambridge University Library (most records - ~128K)
+   2. Jewish Theological Seminary
+   3. National Library of Russia
+   4. Bodleian Libraries
+   5. University of Manchester
+   6. British Library
+   7. Alliance Israélite
+   8. Westminster College
+   9. Freer Gallery
+   10. Collection-based fallbacks (Mosseri, Gaster, etc.)
+   ```
+
+2. **Ambiguity Handling**: If a record mentions multiple libraries (e.g., "Cambridge" in a note about "Oxford"), the priority order ensures consistent assignment.
+
+3. **Validation Step**: The extraction script will report:
+   - Records with no match (manual review required)
+   - Records that match multiple patterns (for verification)
+   - Distribution statistics for sanity checking
+
+4. **Interactive Confirmation**: Script prompts user for each library/collection pattern before applying.
+
+### 2. Backward Compatibility (Critical)
+
+**Risk:** If a user updates the app but keeps an old `libraries.csv` without the `library_code` column, the app could crash.
+
+**Mitigations:**
+1. **Graceful Degradation in CSV Loading** (`genizah_core.py`):
+   ```python
+   def _load_csv_bank(self):
+       # ...
+       # Check if library_code column exists
+       has_library_col = len(row) > 3 and row[3].strip() != ''
+
+       self.csv_bank[sys_id] = {
+           'shelfmark': shelf,
+           'title': title,
+           'oxford_part_id': oxford_part_id,
+           'library_code': row[3].strip() if has_library_col else '',  # Safe fallback
+       }
+   ```
+
+2. **Safe Display Functions**:
+   ```python
+   def get_library_for_id(self, sys_id: str) -> str:
+       entry = self.csv_bank.get(sys_id, {})
+       return entry.get('library_code', '')  # Returns '' if missing
+   ```
+
+3. **UI Handling**: All UI code checks for empty library_code before displaying:
+   ```python
+   if library_code:
+       # Show library badge/column
+   # Otherwise, simply don't show it
+   ```
+
+### 3. Desktop Column Indexing (Medium Risk)
+
+**Risk:** `genizah_app.py` uses `self.COL_*` constants for column indices. Inserting a new column requires updating all subsequent indices.
+
+**Current Constants (line 5637-5644):**
+```python
+self.COL_CHECKBOX = 0
+self.COL_ACTIONS = 1
+self.COL_SYS_ID = 2
+self.COL_SHELF = 3
+self.COL_IMG = 4
+self.COL_TITLE = 5
+self.COL_SNIPPET = 6
+self.COL_SRC = 7
+```
+
+**Mitigations:**
+1. **Add New Constant**: Insert `self.COL_LIBRARY = 4` and shift subsequent constants:
+   ```python
+   self.COL_SHELF = 3
+   self.COL_LIBRARY = 4   # NEW
+   self.COL_IMG = 5       # Was 4
+   self.COL_TITLE = 6     # Was 5
+   self.COL_SNIPPET = 7   # Was 6
+   self.COL_SRC = 8       # Was 7
+   ```
+
+2. **Update setColumnCount**: Change from 8 to 9 (line 5646)
+
+3. **Audit All References**: Search for all uses of these constants and verify correctness:
+   - Line 5654: filter_columns
+   - Line 5663-5670: setColumnWidth calls
+   - Line 10783-10845: setItem calls
+   - Line 10889: setColumnHidden
+   - Line 10917-10921: column iteration
+
+4. **Lists Table**: The lists_items_table (line 7553-7569) uses hardcoded indices 0-4. These need updating if Library column is added to lists.
+
+5. **Composition Tree**: `comp_tree` (QTreeWidget) uses hardcoded column numbers (0-3). Adding Library would require updating all `_set_comp_tree_text` calls.
+
+### 4. Search & Filtering Limitations
+
+**Risk:** Without rebuilding the Tantivy index, users cannot search `library:Cambridge` - they can only see library badges in results.
+
+**Clarification:**
+- **Phase 6 (Tantivy) is enhancement-only**, not required for core functionality
+- Users see library info in all displays and exports without index rebuild
+- Index rebuild enables: `library:CUL` searches, future filtering UI
+- Document this clearly in release notes
+
+### 5. Web UI Visual Clutter
+
+**Risk:** Adding `[CUL]` badge to every search result may clutter the view, especially on mobile.
+
+**Mitigations:**
+1. **Compact Badge Design**: Use subtle styling (muted color, small font)
+2. **Responsive Hiding**: On mobile (<768px), hide badge text and show only on tap/tooltip
+3. **Position**: Place before shelfmark, not as separate element, to minimize visual weight
+4. **Example**: `CUL T-S 12.123` (no brackets, just prefix with space)
+
+---
+
 ## Objectives
 
 ### Primary Goals
@@ -456,16 +582,20 @@ doc.add_text("library", library_code)
 
 ## File Change Summary
 
-| File | Changes | Risk |
-|------|---------|------|
-| `libraries.csv` | Add `library_code` column | Low - additive |
-| `scripts/extract_library_codes.py` | New file | None |
-| `genizah_core.py` | Constants, csv_bank, get_display_data, new methods | Medium |
-| `web/services.py` | Add fields to dataclasses | Low |
-| `web/pages/search.py` | Display library badge | Low |
-| `web/pages/browse.py` | Display full library name | Low |
-| `web/export_service.py` | Add library column | Low |
-| `genizah_app.py` | Table columns, ResultDialog, exports | Medium |
+| File | Changes | Risk | Notes |
+|------|---------|------|-------|
+| `libraries.csv` | Add `library_code` column (col 3) | Low | Additive; backup original first |
+| `scripts/extract_library_codes.py` | New file | None | Interactive extraction script |
+| `genizah_core.py` | Constants, csv_bank loading, get_display_data, new methods | Medium | Must handle missing column gracefully |
+| `web/services.py` | Add fields to dataclasses | Low | Default values ensure compatibility |
+| `web/pages/search.py` | Display library badge | Low | Check for empty before display |
+| `web/pages/browse.py` | Display full library name | Low | Check for empty before display |
+| `web/export_service.py` | Add library column | Low | Column position matters for user workflows |
+| `genizah_app.py` (search table) | Add COL_LIBRARY, shift indices | **High** | Audit all COL_* references (lines 5637-5670, 10783-10889) |
+| `genizah_app.py` (comp_tree) | Add library column to tree | Medium | Hardcoded columns 0-3 (lines 13545-13620) |
+| `genizah_app.py` (lists table) | Add library column | Medium | Hardcoded columns 0-4 (lines 7553-7569) |
+| `genizah_app.py` (exports) | Add library to all formats | Low | Multiple export functions |
+| `genizah_app.py` (ResultDialog) | CSV-first library display | Low | Line 3632 - already has MARC fallback |
 
 ---
 
@@ -514,6 +644,9 @@ doc.add_text("library", library_code)
 - [ ] Export list to Excel - verify Library column
 - [ ] Export to Word - verify Library field
 - [ ] Test with old index (no library field) - should work
+- [ ] **Backward Compatibility**: Test with old libraries.csv (no library_code column)
+- [ ] **Mobile**: Check web search results on narrow viewport (<768px)
+- [ ] **Column Alignment**: Verify all desktop table columns are correctly aligned after Library addition
 
 ### Sample Records for Testing
 
@@ -524,6 +657,28 @@ doc.add_text("library", library_code)
 | `990000085850205171` | CUL | T-S shelfmark |
 | (JTS record) | JTS | ENA shelfmark |
 | (Bodleian record) | Oxford | MS heb shelfmark |
+
+---
+
+## Pre-Implementation Checklist
+
+Before starting code changes, verify:
+
+### Data Preparation
+- [ ] Backup `libraries.csv` to `libraries.csv.bak`
+- [ ] Run extraction script in dry-run mode
+- [ ] Review unmatched records
+- [ ] Confirm library code mappings with user
+
+### Desktop App Audit (genizah_app.py)
+- [ ] Document all `COL_*` constant usages (grep `COL_`)
+- [ ] Document all hardcoded column indices in lists_items_table
+- [ ] Document all hardcoded column indices in comp_tree
+- [ ] Identify all export functions that need updating
+
+### Web App Audit
+- [ ] Verify dataclass changes won't break existing code
+- [ ] Check mobile CSS responsiveness approach
 
 ---
 
