@@ -10,8 +10,8 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 Every manuscript record now shows which library or collection holds the original document.
 
-- **Coverage:** 99.65% of ~217,000 records have library codes assigned
-- **Libraries identified:** Cambridge (CUL), JTS, National Library of Russia, Bodleian (Oxford), Manchester, British Library, Alliance Israélite, and 20+ more
+- **Coverage:** 99.99% of ~217,000 records have library codes assigned (only 14 records with missing source data)
+- **Libraries identified:** 70+ institutions including Cambridge (CUL), JTS, National Library of Russia, Bodleian (Oxford), Manchester, British Library, Alliance Israélite, Library of Geneva, Senckenberg (Frankfurt), Schocken Institute, and many more
 
 #### Web Application
 - Library badge with code (e.g., "CUL") displayed in search results with full name tooltip
