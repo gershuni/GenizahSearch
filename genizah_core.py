@@ -68,10 +68,25 @@ STANDARD_HEBREW_DIST = {
     'צ': 0.8, 'ץ': 0.4, 'ף': 0.3, 'ך': 0.3, 'ם': 2.5, 'ן': 1.0
 }
 
+# Hebrew nikud (vowel marks) Unicode range: U+0591-U+05C7 (excluding letters U+05D0-U+05EA)
+NIKUD_PATTERN = re.compile(r'[\u0591-\u05CF]')
+
+def strip_nikud(text: str) -> str:
+    """Remove Hebrew vowel marks (nikud) and cantillation marks from text.
+
+    Keeps only Hebrew letters (א-ת) and other characters.
+    """
+    if not text:
+        return text
+    return NIKUD_PATTERN.sub('', text)
+
+
 def encode_word_shmidman(word: str, freq_map=None) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
     if freq_map is None:
         freq_map = HEBREW_FREQ
+    # Strip nikud (vowel marks) before encoding
+    word = strip_nikud(word)
     letters = []
     for idx, ch in enumerate(word):
         if ch in freq_map:
@@ -1078,10 +1093,14 @@ class LabEngine:
 
         # (Part 1: Tokenization) - track positions for preserving formatting
         token_matches = list(re.finditer(r"[\w\u0590-\u05FF\']+", full_text))
-        tokens = [m.group() for m in token_matches]
+        tokens = [strip_nikud(m.group()) for m in token_matches]  # Strip nikud from tokens
         token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
         c_size = chunk_size if chunk_size else 15
         step = max(1, int(c_size * 0.5))
+
+        # Strip nikud from filter text for consistent matching
+        if filter_text:
+            filter_text = strip_nikud(filter_text)
 
         # Get boundary stats (includes parsed boundaries to avoid double parsing)
         boundary_stats = get_boundary_stats(full_text, boundary_delimiter, c_size, min_delimiter_distance)
@@ -4546,8 +4565,12 @@ class SearchEngine:
         """
         # 1. Tokenize original text - track positions for preserving formatting
         token_matches = list(re.finditer(Config.WORD_TOKEN_PATTERN, full_text))
-        tokens = [m.group() for m in token_matches]
+        tokens = [strip_nikud(m.group()) for m in token_matches]  # Strip nikud from tokens
         token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
+
+        # Strip nikud from filter text for consistent matching
+        if filter_text:
+            filter_text = strip_nikud(filter_text)
 
         if len(tokens) < chunk_size:
             return {'main': [], 'filtered': [], 'boundary_stats': None}
