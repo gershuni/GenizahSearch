@@ -68,10 +68,25 @@ STANDARD_HEBREW_DIST = {
     'צ': 0.8, 'ץ': 0.4, 'ף': 0.3, 'ך': 0.3, 'ם': 2.5, 'ן': 1.0
 }
 
+# Hebrew nikud (vowel marks) Unicode range: U+0591-U+05C7 (excluding letters U+05D0-U+05EA)
+NIKUD_PATTERN = re.compile(r'[\u0591-\u05CF]')
+
+def strip_nikud(text: str) -> str:
+    """Remove Hebrew vowel marks (nikud) and cantillation marks from text.
+
+    Keeps only Hebrew letters (א-ת) and other characters.
+    """
+    if not text:
+        return text
+    return NIKUD_PATTERN.sub('', text)
+
+
 def encode_word_shmidman(word: str, freq_map=None) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
     if freq_map is None:
         freq_map = HEBREW_FREQ
+    # Strip nikud (vowel marks) before encoding
+    word = strip_nikud(word)
     letters = []
     for idx, ch in enumerate(word):
         if ch in freq_map:
