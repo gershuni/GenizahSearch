@@ -6915,6 +6915,10 @@ class GenizahGUI(QMainWindow):
             # Header
             f.write(self._get_credit_header())
             f.write(f"System ID: {self.current_browse_sid}\n")
+            # Add Library field
+            library_code = self.meta_mgr.get_library_for_id(self.current_browse_sid)
+            library_name = get_library_display(library_code, short=False) if library_code else ''
+            f.write(f"Library: {library_name}\n")
             f.write(f"Shelfmark: {meta.get('shelfmark', 'Unknown')}\n")
             f.write(f"Title: {meta.get('title', 'Unknown')}\n")
             f.write("="*50 + "\n\n")
@@ -14983,12 +14987,15 @@ class GenizahGUI(QMainWindow):
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
 
-        # Add library prefix to shelfmark
+        # Keep original shelf for input field, create display version with library prefix
+        original_shelf = shelf
+        display_shelf = shelf
+        library_code = None
         if shelf and self.current_browse_sid:
             library_code = self.meta_mgr.get_library_for_id(self.current_browse_sid)
             if library_code:
                 library = get_library_display(library_code, short=False)
-                shelf = f"{library} | {shelf}"
+                display_shelf = f"{library} | {shelf}"
 
         # Add Oxford Part info if available - integrated into shelfmark
         part_id = self.current_browse_part_id
@@ -15004,7 +15011,7 @@ class GenizahGUI(QMainWindow):
             part_num = part_id.split('/')[-1] if '/' in part_id else ''
 
             # Build combined shelfmark: "MS heb. b. 10/79 (part 43: fols. 79-82)"
-            shelf_with_part = f"{shelf}"
+            shelf_with_part = f"{display_shelf}"
             if part_num:
                 shelf_with_part += f" (part {part_num}"
                 if len(folio_range) == 2:
@@ -15025,7 +15032,7 @@ class GenizahGUI(QMainWindow):
                 info_text += f"<br/>{truncated}"
                 if full: tooltip_parts.append(full)
         else:
-            info_text = f"<b>{shelf}</b>"
+            info_text = f"<b>{display_shelf}</b>"
             tooltip_parts = []
             if title:
                 truncated, full = _truncate_title(title)
@@ -15034,8 +15041,8 @@ class GenizahGUI(QMainWindow):
 
         self.browse_info_lbl.setText(info_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
-        if shelf:
-            self.browse_shelf_input.setText(shelf)
+        if original_shelf:
+            self.browse_shelf_input.setText(original_shelf)
 
         # Update Combo
         total = pd['total_pages']
