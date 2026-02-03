@@ -3690,16 +3690,12 @@ class MetadataManager:
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
 
-        meta = self.nli_cache.get(sys_id, {'shelfmark': '', 'title': ''})
-        shelfmark = meta.get('shelfmark')
-
-        # Fallback to CSV bank if not in cache (get_meta_for_id handles this priority)
-        if not shelfmark or shelfmark == "Unknown":
-             shelfmark, _ = self.get_meta_for_id(sys_id)
+        # Use get_meta_for_id which has proper fallback logic (CSV > NLI Cache)
+        shelfmark, title = self.get_meta_for_id(sys_id)
 
         return {
             'shelfmark': shelfmark or f"ID: {sys_id}",
-            'title': meta.get('title', ''),
+            'title': title,
             'img': p_num,
             'source': src_label,
             'id': sys_id
