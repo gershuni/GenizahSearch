@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-02-02
+> Last updated: 2026-02-03
 
 This directory contains all project documentation, organized by category.
 
@@ -10,6 +10,7 @@ This directory contains all project documentation, organized by category.
 
 | Need to... | Read this |
 |------------|-----------|
+| **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
 | Find a specific file | [FILE_INDEX.md](FILE_INDEX.md) |
@@ -24,6 +25,7 @@ This directory contains all project documentation, organized by category.
 ```
 docs/
 ├── DOCUMENTATION_INDEX.md    # This file
+├── OPEN_ISSUES.md            # Active issue tracker (AI agents MUST update)
 ├── FILE_INDEX.md             # Complete file listing for the project
 ├── CODE_INDEX.md             # Code structure and architecture
 ├── PRE_LAUNCH_CHECKLIST.md   # Pre-launch tasks checklist
@@ -157,4 +159,4 @@ These files remain in the project root:
 
 ---
 
-*Last reorganization: 2026-02-01*
+*Last reorganization: 2026-02-03*

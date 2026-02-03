@@ -127,6 +127,22 @@ pytest tests/
 
 **AI agents working on this codebase should keep documentation updated.**
 
+### Open Issues Tracker (REQUIRED)
+
+**`docs/OPEN_ISSUES.md`** is the central issue tracking document. **You MUST maintain it:**
+
+1. **At session start:** Read `docs/OPEN_ISSUES.md` to understand current status
+2. **After fixing any bug:** Mark the issue as `✅ Fixed (YYYY-MM-DD)` with date
+3. **After finding new bugs:** Add to appropriate section with `❌ Open` status
+4. **At session end:** Update the "Last Updated" timestamp and summary counts
+
+```markdown
+# Format for marking issues complete:
+| Issue | ❌ Open | Notes |
+↓
+| Issue | ✅ Fixed (2026-02-03) | Notes |
+```
+
 ### When to Update Docs
 
 | If you change... | Update these docs |
