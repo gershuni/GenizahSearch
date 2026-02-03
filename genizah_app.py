@@ -9163,9 +9163,17 @@ class GenizahGUI(QMainWindow):
         corrections_header.addWidget(btn_refresh_corrections)
         corrections_layout.addLayout(corrections_header)
 
-        # Sub-tabs for My Corrections vs All Corrections
+        # Sub-tabs for All Corrections vs My Corrections
         corrections_tabs = QTabWidget()
         corrections_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # All Corrections list (shown first)
+        self.all_corrections_list = QListWidget()
+        self.all_corrections_list.setAlternatingRowColors(True)
+        self.all_corrections_list.itemDoubleClicked.connect(self._on_correction_clicked)
+        self.all_corrections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_corrections_list.customContextMenuRequested.connect(lambda pos: self._corrections_context_menu(pos, self.all_corrections_list))
+        corrections_tabs.addTab(self.all_corrections_list, tr("All Corrections"))
 
         # My Corrections list
         self.my_corrections_list = QListWidget()
@@ -9174,14 +9182,6 @@ class GenizahGUI(QMainWindow):
         self.my_corrections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.my_corrections_list.customContextMenuRequested.connect(lambda pos: self._corrections_context_menu(pos, self.my_corrections_list))
         corrections_tabs.addTab(self.my_corrections_list, tr("My Corrections"))
-
-        # All Corrections list
-        self.all_corrections_list = QListWidget()
-        self.all_corrections_list.setAlternatingRowColors(True)
-        self.all_corrections_list.itemDoubleClicked.connect(self._on_correction_clicked)
-        self.all_corrections_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.all_corrections_list.customContextMenuRequested.connect(lambda pos: self._corrections_context_menu(pos, self.all_corrections_list))
-        corrections_tabs.addTab(self.all_corrections_list, tr("All Corrections"))
 
         corrections_layout.addWidget(corrections_tabs)
 
@@ -9206,9 +9206,17 @@ class GenizahGUI(QMainWindow):
         comments_header.addWidget(btn_refresh_comments)
         comments_layout.addLayout(comments_header)
 
-        # Sub-tabs for My Comments vs All Comments (like Corrections)
+        # Sub-tabs for All Comments vs My Comments (like Corrections)
         comments_tabs = QTabWidget()
         comments_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # All Comments list (shown first)
+        self.all_comments_list = QListWidget()
+        self.all_comments_list.setAlternatingRowColors(True)
+        self.all_comments_list.itemDoubleClicked.connect(self._on_comment_clicked)
+        self.all_comments_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_comments_list.customContextMenuRequested.connect(lambda pos: self._comments_context_menu(pos, self.all_comments_list))
+        comments_tabs.addTab(self.all_comments_list, tr("All Comments"))
 
         # My Comments list
         self.my_comments_list = QListWidget()
@@ -9217,14 +9225,6 @@ class GenizahGUI(QMainWindow):
         self.my_comments_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.my_comments_list.customContextMenuRequested.connect(lambda pos: self._comments_context_menu(pos, self.my_comments_list))
         comments_tabs.addTab(self.my_comments_list, tr("My Comments"))
-
-        # All Comments list
-        self.all_comments_list = QListWidget()
-        self.all_comments_list.setAlternatingRowColors(True)
-        self.all_comments_list.itemDoubleClicked.connect(self._on_comment_clicked)
-        self.all_comments_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.all_comments_list.customContextMenuRequested.connect(lambda pos: self._comments_context_menu(pos, self.all_comments_list))
-        comments_tabs.addTab(self.all_comments_list, tr("All Comments"))
 
         comments_layout.addWidget(comments_tabs)
 
@@ -9249,9 +9249,17 @@ class GenizahGUI(QMainWindow):
         joins_header.addWidget(btn_refresh_joins)
         joins_layout.addLayout(joins_header)
 
-        # Sub-tabs for My Joins vs All Joins
+        # Sub-tabs for All Joins vs My Joins
         joins_tabs = QTabWidget()
         joins_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        # All Joins list (shown first)
+        self.all_joins_list = QListWidget()
+        self.all_joins_list.setAlternatingRowColors(True)
+        self.all_joins_list.itemDoubleClicked.connect(self._on_join_clicked)
+        self.all_joins_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.all_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.all_joins_list))
+        joins_tabs.addTab(self.all_joins_list, tr("All Joins"))
 
         # My Joins list
         self.my_joins_list = QListWidget()
@@ -9260,14 +9268,6 @@ class GenizahGUI(QMainWindow):
         self.my_joins_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.my_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.my_joins_list))
         joins_tabs.addTab(self.my_joins_list, tr("My Joins"))
-
-        # All Joins list
-        self.all_joins_list = QListWidget()
-        self.all_joins_list.setAlternatingRowColors(True)
-        self.all_joins_list.itemDoubleClicked.connect(self._on_join_clicked)
-        self.all_joins_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.all_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.all_joins_list))
-        joins_tabs.addTab(self.all_joins_list, tr("All Joins"))
 
         joins_layout.addWidget(joins_tabs)
 

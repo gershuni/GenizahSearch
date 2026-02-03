@@ -971,6 +971,15 @@ class SupabaseCorrectionsClient:
             response = client.table('discoveries').select('*').eq('id', discovery_id).single().execute()
 
             if response.data:
+                # Fetch profile data for the author
+                user_id = response.data.get('user_id')
+                if user_id:
+                    try:
+                        profile_response = client.table('profiles').select('id, full_name, username').eq('id', user_id).single().execute()
+                        if profile_response.data:
+                            response.data['profiles'] = profile_response.data
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch profile for discovery: {e}")
                 return self._parse_discovery(response.data)
             return None
 
@@ -1004,7 +1013,29 @@ class SupabaseCorrectionsClient:
             offset = (page - 1) * page_size
             response = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
 
-            discoveries = [self._parse_discovery(d) for d in response.data or []]
+            # Fetch profile data for authors (to get full_name and username)
+            discovery_data = response.data or []
+            user_ids = set()
+            for d in discovery_data:
+                user_id = d.get('user_id')
+                if user_id:
+                    user_ids.add(user_id)
+
+            profiles_map = {}
+            if user_ids:
+                try:
+                    profiles_response = client.table('profiles').select('id, full_name, username').in_('id', list(user_ids)).execute()
+                    profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+                except Exception as e:
+                    logger.warning(f"Failed to fetch profiles for discoveries: {e}")
+
+            # Merge profile data into discovery dicts
+            for d in discovery_data:
+                user_id = d.get('user_id')
+                if user_id and user_id in profiles_map:
+                    d['profiles'] = profiles_map[user_id]
+
+            discoveries = [self._parse_discovery(d) for d in discovery_data]
             total = response.count or len(discoveries)
             return discoveries, total
 
