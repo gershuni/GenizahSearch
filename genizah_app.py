@@ -15115,7 +15115,18 @@ class GenizahGUI(QMainWindow):
 
     def on_index_error(self, err):
         self.index_progress.setFormat(tr("Indexing failed"))
-        QMessageBox.critical(self, tr("Indexing Error"), str(err))
+
+        # Check for file locking error (caused by file managers, antivirus, etc.)
+        err_lower = str(err).lower()
+        if "index writer" in err_lower or "io:error" in err_lower or "worker thread" in err_lower:
+            msg = tr("Indexing failed - another program is blocking file access.") + "\n\n" + \
+                  tr("Solution:") + "\n" + \
+                  tr("• Close file manager programs (Total Commander, Directory Opus, etc.)") + "\n" + \
+                  tr("• Close Windows Explorer windows open to the application folder") + "\n" + \
+                  tr("• Try again")
+            QMessageBox.critical(self, tr("Indexing Error"), msg)
+        else:
+            QMessageBox.critical(self, tr("Indexing Error"), str(err))
 
     def closeEvent(self, event):
         # Ensure worker threads are stopped before the window is destroyed
