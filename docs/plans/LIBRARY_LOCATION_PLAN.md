@@ -1,7 +1,7 @@
 # Library Location Implementation Plan
 
 **Date:** 2026-02-03
-**Status:** Planning
+**Status:** ✅ Completed
 **Priority:** High
 
 ---
@@ -147,11 +147,11 @@ self.COL_SRC = 7
 4. **Search Enhancement**: Enable library-based filtering via Tantivy index (with backward compatibility)
 
 ### Success Criteria
-- [ ] All ~217,000 records have a `library_code` value
-- [ ] Library displays correctly in web search results (abbreviated) and browse pages (full name)
-- [ ] Library column appears in desktop search results and joins tables
-- [ ] All export formats include library information
-- [ ] Existing users without rebuilt index can still use the application
+- [x] All ~217,000 records have a `library_code` value (99.65% coverage)
+- [x] Library displays correctly in web search results (abbreviated) and browse pages (full name)
+- [x] Library column appears in desktop search results and joins tables
+- [x] All export formats include library information
+- [x] Existing users without rebuilt index can still use the application
 
 ---
 

@@ -96,8 +96,8 @@ def create_search_page(initial_query: str = None):
 
                         def expand_panel():
                             search_state.is_panel_collapsed = False
-                            collapsed_panel.style('display: none;')
-                            expanded_panel.style('')
+                            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
                         ui.button(
                             icon='expand_more', on_click=expand_panel
@@ -123,8 +123,8 @@ def create_search_page(initial_query: str = None):
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                                      'Shelfmark': '#', 'Title': '$'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
-                        expanded_panel.style('display: none;')
-                        collapsed_panel.style('')
+                        expanded_panel.style('display: none !important;')
+                        collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
                     ui.button(
                         icon='expand_less', on_click=collapse_panel
@@ -241,6 +241,31 @@ def create_search_page(initial_query: str = None):
                         ).classes('h-10 px-4').style('display: none;').props('outline color=red')
                         stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
+                # Advanced Options Row (inside expanded_panel, collapses with search bar)
+                with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
+                    'background: var(--bg-tertiary); border-radius: 12px;'
+                ):
+                    with ui.column().classes('w-full p-4 gap-6'):
+                        # Options Grid
+                        with ui.row().classes('w-full gap-8 flex-wrap'):
+                            # Lab Mode Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
+                                with ui.row().classes('gap-2 items-center'):
+                                    deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
+                                    ui.icon('info').classes('text-sm cursor-help').tooltip(
+                                        tr('Searches more candidates for comprehensive results')
+                                    )
+
+                            # NOT Filter Section
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                not_filter = ui.input(
+                                    placeholder=tr('Words to exclude (space separated)')
+                                ).classes('w-full').props('outlined dense').style('direction: rtl;')
+                                ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
+
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
             if use_slider:
@@ -286,33 +311,6 @@ def create_search_page(initial_query: str = None):
                 app.storage.user['search_mode'] = mode
 
             mode_select.on('update:model-value', on_mode_change)
-
-            # Advanced Options Row
-            with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
-                'background: var(--bg-tertiary); border-radius: 12px;'
-            ):
-                with ui.column().classes('w-full p-4 gap-6'):
-
-                    # Options Grid
-                    with ui.row().classes('w-full gap-8 flex-wrap'):
-
-                        # Lab Mode Section
-                        with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Lab Mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            lab_mode = ui.switch(tr('Enable Lab Mode algorithms'))
-                            with ui.row().classes('gap-2 items-center'):
-                                deep_scan = ui.checkbox(tr('Deep Scan')).classes('text-sm')
-                                ui.icon('info').classes('text-sm cursor-help').tooltip(
-                                    tr('Searches more candidates for comprehensive results')
-                                )
-
-                        # NOT Filter Section
-                        with ui.column().classes('gap-3 min-w-64'):
-                            ui.label(tr('Exclude Words')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            not_filter = ui.input(
-                                placeholder=tr('Words to exclude (space separated)')
-                            ).classes('w-full').props('outlined dense').style('direction: rtl;')
-                            ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
 
         # === Progress Bar ===
         progress_container = ui.column().classes('w-full')
@@ -393,7 +391,7 @@ def create_search_page(initial_query: str = None):
                             'flat dense size=sm'
                         )
 
-                results_container = ui.scroll_area().classes('w-full flex-grow').style(
+                results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
                     'background: var(--bg-secondary);'
                 )
 
@@ -413,8 +411,8 @@ def create_search_page(initial_query: str = None):
         if search_state.is_panel_collapsed:
             # Expand
             search_state.is_panel_collapsed = False
-            collapsed_panel.style('display: none;')
-            expanded_panel.style('')
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
         else:
             # Collapse
             search_state.is_panel_collapsed = True
@@ -425,8 +423,8 @@ def create_search_page(initial_query: str = None):
                          'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                          'Shelfmark': '#', 'Title': '$'}
             collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
-            expanded_panel.style('display: none;')
-            collapsed_panel.style('')
+            expanded_panel.style('display: none !important;')
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
     # === Keyboard Shortcut Handler ===
 
@@ -442,8 +440,8 @@ def create_search_page(initial_query: str = None):
                 # Focus search input and expand panel if collapsed
                 if search_state.is_panel_collapsed:
                     search_state.is_panel_collapsed = False
-                    collapsed_panel.style('display: none;')
-                    expanded_panel.style('')
+                    collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                    expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
                 query_input.run_method('focus')
 
     # === Auto-collapse on Scroll (Simplified Approach) ===
@@ -462,26 +460,38 @@ def create_search_page(initial_query: str = None):
 
         js_code = f'''
         (function() {{
-            // Find the scroll area within the results container
+            // Find the scroll area - look for the results scroll area's inner container
             const findScrollArea = () => {{
+                // First try the direct class we added
+                const scrollAreaEl = document.querySelector('.results-scroll-area');
+                if (scrollAreaEl) {{
+                    // Quasar scroll-area has an inner container that actually scrolls
+                    const inner = scrollAreaEl.querySelector('.q-scrollarea__container');
+                    if (inner) return inner;
+                    // Fallback: the element itself might be scrollable
+                    return scrollAreaEl;
+                }}
+                // Fallback to old method
                 const splitter = document.querySelector('.search-splitter');
                 if (!splitter) return null;
-                const scrollArea = splitter.querySelector('.q-scrollarea__container');
-                return scrollArea;
+                return splitter.querySelector('.q-scrollarea__container');
             }};
 
             let attempts = 0;
             const setupScroll = () => {{
                 const scrollArea = findScrollArea();
-                if (!scrollArea && attempts < 10) {{
+                if (!scrollArea && attempts < 20) {{
                     attempts++;
-                    setTimeout(setupScroll, 500);
+                    setTimeout(setupScroll, 300);
                     return;
                 }}
-                if (!scrollArea) return;
+                if (!scrollArea) {{
+                    console.warn('Could not find scroll area for auto-collapse');
+                    return;
+                }}
 
                 let lastScrollTop = 0;
-                let scrollThreshold = 80;
+                let scrollThreshold = 50;  // Lower threshold for easier triggering
                 let collapseTimeout = null;
 
                 scrollArea.addEventListener('scroll', function() {{
@@ -495,23 +505,28 @@ def create_search_page(initial_query: str = None):
                     }}
 
                     // Only collapse when scrolling down past threshold
-                    if (scrollDelta > scrollThreshold && currentScrollTop > 150) {{
+                    if (scrollDelta > scrollThreshold && currentScrollTop > 100) {{
                         collapseTimeout = setTimeout(() => {{
                             const expandedEl = document.getElementById('{expanded_id}');
                             const collapsedEl = document.getElementById('{collapsed_id}');
-                            if (expandedEl && collapsedEl && expandedEl.style.display !== 'none') {{
-                                expandedEl.style.display = 'none';
-                                collapsedEl.style.display = '';
+                            if (expandedEl && collapsedEl) {{
+                                const isVisible = !expandedEl.style.display || !expandedEl.style.display.includes('none');
+                                if (isVisible) {{
+                                    expandedEl.style.cssText = 'display: none !important;';
+                                    collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
+                                }}
                             }}
-                        }}, 150);  // Small delay to avoid jitter
+                        }}, 100);
                     }}
 
                     lastScrollTop = currentScrollTop;
                 }});
+
+                console.log('Scroll auto-collapse setup complete');
             }};
 
             // Start looking for scroll area
-            setTimeout(setupScroll, 500);
+            setTimeout(setupScroll, 300);
         }})();
         '''
         await ui.run_javascript(js_code)
@@ -983,22 +998,22 @@ def create_search_page(initial_query: str = None):
                     ).props('dense')
 
                 # Main content (clickable)
-                with ui.column().classes('flex-grow gap-1').on('click', lambda r=result: load_in_viewer(r)):
-                    with ui.row().classes('items-center gap-2'):
-                        ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded').style(
+                with ui.column().classes('flex-grow min-w-0 gap-1').on('click', lambda r=result: load_in_viewer(r)):
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                        ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
                         )
                         # Library badge (if available)
                         if library_code:
                             from genizah_core import get_library_display, LIBRARY_CODES
                             full_name = get_library_display(library_code, short=False)
-                            ui.label(library_code).classes('text-xs px-2 py-0.5 rounded').style(
+                            ui.label(library_code).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--primary-100); color: var(--primary-700);'
                             ).tooltip(full_name)
-                        ui.label(shelfmark).classes('font-bold').style('color: var(--primary-700);')
+                        ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
-                        ui.label(title_short).classes('text-xs truncate').style(
-                            'color: var(--text-tertiary); max-width: 300px; direction: rtl;'
+                        ui.label(title_short).classes('text-xs').style(
+                            'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
                         )
 
                 # Actions
@@ -1016,26 +1031,6 @@ def create_search_page(initial_query: str = None):
                         icon='star_border',
                         on_click=make_star_handler(result)
                     ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
-
-                    # Edit and Comment buttons
-                    sys_id = display.get('id', '')
-                    full_text = result.get('full_text', '')
-                    page_num = int(display.get('img', '1'))
-                    if full_text and sys_id:
-                        from web.components import create_edit_button, create_comment_button
-                        create_edit_button(
-                            document_id=sys_id,
-                            page_number=page_num,
-                            original_text=full_text,
-                            shelfmark=shelfmark,
-                            size='sm'
-                        )
-                        create_comment_button(
-                            document_id=sys_id,
-                            page_number=page_num,
-                            shelfmark=shelfmark,
-                            size='sm'
-                        )
 
             # Snippet
             if snippet:
@@ -1416,6 +1411,7 @@ def create_search_page(initial_query: str = None):
         snippet = result.get('snippet', '')
         full_text = result.get('full_text', '')
         library_code = display.get('library_code', '')
+        highlight_pattern = result.get('highlight_pattern', '')
 
         # Initialize page index from display.img if not already set
         try:
@@ -1472,10 +1468,31 @@ def create_search_page(initial_query: str = None):
                             ui.button(icon='chevron_left' if is_rtl() else 'chevron_right', on_click=browse_next).props('flat round').tooltip(tr('Next'))
 
                     if full_text:
+                        # Apply highlighting to full text using the highlight pattern
+                        def highlight_full_text(text, pattern):
+                            if not text:
+                                return ""
+                            escaped = html.escape(text)
+                            if pattern:
+                                try:
+                                    # Apply case-insensitive highlighting
+                                    highlighted = re.sub(
+                                        f'({pattern})',
+                                        r'<span class="highlight-match">\1</span>',
+                                        escaped,
+                                        flags=re.IGNORECASE
+                                    )
+                                    return highlighted
+                                except re.error:
+                                    return escaped
+                            return escaped
+
+                        full_text_html = highlight_full_text(full_text, highlight_pattern)
                         with ui.scroll_area().classes('w-full h-64'):
-                            ui.label(full_text).classes('whitespace-pre-wrap').style(
+                            with ui.element('div').classes('whitespace-pre-wrap').style(
                                 'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
-                            )
+                            ):
+                                ui.html(full_text_html, sanitize=False)
                     else:
                         ui.label(tr('Full text not available')).style('color: var(--text-muted);')
 
