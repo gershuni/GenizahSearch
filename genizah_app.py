@@ -14987,15 +14987,16 @@ class GenizahGUI(QMainWindow):
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
 
-        # Keep original shelf for input field, create display version with library prefix
-        original_shelf = shelf
-        display_shelf = shelf
+        # Create display versions: full name for info label, short code for input field
+        display_shelf = shelf  # For info label (full library name)
+        input_shelf = shelf    # For input field (short library code)
         library_code = None
         if shelf and self.current_browse_sid:
             library_code = self.meta_mgr.get_library_for_id(self.current_browse_sid)
             if library_code:
-                library = get_library_display(library_code, short=False)
-                display_shelf = f"{library} | {shelf}"
+                library_full = get_library_display(library_code, short=False)
+                display_shelf = f"{library_full} | {shelf}"
+                input_shelf = f"{library_code} {shelf}"
 
         # Add Oxford Part info if available - integrated into shelfmark
         part_id = self.current_browse_part_id
@@ -15041,8 +15042,8 @@ class GenizahGUI(QMainWindow):
 
         self.browse_info_lbl.setText(info_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
-        if original_shelf:
-            self.browse_shelf_input.setText(original_shelf)
+        if input_shelf:
+            self.browse_shelf_input.setText(input_shelf)
 
         # Update Combo
         total = pd['total_pages']
