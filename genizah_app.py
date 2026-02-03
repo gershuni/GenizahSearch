@@ -6832,11 +6832,20 @@ class GenizahGUI(QMainWindow):
 
             # Get shelfmark for first folio in part
             shelf = ""
+            first_sid = None
             if self.current_browse_part_folios:
                 first_sid = self.current_browse_part_folios[0]
                 shelf, _ = self.meta_mgr.get_meta_for_id(first_sid)
             if not shelf or shelf == "Unknown":
                 shelf = part_id
+
+            # Add library prefix
+            sid_for_lib = first_sid or self.current_browse_sid
+            if sid_for_lib:
+                library_code = self.meta_mgr.get_library_for_id(sid_for_lib)
+                if library_code:
+                    library = get_library_display(library_code, short=False)
+                    shelf = f"{library} | {shelf}"
 
             # Extract part number from part_id (e.g., "MS. Heb. b. 10/43" -> "43")
             part_num = part_id.split('/')[-1] if '/' in part_id else ''
@@ -11596,7 +11605,13 @@ class GenizahGUI(QMainWindow):
 
         derived_fl_id = fl_id or self._extract_fl_id(res)
         if shelfmark:
-            info_text = f"<b>{shelfmark}</b>"
+            # Add library prefix to shelfmark
+            display_shelf = shelfmark
+            library_code = self.meta_mgr.get_library_for_id(sid)
+            if library_code:
+                library = get_library_display(library_code, short=False)
+                display_shelf = f"{library} | {shelfmark}"
+            info_text = f"<b>{display_shelf}</b>"
             if title:
                 info_text += f"<br>{title}"
             self.browse_info_lbl.setText(info_text)
@@ -14805,6 +14820,12 @@ class GenizahGUI(QMainWindow):
         # Get our CSV title if available (for Hebrew)
         shelf, csv_title = self.meta_mgr.get_meta_for_id(target_sid)
 
+        # Add library prefix
+        library_code = self.meta_mgr.get_library_for_id(target_sid)
+        if library_code:
+            library = get_library_display(library_code, short=False)
+            shelf = f"{library} | {shelf}" if shelf else library
+
         # Format folio range info
         folio_range = part_meta.get('folio_range', []) if part_meta else []
 
@@ -14961,6 +14982,13 @@ class GenizahGUI(QMainWindow):
         
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
+
+        # Add library prefix to shelfmark
+        if shelf and self.current_browse_sid:
+            library_code = self.meta_mgr.get_library_for_id(self.current_browse_sid)
+            if library_code:
+                library = get_library_display(library_code, short=False)
+                shelf = f"{library} | {shelf}"
 
         # Add Oxford Part info if available - integrated into shelfmark
         part_id = self.current_browse_part_id
