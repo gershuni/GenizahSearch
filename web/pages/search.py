@@ -96,8 +96,8 @@ def create_search_page(initial_query: str = None):
 
                         def expand_panel():
                             search_state.is_panel_collapsed = False
-                            collapsed_panel.style('display: none;')
-                            expanded_panel.style('')
+                            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
                         ui.button(
                             icon='expand_more', on_click=expand_panel
@@ -123,8 +123,8 @@ def create_search_page(initial_query: str = None):
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                                      'Shelfmark': '#', 'Title': '$'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
-                        expanded_panel.style('display: none;')
-                        collapsed_panel.style('')
+                        expanded_panel.style('display: none !important;')
+                        collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
                     ui.button(
                         icon='expand_less', on_click=collapse_panel
@@ -413,8 +413,8 @@ def create_search_page(initial_query: str = None):
         if search_state.is_panel_collapsed:
             # Expand
             search_state.is_panel_collapsed = False
-            collapsed_panel.style('display: none;')
-            expanded_panel.style('')
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+            expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
         else:
             # Collapse
             search_state.is_panel_collapsed = True
@@ -425,8 +425,8 @@ def create_search_page(initial_query: str = None):
                          'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                          'Shelfmark': '#', 'Title': '$'}
             collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
-            expanded_panel.style('display: none;')
-            collapsed_panel.style('')
+            expanded_panel.style('display: none !important;')
+            collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
     # === Keyboard Shortcut Handler ===
 
@@ -442,8 +442,8 @@ def create_search_page(initial_query: str = None):
                 # Focus search input and expand panel if collapsed
                 if search_state.is_panel_collapsed:
                     search_state.is_panel_collapsed = False
-                    collapsed_panel.style('display: none;')
-                    expanded_panel.style('')
+                    collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: none !important;')
+                    expanded_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
                 query_input.run_method('focus')
 
     # === Auto-collapse on Scroll (Simplified Approach) ===
@@ -511,9 +511,9 @@ def create_search_page(initial_query: str = None):
                         collapseTimeout = setTimeout(() => {{
                             const expandedEl = document.getElementById('{expanded_id}');
                             const collapsedEl = document.getElementById('{collapsed_id}');
-                            if (expandedEl && collapsedEl && expandedEl.style.display !== 'none') {{
-                                expandedEl.style.display = 'none';
-                                collapsedEl.style.display = '';
+                            if (expandedEl && collapsedEl && !expandedEl.style.display.includes('none')) {{
+                                expandedEl.style.cssText = 'display: none !important;';
+                                collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
                             }}
                         }}, 100);  // Faster response
                     }}
