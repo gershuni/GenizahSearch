@@ -393,7 +393,7 @@ def create_search_page(initial_query: str = None):
                             'flat dense size=sm'
                         )
 
-                results_container = ui.scroll_area().classes('w-full flex-grow').style(
+                results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
                     'background: var(--bg-secondary);'
                 )
 
@@ -462,26 +462,38 @@ def create_search_page(initial_query: str = None):
 
         js_code = f'''
         (function() {{
-            // Find the scroll area within the results container
+            // Find the scroll area - look for the results scroll area's inner container
             const findScrollArea = () => {{
+                // First try the direct class we added
+                const scrollAreaEl = document.querySelector('.results-scroll-area');
+                if (scrollAreaEl) {{
+                    // Quasar scroll-area has an inner container that actually scrolls
+                    const inner = scrollAreaEl.querySelector('.q-scrollarea__container');
+                    if (inner) return inner;
+                    // Fallback: the element itself might be scrollable
+                    return scrollAreaEl;
+                }}
+                // Fallback to old method
                 const splitter = document.querySelector('.search-splitter');
                 if (!splitter) return null;
-                const scrollArea = splitter.querySelector('.q-scrollarea__container');
-                return scrollArea;
+                return splitter.querySelector('.q-scrollarea__container');
             }};
 
             let attempts = 0;
             const setupScroll = () => {{
                 const scrollArea = findScrollArea();
-                if (!scrollArea && attempts < 10) {{
+                if (!scrollArea && attempts < 20) {{
                     attempts++;
-                    setTimeout(setupScroll, 500);
+                    setTimeout(setupScroll, 300);
                     return;
                 }}
-                if (!scrollArea) return;
+                if (!scrollArea) {{
+                    console.warn('Could not find scroll area for auto-collapse');
+                    return;
+                }}
 
                 let lastScrollTop = 0;
-                let scrollThreshold = 80;
+                let scrollThreshold = 50;  // Lower threshold for easier triggering
                 let collapseTimeout = null;
 
                 scrollArea.addEventListener('scroll', function() {{
@@ -495,7 +507,7 @@ def create_search_page(initial_query: str = None):
                     }}
 
                     // Only collapse when scrolling down past threshold
-                    if (scrollDelta > scrollThreshold && currentScrollTop > 150) {{
+                    if (scrollDelta > scrollThreshold && currentScrollTop > 100) {{
                         collapseTimeout = setTimeout(() => {{
                             const expandedEl = document.getElementById('{expanded_id}');
                             const collapsedEl = document.getElementById('{collapsed_id}');
@@ -503,15 +515,17 @@ def create_search_page(initial_query: str = None):
                                 expandedEl.style.display = 'none';
                                 collapsedEl.style.display = '';
                             }}
-                        }}, 150);  // Small delay to avoid jitter
+                        }}, 100);  // Faster response
                     }}
 
                     lastScrollTop = currentScrollTop;
                 }});
+
+                console.log('Scroll auto-collapse setup complete');
             }};
 
             // Start looking for scroll area
-            setTimeout(setupScroll, 500);
+            setTimeout(setupScroll, 300);
         }})();
         '''
         await ui.run_javascript(js_code)
