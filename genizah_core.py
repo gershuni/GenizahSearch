@@ -4320,6 +4320,8 @@ class SearchEngine:
                     'highlight_pattern': None
                 })
 
+            # Sort results by shelfmark using natural sort (like desktop app)
+            results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
             return results
         
         if mode == 'Regex': terms = [query_str]
