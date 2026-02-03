@@ -997,15 +997,15 @@ def create_search_page(initial_query: str = None):
                     ).props('dense')
 
                 # Main content (clickable)
-                with ui.column().classes('flex-grow gap-1').on('click', lambda r=result: load_in_viewer(r)):
-                    with ui.row().classes('items-center gap-2'):
-                        ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded').style(
+                with ui.column().classes('flex-grow min-w-0 gap-1').on('click', lambda r=result: load_in_viewer(r)):
+                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                        ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
                         )
-                        ui.label(shelfmark).classes('font-bold').style('color: var(--primary-700);')
+                        ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
-                        ui.label(title_short).classes('text-xs truncate').style(
-                            'color: var(--text-tertiary); max-width: 300px; direction: rtl;'
+                        ui.label(title_short).classes('text-xs').style(
+                            'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
                         )
 
                 # Actions
@@ -1023,26 +1023,6 @@ def create_search_page(initial_query: str = None):
                         icon='star_border',
                         on_click=make_star_handler(result)
                     ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
-
-                    # Edit and Comment buttons
-                    sys_id = display.get('id', '')
-                    full_text = result.get('full_text', '')
-                    page_num = int(display.get('img', '1'))
-                    if full_text and sys_id:
-                        from web.components import create_edit_button, create_comment_button
-                        create_edit_button(
-                            document_id=sys_id,
-                            page_number=page_num,
-                            original_text=full_text,
-                            shelfmark=shelfmark,
-                            size='sm'
-                        )
-                        create_comment_button(
-                            document_id=sys_id,
-                            page_number=page_num,
-                            shelfmark=shelfmark,
-                            size='sm'
-                        )
 
             # Snippet
             if snippet:
