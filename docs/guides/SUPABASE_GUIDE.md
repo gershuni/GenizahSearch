@@ -323,6 +323,202 @@ WITH CHECK (auth.uid() = author_id);
 - Users can only see their own private comments
 - Users can CRUD their own comments
 
+### Detailed Policy SQL Examples
+
+```sql
+-- ============================================
+-- profiles table
+-- ============================================
+-- Anyone can read profiles (public info)
+CREATE POLICY "Public profiles are viewable by everyone"
+ON profiles FOR SELECT
+TO public
+USING (true);
+
+-- Users can update only their own profile
+CREATE POLICY "Users can update own profile"
+ON profiles FOR UPDATE
+TO authenticated
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id);
+
+-- ============================================
+-- user_lists table
+-- ============================================
+-- Users can only see their own lists
+CREATE POLICY "Users can view own lists"
+ON user_lists FOR SELECT
+TO authenticated
+USING (auth.uid() = user_id);
+
+-- Users can create lists for themselves
+CREATE POLICY "Users can create own lists"
+ON user_lists FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+-- Users can update their own lists
+CREATE POLICY "Users can update own lists"
+ON user_lists FOR UPDATE
+TO authenticated
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+-- Users can delete their own lists
+CREATE POLICY "Users can delete own lists"
+ON user_lists FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);
+
+-- ============================================
+-- corrections table
+-- ============================================
+-- Anyone can read approved corrections
+CREATE POLICY "Approved corrections are public"
+ON corrections FOR SELECT
+TO public
+USING (status = 'approved');
+
+-- Users can read their own corrections (any status)
+CREATE POLICY "Users can view own corrections"
+ON corrections FOR SELECT
+TO authenticated
+USING (auth.uid() = author_id);
+
+-- Users can create corrections
+CREATE POLICY "Users can create corrections"
+ON corrections FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = author_id);
+
+-- ============================================
+-- comments table
+-- ============================================
+-- Public comments are readable by all
+CREATE POLICY "Public comments are viewable"
+ON comments FOR SELECT
+TO public
+USING (is_public = true);
+
+-- Users can see their own private comments
+CREATE POLICY "Users can view own comments"
+ON comments FOR SELECT
+TO authenticated
+USING (auth.uid() = author_id);
+
+-- Users can create comments
+CREATE POLICY "Users can create comments"
+ON comments FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = author_id);
+
+-- ============================================
+-- discoveries table
+-- ============================================
+-- Non-hidden discoveries are public
+CREATE POLICY "Visible discoveries are public"
+ON discoveries FOR SELECT
+TO public
+USING (is_hidden = false);
+
+-- Users can create discoveries
+CREATE POLICY "Users can create discoveries"
+ON discoveries FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+-- Users can update their own discoveries
+CREATE POLICY "Users can update own discoveries"
+ON discoveries FOR UPDATE
+TO authenticated
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+-- ============================================
+-- fragment_joins table
+-- ============================================
+-- All joins are publicly readable
+CREATE POLICY "Joins are public"
+ON fragment_joins FOR SELECT
+TO public
+USING (true);
+
+-- Users can create joins
+CREATE POLICY "Users can create joins"
+ON fragment_joins FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+-- Users can delete their own joins
+CREATE POLICY "Users can delete own joins"
+ON fragment_joins FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);
+```
+
+---
+
+## OAuth Authentication
+
+### OAuth Callback Flow
+
+GenizahSearch uses Supabase OAuth for Google login. The OAuth flow works as follows:
+
+1. **User clicks "Login with Google"**
+   - Frontend calls `get_oauth_url('google', redirect_url)`
+   - Supabase generates OAuth URL with state parameter
+
+2. **User authenticates with Google**
+   - Redirected to Google login
+   - After consent, Google redirects back to Supabase
+
+3. **Supabase redirects to callback**
+   - URL: `https://genizahsearch.com/auth/callback`
+   - Tokens in URL hash: `#access_token=...&refresh_token=...` (implicit flow)
+
+4. **Frontend extracts tokens**
+   - JavaScript reads URL hash fragment
+   - Tokens are passed to `set_session_from_url(access_token, refresh_token)`
+
+### Token Extraction (Implicit Flow)
+
+```javascript
+// The callback page extracts tokens from URL hash
+const hash = window.location.hash.substring(1);
+const params = new URLSearchParams(hash);
+const access_token = params.get('access_token');
+const refresh_token = params.get('refresh_token');
+```
+
+### Setting Up Session
+
+```python
+from web.supabase_client import set_session_from_url
+
+# After extracting tokens from URL
+result = set_session_from_url(access_token, refresh_token)
+if result.get('success'):
+    user = result['user']
+    session = result['session']
+```
+
+### Environment Variables for OAuth
+
+```bash
+# Required in .env for OAuth redirect
+SITE_URL=https://genizahsearch.com
+
+# Supabase Dashboard → Authentication → URL Configuration
+# Site URL: https://genizahsearch.com
+# Redirect URLs: https://genizahsearch.com/auth/callback
+```
+
+### Desktop App Users & OAuth
+
+Users who sign up via Google OAuth don't have a password set. To use the desktop app:
+1. Go to Profile → Set Password, or
+2. Use "Forgot Password" to receive a password reset email
+
 ---
 
 ## Supabase Dashboard

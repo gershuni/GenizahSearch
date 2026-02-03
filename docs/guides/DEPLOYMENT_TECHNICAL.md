@@ -381,6 +381,52 @@ sudo certbot certificates
 - SSL/TLS: Encryption enabled
 - Database: No direct access (Supabase handles it)
 
+### Cloudflare Configuration
+
+GenizahSearch uses Cloudflare for DNS, SSL termination, and DDoS protection.
+
+**Dashboard:** https://dash.cloudflare.com
+
+#### Proxy Settings
+- Proxy status: **Proxied** (orange cloud) for genizahsearch.com
+- SSL/TLS mode: **Full (strict)**
+- Always Use HTTPS: **Enabled**
+- Minimum TLS Version: **TLS 1.2**
+
+#### Rate Limiting (Optional)
+
+Rate limiting can be configured in Cloudflare Dashboard → Security → WAF → Rate limiting rules.
+
+**Recommended settings for API protection:**
+
+| Rule | Path | Rate | Action |
+|------|------|------|--------|
+| Auth endpoints | `/auth/*` | 10 req/min | Challenge |
+| API calls | `/api/*` | 100 req/min | Challenge |
+| General | `*` | 1000 req/min | Block |
+
+**To create a rate limiting rule:**
+1. Go to Security → WAF → Rate limiting rules
+2. Click "Create rule"
+3. Set matching criteria (URI path, HTTP method)
+4. Set rate threshold (requests per period)
+5. Choose action (Block, Challenge, Log)
+
+**Note:** Basic DDoS protection is automatic with Cloudflare proxy enabled.
+No explicit rate limiting rules are currently configured - Cloudflare's
+default DDoS protection handles most abuse cases.
+
+#### Caching
+
+Cloudflare caching is configured to:
+- Cache static assets (CSS, JS, images)
+- Bypass cache for dynamic content
+- Respect `Cache-Control` headers from origin
+
+**Page Rules (if needed):**
+- `*genizahsearch.com/static/*` → Cache Level: Standard
+- `*genizahsearch.com/api/*` → Cache Level: Bypass
+
 ---
 
 ## Cockpit Server Management

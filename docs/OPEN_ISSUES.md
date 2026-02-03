@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03 (documentation cleanup, version updates, archive moves)
+> **Last Updated:** 2026-02-03 (documentation gaps addressed)
 > **Status:** Active working document
 
 ---
@@ -49,11 +49,12 @@ Move to "Completed Issues" section at bottom with date
 | P1 Critical Bugs | 0 | 1 | 1 |
 | P2 Medium Bugs | 2 | 4 | 6 |
 | P3 Low Priority | 4 | 0 | 4 |
-| Documentation Issues | 1 | 7 | 8 |
+| Documentation Issues | 0 | 8 | 8 |
+| Documentation Gaps | 0 | 4 | 4 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **11** | **20** | **31** |
+| **Total** | **10** | **25** | **35** |
 
 ---
 
@@ -159,10 +160,10 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Topic | Status | Notes |
 |-------|--------|-------|
-| **Supabase RLS policies detail** | ❌ Missing | Not documented in `SUPABASE_GUIDE.md` |
-| **OAuth callback handling** | ❌ Missing | Implicit flow token extraction undocumented |
-| **Cloudflare rate limiting config** | ❌ Missing | Mentioned but no config documented |
-| **Desktop Supabase client** | ❌ Missing | `supabase_corrections_client.py` not in code index |
+| **Supabase RLS policies detail** | ✅ Fixed (2026-02-03) | Added detailed policy SQL examples to `SUPABASE_GUIDE.md` |
+| **OAuth callback handling** | ✅ Fixed (2026-02-03) | Documented implicit flow and token extraction in `SUPABASE_GUIDE.md` |
+| **Cloudflare rate limiting config** | ✅ Fixed (2026-02-03) | Added configuration guide to `DEPLOYMENT_TECHNICAL.md` |
+| **Desktop Supabase client** | ✅ Fixed (2026-02-03) | Added `supabase_corrections_client.py` to `CODE_INDEX.md` |
 
 ---
 
@@ -193,6 +194,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-03 | Fixed all 4 documentation gaps: RLS policies, OAuth callback, Cloudflare config, Desktop client | Claude |
 | 2026-02-03 | Moved 4 completed plans to archive (Supabase, Library Location, Boundary Search) | Claude |
 | 2026-02-03 | Updated README.md version to 5.4, fixed download reference to V5.4.1 | Claude |
 | 2026-02-03 | Updated PRE_LAUNCH_CHECKLIST.md version to 5.4 | Claude |
