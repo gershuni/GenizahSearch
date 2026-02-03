@@ -37,12 +37,35 @@ Parallels search now automatically strips Hebrew vowel marks (nikud) and cantill
 - Also strips nikud from filter/exclude text for consistent filtering
 - New function: `strip_nikud()` in `genizah_core.py`
 
+### Enhancement: Advanced View Dialog Improvements
+
+The Advanced View dialog (opened from search results) has been significantly enhanced:
+
+#### Navigation & Viewing
+- **Fixed navigation bug**: Results now navigate in-place without closing/reopening the dialog
+- **Page navigation**: Browse pages within a manuscript using prev/next buttons
+- **IIIF image viewer**: Side-by-side image panel with zoom, rotate, and pan controls
+- **Fullscreen mode**: Distraction-free view with compact navigation bar
+- **Image toggle**: Show/hide image panel as needed
+
+#### Inline Editing
+- Edit text directly in the Advanced View (same as Browse page)
+- Save drafts, submit for review, or publish immediately (for editors/admins)
+- Visual feedback: orange border for unsaved changes, green for saved
+- Notes field for correction comments
+
+#### Bug Fixes
+- Fixed "Unknown" author display in version selector (now joins profiles table)
+- Fixed script tag error in edit dialog (NiceGUI compatibility)
+
 ### Files Changed
 - `genizah_core.py` - Core library functions, CSV loading, nikud removal
 - `genizah_app.py` - Desktop table columns
 - `web/services.py` - Data classes and page retrieval
-- `web/pages/search.py` - Library badge display
+- `web/pages/search.py` - Library badge display, Advanced View dialog enhancements
 - `web/pages/browse.py` - Metadata panel
+- `web/components/text_editor.py` - Fixed script tag in HTML
+- `web/supabase_client.py` - Added profiles join to get_corrections()
 - `web/export_service.py` - Export functions
 - `libraries.csv` - Added library_code column
 
