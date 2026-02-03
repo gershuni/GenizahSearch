@@ -1475,6 +1475,11 @@ TRANSLATIONS = {
     "Showing first 200 results. Refine search.": "מציג 200 תוצאות ראשונות. דייק את החיפוש.",
     "Browse Full Manuscript": "עיין בכתב יד מלא",
     "Done. Found {} results.": "סיים. נמצאו {} תוצאות.",
+
+    # Collapsible Search Panel
+    "Expand search options": "הרחב אפשרויות חיפוש",
+    "Collapse search panel": "כווץ את חלונית החיפוש",
+    "Enter search query": "הזן שאילתת חיפוש",
     "Filter by lists": "סינון לפי רשימות",
     "All results": "כל התוצאות",
     "Favorites only": "מועדפים בלבד",

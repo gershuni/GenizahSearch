@@ -986,6 +986,93 @@ COMMON_STYLES = '''
         .result-mobile-expand { display: none !important; }
     }
 
+    /* Collapsible Search Panel */
+    .search-panel-container {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .search-panel-expanded,
+    .search-panel-collapsed {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+    }
+
+    .search-panel-collapsed {
+        animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .search-panel-expanded {
+        animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Collapsed panel hover effect */
+    .search-panel-collapsed:hover {
+        background: var(--bg-hover) !important;
+    }
+
+    /* Ensure smooth transition for panel content */
+    .search-panel-container .q-card {
+        will-change: transform, opacity;
+    }
+
+    /* RTL support for collapsed panel */
+    [dir="rtl"] .search-panel-collapsed .q-row,
+    .hebrew-mode .search-panel-collapsed .q-row {
+        flex-direction: row-reverse;
+    }
+
+    /* Collapsed panel query text RTL */
+    .search-panel-collapsed .truncate {
+        direction: rtl;
+        text-align: right;
+    }
+
+    /* Mobile adjustments for collapsible search panel */
+    @media (max-width: 768px) {
+        .search-panel-expanded {
+            padding: 12px !important;
+        }
+
+        .search-panel-collapsed {
+            padding: 8px 12px !important;
+        }
+
+        /* Stack search elements vertically on very small screens */
+        .search-panel-expanded .flex-wrap {
+            gap: 12px !important;
+        }
+
+        /* Collapse toggle button more visible on mobile */
+        .search-panel-container [class*="expand_less"],
+        .search-panel-container [class*="expand_more"] {
+            font-size: 1.5rem !important;
+        }
+    }
+
+    @media (max-width: 480px) {
+        /* Very small screens: hide some labels in collapsed view */
+        .search-panel-collapsed .q-badge {
+            display: none !important;
+        }
+
+        /* Full width search button in collapsed mode */
+        .search-panel-collapsed .btn-primary {
+            padding: 4px 12px !important;
+            font-size: 0.75rem !important;
+        }
+    }
+
     /* Browse page */
     @media (max-width: 768px) {
         .browse-container { flex-direction: column !important; }
