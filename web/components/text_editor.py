@@ -217,44 +217,48 @@ def create_edit_text_dialog(
                                 safe_doc_id = json.dumps(document_id or '')[1:-1]  # Remove surrounding quotes
                                 page_idx = page_number - 1 if page_number else 0
 
-                                # Use JavaScript fallback that fetches IIIF manifest client-side
-                                img_html = f'''
+                                # Add JavaScript fallback function via add_body_html (scripts not allowed in ui.html)
+                                fallback_script = '''
                                 <script>
-                                // Editor image fallback - fetch FL IDs from IIIF manifest
-                                async function editorImageFallback(img, sysId, pageIdx) {{
-                                    if (!sysId || img.dataset.triedManifest) {{
+                                if (!window.editorImageFallback) {
+                                    window.editorImageFallback = async function(img, sysId, pageIdx) {
+                                        if (!sysId || img.dataset.triedManifest) {
+                                            img.style.display='none';
+                                            img.parentElement.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Image not available</div>';
+                                            return;
+                                        }
+                                        img.dataset.triedManifest = 'true';
+                                        try {
+                                            const resp = await fetch(`https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`);
+                                            if (!resp.ok) throw new Error('Manifest not found');
+                                            const data = await resp.json();
+                                            const flIds = [];
+                                            if (data.sequences && data.sequences[0]) {
+                                                for (const canvas of data.sequences[0].canvases || []) {
+                                                    const svc = canvas.images?.[0]?.resource?.service?.['@id'] || '';
+                                                    const m = svc.match(/FL(\\d+)/);
+                                                    if (m) flIds.push(m[1]);
+                                                }
+                                            }
+                                            if (flIds.length > 0) {
+                                                const idx = Math.min(pageIdx || 0, flIds.length - 1);
+                                                img.src = `https://iiif.nli.org.il/IIIFv21/FL${flIds[idx]}/full/max/0/default.jpg`;
+                                                return;
+                                            }
+                                        } catch(e) { console.error('Manifest fetch failed:', e); }
                                         img.style.display='none';
                                         img.parentElement.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Image not available</div>';
-                                        return;
-                                    }}
-                                    img.dataset.triedManifest = 'true';
-                                    try {{
-                                        const resp = await fetch(`https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS${{sysId}}-1/manifest`);
-                                        if (!resp.ok) throw new Error('Manifest not found');
-                                        const data = await resp.json();
-                                        const flIds = [];
-                                        if (data.sequences && data.sequences[0]) {{
-                                            for (const canvas of data.sequences[0].canvases || []) {{
-                                                const svc = canvas.images?.[0]?.resource?.service?.['@id'] || '';
-                                                const m = svc.match(/FL(\\d+)/);
-                                                if (m) flIds.push(m[1]);
-                                            }}
-                                        }}
-                                        if (flIds.length > 0) {{
-                                            const idx = Math.min(pageIdx || 0, flIds.length - 1);
-                                            img.src = `https://iiif.nli.org.il/IIIFv21/FL${{flIds[idx]}}/full/max/0/default.jpg`;
-                                            return;
-                                        }}
-                                    }} catch(e) {{ console.error('Manifest fetch failed:', e); }}
-                                    img.style.display='none';
-                                    img.parentElement.innerHTML='<div style="text-align:center;color:#888;padding:20px;">Image not available</div>';
-                                }}
+                                    };
+                                }
                                 </script>
-                                <img src="{safe_url}"
+                                '''
+                                ui.add_body_html(fallback_script)
+
+                                # Image element only (no script)
+                                img_html = f'''<img src="{safe_url}"
                                      style="max-width: 100%; max-height: 60vh; object-fit: contain;"
                                      onerror="editorImageFallback(this, '{safe_doc_id}', {page_idx})"
-                                />
-                                '''
+                                />'''
                                 ui.html(img_html, sanitize=False)
                     else:
                         # Fallback to original text if no image

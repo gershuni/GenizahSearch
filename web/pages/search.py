@@ -14,8 +14,11 @@ from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
-from genizah_core import SearchEngine
+from web.services import get_service, BrowsePage
+from genizah_core import SearchEngine, get_library_display
 from urllib.parse import quote
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass, field
 import re
 import html
 
@@ -39,6 +42,36 @@ def create_search_page(initial_query: str = None):
             self.last_scroll_top = 0  # For scroll-based auto-collapse
 
     search_state = SearchUIState()
+
+    # State for Advanced View dialog (used for in-place updates)
+    class AdvancedViewState:
+        """State holder for the Advanced View dialog to enable in-place updates."""
+        def __init__(self):
+            self.current_result_idx: int = 0
+            self.results: List[dict] = []
+            self.current_sys_id: Optional[str] = None
+            self.current_p_num: int = 1
+            self.current_fl_id: Optional[str] = None
+            self.total_pages: int = 1
+            self.current_page: Optional[BrowsePage] = None
+            self.show_image_panel: bool = True
+            self.zoom_level: float = 1.0
+            self.rotation: int = 0
+            self.is_fullscreen: bool = False  # Fullscreen mode
+            # Edit mode state (inline editing like browse.py)
+            self.edit_mode: bool = False
+            self.edit_text: str = ""
+            self.edit_notes: str = ""
+            self.original_edit_text: str = ""
+            self.draft_saved: bool = False
+            self.draft_id: Optional[str] = None
+            # UI element references for in-place updates
+            self.result_label = None
+            self.score_badge = None
+            self.prev_btn = None
+            self.next_btn = None
+            self.content_container = None
+            self.image_container = None
 
     # Restore previous results
     if 'search_results' in app.storage.user:
@@ -1080,311 +1113,836 @@ def create_search_page(initial_query: str = None):
                 mobile_expand.on('show', load_mobile_content)
 
     def open_advanced_dialog(index, result):
-        """Open a redesigned Advanced View dialog with comprehensive result information."""
+        """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer."""
+        service = get_service()
+        adv_state = AdvancedViewState()
+        adv_state.current_result_idx = index
+        adv_state.results = search_state.results
+
+        # === VIEWER_STYLES for image handling (adapted from browse.py) ===
+        ADVANCED_VIEWER_STYLES = '''
+        <script>
+        // NLI IIIF base URL for direct browser access
+        const NLI_IIIF_BASE = 'https://iiif.nli.org.il/IIIFv21';
+        const advFlIdCache = {};
+
+        async function advFetchFlIdsFromManifest(sysId) {
+            if (advFlIdCache[sysId]) return advFlIdCache[sysId];
+            const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
+            try {
+                const resp = await fetch(manifestUrl);
+                if (!resp.ok) return [];
+                const data = await resp.json();
+                const flIds = [];
+                if (data.sequences && data.sequences[0] && data.sequences[0].canvases) {
+                    for (const canvas of data.sequences[0].canvases) {
+                        const images = canvas.images || [];
+                        if (images[0] && images[0].resource && images[0].resource.service) {
+                            const serviceId = images[0].resource.service['@id'] || '';
+                            const match = serviceId.match(/FL(\\d+)/);
+                            if (match) flIds.push(match[1]);
+                        }
+                    }
+                }
+                if (flIds.length > 0) advFlIdCache[sysId] = flIds;
+                return flIds;
+            } catch (e) { return []; }
+        }
+
+        async function advHandleImageError(img, sysId, pageIdx, isOxford = false) {
+            const currentSrc = img.src || '';
+            const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
+            if (isOxford && sysId && !isOxfordApiUrl && !img.dataset.triedOxford) {
+                img.dataset.triedOxford = 'true';
+                img.src = `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
+                img.onload = function() { if(window.advViewer) window.advViewer.init(); };
+                return;
+            }
+            if (isOxfordApiUrl) img.dataset.triedOxford = 'true';
+            if (sysId && !img.dataset.triedManifest) {
+                img.dataset.triedManifest = 'true';
+                const flIds = await advFetchFlIdsFromManifest(sysId);
+                if (flIds.length > 0) {
+                    const idx = Math.min(pageIdx || 0, flIds.length - 1);
+                    img.src = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/max/0/default.jpg`;
+                    img.onload = function() { if(window.advViewer) window.advViewer.init(); };
+                    return;
+                }
+            }
+            if (sysId && !img.dataset.triedServerProxy) {
+                img.dataset.triedServerProxy = 'true';
+                img.src = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
+                img.onload = function() { if(window.advViewer) window.advViewer.init(); };
+                return;
+            }
+            img.style.display = 'none';
+            const parent = img.parentElement;
+            if (parent) {
+                parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 3rem;">image_not_supported</i><p>Image not available</p></div>';
+            }
+        }
+
+        window.advViewer = {
+            el: null, container: null,
+            state: { scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
+            init: function() {
+                this.el = document.querySelector('.adv-zoomable-image');
+                this.container = document.querySelector('.adv-image-container');
+                if (!this.el || !this.container) return;
+                this.el.onmousedown = this.onMouseDown.bind(this);
+                window.onmousemove = this.onMouseMove.bind(this);
+                window.onmouseup = this.onMouseUp.bind(this);
+                this.el.ondragstart = (e) => e.preventDefault();
+                this.el.onwheel = this.onWheel.bind(this);
+                this.el.style.cursor = 'grab';
+            },
+            onWheel: function(e) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.25 : 0.25;
+                this.state.scale = Math.max(0.25, Math.min(4, this.state.scale + delta));
+                this.applyTransform();
+                const zoomLabel = document.querySelector('.adv-zoom-label');
+                if (zoomLabel) zoomLabel.textContent = Math.round(this.state.scale * 100) + '%';
+            },
+            onMouseDown: function(e) {
+                if (e.button !== 0) return;
+                e.preventDefault(); e.stopPropagation();
+                this.state.isDragging = true;
+                this.state.startX = e.clientX - this.state.x;
+                this.state.startY = e.clientY - this.state.y;
+                this.el.style.cursor = 'grabbing';
+            },
+            onMouseMove: function(e) {
+                if (!this.state.isDragging) return;
+                e.preventDefault();
+                this.state.x = e.clientX - this.state.startX;
+                this.state.y = e.clientY - this.state.startY;
+                requestAnimationFrame(() => this.applyTransform());
+            },
+            onMouseUp: function() {
+                this.state.isDragging = false;
+                if (this.el) this.el.style.cursor = 'grab';
+            },
+            applyTransform: function() {
+                if (!this.el) { this.el = document.querySelector('.adv-zoomable-image'); if (!this.el) return; }
+                this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+            },
+            zoomIn: function() { this.state.scale = Math.min(4, this.state.scale + 0.25); this.applyTransform(); this.updateLabel(); },
+            zoomOut: function() { this.state.scale = Math.max(0.25, this.state.scale - 0.25); this.applyTransform(); this.updateLabel(); },
+            rotateLeft: function() { this.state.rotation = (this.state.rotation - 90) % 360; this.applyTransform(); },
+            rotateRight: function() { this.state.rotation = (this.state.rotation + 90) % 360; this.applyTransform(); },
+            reset: function() { this.state.x = 0; this.state.y = 0; this.state.rotation = 0; this.state.scale = 1; this.applyTransform(); this.updateLabel(); },
+            updateLabel: function() { const l = document.querySelector('.adv-zoom-label'); if (l) l.textContent = Math.round(this.state.scale * 100) + '%'; }
+        };
+        </script>
+        <style>
+        .adv-image-container { position: relative; background: #1a1a1a; border-radius: 8px; overflow: hidden; min-height: 400px; display: flex; align-items: center; justify-content: center; }
+        .adv-zoomable-image { max-width: 100%; max-height: 100%; object-fit: contain; cursor: grab; transform-origin: center center; transition: transform 0.1s ease-out; }
+        .adv-zoomable-image:active { cursor: grabbing; }
+        </style>
+        '''
 
         with ui.dialog().props('maximized') as dialog:
+            # Add viewer styles once
+            ui.add_head_html(ADVANCED_VIEWER_STYLES)
+
             with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
                 # === Header Bar ===
-                with ui.row().classes('w-full px-6 py-4 items-center justify-between shrink-0').style(
+                adv_state.header_container = ui.row().classes('w-full px-4 py-3 items-center justify-between shrink-0').style(
                     'background: var(--bg-header); color: white;'
-                ):
+                )
+                with adv_state.header_container:
                     # Left: Close and Title
-                    with ui.row().classes('items-center gap-4'):
-                        ui.button(icon='close', on_click=dialog.close).props('flat round color=white')
-                        with ui.column().classes('gap-0'):
-                            h2(tr('Advanced View'), classes='text-xl font-bold', style='color: white;')
-                            ui.label(f"{tr('Result')} {index + 1} {tr('of')} {len(search_state.results)}").classes(
-                                'text-sm opacity-80'
-                            )
+                    with ui.row().classes('items-center gap-3'):
+                        ui.button(icon='close', on_click=dialog.close).props('flat round color=white size=sm')
+                        adv_state.result_label = ui.label(
+                            f"{tr('Result')} {index + 1} / {len(search_state.results)}"
+                        ).classes('text-sm font-medium')
 
-                    # Right: Navigation and Score
-                    with ui.row().classes('items-center gap-4'):
-                        # Relevance Score Badge (if available)
-                        sort_score = result.get('sort_score')
-                        if sort_score is not None:
-                            score_pct = min(100, max(0, int(sort_score)))
-                            score_color = '#10b981' if score_pct >= 70 else '#f59e0b' if score_pct >= 40 else '#ef4444'
-                            with ui.element('div').classes('flex items-center gap-2 px-3 py-1 rounded-full').style(
-                                f'background: rgba(255,255,255,0.15);'
-                            ):
-                                ui.icon('insights').classes('text-sm')
-                                ui.label(f"{tr('Score')}: {score_pct}").classes('text-sm font-medium')
+                    # Center: Score badge (will be updated in-place)
+                    adv_state.score_badge = ui.element('div').classes('flex items-center gap-2')
 
+                    # Right: Navigation and Fullscreen
+                    with ui.row().classes('items-center gap-2'):
                         # Navigation Buttons
-                        def navigate_result(direction):
-                            new_idx = index + direction
-                            if 0 <= new_idx < len(search_state.results):
-                                dialog.close()
-                                open_advanced_dialog(new_idx, search_state.results[new_idx])
-
-                        ui.button(
+                        adv_state.prev_btn = ui.button(
                             icon='chevron_right' if is_rtl() else 'chevron_left',
                             on_click=lambda: navigate_result(-1)
-                        ).props('flat round color=white').tooltip(tr('Previous')).set_enabled(index > 0)
+                        ).props('flat round color=white size=sm').tooltip(tr('Previous'))
 
-                        ui.button(
+                        adv_state.next_btn = ui.button(
                             icon='chevron_left' if is_rtl() else 'chevron_right',
                             on_click=lambda: navigate_result(1)
-                        ).props('flat round color=white').tooltip(tr('Next')).set_enabled(index < len(search_state.results) - 1)
+                        ).props('flat round color=white size=sm').tooltip(tr('Next'))
 
-                # === Main Content ===
+                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-400')
+
+                        # Fullscreen toggle
+                        def toggle_fullscreen():
+                            adv_state.is_fullscreen = not adv_state.is_fullscreen
+                            render_content(adv_state.results[adv_state.current_result_idx])
+
+                        ui.button(
+                            icon='fullscreen',
+                            on_click=toggle_fullscreen
+                        ).props('flat round color=white size=sm').tooltip(tr('Fullscreen'))
+
+                # === Main Content (refreshable container) ===
                 with ui.scroll_area().classes('flex-grow'):
-                    with ui.column().classes('w-full max-w-5xl mx-auto p-6 gap-6'):
-                        render_advanced_dialog_content(result, dialog, index)
+                    adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto p-6 gap-6')
 
-        dialog.open()
+        def navigate_result(direction: int):
+            """Navigate to prev/next result with in-place update (no dialog close/reopen)."""
+            new_idx = adv_state.current_result_idx + direction
+            if 0 <= new_idx < len(adv_state.results):
+                adv_state.current_result_idx = new_idx
+                load_result(new_idx)
 
-    def render_advanced_dialog_content(result, dialog, index):
-        """Render the redesigned Advanced View content."""
-        display = result.get('display', {})
-        shelfmark = display.get('shelfmark', 'Unknown')
-        title = display.get('title', '')
-        sys_id = display.get('id', '')
-        snippet = result.get('snippet', '')
-        full_text = result.get('full_text', '')
-        source = display.get('source', '')
-        page_num = display.get('img', '')
-        library_code = display.get('library_code', '')
+        def load_result(idx: int):
+            """Load a result into the dialog, updating UI in-place."""
+            result = adv_state.results[idx]
+            display = result.get('display', {})
+            adv_state.current_sys_id = display.get('id', '')
 
-        # Extract FL ID for browse link
-        fl_id = None
-        if 'raw_header' in result and state.meta_mgr:
-            try:
-                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                fl_id = parsed.get('fl_id')
-            except Exception:
-                pass
-
-        # === Hero Section: Manuscript Identity ===
-        with ui.card().classes('w-full overflow-hidden').style(
-            'border-radius: 16px; border: none;'
-        ):
-            # Gradient accent bar
-            ui.element('div').classes('w-full h-2').style(
-                'background: linear-gradient(90deg, var(--primary-600), var(--primary-400), var(--accent-gold));'
+            # Update header label
+            adv_state.result_label.set_text(
+                f"{tr('Result')} {idx + 1} / {len(adv_state.results)}"
             )
 
-            with ui.column().classes('p-6 gap-4'):
-                # Shelfmark with Library Name as main heading
-                display_shelfmark = shelfmark
-                library_name = ''
-                if library_code:
-                    from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False)
-                    if library_name:
-                        display_shelfmark = f"{library_name}, {shelfmark}"
+            # Update navigation button states
+            adv_state.prev_btn.set_enabled(idx > 0)
+            adv_state.next_btn.set_enabled(idx < len(adv_state.results) - 1)
 
-                with ui.row().classes('items-start justify-between w-full'):
-                    with ui.column().classes('gap-2 flex-grow'):
-                        h1(display_shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
-                        if title:
-                            ui.label(title).classes('text-lg').style(
-                                'color: var(--text-secondary); direction: rtl; text-align: right;'
-                            )
+            # Update score badge
+            adv_state.score_badge.clear()
+            sort_score = result.get('sort_score')
+            if sort_score is not None:
+                score_pct = min(100, max(0, int(sort_score)))
+                with adv_state.score_badge:
+                    with ui.element('div').classes('flex items-center gap-2 px-3 py-1 rounded-full').style(
+                        'background: rgba(255,255,255,0.15);'
+                    ):
+                        ui.icon('insights').classes('text-sm')
+                        ui.label(f"{tr('Score')}: {score_pct}").classes('text-sm font-medium')
 
-                    # Quick action buttons (top right)
-                    with ui.row().classes('gap-2 shrink-0'):
+            # Load browse page data for this result
+            page_num_str = display.get('img', '1')
+            try:
+                initial_p_num = int(page_num_str) if page_num_str else 1
+            except (ValueError, TypeError):
+                initial_p_num = 1
+
+            adv_state.current_p_num = initial_p_num
+
+            # Fetch page data asynchronously
+            async def fetch_and_render():
+                if adv_state.current_sys_id:
+                    page = await run.io_bound(lambda: service.get_browse_page(
+                        adv_state.current_sys_id, p_num=adv_state.current_p_num
+                    ))
+                    adv_state.current_page = page
+                    if page:
+                        adv_state.total_pages = page.total_pages
+                        adv_state.current_fl_id = page.fl_id
+                else:
+                    adv_state.current_page = None
+                    adv_state.total_pages = 1
+
+                render_content(result)
+
+            ui.timer(0, fetch_and_render, once=True)
+
+        async def load_page(direction: int = 0, p_num: int = None):
+            """Load a specific page within the current manuscript."""
+            if not adv_state.current_sys_id:
+                return
+
+            target_p_num = p_num if p_num is not None else adv_state.current_p_num
+            page = await run.io_bound(lambda: service.get_browse_page(
+                adv_state.current_sys_id, p_num=target_p_num, direction=direction
+            ))
+
+            if page:
+                adv_state.current_page = page
+                adv_state.current_p_num = page.p_num
+                adv_state.total_pages = page.total_pages
+                adv_state.current_fl_id = page.fl_id
+                render_content(adv_state.results[adv_state.current_result_idx])
+
+        # === Edit Mode Functions ===
+        def toggle_edit_mode(current_text: str):
+            """Enter edit mode with the current text."""
+            from web.auth_state import GlobalAuthState
+            if not GlobalAuthState.is_logged_in():
+                ui.notify(tr('Please login to edit'), type='warning')
+                return
+
+            adv_state.edit_mode = True
+            adv_state.edit_text = current_text
+            adv_state.original_edit_text = current_text
+            adv_state.edit_notes = ""
+            adv_state.draft_saved = False
+            adv_state.draft_id = None
+            render_content(adv_state.results[adv_state.current_result_idx])
+
+        def cancel_edit(result):
+            """Cancel edit mode and return to view mode."""
+            adv_state.edit_mode = False
+            adv_state.edit_text = ""
+            adv_state.edit_notes = ""
+            adv_state.draft_saved = False
+            adv_state.draft_id = None
+            render_content(result)
+
+        def save_draft(sys_id: str, shelfmark: str, page_num: int, original_text: str):
+            """Save current edit as draft."""
+            from web.auth_state import GlobalAuthState
+            from web.supabase_client import create_correction, update_correction
+
+            if not GlobalAuthState.is_logged_in():
+                ui.notify(tr('Please login to save'), type='warning')
+                return
+
+            user_id = GlobalAuthState.get_user_id()
+            text = adv_state.edit_text
+            notes = adv_state.edit_notes
+
+            try:
+                if adv_state.draft_id:
+                    # Update existing draft
+                    result = update_correction(adv_state.draft_id, {
+                        'corrected_text': text,
+                        'notes': notes
+                    })
+                else:
+                    # Create new draft
+                    result = create_correction(
+                        author_id=user_id,
+                        sys_id=sys_id,
+                        shelfmark=shelfmark or '',
+                        page_number=page_num,
+                        original_text=original_text,
+                        corrected_text=text,
+                        notes=notes,
+                        status='draft'
+                    )
+                    if result.get('success') and result.get('correction'):
+                        adv_state.draft_id = result['correction'].get('id')
+
+                adv_state.draft_saved = True
+                ui.notify(tr('Draft saved'), type='positive')
+                render_content(adv_state.results[adv_state.current_result_idx])
+            except Exception as e:
+                ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
+
+        def submit_correction(sys_id: str, shelfmark: str, page_num: int, original_text: str, result):
+            """Submit correction for review or publish directly."""
+            from web.auth_state import GlobalAuthState
+            from web.supabase_client import create_correction, update_correction
+
+            if not GlobalAuthState.is_logged_in():
+                ui.notify(tr('Please login to submit'), type='warning')
+                return
+
+            user_id = GlobalAuthState.get_user_id()
+            text = adv_state.edit_text
+            notes = adv_state.edit_notes
+
+            # Determine status based on role
+            if GlobalAuthState.is_admin() or GlobalAuthState.is_editor():
+                status = 'approved'
+            else:
+                status = 'pending'
+
+            try:
+                if adv_state.draft_id:
+                    # Update existing draft to submitted
+                    update_correction(adv_state.draft_id, {
+                        'corrected_text': text,
+                        'notes': notes,
+                        'status': status
+                    })
+                else:
+                    # Create new correction
+                    create_correction(
+                        author_id=user_id,
+                        sys_id=sys_id,
+                        shelfmark=shelfmark or '',
+                        page_number=page_num,
+                        original_text=original_text,
+                        corrected_text=text,
+                        notes=notes,
+                        status=status
+                    )
+
+                # Exit edit mode
+                adv_state.edit_mode = False
+                adv_state.edit_text = ""
+                adv_state.edit_notes = ""
+                adv_state.draft_saved = False
+                adv_state.draft_id = None
+
+                if status == 'approved':
+                    ui.notify(tr('Correction published'), type='positive')
+                else:
+                    ui.notify(tr('Correction submitted for review'), type='positive')
+
+                render_content(result)
+            except Exception as e:
+                ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
+
+        def render_content(result):
+            """Render the main content area."""
+            adv_state.content_container.clear()
+
+            display = result.get('display', {})
+            shelfmark = display.get('shelfmark', 'Unknown')
+            title = display.get('title', '')
+            sys_id = display.get('id', '')
+            snippet = result.get('snippet', '')
+            full_text = result.get('full_text', '')
+            source = display.get('source', '')
+            page_num = display.get('img', '')
+            library_code = display.get('library_code', '')
+
+            # Use current page data if available
+            page = adv_state.current_page
+            current_text = page.text if page else full_text
+            current_p_num = page.p_num if page else adv_state.current_p_num
+            total_pages = page.total_pages if page else 1
+
+            # Extract FL ID
+            fl_id = adv_state.current_fl_id
+            if not fl_id and 'raw_header' in result and state.meta_mgr:
+                try:
+                    parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                    fl_id = parsed.get('fl_id')
+                except Exception:
+                    pass
+
+            # Determine if Oxford manuscript
+            shelfmark_lower = (shelfmark or '').lower()
+            is_oxford = shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb')
+
+            # Compute image URL
+            has_image = bool(sys_id)
+            page_idx = max(0, current_p_num - 1)
+            if is_oxford and sys_id:
+                img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+            elif sys_id:
+                img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
+            else:
+                img_url = None
+
+            # Get library display name
+            library_name = ''
+            if library_code:
+                library_name = get_library_display(library_code, short=False)
+            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+
+            # Apply highlighting from snippet if we have match markers
+            display_text = current_text or snippet.replace('*', '') if snippet else ''
+            if snippet and '*' in snippet and display_text:
+                import re as re_module
+                highlighted_terms = re_module.findall(r'\*([^*]+)\*', snippet)
+                highlighted_text = display_text
+                for term in highlighted_terms:
+                    if term in highlighted_text:
+                        highlighted_text = highlighted_text.replace(
+                            term,
+                            f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px; font-weight: 600;">{term}</mark>'
+                        )
+                text_html = highlighted_text.replace('\n', '<br>')
+            else:
+                text_html = display_text.replace('\n', '<br>') if display_text else ''
+
+            with adv_state.content_container:
+
+                # ============================================================
+                # FULLSCREEN MODE - Compact layout with text and image only
+                # ============================================================
+                if adv_state.is_fullscreen:
+                    # Compact info bar
+                    with ui.row().classes('w-full items-center justify-between p-2 mb-2 rounded-lg').style(
+                        'background: var(--bg-tertiary);'
+                    ):
+                        # Left: Shelfmark and page info
+                        with ui.row().classes('items-center gap-3'):
+                            ui.label(display_shelfmark).classes('font-bold text-sm').style('color: var(--primary-700);')
+                            if title:
+                                ui.label(f"| {title[:50]}{'...' if len(title) > 50 else ''}").classes('text-xs').style(
+                                    'color: var(--text-muted); direction: rtl;'
+                                )
+
+                        # Center: Page navigation
+                        with ui.row().classes('items-center gap-2'):
+                            if total_pages > 1:
+                                prev_pg_btn = ui.button(
+                                    icon='chevron_right' if is_rtl() else 'chevron_left',
+                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
+                                ).props('flat round size=sm').tooltip(tr('Previous Page'))
+                                prev_pg_btn.set_enabled(current_p_num > 1)
+
+                                ui.label(f"{tr('Page')} {current_p_num}/{total_pages}").classes('text-sm font-medium')
+
+                                next_pg_btn = ui.button(
+                                    icon='chevron_left' if is_rtl() else 'chevron_right',
+                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
+                                ).props('flat round size=sm').tooltip(tr('Next Page'))
+                                next_pg_btn.set_enabled(current_p_num < total_pages)
+                            else:
+                                ui.label(f"{tr('Page')} 1").classes('text-sm')
+
+                        # Right: Action buttons
+                        with ui.row().classes('items-center gap-1'):
+                            if sys_id:
+                                browse_url = f'/browse?sys_id={sys_id}'
+                                if fl_id:
+                                    browse_url += f'&fl_id={fl_id}'
+                                ui.button(icon='menu_book', on_click=lambda url=browse_url: (
+                                    dialog.close(), ui.navigate.to(url)
+                                )).props('flat round size=sm').tooltip(tr('Browse'))
+
+                            if display_text:
+                                ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy'))
+
+                            # Exit fullscreen
+                            def exit_fullscreen():
+                                adv_state.is_fullscreen = False
+                                render_content(result)
+                            ui.button(icon='fullscreen_exit', on_click=exit_fullscreen).props('flat round size=sm').tooltip(tr('Exit Fullscreen'))
+
+                    # Two-panel layout for fullscreen
+                    with ui.row().classes('w-full gap-4 flex-nowrap').style('height: calc(100vh - 120px);'):
+                        # Text panel
+                        with ui.card().classes('flex-1 h-full overflow-hidden').style('border-radius: 12px;'):
+                            with ui.scroll_area().classes('w-full h-full'):
+                                with ui.element('div').classes('p-6').style(
+                                    'direction: rtl; text-align: right; '
+                                    'line-height: 2.4; font-size: 1.3rem; font-family: "SBL Hebrew", "David", serif;'
+                                ):
+                                    if text_html:
+                                        ui.html(text_html, sanitize=False)
+                                    else:
+                                        ui.label(tr('No text available')).style('color: var(--text-muted);')
+
+                        # Image panel (if available)
+                        if has_image and img_url:
+                            with ui.card().classes('flex-1 h-full overflow-hidden').style('border-radius: 12px;'):
+                                # Image controls
+                                with ui.row().classes('w-full items-center justify-between p-2').style('background: #1a1a1a;'):
+                                    ui.label(tr('Image')).classes('text-white text-sm')
+                                    with ui.row().classes('gap-1'):
+                                        ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props('flat round size=xs text-color=white')
+                                        ui.label('100%').classes('adv-zoom-label text-white text-xs px-1')
+                                        ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props('flat round size=xs text-color=white')
+                                        ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props('flat round size=xs text-color=white')
+                                        ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props('flat round size=xs text-color=white')
+
+                                # Image
+                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                                is_oxford_js = 'true' if is_oxford else 'false'
+
+                                with ui.element('div').classes('adv-image-container w-full').style('height: calc(100% - 48px);'):
+                                    img_html = f'''<img src="{safe_img_url}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" loading="lazy" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"/>'''
+                                    ui.html(img_html, sanitize=False)
+                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); }, 200);')
+
+                    return  # Exit early for fullscreen mode
+
+                # ============================================================
+                # NORMAL MODE - Full layout with hero, text, image, actions
+                # ============================================================
+
+                # === Hero Section ===
+                with ui.card().classes('w-full overflow-hidden').style('border-radius: 16px; border: none;'):
+                    ui.element('div').classes('w-full h-2').style(
+                        'background: linear-gradient(90deg, var(--primary-600), var(--primary-400), var(--accent-gold));'
+                    )
+                    with ui.column().classes('p-6 gap-4'):
+                        with ui.row().classes('items-start justify-between w-full'):
+                            with ui.column().classes('gap-2 flex-grow'):
+                                h1(display_shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
+                                if title:
+                                    ui.label(title).classes('text-lg').style(
+                                        'color: var(--text-secondary); direction: rtl; text-align: right;'
+                                    )
+
+                            with ui.row().classes('gap-2 shrink-0'):
+                                if sys_id:
+                                    browse_url = f'/browse?sys_id={sys_id}'
+                                    if fl_id:
+                                        browse_url += f'&fl_id={fl_id}'
+                                    ui.button(icon='menu_book', on_click=lambda url=browse_url: (
+                                        dialog.close(), ui.navigate.to(url)
+                                    )).props('round color=green').tooltip(tr('Browse Full Manuscript'))
+
+                                def make_add_handler(r):
+                                    def handler():
+                                        show_add_to_list_dialog_local(r)
+                                    return handler
+                                ui.button(icon='star_border', on_click=make_add_handler(result)).props(
+                                    'round'
+                                ).style('color: var(--accent-amber);').tooltip(tr('Add to List'))
+
+                                # Image toggle button
+                                if has_image:
+                                    def toggle_image():
+                                        adv_state.show_image_panel = not adv_state.show_image_panel
+                                        render_content(result)
+                                    ui.button(
+                                        icon='image' if adv_state.show_image_panel else 'hide_image',
+                                        on_click=toggle_image
+                                    ).props('round').tooltip(
+                                        tr('Hide Image') if adv_state.show_image_panel else tr('Show Image')
+                                    )
+
+                        # Info chips
+                        with ui.row().classes('gap-3 flex-wrap mt-2'):
+                            if source:
+                                with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                                    'background: var(--primary-100); color: var(--primary-700);'
+                                ):
+                                    ui.icon('source').classes('text-sm')
+                                    ui.label(source).classes('text-sm font-medium')
+
+                            with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                                'background: var(--accent-blue); color: white;'
+                            ):
+                                ui.icon('description').classes('text-sm')
+                                ui.label(f"{tr('Page')} {current_p_num} / {total_pages}").classes('text-sm font-medium')
+
+                            with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                                'background: var(--bg-tertiary); color: var(--text-secondary);'
+                            ):
+                                ui.icon('tag').classes('text-sm')
+                                ui.label(f"#{adv_state.current_result_idx + 1}").classes('text-sm font-medium')
+
+                # === Page Navigation Bar ===
+                if total_pages > 1:
+                    with ui.card().classes('w-full p-3').style('border-radius: 12px;'):
+                        with ui.row().classes('items-center justify-center gap-3'):
+                            prev_page_btn = ui.button(
+                                icon='chevron_right' if is_rtl() else 'chevron_left',
+                                on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
+                            ).props('flat round').tooltip(tr('Previous Page'))
+                            prev_page_btn.set_enabled(current_p_num > 1)
+
+                            page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-16').props('dense outlined')
+                            ui.label(f"/ {total_pages}").classes('text-sm').style('color: var(--text-secondary);')
+
+                            def go_to_page():
+                                try:
+                                    p = int(page_input.value) if page_input.value else 1
+                                    p = max(1, min(total_pages, p))
+                                    ui.timer(0, lambda: load_page(p_num=p), once=True)
+                                except (ValueError, TypeError):
+                                    pass
+                            ui.button(tr('Go'), on_click=go_to_page).props('flat dense color=green')
+
+                            next_page_btn = ui.button(
+                                icon='chevron_left' if is_rtl() else 'chevron_right',
+                                on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
+                            ).props('flat round').tooltip(tr('Next Page'))
+                            next_page_btn.set_enabled(current_p_num < total_pages)
+
+                # === Two-Panel Layout: Text + Image ===
+                with ui.row().classes('w-full gap-4 flex-wrap lg:flex-nowrap'):
+                    # Left Panel: Text content with inline editing
+                    text_panel_classes = 'flex-1 min-w-[300px]' if adv_state.show_image_panel and has_image else 'w-full'
+
+                    # Edit mode border styling
+                    panel_border = ''
+                    if adv_state.edit_mode:
+                        panel_border = 'border: 3px solid #27ae60;' if adv_state.draft_saved else 'border: 3px solid #f39c12;'
+
+                    with ui.column().classes(text_panel_classes + ' gap-4'):
+
+                        # Page Text Section with inline editing
+                        if display_text or adv_state.edit_mode:
+                            with ui.card().classes('w-full').style(f'border-radius: 16px; {panel_border}'):
+
+                                if adv_state.edit_mode:
+                                    # === EDIT MODE ===
+                                    # Edit toolbar
+                                    with ui.row().classes('w-full items-center justify-between p-3 bg-gray-100 border-b'):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.icon('edit').classes('text-primary')
+                                            ui.label(tr('Edit Mode')).classes('font-bold')
+                                            if adv_state.draft_saved:
+                                                ui.label(tr('Saved')).classes('text-green-600 text-sm font-bold')
+                                            else:
+                                                ui.label(tr('Unsaved')).classes('text-orange-600 text-sm')
+
+                                        with ui.row().classes('gap-2'):
+                                            ui.button(tr('Cancel'), icon='close', on_click=lambda: cancel_edit(result)).props('flat dense color=grey')
+                                            ui.button(tr('Save'), icon='save', on_click=lambda: save_draft(sys_id, shelfmark, current_p_num, current_text)).props('flat dense color=primary')
+                                            ui.button(tr('Submit'), on_click=lambda: submit_correction(sys_id, shelfmark, current_p_num, current_text, result)).props('unelevated dense color=green')
+
+                                    # Editable textarea
+                                    textarea = ui.textarea(value=adv_state.edit_text).classes('w-full').props(
+                                        'borderless autofocus'
+                                    ).style(
+                                        'direction: rtl; text-align: right; resize: none; min-height: 400px; padding: 16px; '
+                                        'font-family: "SBL Hebrew", "David", serif; font-size: 1.2rem; line-height: 2;'
+                                    )
+                                    textarea.bind_value(adv_state, 'edit_text')
+
+                                    def on_edit_change():
+                                        if adv_state.draft_saved:
+                                            adv_state.draft_saved = False
+                                    textarea.on('input', on_edit_change)
+
+                                    # Notes field
+                                    with ui.expansion(tr('Add Notes'), icon='note_add').classes('w-full border-t'):
+                                        ui.textarea(value=adv_state.edit_notes, placeholder=tr('Notes about your correction')).bind_value(adv_state, 'edit_notes').classes('w-full').props('outlined dense').style('direction: rtl;')
+
+                                else:
+                                    # === VIEW MODE ===
+                                    # Header with page info and actions
+                                    with ui.row().classes('items-center justify-between w-full p-4 border-b').style('border-color: var(--border-light);'):
+                                        with ui.row().classes('items-center gap-3'):
+                                            ui.icon('article').classes('text-2xl').style('color: var(--primary-600);')
+                                            ui.label(f"{tr('Page')} {current_p_num}").classes('text-lg font-bold')
+                                            word_count = len(display_text.split()) if display_text else 0
+                                            ui.label(f"({word_count} {tr('words')})").classes('text-sm').style('color: var(--text-muted);')
+
+                                        with ui.row().classes('gap-2'):
+                                            ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy Text'))
+                                            # Inline edit button
+                                            if sys_id and current_text:
+                                                ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props('flat round size=sm').tooltip(tr('Edit'))
+
+                                    # Text content
+                                    with ui.scroll_area().classes('w-full').style('max-height: 60vh;'):
+                                        with ui.element('div').classes('p-6').style(
+                                            'direction: rtl; text-align: right; '
+                                            'line-height: 2.4; font-size: 1.2rem; font-family: "SBL Hebrew", "David", serif;'
+                                        ):
+                                            ui.html(text_html, sanitize=False)
+
+                        # Community Features Row (compact) - only in view mode
+                        if sys_id and current_text and not adv_state.edit_mode:
+                            with ui.row().classes('gap-2 flex-wrap items-center'):
+                                from web.components import (
+                                    create_version_selector,
+                                    create_comment_button, create_joins_button
+                                )
+
+                                create_version_selector(
+                                    document_id=sys_id,
+                                    page_number=current_p_num,
+                                    original_text=current_text,
+                                    on_version_change=lambda text, meta: None
+                                )
+
+                                create_comment_button(
+                                    document_id=sys_id,
+                                    page_number=current_p_num,
+                                    shelfmark=shelfmark,
+                                    size='sm'
+                                )
+
+                                if shelfmark:
+                                    def navigate_to_join(target_shelfmark: str):
+                                        dialog.close()
+                                        ui.navigate.to(f'/browse?shelfmark={target_shelfmark}')
+
+                                    create_joins_button(
+                                        shelfmark=shelfmark,
+                                        document_id=sys_id,
+                                        on_navigate=navigate_to_join
+                                    )
+
+                    # Right Panel: Image viewer (toggleable)
+                    if adv_state.show_image_panel and has_image and img_url:
+                        with ui.column().classes('flex-1 min-w-[300px]'):
+                            with ui.card().classes('w-full').style('border-radius: 16px; overflow: hidden;'):
+                                # Image controls header
+                                with ui.row().classes('w-full items-center justify-between p-3').style(
+                                    'background: #1a1a1a; border-radius: 8px 8px 0 0;'
+                                ):
+                                    ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+                                    with ui.row().classes('gap-1'):
+                                        ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                        ui.label('100%').classes('adv-zoom-label text-white text-sm px-2')
+                                        ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(icon='rotate_left', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateLeft()')).props('flat round size=sm text-color=white').tooltip(tr('Rotate Left'))
+                                        ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props('flat round size=sm text-color=white').tooltip(tr('Rotate Right'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props('flat round size=sm text-color=white').tooltip(tr('Reset View'))
+
+                                # Image display
+                                safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
+                                safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
+                                is_oxford_js = 'true' if is_oxford else 'false'
+
+                                with ui.element('div').classes('adv-image-container w-full').style('height: 500px;'):
+                                    img_html = f'''
+                                    <img
+                                        src="{safe_img_url}"
+                                        class="adv-zoomable-image"
+                                        style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"
+                                        loading="lazy"
+                                        draggable="false"
+                                        onload="if(window.advViewer) window.advViewer.init()"
+                                        onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
+                                    />
+                                    '''
+                                    ui.html(img_html, sanitize=False)
+                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); }, 200);')
+
+                                # Attribution footer
+                                attribution = ''
+                                if is_oxford:
+                                    attribution = 'From the collections of the Bodleian Libraries, Oxford'
+                                elif page and page.attribution:
+                                    attribution = page.attribution
+                                else:
+                                    attribution = 'הספרייה הלאומית / National Library of Israel'
+
+                                with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
+                                    'background: #2a2a2a; border-radius: 0 0 8px 8px;'
+                                ):
+                                    ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
+                                    ui.label(attribution).classes('text-xs').style('color: #aaa; font-style: italic;')
+
+                # === Actions Section ===
+                with ui.card().classes('w-full p-6').style('border-radius: 16px; background: var(--bg-tertiary);'):
+                    h3(tr('Actions'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
+
+                    with ui.row().classes('gap-4 flex-wrap'):
                         if sys_id:
                             browse_url = f'/browse?sys_id={sys_id}'
                             if fl_id:
                                 browse_url += f'&fl_id={fl_id}'
-                            ui.button(icon='menu_book', on_click=lambda url=browse_url: (
-                                dialog.close(), ui.navigate.to(url)
-                            )).props('round color=green').tooltip(tr('Browse Full Manuscript'))
-
-                        def make_add_handler(r):
-                            def handler():
-                                show_add_to_list_dialog_local(r)
-                            return handler
-                        ui.button(icon='star_border', on_click=make_add_handler(result)).props(
-                            'round'
-                        ).style('color: var(--accent-amber);').tooltip(tr('Add to List'))
-
-                # Info Chips Row
-                with ui.row().classes('gap-3 flex-wrap mt-2'):
-                    if source:
-                        with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
-                            'background: var(--primary-100); color: var(--primary-700);'
-                        ):
-                            ui.icon('source').classes('text-sm')
-                            ui.label(source).classes('text-sm font-medium')
-
-                    if page_num:
-                        with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
-                            'background: var(--accent-blue); color: white;'
-                        ):
-                            ui.icon('description').classes('text-sm')
-                            ui.label(f"{tr('Page')} {page_num}").classes('text-sm font-medium')
-
-                    # Result position
-                    with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
-                        'background: var(--bg-tertiary); color: var(--text-secondary);'
-                    ):
-                        ui.icon('tag').classes('text-sm')
-                        ui.label(f"#{index + 1}").classes('text-sm font-medium')
-
-        # === Match Context Section (Primary Focus) ===
-        if snippet:
-            with ui.card().classes('w-full p-6').style('border-radius: 16px;'):
-                with ui.row().classes('items-center gap-3 mb-4'):
-                    ui.icon('highlight').classes('text-2xl').style('color: var(--accent-amber);')
-                    h2(tr('Match Context'), classes='text-xl font-bold', style='color: var(--text-primary);')
-
-                snippet_html = SearchEngine.format_snippet(snippet)
-                with ui.element('div').classes('p-5 rounded-xl').style(
-                    'background: var(--bg-tertiary); direction: rtl; text-align: right; '
-                    'line-height: 2.2; font-size: 1.15rem; font-family: "SBL Hebrew", "David", serif;'
-                ):
-                    ui.html(snippet_html, sanitize=False)
-
-                # Copy snippet button
-                with ui.row().classes('justify-end mt-3'):
-                    ui.button(
-                        tr('Copy Match'),
-                        icon='content_copy',
-                        on_click=lambda: copy_result_text(snippet.replace('*', ''))
-                    ).props('flat dense').classes('text-sm')
-
-        # === Full Manuscript Text Section (Expandable) ===
-        if full_text:
-            with ui.card().classes('w-full').style('border-radius: 16px;'):
-                with ui.expansion(
-                    value=False
-                ).classes('w-full').props('dense header-class="text-lg font-bold"') as full_text_expansion:
-                    with full_text_expansion.add_slot('header'):
-                        with ui.row().classes('items-center gap-3 w-full py-2'):
-                            ui.icon('article').classes('text-2xl').style('color: var(--primary-600);')
-                            ui.label(tr('Full Manuscript Text')).classes('text-lg font-bold')
-                            word_count = len(full_text.split())
-                            ui.label(f"({word_count} {tr('words')})").classes('text-sm').style(
-                                'color: var(--text-muted);'
-                            )
-
-                    with ui.column().classes('w-full gap-4 p-4'):
-                        # Full text display with enhanced styling
-                        with ui.scroll_area().classes('w-full').style('max-height: 400px;'):
-                            with ui.element('div').classes('p-4 rounded-lg').style(
-                                'background: var(--bg-tertiary); direction: rtl; text-align: right; '
-                                'line-height: 2.2; font-family: "SBL Hebrew", "David", serif;'
-                            ):
-                                # Format full text with line numbers for reference
-                                lines = full_text.strip().split('\n')
-                                for i, line in enumerate(lines, 1):
-                                    if line.strip():
-                                        with ui.row().classes('w-full gap-3 hover:bg-opacity-50').style(
-                                            'direction: rtl;'
-                                        ):
-                                            ui.label(line).classes('flex-grow whitespace-pre-wrap').style(
-                                                'color: var(--text-primary);'
-                                            )
-
-                        # Actions for full text
-                        with ui.row().classes('justify-end gap-2'):
                             ui.button(
-                                tr('Copy Full Text'),
-                                icon='content_copy',
-                                on_click=lambda: copy_result_text(full_text)
-                            ).props('flat dense')
+                                tr('Browse Full Manuscript'), icon='menu_book',
+                                on_click=lambda url=browse_url: (dialog.close(), ui.navigate.to(url))
+                            ).classes('btn-primary')
 
-        # === Metadata Details Section (Collapsible) ===
-        with ui.card().classes('w-full').style('border-radius: 16px;'):
-            with ui.expansion(value=False).classes('w-full').props(
-                'dense header-class="text-lg font-bold"'
-            ) as metadata_expansion:
-                with metadata_expansion.add_slot('header'):
-                    with ui.row().classes('items-center gap-3 w-full py-2'):
-                        ui.icon('info').classes('text-2xl').style('color: var(--info);')
-                        ui.label(tr('Metadata & Details')).classes('text-lg font-bold')
-
-                with ui.column().classes('w-full p-4'):
-                    with ui.element('div').classes('grid gap-4').style(
-                        'grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));'
-                    ):
-                        # Get library full name
-                        library_name = ''
-                        if library_code:
-                            from genizah_core import get_library_display
-                            library_name = get_library_display(library_code, short=False)
-
-                        # Metadata cards
-                        metadata_items = [
-                            ('account_balance', tr('Library'), library_name or tr('Not available'), 'var(--accent-amber)'),
-                            ('library', tr('Shelfmark'), shelfmark, 'var(--primary-600)'),
-                            ('title', tr('Title'), title or tr('Not available'), 'var(--text-secondary)'),
-                            ('fingerprint', tr('System ID'), sys_id or tr('Not available'), 'var(--text-muted)'),
-                            ('source', tr('Source'), source or tr('Not available'), 'var(--accent-blue)'),
-                            ('description', tr('Page'), page_num or tr('Not available'), 'var(--success)'),
-                        ]
-
-                        for icon_name, label, value, color in metadata_items:
-                            with ui.element('div').classes('p-4 rounded-lg').style(
-                                'background: var(--bg-tertiary);'
-                            ):
-                                with ui.row().classes('items-center gap-2 mb-2'):
-                                    ui.icon(icon_name).style(f'color: {color};')
-                                    ui.label(label).classes('text-sm font-medium').style(
-                                        'color: var(--text-secondary);'
-                                    )
-                                ui.label(value).classes('text-sm').style(
-                                    'color: var(--text-primary); direction: rtl; word-break: break-word;'
+                        text_for_parallels = current_text or snippet.replace('*', '')
+                        if text_for_parallels:
+                            ui.button(
+                                tr('Find Parallels'), icon='compare_arrows',
+                                on_click=lambda t=text_for_parallels: (
+                                    dialog.close(),
+                                    ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
                                 )
+                            ).props('outline')
 
-        # === Actions Section ===
-        with ui.card().classes('w-full p-6').style(
-            'border-radius: 16px; background: var(--bg-tertiary);'
-        ):
-            h3(tr('Actions'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
+                        text_to_copy = current_text or snippet.replace('*', '')
+                        if text_to_copy:
+                            ui.button(
+                                tr('Copy Text'), icon='content_copy',
+                                on_click=lambda t=text_to_copy: copy_result_text(t)
+                            ).props('outline')
 
-            with ui.row().classes('gap-4 flex-wrap'):
-                # Primary: Browse manuscript
-                if sys_id:
-                    browse_url = f'/browse?sys_id={sys_id}'
-                    if fl_id:
-                        browse_url += f'&fl_id={fl_id}'
-                    ui.button(
-                        tr('Browse Full Manuscript'),
-                        icon='menu_book',
-                        on_click=lambda url=browse_url: (dialog.close(), ui.navigate.to(url))
-                    ).classes('btn-primary')
-
-                # Find parallels
-                text_for_parallels = full_text or snippet.replace('*', '')
-                if text_for_parallels:
-                    ui.button(
-                        tr('Find Parallels'),
-                        icon='compare_arrows',
-                        on_click=lambda t=text_for_parallels: (
-                            dialog.close(),
-                            ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
-                        )
-                    ).props('outline')
-
-                # Copy all text
-                text_to_copy = full_text or snippet.replace('*', '')
-                if text_to_copy:
-                    ui.button(
-                        tr('Copy Text'),
-                        icon='content_copy',
-                        on_click=lambda t=text_to_copy: copy_result_text(t)
-                    ).props('outline')
-
-                # Edit and Comment buttons (if available)
-                if full_text and sys_id:
-                    from web.components import create_edit_button, create_comment_button
-                    p_num = int(page_num) if page_num and page_num.isdigit() else 1
-                    create_edit_button(
-                        document_id=sys_id,
-                        page_number=p_num,
-                        original_text=full_text,
-                        shelfmark=shelfmark,
-                        size='md'
-                    )
-                    create_comment_button(
-                        document_id=sys_id,
-                        page_number=p_num,
-                        shelfmark=shelfmark,
-                        size='md'
-                    )
+        # Initial load
+        load_result(index)
+        dialog.open()
 
     def copy_result_text(text):
         """Copy text to clipboard."""
