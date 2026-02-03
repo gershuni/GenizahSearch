@@ -29,8 +29,16 @@ Every manuscript record now shows which library or collection holds the original
 - New functions: `LIBRARY_CODES` constant, `get_library_display()`, `get_library_for_id()`
 - Backward compatible with old CSV files (gracefully handles missing column)
 
+### Enhancement: Nikud (Vowel Mark) Removal in Parallels Search
+
+Parallels search now automatically strips Hebrew vowel marks (nikud) and cantillation marks from text before matching. This ensures consistent results whether the input text contains nikud or not.
+
+- Affects both Lab Mode and Standard parallels search
+- Also strips nikud from filter/exclude text for consistent filtering
+- New function: `strip_nikud()` in `genizah_core.py`
+
 ### Files Changed
-- `genizah_core.py` - Core library functions and CSV loading
+- `genizah_core.py` - Core library functions, CSV loading, nikud removal
 - `genizah_app.py` - Desktop table columns
 - `web/services.py` - Data classes and page retrieval
 - `web/pages/search.py` - Library badge display

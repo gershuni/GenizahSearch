@@ -521,8 +521,10 @@ Auto-generated index of classes and methods.
 
 - **Class** `SafeRotatingFileHandler` (Line 22)
     - Method `doRollover` (Line 28)
-- **Function** `encode_word_shmidman` (Line 71)
-- **Function** `text_to_fingerprint` (Line 88)
+- **Constant** `NIKUD_PATTERN` (Line 72) - Regex pattern for Hebrew vowel marks
+- **Function** `strip_nikud` (Line 74) - Remove Hebrew vowel marks (nikud) from text
+- **Function** `encode_word_shmidman` (Line 88)
+- **Function** `text_to_fingerprint` (Line 105)
 - **Function** `natural_sort_key` (Line 99)
 - **Class** `LabSettings` (Line 119)
     - Method `__init__` (Line 121)
