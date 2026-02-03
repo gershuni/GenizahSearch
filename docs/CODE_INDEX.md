@@ -736,6 +736,46 @@ Auto-generated index of classes and methods.
     - Method `get_items_sorted` (Line 6120)
     - Method `get_item_copy_text` (Line 6145)
 
+## supabase_corrections_client.py
+
+Desktop application Supabase client for community features (corrections, comments, discoveries, joins).
+
+- **Class** `User` (Line 71) - User data class
+- **Class** `Correction` (Line 86) - Correction data class
+- **Class** `Comment` (Line 111) - Comment data class
+- **Class** `Discovery` (Line 131) - Discovery/Question data class
+- **Class** `FragmentJoin` (Line 160) - Fragment join data class
+- **Class** `JoinedFragmentDetail` (Line 176) - Fragment relationship info
+- **Class** `ConnectedFragments` (Line 187) - Connected fragments response
+- **Class** `DiscoveryResponse` (Line 199) - Response to a discovery
+- **Class** `FeedItem` (Line 211) - Activity feed item
+- **Class** `SupabaseCorrectionsClient` (Line 245)
+    - Method `__init__` (Line 253)
+    - Method `_get_client` (Line 276) - Get or create Supabase client
+    - Method `_load_credentials` (Line 293) - Load saved session from disk
+    - Method `_save_credentials` (Line 330) - Save session to disk
+    - Method `save_login_credentials` (Line 369) - Save login for "Remember Me"
+    - Method `get_saved_login_credentials` (Line 402) - Get saved credentials
+    - Method `clear_saved_login_credentials` (Line 434) - Clear saved credentials
+    - Method `is_server_available` (Line 500) - Check Supabase connectivity
+    - Method `is_logged_in` (Line 535) - Check if user is logged in
+    - Method `login` (Line 546) - Login with email/password
+    - Method `register` (Line 571) - Register new user
+    - Method `logout` (Line 620) - Logout and clear credentials
+    - Method `request_password_reset` (Line 636) - Request password reset email
+    - Method `get_current_user` (Line 697) - Get current logged-in user
+    - Method `create_correction` (Line 719) - Create a new correction
+    - Method `get_corrections_for_document` (Line 784) - Get document corrections
+    - Method `get_my_corrections` (Line 807) - Get user's corrections
+    - Method `create_comment` (Line 923) - Create a new comment
+    - Method `get_document_comments` (Line 960) - Get document comments
+    - Method `create_discovery` (Line 1025) - Create discovery/question
+    - Method `get_discoveries` (Line 1095) - Get list of discoveries
+    - Method `create_join` (Line 1214) - Create fragment join
+    - Method `get_connected_fragments` (Line 1249) - Get connected fragments
+    - Method `get_feed` (Line 1432) - Get activity feed
+- **Function** `get_supabase_corrections_client` (Line 1812) - Get singleton client
+
 ## gui_threads.py
 
 - **Class** `IndexerThread` (Line 8)
