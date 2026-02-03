@@ -200,6 +200,10 @@ def create_login_dialog():
     """
     from web.translations import tr
 
+    # Keys for browser storage (localStorage)
+    REMEMBER_EMAIL_KEY = 'genizah_remember_email'
+    REMEMBER_CHECKED_KEY = 'genizah_remember_checked'
+
     dialog = ui.dialog()  # Removed 'persistent' to allow Esc to close
 
     with dialog, ui.card().classes('w-96 p-6').style('background: var(--bg-card); color: var(--text-primary);'):
@@ -213,7 +217,25 @@ def create_login_dialog():
                 with ui.column().classes('w-full gap-4'):
                     login_email = ui.input(tr('Email')).classes('w-full').props('outlined')
                     login_password = ui.input(tr('Password'), password=True).classes('w-full').props('outlined')
+
+                    # Remember me checkbox
+                    remember_me = ui.checkbox(tr('Remember me')).classes('w-full')
+
                     login_error = ui.label('').classes('text-red-500 text-sm hidden')
+
+                    # Load saved email from browser storage
+                    def load_saved_email():
+                        try:
+                            saved_email = app.storage.browser.get(REMEMBER_EMAIL_KEY, '')
+                            was_checked = app.storage.browser.get(REMEMBER_CHECKED_KEY, False)
+                            if saved_email and was_checked:
+                                login_email.value = saved_email
+                                remember_me.value = True
+                        except Exception:
+                            pass  # Browser storage may not be available
+
+                    # Load saved email when dialog opens
+                    dialog.on('show', load_saved_email)
 
                     async def handle_login():
                         login_error.classes('hidden', remove='visible')
@@ -227,6 +249,16 @@ def create_login_dialog():
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
                         else:
+                            # Save or clear email based on "Remember me" checkbox
+                            try:
+                                if remember_me.value:
+                                    app.storage.browser[REMEMBER_EMAIL_KEY] = login_email.value
+                                    app.storage.browser[REMEMBER_CHECKED_KEY] = True
+                                else:
+                                    app.storage.browser.pop(REMEMBER_EMAIL_KEY, None)
+                                    app.storage.browser.pop(REMEMBER_CHECKED_KEY, None)
+                            except Exception:
+                                pass  # Browser storage may not be available
                             dialog.close()
                             ui.navigate.reload()
 
