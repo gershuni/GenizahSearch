@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03
+> **Last Updated:** 2026-02-03 (verified P1 bug already fixed)
 > **Status:** Active working document
 
 ---
@@ -46,13 +46,13 @@ Move to "Completed Issues" section at bottom with date
 
 | Category | Open | Fixed | Total |
 |----------|------|-------|-------|
-| P1 Critical Bugs | 1 | 0 | 1 |
+| P1 Critical Bugs | 0 | 1 | 1 |
 | P2 Medium Bugs | 6 | 0 | 6 |
 | P3 Low Priority | 4 | 0 | 4 |
 | Documentation Issues | 8 | 0 | 8 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 4 | 0 | 4 |
-| **Total** | **27** | **0** | **27** |
+| **Total** | **26** | **1** | **27** |
 
 ---
 
@@ -62,7 +62,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Desktop Path Traversal** | `filter_text_dialog.py:47` | ❌ Open | Sefaria cache vulnerable to path traversal on Windows. Copy sanitization from `parallels.py:25-33` |
+| **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ✅ Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
 ### P2 - Medium
 
@@ -190,6 +190,7 @@ These completed items should be moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-03 | Verified P1 path traversal bug already fixed in `filter_text_dialog.py` | Claude |
 | 2026-02-03 | Initial creation from documentation audit | Claude |
 
 ---

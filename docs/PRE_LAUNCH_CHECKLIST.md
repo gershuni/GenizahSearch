@@ -837,8 +837,8 @@ None
 
 2. **[Security] Path Traversal in Sefaria cache (including Windows)**
    - File: ~~parallels.py:60~~ → **Fixed!** Uses `_sanitize_cache_filename()` (whitelist)
-   - File: filter_text_dialog.py:47 - **Still vulnerable** (desktop app only)
-   - Status: [x] Web fixed, [ ] Desktop needs fix
+   - File: ~~filter_text_dialog.py:47~~ → **Fixed!** Uses `_sanitize_cache_filename()` at line 58
+   - Status: [x] Web fixed, [x] Desktop fixed
 
 3. **[Security] JS Injection in text_editor.py**
    - File: text_editor.py:214-215

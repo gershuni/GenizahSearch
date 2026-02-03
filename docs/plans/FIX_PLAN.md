@@ -22,27 +22,14 @@ After investigation, several issues listed in the checklist are **already fixed*
 
 ## P1 - Security Issues
 
-### 1. Path Traversal in `filter_text_dialog.py` (Desktop App)
+### 1. Path Traversal in `filter_text_dialog.py` (Desktop App) ✅ FIXED
 **Risk:** Medium (desktop app only, not web)
-**File:** `filter_text_dialog.py:47`
+**File:** `filter_text_dialog.py:16-23,58`
+**Status:** ✅ Already fixed - uses `_sanitize_cache_filename()` whitelist approach
 
-**Current vulnerable code:**
-```python
-cache_file = os.path.join(cache_dir, f"{ref.replace(' ', '_').replace('/', '_')}_clean.txt")
-```
-
-**Fix:** Add sanitization function (copy from parallels.py)
-```python
-def _sanitize_cache_filename(ref: str) -> str:
-    """Sanitize a reference string to create a safe cache filename."""
-    return re.sub(r'[^a-zA-Z0-9_\-]', '_', ref)
-
-# Then at line 47:
-safe_filename = _sanitize_cache_filename(ref)
-cache_file = os.path.join(cache_dir, f"{safe_filename}_clean.txt")
-```
-
-**Testing:** Run desktop app, load Sefaria text, verify cache file created with safe name.
+The fix was already applied:
+- Function defined at lines 16-23
+- Used at line 58: `safe_filename = _sanitize_cache_filename(ref)`
 
 ---
 
