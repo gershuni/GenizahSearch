@@ -1,6 +1,6 @@
 # GenizahSearch - Plans & Documentation Index
 
-**Last Updated:** 2026-02-02
+**Last Updated:** 2026-02-03
 
 ---
 
@@ -40,6 +40,19 @@ This is now the **primary plan** that supersedes the lists unification plan. By 
 **Goal:** Unified lists with project-based color inheritance
 
 **Note:** The concepts in this plan (projects, color inheritance, hierarchy) are still valid and should be implemented AFTER the Supabase migration. The Supabase plan includes the database schema for projects.
+
+### 4. Library Location Feature
+**File:** `LIBRARY_LOCATION_PLAN.md`
+**Status:** Planning
+**Goal:** Add holding library/institution information to all manuscript records
+
+Add `library_code` column to `libraries.csv` mapping each record to its holding institution. Display library information:
+- **Web search results:** Abbreviated code (e.g., "CUL", "JTS") before shelfmark with tooltip
+- **Web browse page:** Full library name before shelfmark + metadata field
+- **Desktop search/joins:** Separate "Library" column
+- **All exports:** Library column/field added
+
+Covers ~217,000 records across 15+ institutions including Cambridge, JTS, Bodleian, Manchester, British Library, NLR, and various special collections.
 
 ---
 
