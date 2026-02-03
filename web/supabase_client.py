@@ -746,26 +746,46 @@ def create_discovery(user_id: str, title: str, content: str, type: str = 'discov
                      document_id: str = None, shelfmark: str = None, page_number: int = None,
                      is_anonymous: bool = False, additional_shelfmarks: List[Dict] = None,
                      related_manuscripts: List[Dict] = None) -> Dict:
-    """Create a new discovery."""
+    """Create a new discovery.
+
+    Note: The database schema uses a 'shelfmarks' JSONB array field.
+    The document_id, shelfmark, page_number and additional entries are
+    stored in this array.
+    """
     try:
         client = get_client()
+
+        # Build shelfmarks array from the various inputs
+        shelfmarks = []
+
+        # Add primary shelfmark/document if provided
+        if document_id or shelfmark:
+            primary = {}
+            if document_id:
+                primary['document_id'] = document_id
+            if shelfmark:
+                primary['shelfmark'] = shelfmark
+            if page_number is not None:
+                primary['page_number'] = page_number
+            if primary:
+                shelfmarks.append(primary)
+
+        # Add additional shelfmarks
+        if additional_shelfmarks:
+            shelfmarks.extend(additional_shelfmarks)
+
+        # Add related manuscripts
+        if related_manuscripts:
+            shelfmarks.extend(related_manuscripts)
+
         data = {
             'user_id': user_id,
             'title': title,
             'content': content,
             'type': type,
-            'is_anonymous': is_anonymous
+            'is_anonymous': is_anonymous,
+            'shelfmarks': shelfmarks
         }
-        if document_id:
-            data['document_id'] = document_id
-        if shelfmark:
-            data['shelfmark'] = shelfmark
-        if page_number is not None:
-            data['page_number'] = page_number
-        if additional_shelfmarks:
-            data['additional_shelfmarks'] = additional_shelfmarks
-        if related_manuscripts:
-            data['related_manuscripts'] = related_manuscripts
 
         response = client.table('discoveries').insert(data).execute()
         if response.data:
