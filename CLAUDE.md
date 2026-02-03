@@ -57,6 +57,36 @@ python genizah_app.py
 2. **Shelfmarks** - Manuscript identifiers like "T-S 12.123", "MS Heb c 57"
 3. **sys_id** - Internal unique identifier for manuscripts
 4. **fl_id** - Fragment/leaf identifier (e.g., "T-S 12.123.1r" for recto)
+5. **library_code** - Abbreviated library identifier (e.g., "CUL", "JTS", "Oxford")
+
+## Data Files
+
+### libraries.csv
+Master metadata file for all ~217,000 manuscript records.
+
+**Structure:**
+```csv
+system_number,oxford_part_id,call_numbers,library_code,,,,titles_non_placeholder
+```
+
+| Column | Index | Description |
+|--------|-------|-------------|
+| system_number | 0 | Unique sys_id |
+| oxford_part_id | 1 | Oxford part identifier (optional) |
+| call_numbers | 2 | Pipe-separated shelfmark variants |
+| library_code | 3 | Library abbreviation (CUL, JTS, etc.) |
+| titles_non_placeholder | 7 | Hebrew title |
+
+**Library Codes:**
+- `CUL` - Cambridge University Library (~128K records)
+- `JTS` - Jewish Theological Seminary (~30K)
+- `RNL` - National Library of Russia (~17K)
+- `Oxford` - Bodleian Libraries (~13K)
+- `Manchester` - University of Manchester (~12K)
+- `BL` - British Library (~8K)
+- `AIU` - Alliance Israélite Universelle
+- `Mosseri`, `Gaster`, `Halper` - Private collections
+- And others (see `genizah_core.LIBRARY_CODES`)
 
 ## Documentation
 
@@ -132,6 +162,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- February 2026: Added library_code column to libraries.csv with holding institution info
 - January 2026: Migrated from FastAPI to Supabase
 - January 2026: Documentation reorganized into `docs/` subdirectories
 - January 2026: Projects and Lists unified

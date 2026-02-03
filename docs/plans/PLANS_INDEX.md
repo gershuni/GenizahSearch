@@ -43,16 +43,19 @@ This is now the **primary plan** that supersedes the lists unification plan. By 
 
 ### 4. Library Location Feature
 **File:** `LIBRARY_LOCATION_PLAN.md`
-**Status:** Planning
+**Test Checklist:** `LIBRARY_LOCATION_TEST_CHECKLIST.md`
+**Status:** ✅ Implemented (Web + Desktop)
 **Goal:** Add holding library/institution information to all manuscript records
 
-Add `library_code` column to `libraries.csv` mapping each record to its holding institution. Display library information:
+Added `library_code` column to `libraries.csv` mapping each record to its holding institution. Library information now displayed:
 - **Web search results:** Abbreviated code (e.g., "CUL", "JTS") before shelfmark with tooltip
-- **Web browse page:** Full library name before shelfmark + metadata field
-- **Desktop search/joins:** Separate "Library" column
-- **All exports:** Library column/field added
+- **Web browse page:** Full library name in metadata panel
+- **Desktop search results:** Separate "Library" column
+- **All exports:** Library column added
 
-Covers ~217,000 records across 15+ institutions including Cambridge, JTS, Bodleian, Manchester, British Library, NLR, and various special collections.
+Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge, JTS, Bodleian, Manchester, British Library, NLR, Mosseri, Gaster, and various special collections.
+
+**Extraction script:** `scripts/extract_library_codes.py`
 
 ---
 

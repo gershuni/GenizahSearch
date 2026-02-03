@@ -528,6 +528,8 @@ Auto-generated index of classes and methods.
     - Method `__init__` (Line 121)
     - Method `load` (Line 161)
     - Method `save` (Line 198)
+- **Constant** `LIBRARY_CODES` (Line 1428) - Dict mapping library codes to full names
+- **Function** `get_library_display` (Line 1461) - Return library name for display (short or full)
 - **Class** `LabEngine` (Line 239)
     - Method `__init__` (Line 244)
     - Method `_close_index` (Line 263)
@@ -608,6 +610,7 @@ Auto-generated index of classes and methods.
     - Method `_load_heavy_caches_bg` (Line 2395)
     - Method `_load_csv_bank` (Line 2400)
     - Method `get_meta_for_id` (Line 2449)
+    - Method `get_library_for_id` (Line 2832) - Get library code for a system ID
     - Method `get_shelfmark_from_header` (Line 2485)
     - Method `save_caches` (Line 2498)
     - Method `get_part_for_folio` (Line 2506)

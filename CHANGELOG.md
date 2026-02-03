@@ -4,6 +4,42 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.4.0] - 2026-02-03
+
+### New Feature: Library/Holding Institution Display
+
+Every manuscript record now shows which library or collection holds the original document.
+
+- **Coverage:** 99.65% of ~217,000 records have library codes assigned
+- **Libraries identified:** Cambridge (CUL), JTS, National Library of Russia, Bodleian (Oxford), Manchester, British Library, Alliance Israélite, and 20+ more
+
+#### Web Application
+- Library badge with code (e.g., "CUL") displayed in search results with full name tooltip
+- Library field in Advanced View metadata cards
+- Library field in browse page metadata panel
+- Library column in all Excel exports (Search, Lists, Parallels)
+
+#### Desktop Application
+- New "Library" column in search results table
+- Filterable/sortable like other columns
+- Library column in Excel/Word exports
+
+#### Technical Details
+- New `library_code` column in `libraries.csv`
+- New functions: `LIBRARY_CODES` constant, `get_library_display()`, `get_library_for_id()`
+- Backward compatible with old CSV files (gracefully handles missing column)
+
+### Files Changed
+- `genizah_core.py` - Core library functions and CSV loading
+- `genizah_app.py` - Desktop table columns
+- `web/services.py` - Data classes and page retrieval
+- `web/pages/search.py` - Library badge display
+- `web/pages/browse.py` - Metadata panel
+- `web/export_service.py` - Export functions
+- `libraries.csv` - Added library_code column
+
+---
+
 ## [5.3.1] - 2026-02-03
 
 ### Bug Fixes
