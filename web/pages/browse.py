@@ -973,12 +973,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('No text available'), type='warning')
             return
 
+        # Get library info
+        library_code = ''
+        library_name = ''
+        if state.current_page and state.current_page.library_code:
+            library_code = state.current_page.library_code
+            from genizah_core import get_library_display
+            library_name = get_library_display(library_code, short=False)
+
         # Prepare export data
         export_data = {
             'shelfmark': state.current_page.shelfmark,
             'title': state.current_page.title,
             'sys_id': state.sys_id,
-            'view_all': state.view_all
+            'view_all': state.view_all,
+            'library_code': library_code,
+            'library_name': library_name
         }
 
         if state.view_all and state.full_manuscript:

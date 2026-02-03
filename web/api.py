@@ -575,8 +575,12 @@ def init_api_routes():
     @app.get('/api/export/parallels/excel')
     def export_parallels_excel():
         """Export parallels results to Excel using unified export service."""
+        from nicegui import app as nicegui_app
+
         parallels_results = state.parallels_results or []
         filtered_results = state.parallels_filtered or []
+        # Get source text from storage for filename
+        source_text = nicegui_app.storage.user.get('parallels_source_text', '')
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -584,7 +588,7 @@ def init_api_routes():
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_parallels_excel(
-                parallels_results, filtered_results
+                parallels_results, filtered_results, source_text=source_text
             )
             return Response(
                 content=content,
@@ -600,8 +604,12 @@ def init_api_routes():
     @app.get('/api/export/parallels/word')
     def export_parallels_word():
         """Export parallels results to Word using unified export service."""
+        from nicegui import app as nicegui_app
+
         parallels_results = state.parallels_results or []
         filtered_results = state.parallels_filtered or []
+        # Get source text from storage for filename
+        source_text = nicegui_app.storage.user.get('parallels_source_text', '')
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -609,7 +617,7 @@ def init_api_routes():
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_parallels_word(
-                parallels_results, filtered_results
+                parallels_results, filtered_results, source_text=source_text
             )
             return Response(
                 content=content,

@@ -328,6 +328,16 @@ class ExportService:
         except Exception:
             return ''
 
+    def get_library_display(self, library_code: str, short: bool = True) -> str:
+        """Get library display name from code."""
+        if not library_code:
+            return ''
+        try:
+            from genizah_core import get_library_display as core_get_library_display
+            return core_get_library_display(library_code, short=short)
+        except Exception:
+            return library_code  # Fallback to code itself
+
     def export_search_results_excel(
         self,
         results: List[Dict[str, Any]],
@@ -417,10 +427,19 @@ class ExportService:
             display = res.get('display', {})
             shelf = display.get('shelfmark', 'Unknown')
             title = display.get('title', '')
+            library_code = display.get('library_code', '')
 
-            # Header with shelfmark
+            # Get library name
+            library_name = ''
+            if library_code:
+                library_name = self.get_library_display(library_code, short=False)
+
+            # Build display header with library
+            display_header = f"{library_name}, {shelf}" if library_name else shelf
+
+            # Header with library and shelfmark
             p = doc.add_paragraph()
-            run = p.add_run(f"{i+1}. {shelf}")
+            run = p.add_run(f"{i+1}. {display_header}")
             run.bold = True
             set_run_rtl_font(run)
             if title:
@@ -438,7 +457,8 @@ class ExportService:
 
         add_word_credits(doc)
 
-        filename = make_safe_filename(search_query) + ".docx"
+        # Filename with "search" suffix
+        filename = make_safe_filename(search_query, default="genizah") + "_search.docx"
         return save_document_to_bytes(doc), filename
 
     def export_list_excel(
@@ -506,7 +526,8 @@ class ExportService:
     def export_parallels_excel(
         self,
         main_results: List[Dict[str, Any]],
-        filtered_results: List[Dict[str, Any]] = None
+        filtered_results: List[Dict[str, Any]] = None,
+        source_text: str = ""
     ) -> tuple:
         """
         Export parallels results to Excel format.
@@ -577,12 +598,20 @@ class ExportService:
 
         add_excel_credits(ws)
 
-        return save_workbook_to_bytes(wb), "parallels_results.xlsx"
+        # Filename: first words of source text + "_parallels"
+        if source_text:
+            filename_base = source_text[:30].strip()
+            filename = make_safe_filename(filename_base, default="parallels") + "_parallels.xlsx"
+        else:
+            filename = "parallels_results.xlsx"
+
+        return save_workbook_to_bytes(wb), filename
 
     def export_parallels_word(
         self,
         main_results: List[Dict[str, Any]],
-        filtered_results: List[Dict[str, Any]] = None
+        filtered_results: List[Dict[str, Any]] = None,
+        source_text: str = ""
     ) -> tuple:
         """
         Export parallels results to Word format.
@@ -594,7 +623,16 @@ class ExportService:
             raise ValueError("No parallels results to export")
 
         doc = Document()
-        doc.add_heading('Genizah Parallels Search Results', 0)
+
+        # Build title with source text preview
+        if source_text:
+            # Take first ~50 chars of source text for title
+            source_preview = source_text[:50].strip()
+            if len(source_text) > 50:
+                source_preview += "..."
+            doc.add_heading(f'Parallels for: "{source_preview}"', 0)
+        else:
+            doc.add_heading('Genizah Parallels Search Results', 0)
 
         def add_results(results: List[Dict], start_idx: int, section_title: str = None) -> int:
             if section_title:
@@ -603,15 +641,27 @@ class ExportService:
             for idx, item in enumerate(results, start_idx):
                 raw_header = item.get('raw_header', '')
                 shelfmark, title = 'Unknown', ''
+                sys_id = ''
 
                 if raw_header:
                     sys_match = re.search(r'(99\d{8,})', raw_header)
                     if sys_match:
-                        shelfmark, title = self.get_metadata(sys_match.group(1))
+                        sys_id = sys_match.group(1)
+                        shelfmark, title = self.get_metadata(sys_id)
+
+                # Get library info
+                library_name = ''
+                if sys_id:
+                    library_code = self.get_library_code(sys_id)
+                    if library_code:
+                        library_name = self.get_library_display(library_code, short=False)
+
+                # Build display header with library
+                display_header = f"{library_name}, {shelfmark}" if library_name else shelfmark
 
                 # Header
                 p = doc.add_paragraph()
-                shelf_run = p.add_run(f"{idx}. {shelfmark}")
+                shelf_run = p.add_run(f"{idx}. {display_header}")
                 shelf_run.bold = True
                 set_run_rtl_font(shelf_run)
                 p.add_run(f" - Score: {item.get('score', 0)}")
@@ -641,7 +691,15 @@ class ExportService:
 
         add_word_credits(doc)
 
-        return save_document_to_bytes(doc), "parallels_results.docx"
+        # Filename: first words of source text + "_parallels"
+        if source_text:
+            # Take first ~30 chars for filename
+            filename_base = source_text[:30].strip()
+            filename = make_safe_filename(filename_base, default="parallels") + "_parallels.docx"
+        else:
+            filename = "parallels_results.docx"
+
+        return save_document_to_bytes(doc), filename
 
     def export_browse_word(
         self,
@@ -657,16 +715,22 @@ class ExportService:
             raise ValueError("No browse data to export")
 
         doc = Document()
-        doc.add_heading('Genizah Manuscript', 0)
 
-        # Shelfmark
-        if browse_data.get('shelfmark'):
-            shelf_heading = doc.add_heading(browse_data['shelfmark'], 1)
-            set_paragraph_rtl(shelf_heading)
-            for run in shelf_heading.runs:
-                set_run_rtl_font(run)
+        # Build title with library name and shelfmark
+        shelfmark = browse_data.get('shelfmark', '')
+        library_name = browse_data.get('library_name', '')
 
-        # Title
+        # Document title: Library, Shelfmark (or just Shelfmark)
+        if library_name and shelfmark:
+            doc_title = f"{library_name}, {shelfmark}"
+        elif shelfmark:
+            doc_title = shelfmark
+        else:
+            doc_title = 'Genizah Manuscript'
+
+        doc.add_heading(doc_title, 0)
+
+        # Title (Hebrew)
         if browse_data.get('title'):
             add_hebrew_paragraph(doc, browse_data['title'])
 
@@ -689,7 +753,9 @@ class ExportService:
 
         add_word_credits(doc)
 
-        return save_document_to_bytes(doc), "manuscript.docx"
+        # Filename: use shelfmark
+        filename = make_safe_filename(shelfmark, default="manuscript") + ".docx"
+        return save_document_to_bytes(doc), filename
 
 
 # Create singleton instance (can be initialized with meta_mgr later)
