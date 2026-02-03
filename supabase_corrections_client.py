@@ -29,6 +29,13 @@ except ImportError:
     Client = None
     AuthApiError = Exception
 
+try:
+    import keyring
+    KEYRING_AVAILABLE = True
+except ImportError:
+    keyring = None
+    KEYRING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -351,6 +358,104 @@ class SupabaseCorrectionsClient:
 
         except Exception as e:
             logger.warning(f"Failed to save credentials: {e}")
+
+    # =========================================================================
+    # LOGIN CREDENTIALS STORAGE (for "Remember Me" feature)
+    # =========================================================================
+    # Service name for keyring - used to identify the application
+    KEYRING_SERVICE = "GenizahSearch"
+    KEYRING_EMAIL_KEY = "saved_email"
+
+    def save_login_credentials(self, email: str, password: str) -> bool:
+        """
+        Save login credentials securely using keyring.
+        Email is saved to credentials file, password to system keyring.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            # Save email to credentials file
+            if self.credentials_file.exists():
+                with open(self.credentials_file, 'r') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+
+            data['saved_email'] = email
+            data['remember_me'] = True
+
+            with open(self.credentials_file, 'w') as f:
+                json.dump(data, f)
+
+            # Save password to system keyring (secure storage)
+            if KEYRING_AVAILABLE:
+                keyring.set_password(self.KEYRING_SERVICE, email, password)
+                logger.info(f"Login credentials saved for {email}")
+                return True
+            else:
+                logger.warning("keyring not available, password not saved")
+                return False
+
+        except Exception as e:
+            logger.warning(f"Failed to save login credentials: {e}")
+            return False
+
+    def get_saved_login_credentials(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Get saved login credentials.
+        Returns (email, password) tuple, or (None, None) if not saved.
+        """
+        try:
+            if not self.credentials_file.exists():
+                return None, None
+
+            with open(self.credentials_file, 'r') as f:
+                data = json.load(f)
+
+            email = data.get('saved_email')
+            remember_me = data.get('remember_me', False)
+
+            if not email or not remember_me:
+                return None, None
+
+            # Get password from system keyring
+            password = None
+            if KEYRING_AVAILABLE:
+                try:
+                    password = keyring.get_password(self.KEYRING_SERVICE, email)
+                except Exception as e:
+                    logger.debug(f"Could not retrieve password from keyring: {e}")
+
+            return email, password
+
+        except Exception as e:
+            logger.warning(f"Failed to get saved credentials: {e}")
+            return None, None
+
+    def clear_saved_login_credentials(self):
+        """Clear saved login credentials."""
+        try:
+            # Remove from credentials file
+            if self.credentials_file.exists():
+                with open(self.credentials_file, 'r') as f:
+                    data = json.load(f)
+
+                email = data.pop('saved_email', None)
+                data.pop('remember_me', None)
+
+                with open(self.credentials_file, 'w') as f:
+                    json.dump(data, f)
+
+                # Remove from keyring
+                if KEYRING_AVAILABLE and email:
+                    try:
+                        keyring.delete_password(self.KEYRING_SERVICE, email)
+                    except Exception:
+                        pass  # Password may not exist in keyring
+
+            logger.info("Saved login credentials cleared")
+
+        except Exception as e:
+            logger.warning(f"Failed to clear saved credentials: {e}")
 
     def _load_cache(self):
         """Load cached community data from disk."""

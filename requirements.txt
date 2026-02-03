@@ -10,3 +10,4 @@ nicegui
 supabase
 gotrue
 python-dotenv
+keyring

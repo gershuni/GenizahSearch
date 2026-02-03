@@ -52,8 +52,22 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.client = client or get_corrections_client()
         self.setWindowTitle(tr("Login to Corrections System"))
-        self.resize(400, 250)
+        self.resize(400, 280)
         self.init_ui()
+        self._load_saved_credentials()
+
+    def _load_saved_credentials(self):
+        """Load saved credentials and pre-fill the form."""
+        try:
+            if hasattr(self.client, 'get_saved_login_credentials'):
+                email, password = self.client.get_saved_login_credentials()
+                if email:
+                    self.email_input.setText(email)
+                    self.remember_checkbox.setChecked(True)
+                    if password:
+                        self.password_input.setText(password)
+        except Exception as e:
+            logger.debug(f"Could not load saved credentials: {e}")
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -77,6 +91,11 @@ class LoginDialog(QDialog):
         form.addWidget(self.password_input, 1, 1)
 
         layout.addLayout(form)
+
+        # Remember me checkbox
+        self.remember_checkbox = QCheckBox(tr("Remember me"))
+        self.remember_checkbox.setToolTip(tr("Save login credentials for next time"))
+        layout.addWidget(self.remember_checkbox)
 
         # Forgot password link
         forgot_link = QLabel(f'<a href="#">{tr("Forgot password?")}</a>')
@@ -123,6 +142,14 @@ class LoginDialog(QDialog):
         success, message = self.client.login(email, password)
 
         if success:
+            # Save or clear credentials based on "Remember me" checkbox
+            if hasattr(self.client, 'save_login_credentials'):
+                if self.remember_checkbox.isChecked():
+                    self.client.save_login_credentials(email, password)
+                else:
+                    # Clear saved credentials if user unchecked "Remember me"
+                    if hasattr(self.client, 'clear_saved_login_credentials'):
+                        self.client.clear_saved_login_credentials()
             self.login_success.emit(self.client.current_user)
             self.accept()
         else:

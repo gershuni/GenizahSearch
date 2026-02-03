@@ -1036,6 +1036,8 @@ TRANSLATIONS = {
     "Please enter email and password": "אנא הזן אימייל וסיסמה",
     "Logging in...": "מתחבר...",
     "Login Failed": "ההתחברות נכשלה",
+    "Remember me": "זכור אותי",
+    "Save login credentials for next time": "שמור את פרטי ההתחברות לפעם הבאה",
     "Forgot password?": "שכחת סיסמה?",
     "Forgot Password": "שכחתי סיסמה",
     "Enter your email address:": "הזן את כתובת האימייל שלך:",
