@@ -104,12 +104,9 @@ class SefariaLibraryManager:
     def _fetch_from_api(self):
         """Fetch the full TOC from Sefaria API."""
         try:
-            print("[DEBUG] Fetching Sefaria TOC from API...")
             resp = requests.get(self.TOC_URL, timeout=30)
             if resp.status_code == 200:
-                data = resp.json()
-                print(f"[DEBUG] Fetched Sefaria TOC: {len(data)} top-level categories")
-                return data
+                return resp.json()
         except Exception as e:
             print(f"Error fetching Sefaria TOC: {e}")
         return None

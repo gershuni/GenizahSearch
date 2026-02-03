@@ -688,8 +688,8 @@ def create_parallels_page(initial_text: str = None):
             # Save custom texts (small enough to store directly)
             app.storage.user['filter_sources_custom'] = custom_texts
             app.storage.user['filter_sources_custom_count'] = filter_sources.get('custom_count', 0)
-        except Exception as e:
-            print(f"[DEBUG] Error saving filter sources: {e}")
+        except Exception:
+            pass
 
     def on_source_toggled(ref, checked):
         """Handle source checkbox toggle."""
@@ -775,7 +775,6 @@ def create_parallels_page(initial_text: str = None):
             try:
                 _ = sefaria_progress.client
             except (RuntimeError, Exception):
-                print("[DEBUG] Client deleted during load, aborting")
                 return
 
             # Update progress before fetching
@@ -1101,10 +1100,8 @@ def create_parallels_page(initial_text: str = None):
     async def execute_parallels():
         # Prevent duplicate executions
         if p_state.is_running:
-            print("[DEBUG] execute_parallels: already running, skipping")
             return
 
-        print("[DEBUG] execute_parallels called")
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
 
@@ -1155,9 +1152,6 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
-        print(f"[DEBUG] Captured filter text length: {len(captured_filter_text) if captured_filter_text else 0}, enabled: {len(filter_sources['enabled'])}, loaded: {len(filter_sources['loaded'])}")
-        if captured_filter_text:
-            print(f"[DEBUG] Filter text sample (first 100 chars): {captured_filter_text[:100]}")
 
         def progress_cb(current, total):
             if p_state.is_cancelled:
@@ -1182,12 +1176,8 @@ def create_parallels_page(initial_text: str = None):
 
         def run_search():
             try:
-                print(f"[DEBUG] Starting search: lab_mode={captured_lab_mode}, mode={captured_mode}, chunk_size={captured_chunk_size}")
-
                 if captured_lab_mode:
                     # LAB MODE: Use fingerprint-based search with advanced features
-                    print(f"[DEBUG] Using LAB search: deep_scan={captured_deep_scan}")
-                    print(f"[DEBUG] Boundary settings: mode={captured_boundary_mode}, delimiter='{repr(captured_boundary_delimiter)}', boost={captured_boundary_boost}")
                     result = state.lab_engine.lab_composition_search(
                         text,
                         mode=captured_mode,
@@ -1201,13 +1191,8 @@ def create_parallels_page(initial_text: str = None):
                         min_boundary_matches=captured_min_boundary_matches,
                         min_delimiter_distance=captured_min_delimiter_distance
                     )
-                    print(f"[DEBUG] Lab search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}, partial={result.get('partial', False)}")
-                    if result.get('boundary_stats'):
-                        print(f"[DEBUG] Boundary stats: {result['boundary_stats']}")
                 else:
                     # STANDARD MODE: Use direct Tantivy search (faster, simpler)
-                    print(f"[DEBUG] Using STANDARD search: freq_threshold={captured_freq_threshold}")
-                    print(f"[DEBUG] Boundary settings: mode={captured_boundary_mode}, delimiter='{repr(captured_boundary_delimiter)}', boost={captured_boundary_boost}")
                     result = state.searcher.search_composition_logic(
                         text,
                         chunk_size=captured_chunk_size,
@@ -1221,9 +1206,6 @@ def create_parallels_page(initial_text: str = None):
                         min_boundary_matches=captured_min_boundary_matches,
                         min_delimiter_distance=captured_min_delimiter_distance
                     )
-                    print(f"[DEBUG] Standard search returned: main={len(result.get('main', []))}, filtered={len(result.get('filtered', []))}")
-                    if result and result.get('boundary_stats'):
-                        print(f"[DEBUG] Boundary stats: {result['boundary_stats']}")
                     # Add empty fields for compatibility with result display
                     if result:
                         result['partial'] = False
@@ -1825,10 +1807,12 @@ def create_parallels_page(initial_text: str = None):
                         on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
                     ).props('flat dense').style('color: var(--primary-700);')
 
+                # Check if item is in any list
+                parallels_in_list = state.lists_mgr and sys_id and state.lists_mgr.is_item_in_any_list(sys_id)
                 ui.button(
-                    icon='star_border',
+                    icon='star' if parallels_in_list else 'star_border',
                     on_click=lambda i=item, s=shelfmark, t=title, sid=sys_id: add_to_list(i, s, t, sid)
-                ).props('flat round dense').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
+                ).props('flat round dense').style('color: var(--accent-amber);').tooltip(tr('In List') if parallels_in_list else tr('Add to List'))
 
                 # Edit and Comment buttons
                 ms_text_clean = item.get('text', '').replace('*', '').replace('\n', ' ').strip()
@@ -1880,9 +1864,6 @@ def create_parallels_page(initial_text: str = None):
             if ref in stored_enabled:
                 filter_sources['enabled'].add(ref)
 
-        total_to_load = len(stored_refs) + len(stored_custom)
-        print(f"[DEBUG] Restore: found {len(stored_refs)} Sefaria refs, {len(stored_custom)} custom, {len(stored_enabled)} enabled")
-
         if not stored_refs:
             filter_sources['pending_restore'] = False
             try:
@@ -1907,7 +1888,6 @@ def create_parallels_page(initial_text: str = None):
             try:
                 _ = sefaria_progress.client
             except (RuntimeError, Exception):
-                print("[DEBUG] Client deleted, aborting restore")
                 return
 
             text = await run.io_bound(fetch_sefaria_text, ref, True)
@@ -1922,7 +1902,6 @@ def create_parallels_page(initial_text: str = None):
                 sefaria_progress.value = (i + 1) / len(stored_refs)
                 sefaria_status.text = tr('Loading: {}').format(f"{i+1}/{len(stored_refs)}")
             except (RuntimeError, Exception):
-                print("[DEBUG] Client deleted during restore, aborting")
                 return
 
         # Update UI
@@ -1931,9 +1910,6 @@ def create_parallels_page(initial_text: str = None):
             sefaria_progress.style('display: none;')
             sefaria_status.style('display: none;')
             refresh_loaded_sources_ui()
-
-            if loaded_count > 0:
-                print(f"[DEBUG] Restored {loaded_count}/{len(stored_refs)} filter sources from cache")
         except (RuntimeError, Exception):
             pass  # Client deleted
 

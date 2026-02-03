@@ -1,6 +1,11 @@
 # Lists & Projects Unification Plan
 ## "The Pro Programmer" Architecture
 
+> ⚠️ **NOTE (2026-02-03):** This plan was written before the FastAPI backend was removed.
+> References to `backend/api/routes/lists.py` and other backend files are outdated.
+> The concepts (projects, color inheritance) remain valid and should be implemented
+> using Supabase directly instead of the old backend.
+
 **Date:** 2026-01-30
 **Goal:** Unified cloud-synced lists with project-based color inheritance
 

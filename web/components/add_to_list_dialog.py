@@ -20,6 +20,27 @@ from typing import Optional, Callable
 import asyncio
 
 
+def get_star_icon(lists_mgr, sys_id: str) -> str:
+    """
+    Return the appropriate star icon based on whether item is in a list.
+
+    Args:
+        lists_mgr: The lists manager instance
+        sys_id: System ID of the item
+
+    Returns:
+        'star' if item is in any list, 'star_border' otherwise
+    """
+    if not lists_mgr or not sys_id:
+        return 'star_border'
+    try:
+        if lists_mgr.is_item_in_any_list(sys_id):
+            return 'star'
+    except Exception:
+        pass
+    return 'star_border'
+
+
 def show_add_to_list_dialog(
     sys_id: str,
     shelfmark: str,
@@ -39,8 +60,6 @@ def show_add_to_list_dialog(
         fl_id: Optional FL ID for page-specific additions
         on_success: Optional callback after successful addition
     """
-    print(f"[DEBUG] show_add_to_list_dialog called: sys_id={sys_id}, shelfmark={shelfmark}")
-    print(f"[DEBUG] lists_mgr={lists_mgr}, fl_id={fl_id}")
     if not sys_id:
         ui.notify(tr('Cannot add: missing system ID'), type='warning')
         return
@@ -64,12 +83,9 @@ def show_add_to_list_dialog(
         ui.label(f"{tr('Item')}: {display_shelfmark}").style('color: var(--text-secondary);')
 
         lists = lists_mgr.data.get('lists', {})
-        print(f"[DEBUG] lists_mgr.data = {lists_mgr.data}")
         # Store list data with colors for display
         list_data = {lid: lst for lid, lst in lists.items() if not lst.get('is_system')}
         list_options = {lid: lst['name'] for lid, lst in list_data.items()}
-        print(f"[DEBUG] list_data = {list_data}")
-        print(f"[DEBUG] list_options = {list_options}")
 
         # Container for the main form
         form_container = ui.column().classes('w-full mt-4 gap-3')
@@ -87,8 +103,6 @@ def show_add_to_list_dialog(
                 simple_options.update(list_options)
 
                 initial_value = list(list_options.keys())[0] if list_options else '__new__'
-                print(f"[DEBUG] simple_options = {simple_options}")
-                print(f"[DEBUG] initial_value = {initial_value}")
 
                 selected_list = ui.select(
                     simple_options,
@@ -169,7 +183,6 @@ def show_add_to_list_dialog(
                 async def create_and_add():
                     name = new_list_name.value.strip()
                     project_id = selected_project['value']
-                    print(f"[DEBUG] create_and_add called, name={name}, project_id={project_id}")
                     if not name:
                         ui.notify(tr('Please enter a list name'), type='warning')
                         return
@@ -177,19 +190,12 @@ def show_add_to_list_dialog(
                     # Create the new list - use async if authenticated, sync otherwise
                     # Color is inherited from project or defaults to gold for standalone
                     is_logged_in = GlobalAuthState.is_logged_in()
-                    print(f"[DEBUG] is_logged_in={is_logged_in}")
                     try:
                         if is_logged_in:
-                            print(f"[DEBUG] Calling lists_mgr.create_list (async)")
                             new_list_id = await lists_mgr.create_list(name, project_id=project_id)
                         else:
-                            print(f"[DEBUG] Calling lists_mgr.create_list_sync")
                             new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
-                        print(f"[DEBUG] new_list_id={new_list_id}")
                     except Exception as e:
-                        print(f"[DEBUG] Exception creating list: {e}")
-                        import traceback
-                        traceback.print_exc()
                         ui.notify(f"Error: {e}", type='negative')
                         return
 
@@ -200,11 +206,7 @@ def show_add_to_list_dialog(
                                 result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
                             else:
                                 result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                            print(f"[DEBUG] add_item result={result}")
                         except Exception as e:
-                            print(f"[DEBUG] Exception adding item: {e}")
-                            import traceback
-                            traceback.print_exc()
                             ui.notify(f"Error: {e}", type='negative')
                             return
 
@@ -257,9 +259,7 @@ def show_add_to_list_dialog(
             if not list_options:
                 add_btn.set_visibility(False)
 
-    print(f"[DEBUG] About to open dialog")
     dialog.open()
-    print(f"[DEBUG] Dialog opened")
     return dialog
 
 
@@ -287,23 +287,43 @@ def create_add_to_list_button(
     Returns:
         The button element
     """
+    # Check if item is already in a list
+    is_in_list = False
+    if lists_mgr and sys_id:
+        try:
+            is_in_list = lists_mgr.is_item_in_any_list(sys_id)
+        except Exception:
+            pass
+
+    # Use filled star if in list, outline if not
+    icon = 'star' if is_in_list else 'star_border'
+
     def show_dialog():
+        nonlocal is_in_list
+        def on_success():
+            nonlocal is_in_list
+            # Update icon after adding to list
+            is_in_list = True
+            btn._props['icon'] = 'star'
+            btn.update()
+
         show_add_to_list_dialog(
             sys_id=sys_id,
             shelfmark=shelfmark,
             lists_mgr=lists_mgr,
             note_default=note_default,
-            fl_id=fl_id
+            fl_id=fl_id,
+            on_success=on_success
         )
 
     props = 'flat round dense'
     if size == 'sm':
         props += ' size=sm'
 
-    tooltip = tooltip_text or tr('Add to List')
+    tooltip = tooltip_text or (tr('In List') if is_in_list else tr('Add to List'))
 
     btn = ui.button(
-        icon='star_border',
+        icon=icon,
         on_click=show_dialog
     ).props(props).style('color: var(--accent-amber);').tooltip(tooltip)
 

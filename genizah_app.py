@@ -5781,7 +5781,7 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
-        # Load Button moved to top row
+        # Load Button Cmoved to top row
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
         top_row.addWidget(btn_load)
 

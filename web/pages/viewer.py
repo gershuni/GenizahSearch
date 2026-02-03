@@ -80,15 +80,10 @@ def load_result(container, result):
     full_text = result.get('full_text') or result.get('text', '')
     snippet = result.get('snippet', '')
 
-    # Debug print
-    print(f"[DEBUG] uid={uid}, full_text length={len(full_text) if full_text else 0}, snippet length={len(snippet) if snippet else 0}")
-
     # For search results, prefer to show snippet + link to browse
     # Don't load the full manuscript text as it's too large
     display_text = snippet if snippet else full_text
     is_snippet_only = bool(snippet and not full_text)
-
-    print(f"[DEBUG] Using {'snippet' if is_snippet_only else 'full_text'}, length={len(display_text) if display_text else 0}")
 
     with container:
 
@@ -114,10 +109,12 @@ def load_result(container, result):
                         fl_id=fl_id
                     )
 
+                # Check if item is in any list
+                viewer_in_list = state.lists_mgr and sys_id and state.lists_mgr.is_item_in_any_list(sys_id)
                 ui.button(
-                    icon='star_border',
+                    icon='star' if viewer_in_list else 'star_border',
                     on_click=show_add_to_list_local
-                ).props('flat round dense').tooltip(tr('Add to List'))
+                ).props('flat round dense').tooltip(tr('In List') if viewer_in_list else tr('Add to List'))
 
                 ui.button(icon='download', on_click=lambda: ui.notify('Exporting...')).props('flat round dense')
 

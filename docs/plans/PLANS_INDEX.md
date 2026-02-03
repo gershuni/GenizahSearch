@@ -94,19 +94,22 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 
 ## Implementation Order
 
-### Immediate (Before Launch)
-1. ✅ Bug #21 - Add-to-list button (DONE)
-2. ⏳ Bug #20 - Lists sync duplicates (partially diagnosed)
-3. 🔲 Security issues from audit
+### Completed
+1. ✅ Bug #21 - Add-to-list button
+2. ✅ Supabase migration (Jan 2026)
+3. ✅ Library location feature (Feb 2026)
+4. ✅ Cross-paragraph search (Feb 2026)
+5. ✅ Debug prints removed (Feb 2026)
+6. ✅ Star button visual feedback (Feb 2026)
 
-### Short-term (Post-Launch)
-1. 🔲 Supabase migration (replaces backend)
-2. 🔲 Projects UI for web (after Supabase)
-3. 🔲 Desktop cloud sync (after Supabase)
+### Short-term
+1. 🔲 Projects UI for web
+2. 🔲 Desktop cloud sync improvements
+3. 🔲 Mobile responsive design
 
 ### Long-term
-1. 🔲 Remove old backend code
-2. 🔲 Performance optimizations
+1. 🔲 Performance optimizations
+2. 🔲 Joins in Discovery Feed
 3. 🔲 Additional features from audit
 
 ---
@@ -141,14 +144,11 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 
 ---
 
-## Debug Prints Added (Remove Before Production)
+## Debug Prints
 
-These files have `[DEBUG]` print statements that should be removed:
+✅ **All debug prints removed** (2026-02-03)
 
-1. `web/components/add_to_list_dialog.py`
-2. `web/pages/browse.py`
-3. `web/user_lists.py`
-4. `genizah_core.py`
+Debug print statements have been removed from all production files.
 
 ---
 

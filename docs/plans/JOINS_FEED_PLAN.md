@@ -1,5 +1,9 @@
 # Joins in Discovery Center - Implementation Plan
 
+> ⚠️ **NOTE (2026-02-03):** This plan was written before the FastAPI backend was removed.
+> References to `backend/schemas/discovery.py` and `backend/services/discovery_service.py`
+> are outdated. The implementation should use Supabase functions instead of the old backend.
+
 ## Overview
 
 Add joins as a new category in the community feed system, showing user-created joins alongside discoveries, corrections, and comments.

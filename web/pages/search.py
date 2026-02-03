@@ -1188,10 +1188,13 @@ def create_search_page(initial_query: str = None):
                         def handler():
                             show_add_to_list_dialog_local(r)
                         return handler
+                    # Check if item is in any list
+                    result_sys_id = result.get('display', {}).get('id')
+                    result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
                     ui.button(
-                        icon='star_border',
+                        icon='star' if result_in_list else 'star_border',
                         on_click=make_star_handler(result)
-                    ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('Add to List'))
+                    ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
 
             # Snippet
             if snippet:
@@ -1684,9 +1687,12 @@ def create_search_page(initial_query: str = None):
                                     def handler():
                                         show_add_to_list_dialog_local(r)
                                     return handler
-                                ui.button(icon='star_border', on_click=make_add_handler(result)).props(
+                                # Check if item is in any list
+                                adv_result_sys_id = result.get('display', {}).get('id')
+                                adv_result_in_list = state.lists_mgr and adv_result_sys_id and state.lists_mgr.is_item_in_any_list(adv_result_sys_id)
+                                ui.button(icon='star' if adv_result_in_list else 'star_border', on_click=make_add_handler(result)).props(
                                     'round'
-                                ).style('color: var(--accent-amber);').tooltip(tr('Add to List'))
+                                ).style('color: var(--accent-amber);').tooltip(tr('In List') if adv_result_in_list else tr('Add to List'))
 
                                 # Image toggle button
                                 if has_image:

@@ -44,7 +44,8 @@ from .joins_panel import (
 
 from .add_to_list_dialog import (
     show_add_to_list_dialog,
-    create_add_to_list_button
+    create_add_to_list_button,
+    get_star_icon
 )
 
 __all__ = [
@@ -69,4 +70,5 @@ __all__ = [
     'invalidate_joins_cache',
     'show_add_to_list_dialog',
     'create_add_to_list_button',
+    'get_star_icon',
 ]

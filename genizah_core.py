@@ -1182,12 +1182,6 @@ class LabEngine:
                             clean_chunk = ' '.join(re.findall(r'[\u05D0-\u05EA]+', chunk_text))
                             if clean_chunk and clean_chunk in filter_text:
                                 is_filtered_match = True
-                                # Debug: log first few filter matches
-                                if not hasattr(self, '_filter_match_count'):
-                                    self._filter_match_count = 0
-                                self._filter_match_count += 1
-                                if self._filter_match_count <= 3:
-                                    print(f"[DEBUG] Filter match #{self._filter_match_count}: '{clean_chunk[:60]}...'")
 
                         match_score, matches, best_window = self._calculate_match_metrics(content, fp_list, chunk_text, freq_map=target_map)
 
@@ -1230,7 +1224,6 @@ class LabEngine:
                     except: pass
         except InterruptedError:
             was_interrupted = True
-            print(f"[DEBUG] Search interrupted at chunk {chunks_processed}/{total_chunks}, found {len(results_map)} results so far")
 
         # (Part 3: Result Processing) - runs even if interrupted to return partial results
         raw_final_items = []
@@ -6013,12 +6006,8 @@ class ListsManager:
 
     def clear_all(self):
         """Clear all lists and reset to default state. Used after migration."""
-        print(f"[DEBUG] ListsManager.clear_all() called")
-        print(f"[DEBUG] Before clear: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
         self.data = self._get_default_data()
-        print(f"[DEBUG] After reset: lists={list(self.data.get('lists', {}).keys())}, items={len(self.data.get('items', {}))}")
         self.save()
-        print(f"[DEBUG] Data saved to {self.LISTS_FILE}")
 
     # --- Cloud Sync Integration ---
 

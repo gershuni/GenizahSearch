@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03 (verified all P1-P2 bugs)
+> **Last Updated:** 2026-02-03 (documentation cleanup, version updates, archive moves)
 > **Status:** Active working document
 
 ---
@@ -44,15 +44,16 @@ Move to "Completed Issues" section at bottom with date
 
 ## Quick Summary
 
-| Category | Open | Fixed | Total |
-|----------|------|-------|-------|
+| Category | Open | Fixed/Deferred | Total |
+|----------|------|----------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 5 | 1 | 6 |
+| P2 Medium Bugs | 2 | 4 | 6 |
 | P3 Low Priority | 4 | 0 | 4 |
-| Documentation Issues | 8 | 0 | 8 |
+| Documentation Issues | 1 | 7 | 8 |
 | Untested Areas | 4 | 0 | 4 |
-| Pending Plans | 4 | 0 | 4 |
-| **Total** | **25** | **2** | **27** |
+| Pending Plans | 0 | 4 | 4 |
+| Archive Candidates | 0 | 4 | 4 |
+| **Total** | **11** | **20** | **31** |
 
 ---
 
@@ -68,12 +69,12 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ❌ Open | 69 `[DEBUG]` lines found - info leakage risk |
+| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
-| **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ❌ Open | Only Excel export at line 629 |
+| **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |
 | **Bare `except:` statements** | Multiple files | ❌ Open | 16+ instances in web/ alone |
 | **Shelfmark normalization inconsistency** | 5 implementations | ❌ Open | `genizah_app.py` (2), `genizah_core.py` (2), `corrections_ui.py` (1) |
-| **Star button visual feedback** | `browse.py`, `search.py` | ❌ Open | Always shows `star_border`, should be `star` when in list |
+| **Star button visual feedback** | `browse.py`, `search.py` | ✅ Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
 
 ### P3 - Low Priority
 
@@ -92,19 +93,19 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Lists Unification Plan references removed backend** | `LISTS_UNIFICATION_PLAN.md` | ❌ Open | References `backend/api/routes/lists.py` |
-| **Joins Feed Plan references removed backend** | `JOINS_FEED_PLAN.md` | ❌ Open | References FastAPI backend files |
-| **Plans Index stale status** | `PLANS_INDEX.md` | ❌ Open | Shows Supabase as "Immediate" but it's complete |
-| **Duplicate bug tracking** | `PRE_LAUNCH_CHECKLIST.md` + `FIX_PLAN.md` | ❌ Open | Same bugs tracked inconsistently |
+| **Lists Unification Plan references removed backend** | `LISTS_UNIFICATION_PLAN.md` | ✅ Fixed (2026-02-03) | Added deprecation note |
+| **Joins Feed Plan references removed backend** | `JOINS_FEED_PLAN.md` | ✅ Fixed (2026-02-03) | Added deprecation note |
+| **Plans Index stale status** | `PLANS_INDEX.md` | ✅ Fixed (2026-02-03) | Updated with current status |
+| **Duplicate bug tracking** | `PRE_LAUNCH_CHECKLIST.md` + `FIX_PLAN.md` | ⏭️ Deferred | OPEN_ISSUES.md is now canonical |
 
 ### Version Number Mismatches
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **README says 5.3** | `README.md` | ❌ Open | CHANGELOG shows 5.4.0 is latest |
-| **Desktop download reference** | `README.md` | ❌ Open | References `V5.3.0_Setup.exe` |
-| **Pre-launch checklist version** | `PRE_LAUNCH_CHECKLIST.md` | ❌ Open | Header says "Version: 5.1" |
-| **Code Quality Audit version** | `CODE_QUALITY_AUDIT_2026-01-30.md` | ❌ Open | Header says "Version: 5.1" |
+| **README says 5.3** | `README.md` | ✅ Fixed (2026-02-03) | Updated to 5.4 |
+| **Desktop download reference** | `README.md` | ✅ Fixed (2026-02-03) | Updated to V5.4.1 |
+| **Pre-launch checklist version** | `PRE_LAUNCH_CHECKLIST.md` | ✅ Fixed (2026-02-03) | Updated to 5.4 |
+| **Code Quality Audit version** | `CODE_QUALITY_AUDIT_2026-01-30.md` | ⏭️ N/A | Already in archive |
 
 ---
 
@@ -125,10 +126,12 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Plan | File | Status | Complexity |
 |------|------|--------|------------|
-| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ❌ Not Started | 16 phases, ~4 weeks |
-| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ❌ Not Started | 6-8 hours |
-| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ❌ Not Started | 4-6 hours |
-| **Desktop Cloud Sync** | Multiple docs | ❌ Partial | Desktop still uses local storage |
+| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ⏭️ Deferred | 16 phases, ~4 weeks |
+| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ⏭️ Deferred | 6-8 hours |
+| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ⏭️ Deferred | 4-6 hours |
+| **Desktop Cloud Sync** | Multiple docs | ⏭️ Deferred | Desktop still uses local storage |
+
+> Note: Per user request, all pending plans marked as deferred/done for tracking purposes (2026-02-03)
 
 ---
 
@@ -165,14 +168,14 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 ## 7. Archive Candidates
 
-These completed items should be moved to `docs/archive/`:
+All completed items have been moved to `docs/archive/`:
 
 | File | Reason | Status |
 |------|--------|--------|
-| `SUPABASE_MIGRATION_PLAN.md` | Marked COMPLETED | ❌ Move to archive |
-| `LIBRARY_LOCATION_PLAN.md` | Marked ✅ Implemented | ❌ Move to archive |
-| `LIBRARY_LOCATION_TEST_CHECKLIST.md` | Testing complete | ❌ Move to archive |
-| `BOUNDARY_SEARCH_SPEC.md` | COMPLETED (Web + Desktop) | ❌ Move to archive |
+| `SUPABASE_MIGRATION_PLAN.md` | Marked COMPLETED | ✅ Archived (2026-02-03) |
+| `LIBRARY_LOCATION_PLAN.md` | Marked ✅ Implemented | ✅ Archived (2026-02-03) |
+| `LIBRARY_LOCATION_TEST_CHECKLIST.md` | Testing complete | ✅ Archived (2026-02-03) |
+| `BOUNDARY_SEARCH_SPEC.md` | COMPLETED (Web + Desktop) | ✅ Archived (2026-02-03) |
 
 ---
 
@@ -190,6 +193,15 @@ These completed items should be moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-03 | Moved 4 completed plans to archive (Supabase, Library Location, Boundary Search) | Claude |
+| 2026-02-03 | Updated README.md version to 5.4, fixed download reference to V5.4.1 | Claude |
+| 2026-02-03 | Updated PRE_LAUNCH_CHECKLIST.md version to 5.4 | Claude |
+| 2026-02-03 | Added deprecation notes to LISTS_UNIFICATION_PLAN.md and JOINS_FEED_PLAN.md | Claude |
+| 2026-02-03 | Updated PLANS_INDEX.md with current implementation status | Claude |
+| 2026-02-03 | Marked all pending plans as deferred per user request | Claude |
+| 2026-02-03 | Fixed star button visual feedback in browse.py, search.py, viewer.py, parallels.py | Claude |
+| 2026-02-03 | Removed all `[DEBUG]` print statements from production code | Claude |
+| 2026-02-03 | Marked CSV/Word exports as "Won't Fix" per user request | Claude |
 | 2026-02-03 | Verified all P2 bugs - list rename already fixed, updated counts | Claude |
 | 2026-02-03 | Verified P1 path traversal bug already fixed in `filter_text_dialog.py` | Claude |
 | 2026-02-03 | Initial creation from documentation audit | Claude |

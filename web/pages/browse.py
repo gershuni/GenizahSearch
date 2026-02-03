@@ -1014,19 +1014,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def add_manuscript_to_list():
         """Add entire manuscript to a list."""
-        print(f"[DEBUG] add_manuscript_to_list called, sys_id={state.sys_id}, current_page={state.current_page}")
         if not state.sys_id or not state.current_page:
             ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
         from web.components import show_add_to_list_dialog
-        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
 
-        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, shelfmark={state.current_page.shelfmark}")
         show_add_to_list_dialog(
             sys_id=state.sys_id,
             shelfmark=state.current_page.shelfmark,
@@ -1034,20 +1031,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             note_default='',  # Empty by default
             fl_id=None
         )
-        print(f"[DEBUG] Dialog should have opened")
 
     def add_page_to_list():
         """Add specific page/image to a list."""
-        print(f"[DEBUG] add_page_to_list called")
-        print(f"[DEBUG] state.sys_id = {state.sys_id}")
-        print(f"[DEBUG] state.current_page = {state.current_page}")
         if not state.sys_id or not state.current_page:
             ui.notify(tr('Please load a manuscript first'), type='warning')
             return
 
         from web.state import state as app_state
         from web.components import show_add_to_list_dialog
-        print(f"[DEBUG] app_state.lists_mgr = {app_state.lists_mgr}")
         if not app_state.lists_mgr:
             ui.notify(tr('Lists manager not available'), type='warning')
             return
@@ -1055,7 +1047,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Use FL ID if available for specific page reference
         fl_id = state.current_page.fl_id
 
-        print(f"[DEBUG] Opening dialog for sys_id={state.sys_id}, fl_id={fl_id}")
         show_add_to_list_dialog(
             sys_id=state.sys_id,
             shelfmark=f"{state.current_page.shelfmark} - {tr('Page')} {state.current_page.p_num}",
@@ -1063,7 +1054,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             note_default='',  # Empty by default (user requested)
             fl_id=fl_id
         )
-        print(f"[DEBUG] Dialog function returned")
 
     def zoom_in():
         """Increase zoom level."""
@@ -1545,10 +1535,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ).tooltip(tr('Show Metadata'))
 
                         # Add manuscript to list (star button)
+                        from web.state import state as app_state
+                        from web.components import get_star_icon
+                        star_icon = get_star_icon(app_state.lists_mgr, page.sys_id) if page else 'star_border'
                         ui.button(
-                            icon='star_border',
+                            icon=star_icon,
                             on_click=add_manuscript_to_list
-                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('Add to List'))
+                        ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('In List') if star_icon == 'star' else tr('Add to List'))
 
                     # Next Shelfmark Button
                     ui.button(
@@ -1822,10 +1815,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ).props(f'flat dense color=green aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
 
                             # Add page to list (star button)
+                            from web.state import state as app_state
+                            from web.components import get_star_icon
+                            page_star_icon = get_star_icon(app_state.lists_mgr, state.sys_id)
                             ui.button(
-                                icon='star_border',
+                                icon=page_star_icon,
                                 on_click=add_page_to_list
-                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('Add to List'))
+                            ).props(f'flat round dense aria-label="{tr("Add to List")}"').classes('text-green-700').tooltip(tr('In List') if page_star_icon == 'star' else tr('Add to List'))
 
                             # Image toggle button - placeholder, will be connected later
                             image_toggle_btn = None

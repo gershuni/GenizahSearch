@@ -39,7 +39,6 @@ docs/
 │
 ├── plans/                    # Implementation plans
 │   ├── PLANS_INDEX.md            # Index of all plans
-│   ├── SUPABASE_MIGRATION_PLAN.md # Supabase migration (COMPLETED)
 │   ├── LISTS_IMPLEMENTATION_PLAN.md
 │   ├── LISTS_UNIFICATION_PLAN.md
 │   ├── JOINS_FEED_PLAN.md
@@ -51,11 +50,14 @@ docs/
 │   └── JOINS_SIMPLIFIED_SPEC.md
 │
 └── archive/                  # Archived/historical documents
-    ├── START_SERVERS_README.md   # Outdated (backend removed)
-    ├── TEST_REPORT_AREAS_*.md    # One-time test reports
-    ├── CODE_QUALITY_AUDIT_*.md   # Code audit reports
-    ├── *_HANDOFF.md              # Session handoffs
-    └── ...                       # Other historical docs
+    ├── SUPABASE_MIGRATION_PLAN.md # Completed (Jan 2026)
+    ├── LIBRARY_LOCATION_PLAN.md   # Completed (Feb 2026)
+    ├── BOUNDARY_SEARCH_SPEC.md    # Completed (Feb 2026)
+    ├── START_SERVERS_README.md    # Outdated (backend removed)
+    ├── TEST_REPORT_AREAS_*.md     # One-time test reports
+    ├── CODE_QUALITY_AUDIT_*.md    # Code audit reports
+    ├── *_HANDOFF.md               # Session handoffs
+    └── ...                        # Other historical docs
 ```
 
 ---
@@ -82,10 +84,11 @@ Active plans for upcoming features:
 
 | Plan | Status | Description |
 |------|--------|-------------|
-| [SUPABASE_MIGRATION_PLAN.md](plans/SUPABASE_MIGRATION_PLAN.md) | Completed | Migration from FastAPI to Supabase |
-| [LISTS_UNIFICATION_PLAN.md](plans/LISTS_UNIFICATION_PLAN.md) | In Progress | Unifying Projects & Lists |
+| [LISTS_UNIFICATION_PLAN.md](plans/LISTS_UNIFICATION_PLAN.md) | Planned | Unifying Projects & Lists |
 | [MOBILE_RESPONSIVE_PLAN.md](plans/MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |
 | [JOINS_FEED_PLAN.md](plans/JOINS_FEED_PLAN.md) | Planned | Fragment joins in discovery feed |
+
+> Completed plans moved to archive: SUPABASE_MIGRATION_PLAN.md, LIBRARY_LOCATION_PLAN.md, BOUNDARY_SEARCH_SPEC.md
 
 See [plans/PLANS_INDEX.md](plans/PLANS_INDEX.md) for the complete list.
 
@@ -99,9 +102,8 @@ Detailed specifications for complex features:
 |------|-------------|
 | [JOINS_TECHNICAL_SPEC.md](specs/JOINS_TECHNICAL_SPEC.md) | Fragment joins system architecture |
 | [JOINS_SIMPLIFIED_SPEC.md](specs/JOINS_SIMPLIFIED_SPEC.md) | Simplified joins for first release |
-| [BOUNDARY_SEARCH_SPEC.md](plans/BOUNDARY_SEARCH_SPEC.md) | Cross-paragraph search (implemented in Web + Desktop) |
 
-> Note: Old correction specs (USER_CORRECTIONS_SPEC.md, SEARCHABLE_CORRECTIONS_SPEC.md) moved to archive after Supabase migration.
+> Note: Completed specs (BOUNDARY_SEARCH_SPEC.md, USER_CORRECTIONS_SPEC.md, SEARCHABLE_CORRECTIONS_SPEC.md) moved to archive.
 
 ---
 
