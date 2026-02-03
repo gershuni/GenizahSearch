@@ -959,6 +959,7 @@ def create_search_page(initial_query: str = None):
         shelfmark = display.get('shelfmark', 'Unknown')
         title = display.get('title', '')
         snippet = result.get('snippet', '')
+        library_code = display.get('library_code', '')
 
         # Truncate title for display
         title_short = (title[:60] + '...') if title and len(title) > 60 else title
@@ -987,6 +988,13 @@ def create_search_page(initial_query: str = None):
                         ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
                         )
+                        # Library badge (if available)
+                        if library_code:
+                            from genizah_core import get_library_display, LIBRARY_CODES
+                            full_name = get_library_display(library_code, short=False)
+                            ui.label(library_code).classes('text-xs px-2 py-0.5 rounded').style(
+                                'background: var(--primary-100); color: var(--primary-700);'
+                            ).tooltip(full_name)
                         ui.label(shelfmark).classes('font-bold').style('color: var(--primary-700);')
                     if title_short:
                         ui.label(title_short).classes('text-xs truncate').style(
@@ -1141,6 +1149,7 @@ def create_search_page(initial_query: str = None):
         full_text = result.get('full_text', '')
         source = display.get('source', '')
         page_num = display.get('img', '')
+        library_code = display.get('library_code', '')
 
         # Extract FL ID for browse link
         fl_id = None
@@ -1288,8 +1297,15 @@ def create_search_page(initial_query: str = None):
                     with ui.element('div').classes('grid gap-4').style(
                         'grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));'
                     ):
+                        # Get library full name
+                        library_name = ''
+                        if library_code:
+                            from genizah_core import get_library_display
+                            library_name = get_library_display(library_code, short=False)
+
                         # Metadata cards
                         metadata_items = [
+                            ('account_balance', tr('Library'), library_name or tr('Not available'), 'var(--accent-amber)'),
                             ('library', tr('Shelfmark'), shelfmark, 'var(--primary-600)'),
                             ('title', tr('Title'), title or tr('Not available'), 'var(--text-secondary)'),
                             ('fingerprint', tr('System ID'), sys_id or tr('Not available'), 'var(--text-muted)'),
@@ -1391,6 +1407,7 @@ def create_search_page(initial_query: str = None):
         sys_id = display.get('id', '')
         snippet = result.get('snippet', '')
         full_text = result.get('full_text', '')
+        library_code = display.get('library_code', '')
 
         # Initialize page index from display.img if not already set
         try:
@@ -1451,7 +1468,14 @@ def create_search_page(initial_query: str = None):
                 # Info tab
                 with ui.tab_panel('info'):
                     with ui.column().classes('w-full gap-4'):
+                        # Get library full name
+                        library_name = ''
+                        if library_code:
+                            from genizah_core import get_library_display
+                            library_name = get_library_display(library_code, short=False)
+
                         info_items = [
+                            (tr('Library'), library_name or tr('Not available')),
                             (tr('Shelfmark'), shelfmark),
                             (tr('Title'), title or tr('Not available')),
                             (tr('System ID'), sys_id or tr('Not available')),

@@ -319,6 +319,15 @@ class ExportService:
         except Exception:
             return ('Unknown', '')
 
+    def get_library_code(self, sys_id: str) -> str:
+        """Get library code for a system ID."""
+        if not sys_id or not self.meta_mgr:
+            return ''
+        try:
+            return self.meta_mgr.get_library_for_id(sys_id) or ''
+        except Exception:
+            return ''
+
     def export_search_results_excel(
         self,
         results: List[Dict[str, Any]],
@@ -336,11 +345,11 @@ class ExportService:
         search_terms = extract_search_terms(search_query)
         wb, ws = create_excel_workbook("Genizah Results")
 
-        headers = ["Shelfmark", "Title", "System ID", "Score", "Snippet", "Full Text"]
+        headers = ["Shelfmark", "Library", "Title", "System ID", "Score", "Snippet", "Full Text"]
         style_excel_header(ws, headers)
 
         set_excel_column_widths(ws, {
-            'A': 25, 'B': 35, 'C': 18, 'D': 10, 'E': 50, 'F': 80,
+            'A': 25, 'B': 15, 'C': 35, 'D': 18, 'E': 10, 'F': 50, 'G': 80,
         })
 
         highlight_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
@@ -355,6 +364,7 @@ class ExportService:
 
             row = [
                 sanitize_text_for_excel(display.get('shelfmark', '')),
+                sanitize_text_for_excel(display.get('library_code', '')),
                 sanitize_text_for_excel(display.get('title', '')),
                 sanitize_text_for_excel(display.get('id', '')),
                 str(res.get('sort_score', '')),
@@ -365,16 +375,17 @@ class ExportService:
 
             current_row = ws.max_row
             ws.cell(row=current_row, column=1).alignment = rtl_align
-            ws.cell(row=current_row, column=2).alignment = rtl_align
-            ws.cell(row=current_row, column=3).alignment = ltr_align
-            ws.cell(row=current_row, column=4).alignment = center_align
+            ws.cell(row=current_row, column=2).alignment = ltr_align  # Library code is LTR
+            ws.cell(row=current_row, column=3).alignment = rtl_align
+            ws.cell(row=current_row, column=4).alignment = ltr_align
+            ws.cell(row=current_row, column=5).alignment = center_align
 
-            snippet_cell = ws.cell(row=current_row, column=5)
+            snippet_cell = ws.cell(row=current_row, column=6)
             snippet_cell.alignment = rtl_align
             if contains_any_term(snippet, search_terms):
                 snippet_cell.fill = highlight_fill
 
-            fulltext_cell = ws.cell(row=current_row, column=6)
+            fulltext_cell = ws.cell(row=current_row, column=7)
             fulltext_cell.alignment = rtl_align
             if contains_any_term(full_text, search_terms):
                 fulltext_cell.fill = highlight_fill
@@ -447,11 +458,11 @@ class ExportService:
 
         wb, ws = create_excel_workbook(list_name)
 
-        headers = ["#", "Shelfmark", "Title", "System ID", "FL ID", "Notes", "Added"]
+        headers = ["#", "Shelfmark", "Library", "Title", "System ID", "FL ID", "Notes", "Added"]
         style_excel_header(ws, headers)
 
         set_excel_column_widths(ws, {
-            'A': 6, 'B': 25, 'C': 35, 'D': 18, 'E': 12, 'F': 40, 'G': 18,
+            'A': 6, 'B': 25, 'C': 15, 'D': 35, 'E': 18, 'F': 12, 'G': 40, 'H': 18,
         })
 
         rtl_align = get_cell_alignment('rtl')
@@ -461,11 +472,13 @@ class ExportService:
         for idx, item in enumerate(items, 1):
             sys_id = item.get('sys_id', '')
             shelfmark, title = self.get_metadata(sys_id)
+            library_code = self.get_library_code(sys_id)
             notes = clean_text_single_line(item.get('note', ''))
 
             row = [
                 idx,
                 sanitize_text_for_excel(shelfmark),
+                sanitize_text_for_excel(library_code),
                 sanitize_text_for_excel(title),
                 sanitize_text_for_excel(sys_id),
                 sanitize_text_for_excel(item.get('fl_id', '')),
@@ -477,11 +490,12 @@ class ExportService:
             current_row = ws.max_row
             ws.cell(row=current_row, column=1).alignment = center_align
             ws.cell(row=current_row, column=2).alignment = rtl_align
-            ws.cell(row=current_row, column=3).alignment = rtl_align
-            ws.cell(row=current_row, column=4).alignment = ltr_align
+            ws.cell(row=current_row, column=3).alignment = ltr_align  # Library code is LTR
+            ws.cell(row=current_row, column=4).alignment = rtl_align
             ws.cell(row=current_row, column=5).alignment = ltr_align
-            ws.cell(row=current_row, column=6).alignment = rtl_align
-            ws.cell(row=current_row, column=7).alignment = ltr_align
+            ws.cell(row=current_row, column=6).alignment = ltr_align
+            ws.cell(row=current_row, column=7).alignment = rtl_align
+            ws.cell(row=current_row, column=8).alignment = ltr_align
 
         add_excel_credits(ws)
 
@@ -505,14 +519,15 @@ class ExportService:
 
         wb, ws = create_excel_workbook("Parallels Results")
 
-        headers = ["#", "Shelfmark", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
+        headers = ["#", "Shelfmark", "Library", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
         style_excel_header(ws, headers)
 
         set_excel_column_widths(ws, {
-            'A': 6, 'B': 25, 'C': 35, 'D': 10, 'E': 50, 'F': 60, 'G': 10,
+            'A': 6, 'B': 25, 'C': 15, 'D': 35, 'E': 10, 'F': 50, 'G': 60, 'H': 10,
         })
 
         rtl_align = get_cell_alignment('rtl')
+        ltr_align = get_cell_alignment('ltr')
         center_align = get_cell_alignment('center')
 
         def add_results(results: List[Dict], start_idx: int, is_filtered: bool) -> int:
@@ -520,12 +535,14 @@ class ExportService:
                 raw_header = item.get('raw_header', '')
                 sys_id = None
                 shelfmark, title = 'Unknown', ''
+                library_code = ''
 
                 if raw_header:
                     sys_match = re.search(r'(99\d{8,})', raw_header)
                     if sys_match:
                         sys_id = sys_match.group(1)
                         shelfmark, title = self.get_metadata(sys_id)
+                        library_code = self.get_library_code(sys_id)
 
                 source_ctx = clean_text_single_line(remove_highlight_markers(item.get('source_ctx', '')))
                 ms_text = clean_text_single_line(remove_highlight_markers(item.get('text', '')))
@@ -533,6 +550,7 @@ class ExportService:
                 row = [
                     idx,
                     sanitize_text_for_excel(shelfmark),
+                    sanitize_text_for_excel(library_code),
                     sanitize_text_for_excel(title),
                     item.get('score', 0),
                     sanitize_text_for_excel(source_ctx),
@@ -542,13 +560,14 @@ class ExportService:
                 ws.append(row)
 
                 current_row = ws.max_row
-                ws.cell(row=current_row, column=1).alignment = center_align
-                ws.cell(row=current_row, column=2).alignment = rtl_align
-                ws.cell(row=current_row, column=3).alignment = rtl_align
-                ws.cell(row=current_row, column=4).alignment = center_align
-                ws.cell(row=current_row, column=5).alignment = rtl_align
-                ws.cell(row=current_row, column=6).alignment = rtl_align
-                ws.cell(row=current_row, column=7).alignment = center_align
+                ws.cell(row=current_row, column=1).alignment = center_align  # #
+                ws.cell(row=current_row, column=2).alignment = rtl_align     # Shelfmark
+                ws.cell(row=current_row, column=3).alignment = ltr_align     # Library
+                ws.cell(row=current_row, column=4).alignment = rtl_align     # Title
+                ws.cell(row=current_row, column=5).alignment = center_align  # Score
+                ws.cell(row=current_row, column=6).alignment = rtl_align     # Source Context
+                ws.cell(row=current_row, column=7).alignment = rtl_align     # Manuscript Match
+                ws.cell(row=current_row, column=8).alignment = center_align  # Filtered
 
             return start_idx + len(results)
 

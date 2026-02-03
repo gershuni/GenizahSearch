@@ -1423,6 +1423,59 @@ class LabEngine:
         return rare_anchors == 0
     
 # ==============================================================================
+#  LIBRARY CODE MAPPINGS
+# ==============================================================================
+LIBRARY_CODES = {
+    'CUL': 'Cambridge University Library',
+    'JTS': 'The Jewish Theological Seminary of America',
+    'RNL': 'The National Library of Russia',
+    'Oxford': 'The Bodleian Libraries, University of Oxford',
+    'Manchester': 'The University of Manchester Library',
+    'BL': 'The British Library',
+    'AIU': 'Alliance Israélite Universelle',
+    'Westminster': 'Westminster College',
+    'Freer': 'Freer Gallery of Art',
+    'Mosseri': 'Mosseri Collection',
+    'Gaster': 'Gaster Collection',
+    'Katz': 'Katz Center',
+    'Halper': 'Halper Catalogue',
+    'HUC': 'Hebrew Union College Library',
+    'HAS': 'Library of the Hungarian Academy of Sciences',
+    'Vienna': 'Austrian National Library',
+    'Strasbourg': 'National and University Library of Strasbourg',
+    'InstFrance': 'Library of the Institute of France',
+    'Warsaw': 'Jewish Community of Warsaw',
+    'ASL': 'Academy of Sciences and Literature',
+    'Schoeyen': 'Schoeyen Collection',
+    'Harkavy': 'Harkavy Collection',
+    'Combs': 'Combs Collection',
+    'Lehnardt': 'Lehnardt Collection',
+    'Allony': 'Allony Collection',
+    'Boesky': 'Boesky Collection',
+    'Bisno': 'Bisno Collection',
+    'UPenn': 'University of Pennsylvania',
+    'BnF': 'Bibliothèque nationale de France',
+}
+
+
+def get_library_display(code: str, short: bool = True) -> str:
+    """Return library name for display.
+
+    Args:
+        code: Library code (e.g., 'CUL', 'JTS')
+        short: If True, return code; if False, return full name
+
+    Returns:
+        Display string for the library
+    """
+    if not code:
+        return ''
+    if short:
+        return code
+    return LIBRARY_CODES.get(code, code)
+
+
+# ==============================================================================
 #  CONFIG CLASS (EXE Compatible)
 # ==============================================================================
 class Config:
@@ -2704,7 +2757,7 @@ class MetadataManager:
 
                     if not row or len(row) < 3:
                         continue
-                    # Format: system_number, oxford_part_id, call_numbers, ..., titles_non_placeholder
+                    # Format: system_number, oxford_part_id, call_numbers, library_code, ..., titles_non_placeholder
                     raw_sys_id = row[0]
                     sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
 
@@ -2721,15 +2774,20 @@ class MetadataManager:
                         if s and len(s) < len(shelf):
                             shelf = s
 
-                    # Title is column index 6 (0-based) - titles_non_placeholder
+                    # Library code (column 3) - backward compatible with old CSV
+                    library_code = row[3].strip() if len(row) > 3 else ""
+
+                    # Title is column index 7 (0-based) - titles_non_placeholder
+                    # (shifted by 1 due to library_code column insertion)
                     title = ""
-                    if len(row) > 6:
-                        title = row[6].strip()
+                    if len(row) > 7:
+                        title = row[7].strip()
 
                     self.csv_bank[sys_id] = {
                         'shelfmark': shelf,
                         'title': title,
                         'oxford_part_id': oxford_part_id,
+                        'library_code': library_code,
                     }
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
@@ -2770,6 +2828,22 @@ class MetadataManager:
                 title = cached_title
 
         return shelf, title
+
+    def get_library_for_id(self, sys_id: str) -> str:
+        """Get library code for a system ID.
+
+        Args:
+            sys_id: The system ID to look up
+
+        Returns:
+            Library code string (e.g., 'CUL', 'JTS') or empty string if not found
+        """
+        if sys_id is None:
+            return ''
+        # Normalize sys_id
+        sys_id = "".join(ch for ch in str(sys_id) if ch.isdigit())
+        entry = self.csv_bank.get(sys_id, {})
+        return entry.get('library_code', '')
 
     def get_shelfmark_from_header(self, full_header):
         parsed = self.parse_full_id_components(full_header)
@@ -3693,12 +3767,16 @@ class MetadataManager:
         # Use get_meta_for_id which has proper fallback logic (CSV > NLI Cache)
         shelfmark, title = self.get_meta_for_id(sys_id)
 
+        # Get library code
+        library_code = self.get_library_for_id(sys_id)
+
         return {
             'shelfmark': shelfmark or f"ID: {sys_id}",
             'title': title,
             'img': p_num,
             'source': src_label,
-            'id': sys_id
+            'id': sys_id,
+            'library_code': library_code,
         }
 
 # ==============================================================================

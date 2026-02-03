@@ -5638,20 +5638,21 @@ class GenizahGUI(QMainWindow):
         self.COL_ACTIONS = 1
         self.COL_SYS_ID = 2
         self.COL_SHELF = 3
-        self.COL_IMG = 4
-        self.COL_TITLE = 5
-        self.COL_SNIPPET = 6
-        self.COL_SRC = 7
+        self.COL_LIBRARY = 4  # NEW: Library code column
+        self.COL_IMG = 5       # Was 4
+        self.COL_TITLE = 6     # Was 5
+        self.COL_SNIPPET = 7   # Was 6
+        self.COL_SRC = 8       # Was 7
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(8)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(9)
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Shelfmark"), tr("Library"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
 
         # Custom Header
-        # Disable sort for Checkbox (0), Actions (1), and Image (4)
+        # Disable sort for Checkbox (0), Actions (1), and Image (5)
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
-            non_sortable_cols=[0, 1, 4],
-            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET],
+            non_sortable_cols=[0, 1, self.COL_IMG],
+            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
             star_callback=self.toggle_list_filter
@@ -5664,6 +5665,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_ACTIONS, 95)
         self.results_table.setColumnWidth(self.COL_SYS_ID, 135)
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
+        self.results_table.setColumnWidth(self.COL_LIBRARY, 90)  # Library column
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
@@ -10772,6 +10774,7 @@ class GenizahGUI(QMainWindow):
 
             # Metadata Check
             shelf, title = self.meta_mgr.get_meta_for_id(sid)
+            library_code = self.meta_mgr.get_library_for_id(sid)
             needs_fetch = (shelf == "Unknown" and (not title))
             if needs_fetch: ids_to_fetch.append(sid)
 
@@ -10816,7 +10819,7 @@ class GenizahGUI(QMainWindow):
             item_sid.setData(Qt.ItemDataRole.UserRole, res)
             self.results_table.setItem(row_idx, self.COL_SYS_ID, item_sid)
 
-            # Shelf/Title
+            # Shelf/Title/Library
             if needs_fetch:
                 item_shelf = ShelfmarkTableWidgetItem(tr("Loading..."))
                 item_title = QTableWidgetItem(tr("Loading..."))
@@ -10825,6 +10828,11 @@ class GenizahGUI(QMainWindow):
                 item_title = QTableWidgetItem(title if title else "")
 
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
+
+            # Library column
+            item_library = QTableWidgetItem(library_code if library_code else "")
+            self.results_table.setItem(row_idx, self.COL_LIBRARY, item_library)
+
             self.results_table.setItem(row_idx, self.COL_TITLE, item_title)
 
             # Map for updates

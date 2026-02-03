@@ -1545,6 +1545,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # Metadata grid
                     with ui.grid(columns=2).classes('w-full gap-4'):
+                        # Library
+                        if page.library_name:
+                            with ui.column().classes('gap-1 col-span-2'):
+                                ui.label(tr('Library')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(page.library_name).classes('text-sm').style('color: var(--text-primary);')
+
                         # Shelfmark
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')

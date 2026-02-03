@@ -21,6 +21,8 @@ from genizah_core import (
     SearchEngine,
     LabEngine,
     LabSettings,
+    LIBRARY_CODES,
+    get_library_display,
 )
 from web.state import state
 
@@ -42,6 +44,7 @@ class SearchResult:
     cross_page: bool = False
     page_highlights: List[Dict] = field(default_factory=list)
     scope: str = 'page'
+    library_code: str = ''  # Library code (e.g., 'CUL', 'JTS')
 
 @dataclass
 class BrowsePage:
@@ -66,6 +69,8 @@ class BrowsePage:
     oxford_part_id: Optional[str] = None # Oxford Part ID (e.g. "MS. Heb. d. 29/2")
     oxford_part_display: str = '' # Display name for part (e.g. "heb. d. 29 part 2")
     oxford_part_metadata: Dict[str, str] = field(default_factory=dict) # Oxford Part metadata
+    library_code: str = ''  # Library code (e.g., 'CUL', 'JTS')
+    library_name: str = ''  # Full library name for display
 
 @dataclass
 class DocumentPage:
@@ -87,6 +92,7 @@ class ManuscriptInfo:
     has_external_images: bool = False
     oxford_part_id: Optional[str] = None
     attribution: str = ''
+    library_code: str = ''  # Library code (e.g., 'CUL', 'JTS')
 
 @dataclass
 class ImageInfo:
@@ -209,6 +215,8 @@ class GenizahService:
 
             actual_sys_id = result.get('sys_id', sys_id)
             shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
+            library_code = state.meta_mgr.get_library_for_id(actual_sys_id)
+            library_name = get_library_display(library_code, short=False) if library_code else ''
 
             fl_id = None
             try:
@@ -317,7 +325,9 @@ class GenizahService:
                 external_url=external_url,
                 oxford_part_id=oxford_part_id,
                 oxford_part_display=oxford_part_display,
-                oxford_part_metadata=oxford_part_metadata
+                oxford_part_metadata=oxford_part_metadata,
+                library_code=library_code,
+                library_name=library_name,
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -332,6 +342,8 @@ class GenizahService:
 
             actual_sys_id = result.get('sys_id', '')
             shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
+            library_code = state.meta_mgr.get_library_for_id(actual_sys_id)
+            library_name = get_library_display(library_code, short=False) if library_code else ''
 
             fl_id_parsed = None
             try:
@@ -346,7 +358,7 @@ class GenizahService:
             # Determine attribution from cache or shelfmark pattern
             attribution = ''
             is_oxford = False
-            
+
             # Check if Oxford manuscript by shelfmark pattern
             shelfmark_lower = (shelfmark or '').lower()
             if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
@@ -417,7 +429,9 @@ class GenizahService:
                 external_url=external_url,
                 oxford_part_id=oxford_part_id,
                 oxford_part_display=oxford_part_display,
-                oxford_part_metadata=oxford_part_metadata
+                oxford_part_metadata=oxford_part_metadata,
+                library_code=library_code,
+                library_name=library_name,
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")
