@@ -3629,8 +3629,14 @@ class ResultDialog(QDialog):
         _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
-            library = marc.get('current_owner')
-            if library: shelf = f"{library} | {shelf}"
+            # Try CSV library_code first, then MARC as fallback
+            library_code = self.meta_mgr.get_library_for_id(self.current_sys_id)
+            if library_code:
+                library = get_library_display(library_code, short=False)
+            else:
+                library = marc.get('current_owner', '')
+            if library:
+                shelf = f"{library} | {shelf}"
             # Add Part info to shelfmark if available
             if oxford_part_id:
                 part_label = self.meta_mgr.codico_mgr.get_part_label(oxford_part_id)
@@ -3881,8 +3887,9 @@ class GenizahGUI(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.comp_col_context = 4
-        self.comp_col_ms_context = 5
+        self.comp_col_library = 2
+        self.comp_col_context = 5
+        self.comp_col_ms_context = 6
         self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
         # Initial size - will be overridden by showMaximized() at startup
         self.setMinimumSize(1200, 700)
@@ -5928,7 +5935,7 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Shelfmark"), tr("Library"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
@@ -6480,8 +6487,14 @@ class GenizahGUI(QMainWindow):
         shelf = meta.get('shelfmark')
         title = meta.get('title')
         if shelf and shelf != "Unknown":
-            library = marc.get('current_owner')
-            if library: shelf = f"{library} | {shelf}"
+            # Try CSV library_code first, then MARC as fallback
+            library_code = self.meta_mgr.get_library_for_id(sid)
+            if library_code:
+                library = get_library_display(library_code, short=False)
+            else:
+                library = marc.get('current_owner', '')
+            if library:
+                shelf = f"{library} | {shelf}"
 
         # Check for Oxford Part metadata - integrated into shelfmark
         part_id = self.current_browse_part_id
@@ -8823,19 +8836,23 @@ class GenizahGUI(QMainWindow):
         ws.title = list_name[:31]  # Excel max sheet name length
 
         # Headers
-        headers = [tr('Shelfmark'), tr('Image'), tr('Title'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
+        headers = [tr('Shelfmark'), tr('Library'), tr('Image'), tr('Title'), 'ID', tr('Source'), tr('Tags'), tr('Notes')]
         for col, header in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=header)
 
         # Data
         for row, item in enumerate(items, 2):
+            sys_id = item.get('sys_id', '')
+            library_code = self.meta_mgr.get_library_for_id(sys_id) if sys_id else ''
+            library_name = get_library_display(library_code, short=False) if library_code else ''
             ws.cell(row=row, column=1, value=item.get('shelfmark', ''))
-            ws.cell(row=row, column=2, value=self._format_image_display(item.get('img')))
-            ws.cell(row=row, column=3, value=item.get('title', ''))
-            ws.cell(row=row, column=4, value=item.get('sys_id', ''))
-            ws.cell(row=row, column=5, value=item.get('source', ''))
-            ws.cell(row=row, column=6, value=', '.join(item.get('tags', [])))
-            ws.cell(row=row, column=7, value=item.get('notes', ''))
+            ws.cell(row=row, column=2, value=library_name)
+            ws.cell(row=row, column=3, value=self._format_image_display(item.get('img')))
+            ws.cell(row=row, column=4, value=item.get('title', ''))
+            ws.cell(row=row, column=5, value=sys_id)
+            ws.cell(row=row, column=6, value=item.get('source', ''))
+            ws.cell(row=row, column=7, value=', '.join(item.get('tags', [])))
+            ws.cell(row=row, column=8, value=item.get('notes', ''))
 
         default_name = f"{list_name}.xlsx"
         path, _ = QFileDialog.getSaveFileName(
@@ -8869,8 +8886,13 @@ class GenizahGUI(QMainWindow):
             source = item.get('source', '')
             tags = item.get('tags', [])
             notes = item.get('notes', '')
+            # Get library info
+            library_code = self.meta_mgr.get_library_for_id(sys_id) if sys_id else ''
+            library_name = get_library_display(library_code, short=False) if library_code else ''
 
             doc.add_heading(f"{i}. {shelfmark}", level=2)
+            if library_name:
+                doc.add_paragraph(f"{tr('Library')}: {library_name}")
             if img not in (None, ""):
                 doc.add_paragraph(f"{tr('Image')}: {self._format_image_display(img)}")
             if title:
@@ -10829,8 +10851,11 @@ class GenizahGUI(QMainWindow):
 
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
 
-            # Library column
+            # Library column with tooltip for full name
             item_library = QTableWidgetItem(library_code if library_code else "")
+            if library_code:
+                full_library_name = get_library_display(library_code, short=False)
+                item_library.setToolTip(full_library_name)
             self.results_table.setItem(row_idx, self.COL_LIBRARY, item_library)
 
             self.results_table.setItem(row_idx, self.COL_TITLE, item_title)
@@ -11659,7 +11684,7 @@ class GenizahGUI(QMainWindow):
         if not path: return
 
         # Prepare tabular data
-        headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
+        headers = [tr("System ID"), tr("Shelfmark"), tr("Library"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
         data_rows = []
 
         # Collect results to export (Selected or All)
@@ -11702,9 +11727,14 @@ class GenizahGUI(QMainWindow):
             snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
             snippet = re.sub(r'\s+', ' ', snippet)
 
+            # Get library info (full name for export)
+            library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+            library_name = get_library_display(library_code, short=False) if library_code else ''
+
             data_rows.append([
                 sid,
                 shelf,
+                library_name,
                 title,
                 str(d.get('img', '')),
                 d.get('source', ''),
@@ -11788,8 +11818,8 @@ class GenizahGUI(QMainWindow):
                     for col_idx, val in enumerate(row_data, 1):
                         val_str = str(val)
 
-                        # Column 6 holds the snippet
-                        if col_idx == 6:
+                        # Column 7 holds the snippet (after adding Library column)
+                        if col_idx == 7:
                             write_rich_cell(current_row, col_idx, val_str)
                         else:
                             # Strip markers/HTML in other columns
@@ -11801,8 +11831,9 @@ class GenizahGUI(QMainWindow):
                 # Column widths
                 ws.column_dimensions['A'].width = 15
                 ws.column_dimensions['B'].width = 20
-                ws.column_dimensions['C'].width = 40
-                ws.column_dimensions['F'].width = 80  # Wider snippet column
+                ws.column_dimensions['C'].width = 25  # Library
+                ws.column_dimensions['D'].width = 40
+                ws.column_dimensions['G'].width = 80  # Wider snippet column
 
                 wb.save(path)
                 self._save_last_folder(path)
@@ -11845,7 +11876,7 @@ class GenizahGUI(QMainWindow):
                     doc.add_paragraph(line.strip())
                 doc.add_paragraph("")
 
-                headers = [tr("System ID"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
+                headers = [tr("System ID"), tr("Shelfmark"), tr("Library"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
                 table = doc.add_table(rows=1, cols=len(headers))
                 self._set_table_width_pct(table, 100)
                 hdr_cells = table.rows[0].cells
@@ -11856,7 +11887,7 @@ class GenizahGUI(QMainWindow):
                     row_cells = table.add_row().cells
                     for col_idx, val in enumerate(row):
                         cell = row_cells[col_idx]
-                        if col_idx == 5:
+                        if col_idx == 6:  # Snippet column (after adding Library)
                             cell.text = ""
                             self._add_docx_highlighted_runs(cell.paragraphs[0], val)
                         else:
@@ -12027,6 +12058,9 @@ class GenizahGUI(QMainWindow):
                         shelf = f"📖 {part_display}" if part_display else sid
                         title = oxford_title or ""
                         ms_score = ms_item.get('score', 0)
+                        # Get library info
+                        library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+                        library_name = get_library_display(library_code, short=False) if library_code else ''
 
                         for page in ms_item.get('pages', []):
                              p_sid, p_num, p_shelf, _ = self._get_meta_for_header(page['raw_header'])
@@ -12042,6 +12076,7 @@ class GenizahGUI(QMainWindow):
                                 group_name,
                                 p_sid or sid or "",
                                 display_shelf or "",
+                                library_name,
                                 title or "",
                                 str(p_num or ""),
                                 f"{ms_score} (P:{page.get('score',0)})",
@@ -12053,6 +12088,9 @@ class GenizahGUI(QMainWindow):
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
                         if not shelf or shelf == "Unknown":
                              shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                        # Get library info
+                        library_code = self.meta_mgr.get_library_for_id(sid)
+                        library_name = get_library_display(library_code, short=False) if library_code else ''
 
                         ms_score = ms_item.get('score', 0)
 
@@ -12067,6 +12105,7 @@ class GenizahGUI(QMainWindow):
                                 group_name,
                                 sid or "",
                                 shelf or "",
+                                library_name,
                                 title or "",
                                 str(p_num or ""),
                                 f"{ms_score} (P:{page.get('score',0)})",
@@ -12076,6 +12115,9 @@ class GenizahGUI(QMainWindow):
                     else:
                         # Fallback
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                        # Get library info
+                        library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+                        library_name = get_library_display(library_code, short=False) if library_code else ''
                         src_clean = _clean_and_marker(ms_item.get('source_ctx', ''))
                         ms_clean = _clean_and_marker(ms_item.get('text', ''))
 
@@ -12084,6 +12126,7 @@ class GenizahGUI(QMainWindow):
                             group_name,
                             sid or "",
                             shelf or "",
+                            library_name,
                             title or "",
                             str(p_num or ""),
                             str(ms_item.get('score', 0)),
@@ -12173,7 +12216,7 @@ class GenizahGUI(QMainWindow):
                     def _write_report_row(ws, row_idx, row_data):
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            if idx in (8, 9):
+                            if idx in (9, 10):
                                 write_rich_cell(ws, row_idx, idx, val_str)
                             else:
                                 ws.cell(row=row_idx, column=idx, value=sanitize_for_excel(val_str))
@@ -12184,6 +12227,7 @@ class GenizahGUI(QMainWindow):
                         tr("Group"),
                         tr("System ID"),
                         tr("Shelfmark"),
+                        tr("Library"),
                         tr("Title"),
                         tr("Image"),
                         tr("Score"),
@@ -12198,13 +12242,13 @@ class GenizahGUI(QMainWindow):
                     for row_data in table_rows:
                         for idx, val in enumerate(row_data, 1):
                             val_str = str(val)
-                            if idx in (8, 9):
+                            if idx in (9, 10):
                                 write_rich_cell(ws_raw, raw_row, idx, val_str)
                             else:
                                 ws_raw.cell(row=raw_row, column=idx, value=sanitize_for_excel(val_str))
                         raw_row += 1
                     if table_rows:
-                        ws_raw.auto_filter.ref = f"A{header_row}:I{raw_row - 1}"
+                        ws_raw.auto_filter.ref = f"A{header_row}:J{raw_row - 1}"
 
                     # Query Information sheet
                     ws_query.column_dimensions['A'].width = 22
@@ -12385,6 +12429,7 @@ class GenizahGUI(QMainWindow):
                         tr("Group"),
                         tr("System ID"),
                         tr("Shelfmark"),
+                        tr("Library"),
                         tr("Title"),
                         tr("Image"),
                         tr("Score"),
@@ -12440,6 +12485,7 @@ class GenizahGUI(QMainWindow):
                         tr("Group"),
                         tr("System ID"),
                         tr("Shelfmark"),
+                        tr("Library"),
                         tr("Title"),
                         tr("Image"),
                         tr("Score"),
@@ -13548,13 +13594,20 @@ class GenizahGUI(QMainWindow):
                 sid = ms_item.get('sys_id', '')
                 shelf = f"📖 {part_display}" if part_display else sid
                 t = oxford_title or ""
+                # Get library info
+                library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+                library_display = library_code  # Short code for display
+                library_full = get_library_display(library_code, short=False) if library_code else ''
 
                 ms_node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
                 set_boundary_tooltip(ms_node, ms_item)
                 self._set_comp_tree_text(ms_node, 1, shelf)
-                self._set_comp_tree_text(ms_node, 2, t)
-                self._set_comp_tree_text(ms_node, 3, ms_item.get('part_id', ''))
+                self._set_comp_tree_text(ms_node, self.comp_col_library, library_display)
+                if library_full:
+                    ms_node.setToolTip(self.comp_col_library, library_full)
+                self._set_comp_tree_text(ms_node, 3, t)
+                self._set_comp_tree_text(ms_node, 4, ms_item.get('part_id', ''))
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
@@ -13581,8 +13634,9 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
                         self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}{folio_info}")
-                        self._set_comp_tree_text(page_node, 2, "")
-                        self._set_comp_tree_text(page_node, 3, p_sid or "")
+                        self._set_comp_tree_text(page_node, self.comp_col_library, "")  # Empty for page nodes
+                        self._set_comp_tree_text(page_node, 3, "")
+                        self._set_comp_tree_text(page_node, 4, p_sid or "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
                         self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
@@ -13592,13 +13646,20 @@ class GenizahGUI(QMainWindow):
                 if not shelf or shelf == "Unknown":
                     header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
                     if header_shelf: shelf = header_shelf
+                # Get library info
+                library_code = self.meta_mgr.get_library_for_id(sid)
+                library_display = library_code  # Short code for display
+                library_full = get_library_display(library_code, short=False) if library_code else ''
 
                 ms_node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
                 set_boundary_tooltip(ms_node, ms_item)
                 self._set_comp_tree_text(ms_node, 1, shelf or tr("Unknown Shelfmark"))
-                self._set_comp_tree_text(ms_node, 2, t or "")
-                self._set_comp_tree_text(ms_node, 3, sid)
+                self._set_comp_tree_text(ms_node, self.comp_col_library, library_display)
+                if library_full:
+                    ms_node.setToolTip(self.comp_col_library, library_full)
+                self._set_comp_tree_text(ms_node, 3, t or "")
+                self._set_comp_tree_text(ms_node, 4, sid)
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
 
@@ -13616,25 +13677,34 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
-                        _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
+                        p_sid, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                         page_node = QTreeWidgetItem(ms_node)
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
                         self._set_comp_tree_text(page_node, 1, f"{tr('Image')} {p_num}")
-                        self._set_comp_tree_text(page_node, 2, "")
+                        self._set_comp_tree_text(page_node, self.comp_col_library, "")  # Empty for page nodes
                         self._set_comp_tree_text(page_node, 3, "")
+                        self._set_comp_tree_text(page_node, 4, p_sid or "")
                         make_checkable(page_node)
                         page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
                         self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             else:
                 # Fallback
                 sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+                # Get library info
+                library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+                library_display = library_code  # Short code for display
+                library_full = get_library_display(library_code, short=False) if library_code else ''
+
                 node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(node, 0, self._format_score_with_boundary(ms_item))
                 set_boundary_tooltip(node, ms_item)
                 self._set_comp_tree_text(node, 1, shelf)
-                self._set_comp_tree_text(node, 2, title)
-                self._set_comp_tree_text(node, 3, sid)
+                self._set_comp_tree_text(node, self.comp_col_library, library_display)
+                if library_full:
+                    node.setToolTip(self.comp_col_library, library_full)
+                self._set_comp_tree_text(node, 3, title)
+                self._set_comp_tree_text(node, 4, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=True)

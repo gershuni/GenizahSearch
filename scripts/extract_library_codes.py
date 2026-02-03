@@ -46,6 +46,15 @@ LIBRARY_PATTERNS: List[Tuple[str, str, str]] = [
     (r'National and University Library of Strasbourg', 'Strasbourg', 'National and University Library of Strasbourg'),
     (r'University of Pennsylvania', 'UPenn', 'University of Pennsylvania'),
     (r'Bibliothèque nationale de France', 'BnF', 'Bibliothèque nationale de France'),
+    # Additional libraries from MARC data
+    (r'University of Toronto', 'Toronto', 'University of Toronto Library'),
+    (r'Dropsie College', 'Dropsie', 'Dropsie College'),
+    (r'Dropsie University', 'Dropsie', 'Dropsie College'),
+    (r'Princeton', 'Princeton', 'Princeton University Library'),
+    (r'Columbia University', 'Columbia', 'Columbia University Library'),
+    (r'Harvard', 'Harvard', 'Harvard University Library'),
+    (r'Yale', 'Yale', 'Yale University Library'),
+    (r'John Rylands', 'Rylands', 'John Rylands Library'),
 ]
 
 # Collection-based detection (fallback when no explicit library name)

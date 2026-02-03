@@ -1455,6 +1455,14 @@ LIBRARY_CODES = {
     'Bisno': 'Bisno Collection',
     'UPenn': 'University of Pennsylvania',
     'BnF': 'Bibliothèque nationale de France',
+    # Additional libraries
+    'Toronto': 'University of Toronto Library',
+    'Dropsie': 'Dropsie College',
+    'Princeton': 'Princeton University Library',
+    'Columbia': 'Columbia University Library',
+    'Harvard': 'Harvard University Library',
+    'Yale': 'Yale University Library',
+    'Rylands': 'John Rylands Library',
 }
 
 
