@@ -4,6 +4,25 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.4.1] - 2026-02-03
+
+### Enhancement: "Remember Me" Login Feature
+
+Both the desktop and web applications now support saving login credentials.
+
+#### Desktop Application
+- **"Remember me" checkbox**: New checkbox in the login dialog to opt-in to credential saving
+- **Secure storage**: Password stored in Windows Credential Manager (via `keyring` library) - not in plain text files
+- **Persistent across updates**: Credentials survive software updates since they're stored in user profile, not application folder
+- **Easy to disable**: Uncheck "Remember me" to clear saved credentials
+
+#### Web Application
+- **"Remember me" checkbox**: New checkbox in the login dialog
+- **Email remembered**: Email address saved in browser localStorage for convenience
+- **Session persistence**: Login session already persists via Supabase cookies
+
+---
+
 ## [5.4.0] - 2026-02-03
 
 ### New Feature: Library/Holding Institution Display
