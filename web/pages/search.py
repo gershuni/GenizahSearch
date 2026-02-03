@@ -511,9 +511,17 @@ def create_search_page(initial_query: str = None):
                         collapseTimeout = setTimeout(() => {{
                             const expandedEl = document.getElementById('{expanded_id}');
                             const collapsedEl = document.getElementById('{collapsed_id}');
-                            if (expandedEl && collapsedEl && !expandedEl.style.display.includes('none')) {{
-                                expandedEl.style.cssText = 'display: none !important;';
-                                collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
+                            console.log('Attempting collapse:', {{ expanded: expandedEl, collapsed: collapsedEl, expandedDisplay: expandedEl?.style?.display }});
+                            if (expandedEl && collapsedEl) {{
+                                const isVisible = !expandedEl.style.display || !expandedEl.style.display.includes('none');
+                                console.log('Panel visible:', isVisible);
+                                if (isVisible) {{
+                                    expandedEl.style.cssText = 'display: none !important;';
+                                    collapsedEl.style.cssText = 'background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;';
+                                    console.log('Collapsed search panel');
+                                }}
+                            }} else {{
+                                console.warn('Elements not found:', {{ expandedId: '{expanded_id}', collapsedId: '{collapsed_id}' }});
                             }}
                         }}, 100);  // Faster response
                     }}
