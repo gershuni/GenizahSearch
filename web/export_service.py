@@ -391,9 +391,13 @@ class ExportService:
             snippet = clean_text_single_line(remove_highlight_markers(res.get('snippet', '')))
             full_text = clean_text_single_line(res.get('full_text', ''))[:32000]
 
+            # Get full library name
+            library_code = display.get('library_code', '')
+            library_name = self.get_library_display(library_code, short=False) if library_code else ''
+
             row = [
                 sanitize_text_for_excel(display.get('shelfmark', '')),
-                sanitize_text_for_excel(display.get('library_code', '')),
+                sanitize_text_for_excel(library_name),
                 sanitize_text_for_excel(display.get('title', '')),
                 sanitize_text_for_excel(display.get('id', '')),
                 str(res.get('sort_score', '')),
@@ -512,12 +516,14 @@ class ExportService:
             sys_id = item.get('sys_id', '')
             shelfmark, title = self.get_metadata(sys_id)
             library_code = self.get_library_code(sys_id)
+            # Get full library name
+            library_name = self.get_library_display(library_code, short=False) if library_code else ''
             notes = clean_text_single_line(item.get('note', ''))
 
             row = [
                 idx,
                 sanitize_text_for_excel(shelfmark),
-                sanitize_text_for_excel(library_code),
+                sanitize_text_for_excel(library_name),
                 sanitize_text_for_excel(title),
                 sanitize_text_for_excel(sys_id),
                 sanitize_text_for_excel(item.get('fl_id', '')),
@@ -575,7 +581,7 @@ class ExportService:
                 raw_header = item.get('raw_header', '')
                 sys_id = None
                 shelfmark, title = 'Unknown', ''
-                library_code = ''
+                library_name = ''
 
                 if raw_header:
                     sys_match = re.search(r'(99\d{8,})', raw_header)
@@ -583,6 +589,8 @@ class ExportService:
                         sys_id = sys_match.group(1)
                         shelfmark, title = self.get_metadata(sys_id)
                         library_code = self.get_library_code(sys_id)
+                        # Get full library name
+                        library_name = self.get_library_display(library_code, short=False) if library_code else ''
 
                 source_ctx = clean_text_single_line(remove_highlight_markers(item.get('source_ctx', '')))
                 ms_text = clean_text_single_line(remove_highlight_markers(item.get('text', '')))
@@ -590,7 +598,7 @@ class ExportService:
                 row = [
                     idx,
                     sanitize_text_for_excel(shelfmark),
-                    sanitize_text_for_excel(library_code),
+                    sanitize_text_for_excel(library_name),
                     sanitize_text_for_excel(title),
                     item.get('score', 0),
                     sanitize_text_for_excel(source_ctx),
