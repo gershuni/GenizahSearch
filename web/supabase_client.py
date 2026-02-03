@@ -615,11 +615,10 @@ def delete_project(project_id: int) -> Dict:
 # ============================================================================
 
 def get_corrections(sys_id: str = None, author_id: str = None, status: str = None) -> List[Dict]:
-    """Get corrections with optional filters, including author profile info."""
+    """Get corrections with optional filters."""
     try:
         client = get_client()
-        # Join profiles table to get author name
-        query = client.table('corrections').select('*, profiles(full_name, username)')
+        query = client.table('corrections').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
