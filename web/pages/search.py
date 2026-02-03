@@ -1386,6 +1386,7 @@ def create_search_page(initial_query: str = None):
         sys_id = display.get('id', '')
         snippet = result.get('snippet', '')
         full_text = result.get('full_text', '')
+        highlight_pattern = result.get('highlight_pattern', '')
 
         # Initialize page index from display.img if not already set
         try:
@@ -1436,10 +1437,31 @@ def create_search_page(initial_query: str = None):
                             ui.button(icon='chevron_left' if is_rtl() else 'chevron_right', on_click=browse_next).props('flat round').tooltip(tr('Next'))
 
                     if full_text:
+                        # Apply highlighting to full text using the highlight pattern
+                        def highlight_full_text(text, pattern):
+                            if not text:
+                                return ""
+                            escaped = html.escape(text)
+                            if pattern:
+                                try:
+                                    # Apply case-insensitive highlighting
+                                    highlighted = re.sub(
+                                        f'({pattern})',
+                                        r'<span class="highlight-match">\1</span>',
+                                        escaped,
+                                        flags=re.IGNORECASE
+                                    )
+                                    return highlighted
+                                except re.error:
+                                    return escaped
+                            return escaped
+
+                        full_text_html = highlight_full_text(full_text, highlight_pattern)
                         with ui.scroll_area().classes('w-full h-64'):
-                            ui.label(full_text).classes('whitespace-pre-wrap').style(
+                            with ui.element('div').classes('whitespace-pre-wrap').style(
                                 'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
-                            )
+                            ):
+                                ui.html(full_text_html, sanitize=False)
                     else:
                         ui.label(tr('Full text not available')).style('color: var(--text-muted);')
 
