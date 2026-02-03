@@ -175,10 +175,13 @@ class GenizahService:
 
             # Single exact match found
             if result.get('sys_id'):
+                sys_id = result['sys_id']
+                library_code = state.meta_mgr.get_library_for_id(sys_id) if state.meta_mgr else ''
                 return [ManuscriptInfo(
-                    sys_id=result['sys_id'],
+                    sys_id=sys_id,
                     shelfmark=result.get('selected_shelfmark', ''),
-                    title=''  # Title fetched later if needed
+                    title='',  # Title fetched later if needed
+                    library_code=library_code
                 )], True
 
             # Multiple options - already sorted by natural_sort_key in genizah_core
@@ -186,14 +189,16 @@ class GenizahService:
             if not options:
                 return [], False
 
-            manuscripts = [
-                ManuscriptInfo(
-                    sys_id=opt['sys_id'],
+            manuscripts = []
+            for opt in options:
+                sys_id = opt['sys_id']
+                library_code = state.meta_mgr.get_library_for_id(sys_id) if state.meta_mgr else ''
+                manuscripts.append(ManuscriptInfo(
+                    sys_id=sys_id,
                     shelfmark=opt['shelfmark'],
-                    title=opt.get('title', '')
-                )
-                for opt in options
-            ]
+                    title=opt.get('title', ''),
+                    library_code=library_code
+                ))
 
             # If there's only one option, treat it as exact match
             if len(manuscripts) == 1:
