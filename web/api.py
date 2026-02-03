@@ -2,7 +2,7 @@ from nicegui import app
 from fastapi import Response
 from fastapi.responses import RedirectResponse
 from web.state import state
-from web.export_service import get_export_service
+from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import re
 from genizah_core import Config
@@ -541,7 +541,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{requests.utils.quote(filename)}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)
@@ -564,7 +564,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{requests.utils.quote(filename)}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)
@@ -593,7 +593,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)
@@ -622,7 +622,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)
@@ -645,7 +645,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)
@@ -676,7 +676,7 @@ def init_api_routes():
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
             )
         except ValueError as e:
             return Response(str(e), status_code=400)

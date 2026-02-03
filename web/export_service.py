@@ -79,12 +79,31 @@ def make_safe_filename(query: str, default: str = "genizah_results", max_length:
     """
     Create a filesystem-safe filename from a search query.
     Removes illegal characters and limits length.
+    For HTTP Content-Disposition, non-ASCII chars need special handling.
     """
     if not query:
         return default
     # Remove filesystem-unsafe characters
-    safe = re.sub(r'[\\/*?:"<>|]', '', query)[:max_length]
-    return safe.strip() or default
+    safe = re.sub(r'[\\/*?:"<>|\n\r\t]', '', query)[:max_length]
+    safe = safe.strip() or default
+    return safe
+
+
+def encode_filename_for_header(filename: str) -> str:
+    """
+    Encode filename for Content-Disposition header.
+    Uses RFC 5987 encoding for non-ASCII characters.
+    """
+    from urllib.parse import quote
+    # Check if filename contains non-ASCII characters
+    try:
+        filename.encode('ascii')
+        # Pure ASCII - simple format
+        return f'attachment; filename="{filename}"'
+    except UnicodeEncodeError:
+        # Contains non-ASCII - use RFC 5987 format
+        encoded = quote(filename, safe='')
+        return f"attachment; filename*=UTF-8''{encoded}"
 
 
 def contains_any_term(text: str, terms: List[str]) -> bool:
