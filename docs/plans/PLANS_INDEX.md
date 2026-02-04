@@ -41,7 +41,18 @@ This is now the **primary plan** that supersedes the lists unification plan. By 
 
 **Note:** The concepts in this plan (projects, color inheritance, hierarchy) are still valid and should be implemented AFTER the Supabase migration. The Supabase plan includes the database schema for projects.
 
-### 4. Library Location Feature
+### 4. In-App Software Updates
+**File:** `IN_APP_UPDATE_PLAN.md`
+**Status:** Planned
+**Goal:** Allow users to update the desktop app without leaving the application
+
+Currently the app detects new versions but requires manual download. This plan adds:
+- Download with progress bar directly in app
+- Automatic extraction and file replacement
+- Auto-restart with new version
+- Uses existing GitHub Releases infrastructure
+
+### 5. Library Location Feature
 **File:** `LIBRARY_LOCATION_PLAN.md`
 **Test Checklist:** `LIBRARY_LOCATION_TEST_CHECKLIST.md`
 **Status:** ✅ Implemented (Web + Desktop)
@@ -106,6 +117,9 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 1. 🔲 Projects UI for web
 2. 🔲 Desktop cloud sync improvements
 3. 🔲 Mobile responsive design
+
+### Short-term (New)
+1. 🔲 In-app software updates (`IN_APP_UPDATE_PLAN.md`)
 
 ### Long-term
 1. 🔲 Performance optimizations
