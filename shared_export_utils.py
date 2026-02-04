@@ -41,10 +41,11 @@ def sanitize_text_for_excel(text: Optional[str], max_length: int = 32700) -> str
     t = str(text)
 
     # Whitelist approach: Keep only printable characters valid in XML 1.0
-    # Range: U+0020-U+D7FF, U+E000-U+FFFD, plus tab (\t)
+    # Ranges: tab (\t), U+0020-U+007E (printable ASCII, excluding DEL 0x7F),
+    # U+0080-U+D7FF (extended chars including Hebrew), U+E000-U+FFFD
     t = "".join(
         ch for ch in t
-        if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch == "\t"
+        if ch == "\t" or (0x20 <= ord(ch) <= 0x7E) or (0x80 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD)
     )
 
     # Handle malicious formulas that could execute when opened in Excel
