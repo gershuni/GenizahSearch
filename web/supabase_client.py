@@ -618,8 +618,7 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
     """Get corrections with optional filters, including author profile data."""
     try:
         client = get_client()
-        # Join with profiles table to get author name
-        query = client.table('corrections').select('*, profiles:author_id(id, full_name, username)')
+        query = client.table('corrections').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
@@ -629,7 +628,26 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
             query = query.eq('status', status)
 
         response = query.order('created_at', desc=True).execute()
-        return response.data or []
+        corrections = response.data or []
+
+        # Fetch profile data for authors
+        if corrections:
+            user_ids = set(c.get('author_id') for c in corrections if c.get('author_id'))
+            if user_ids:
+                profiles_response = client.table('profiles').select(
+                    'id, full_name, username'
+                ).in_('id', list(user_ids)).execute()
+                profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+
+                # Merge profile data into corrections
+                for c in corrections:
+                    aid = c.get('author_id')
+                    if aid and aid in profiles_map:
+                        c['profiles'] = profiles_map[aid]
+                    else:
+                        c['profiles'] = {}
+
+        return corrections
     except Exception as e:
         print(f"Error getting corrections: {e}")
         return []
