@@ -19,7 +19,9 @@ import threading
 # Simple in-memory cache for joins data (key -> (timestamp, data))
 _joins_cache: Dict[str, tuple] = {}
 _joins_cache_lock = threading.Lock()
-_CACHE_TTL = 30  # Cache for 30 seconds
+# Cache TTL (configurable via environment variable, default 30 seconds)
+import os
+_CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
 
 
 def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, force_refresh: bool = False) -> Dict:

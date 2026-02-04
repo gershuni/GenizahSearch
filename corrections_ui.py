@@ -19,10 +19,11 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
 
 try:
-    from genizah_core import tr, CURRENT_LANG
+    from genizah_core import tr, CURRENT_LANG, normalize_shelfmark
 except ImportError:
     def tr(text): return text
     CURRENT_LANG = 'en'
+    def normalize_shelfmark(s): return s.lower().replace(' ', '') if s else ''
 
 from corrections_client import (
     CorrectionsClient, get_corrections_client,
@@ -3264,10 +3265,8 @@ class JoinsDialog(QDialog):
         self.load_joins()
 
     def _normalize_shelfmark(self, text: str) -> str:
-        """Normalize shelfmark for matching (same as ShelfmarkCompleter)."""
-        import re
-        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-        return re.sub(r"[^\w\./]", "", t).lower()
+        """Normalize shelfmark using the canonical function from genizah_core."""
+        return normalize_shelfmark(text)
 
     def init_ui(self):
         layout = QVBoxLayout(self)

@@ -81,6 +81,47 @@ def strip_nikud(text: str) -> str:
     return NIKUD_PATTERN.sub('', text)
 
 
+def normalize_shelfmark(shelfmark: str) -> str:
+    """
+    Normalize shelfmarks for consistent matching across the codebase.
+
+    This is the CANONICAL implementation - all other normalizations should use this.
+
+    Rules:
+    - Convert to lowercase
+    - Treat "/" as "." for consistency (192/23 -> 192.23)
+    - Preserve dots between digits (e.g., "12.123" stays as "12.123")
+    - Remove all other non-alphanumeric characters
+    - Remove "MS" or "Ms." prefix (common in Oxford shelfmarks)
+
+    Examples:
+        "T-S 12.123" -> "ts12.123"
+        "MS. Heb. a.1" -> "heba1"
+        "T-S  K  25/2" -> "tsk25.2"
+        "120.2" -> "120.2"
+    """
+    if not shelfmark:
+        return ""
+
+    # Treat "/" as "." for consistency (192/23 -> 192.23)
+    temp = shelfmark.replace('/', '.')
+
+    # Preserve dots that appear between digits (like 120.2) by replacing with a marker
+    temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
+
+    # Remove all other non-alphanumeric characters
+    cleaned = re.sub(r'\W+', '', temp).casefold()
+
+    # Restore the preserved dots
+    cleaned = cleaned.replace('dotmarker', '.')
+
+    # Remove "ms" prefix (common in Oxford: "MS. Heb. a.1")
+    if cleaned.startswith("ms"):
+        cleaned = cleaned[2:]
+
+    return cleaned
+
+
 def encode_word_shmidman(word: str, freq_map=None) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
     if freq_map is None:
@@ -3728,26 +3769,8 @@ class MetadataManager:
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove non-alphanumeric chars but preserve dots/slashes between digits."""
-        if not shelfmark:
-            return ""
-
-        # Treat "/" as "." for consistency (192/23 -> 192.23)
-        temp = shelfmark.replace('/', '.')
-
-        # Preserve dots that appear between digits (like 120.2) by replacing with a marker
-        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
-
-        # Remove all other non-alphanumeric characters
-        cleaned = re.sub(r'\W+', '', temp).casefold()
-
-        # Restore the preserved dots
-        cleaned = cleaned.replace('dotmarker', '.')
-
-        if cleaned.startswith("ms"):
-            cleaned = cleaned[2:]
-
-        return cleaned
+        """Normalize shelfmarks using the canonical module-level function."""
+        return normalize_shelfmark(shelfmark)
 
     def _iter_shelfmark_sources(self):
         """Yield shelfmark candidates from CSV bank and cached metadata."""
@@ -5355,15 +5378,8 @@ class JoinsManager:
         }
 
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize a shelfmark for consistent lookup."""
-        if not shelfmark:
-            return ""
-        # Simple normalization: lowercase, remove extra spaces
-        normalized = ' '.join(shelfmark.lower().split())
-        # Remove common punctuation variations
-        normalized = normalized.replace('.', ' ').replace(',', ' ')
-        normalized = ' '.join(normalized.split())
-        return normalized
+        """Normalize shelfmarks using the canonical module-level function."""
+        return normalize_shelfmark(shelfmark)
 
     def load(self):
         """Load joins from local cache file."""

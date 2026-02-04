@@ -40,7 +40,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -12869,16 +12869,8 @@ class GenizahGUI(QMainWindow):
         self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
 
     def _normalize_shelfmark(self, shelfmark: str) -> str:
-        """Normalize shelfmarks: remove ALL non-alphanumeric chars (spaces, dots, etc)."""
-        if not shelfmark:
-            return ""
-
-        cleaned = re.sub(r'\W+', '', shelfmark).casefold()
-
-        if cleaned.startswith("ms"):
-            cleaned = cleaned[2:]
-
-        return cleaned
+        """Normalize shelfmarks using the canonical function from genizah_core."""
+        return normalize_shelfmark(shelfmark)
 
     def _ensure_shelf_map(self):
         """Build a mapping from normalized shelfmark to sys_id for quick lookups."""

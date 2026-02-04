@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (cache thread-safety and timer race conditions fixed)
+> **Last Updated:** 2026-02-04 (shelfmark normalization unified, TTL values configurable)
 > **Status:** Active working document
 
 ---
@@ -47,14 +47,14 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Deferred | Total |
 |----------|------|----------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 1 | 5 | 6 |
+| P2 Medium Bugs | 0 | 6 | 6 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **6** | **29** | **35** |
+| **Total** | **5** | **31** | **36** |
 
 ---
 
@@ -74,7 +74,7 @@ Move to "Completed Issues" section at bottom with date
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
 | **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |
 | **Bare `except:` statements** | Multiple files | ✅ Fixed (2026-02-03) | Changed all 16 instances to `except Exception:` |
-| **Shelfmark normalization inconsistency** | 5 implementations | ❌ Open | `genizah_app.py` (2), `genizah_core.py` (2), `corrections_ui.py` (1) |
+| **Shelfmark normalization inconsistency** | 5 implementations | ✅ Fixed (2026-02-04) | Unified to single `normalize_shelfmark()` in `genizah_core.py` |
 | **Star button visual feedback** | `browse.py`, `search.py` | ✅ Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
 
 ### P3 - Low Priority
@@ -150,9 +150,9 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Value | File | Status | Should Be |
 |-------|------|--------|-----------|
-| `_CACHE_TTL = 30` | `joins_panel.py:19` | ❌ Open | Environment variable |
-| `CACHE_TTL = 300` | `api.py:46` | ❌ Open | Environment variable |
-| Timeouts & retries | `auth_state.py:17-20` | ❌ Open | Config file |
+| `_CACHE_TTL = 30` | `joins_panel.py:19` | ✅ Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
+| `CACHE_TTL = 300` | `api.py:46` | ✅ Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
+| Timeouts & retries | `auth_state.py:17-20` | ❌ Deferred | Low priority - defaults are reasonable |
 
 ---
 
@@ -194,6 +194,8 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
+| 2026-02-04 | Made TTL values configurable via environment variables (JOINS_CACHE_TTL, NLI_CACHE_TTL, IMAGE_CACHE_TTL) | Claude |
 | 2026-02-04 | Fixed UI timer race conditions in parallels.py and search.py - added timer tracking | Claude |
 | 2026-02-04 | Fixed cache thread-safety in joins_panel.py - added threading.Lock | Claude |
 | 2026-02-03 | Fixed bare `except:` statements - changed all 16 to `except Exception:` | Claude |
