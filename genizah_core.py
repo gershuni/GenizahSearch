@@ -3687,6 +3687,11 @@ class MetadataManager:
                 if val_normalized == q_normalized:
                     return True
 
+                # Dot-agnostic match: "ts12123" matches "ts12.123"
+                # This allows users to type without dots and still find results
+                if val_normalized.replace('.', '') == q_normalized.replace('.', ''):
+                    return True
+
                 # Normalized prefix match: "ts12" matches "T-S 12.123"
                 # But be careful with numeric boundaries
                 if q_normalized and val_normalized.startswith(q_normalized):
@@ -3829,11 +3834,11 @@ class MetadataManager:
                 exact_matches.append(entry)
             elif norm_query in norm_shelf:
                 partial_matches.append(entry)
-            # Fuzzy matching for pure digit queries - compare without dots
-            elif query_is_pure_digits:
+            else:
+                # Dot-agnostic matching - allows "ts12123" to match "ts12.123"
                 norm_shelf_no_dots = norm_shelf.replace('.', '')
                 if norm_shelf_no_dots == norm_query_no_dots:
-                    # Exact match ignoring dots (19234 == 192.34)
+                    # Exact match ignoring dots
                     exact_matches.append(entry)
                 elif norm_query_no_dots in norm_shelf_no_dots:
                     # Partial match ignoring dots

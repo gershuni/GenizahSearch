@@ -3853,11 +3853,16 @@ class JoinsDialog(QDialog):
         # If not picked from list, try to resolve from shelfmark using csv_bank
         if not doc_id_b and self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
             # Build lookup map if not already done
+            norm_frag_b = self._normalize_shelfmark(frag_b)
+            norm_frag_b_no_dots = norm_frag_b.replace('.', '')
             for sys_id, meta in self.meta_mgr.csv_bank.items():
                 shelf = meta.get('shelfmark', '')
-                if shelf and self._normalize_shelfmark(shelf) == self._normalize_shelfmark(frag_b):
-                    doc_id_b = sys_id
-                    break
+                if shelf:
+                    norm_shelf = self._normalize_shelfmark(shelf)
+                    # Exact match or dot-agnostic match
+                    if norm_shelf == norm_frag_b or norm_shelf.replace('.', '') == norm_frag_b_no_dots:
+                        doc_id_b = sys_id
+                        break
 
         # Try to create via API first
         join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
