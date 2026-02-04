@@ -12,15 +12,8 @@ import requests
 import time
 import re
 
-
-def _sanitize_cache_filename(ref: str) -> str:
-    """Sanitize a reference string to create a safe cache filename.
-
-    Uses a whitelist approach: only alphanumeric characters, underscores, and hyphens
-    are allowed. All other characters are replaced with underscores.
-    This prevents path traversal attacks (e.g., ../ or ..\\ on Windows).
-    """
-    return re.sub(r'[^a-zA-Z0-9_\-]', '_', ref)
+# Import shared sanitization utility
+from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
 # Import shared utilities (no PyQt6 dependency)
 from sefaria_utils import (
