@@ -58,6 +58,7 @@ from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkL
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
+from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 
 # Community features - corrections, comments, discoveries
 from corrections_client import get_corrections_client
@@ -11662,21 +11663,11 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area.setFocus()
 
     def _sanitize_for_excel(self, text):
-        """Cleans text to prevent Excel XML corruption."""
-        if text is None: return ""
-        t = str(text)
-        # Remove illegal characters
-        t = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', t)
+        """Cleans text to prevent Excel XML corruption.
 
-        # Handle malicious formulas
-        t = t.strip()
-        if t.startswith(('=', '+', '-', '@')):
-            t = "'" + t
-
-        # Excel cell limit
-        if len(t) > 32700:
-            t = t[:32700] + "..."
-        return t
+        Uses shared sanitization utility for consistency with Web app.
+        """
+        return shared_sanitize_excel(text)
 
     def _add_docx_highlighted_runs(self, paragraph, text):
         parts = str(text or "").split('*')
@@ -12043,24 +12034,8 @@ class GenizahGUI(QMainWindow):
         if self.btn_lab_mode_toggle_comp.isChecked():
             comp_settings_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep_comp.isChecked() else 'Off'}")
 
-        illegal_chars_re = re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
-
-        def sanitize_for_excel(text):
-            """Cleans text to prevent Excel XML corruption."""
-            if text is None: return ""
-            t = str(text)
-            
-            t = illegal_chars_re.sub('', t)
-            
-            t = t.strip()
-            if t.startswith(('=', '+', '-', '@')): 
-                t = "'" + t
-            
-            # Excel cell limit
-            if len(t) > 32700:
-                t = t[:32700] + "..."
-            
-            return t
+        # Use shared sanitization utility for consistency with Web app
+        sanitize_for_excel = shared_sanitize_excel
 
         def _clean_and_marker(text):
             """Prepares HTML for export: converts spans to *, removes other tags."""

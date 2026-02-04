@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (shelfmark normalization unified, TTL values configurable)
+> **Last Updated:** 2026-02-04 (unified export utilities in shared_export_utils.py)
 > **Status:** Active working document
 
 ---
@@ -51,10 +51,11 @@ Move to "Completed Issues" section at bottom with date
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
+| Code Quality Debt | 0 | 6 | 6 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **5** | **31** | **36** |
+| **Total** | **5** | **37** | **42** |
 
 ---
 
@@ -142,9 +143,9 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Issue | Files | Status | Notes |
 |-------|-------|--------|-------|
-| **Excel export duplication** | `genizah_app.py` + `export_service.py` | ❌ Open | ~80% duplicate code |
-| **Word export duplication** | `genizah_app.py` + `export_service.py` | ❌ Open | ~80% duplicate code |
-| **Text sanitization inconsistency** | Desktop vs Web | ❌ Open | Different behavior on same input |
+| **Excel export duplication** | `genizah_app.py` + `export_service.py` | ✅ Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
+| **Word export duplication** | `genizah_app.py` + `export_service.py` | ✅ Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
+| **Text sanitization inconsistency** | Desktop vs Web | ✅ Fixed (2026-02-04) | Single `sanitize_text_for_excel()` in `shared_export_utils.py` |
 
 ### Hardcoded Values
 
@@ -194,6 +195,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Created `shared_export_utils.py` - unified text sanitization, filename helpers for Desktop & Web | Claude |
 | 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
 | 2026-02-04 | Made TTL values configurable via environment variables (JOINS_CACHE_TTL, NLI_CACHE_TTL, IMAGE_CACHE_TTL) | Claude |
 | 2026-02-04 | Fixed UI timer race conditions in parallels.py and search.py - added timer tracking | Claude |

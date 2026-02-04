@@ -21,16 +21,8 @@ from web.components.typography import h1, h2, h3, h4
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
 from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
 
-
-def _sanitize_cache_filename(ref: str) -> str:
-    """Sanitize a reference string to create a safe cache filename.
-
-    Uses a whitelist approach: only alphanumeric characters, underscores, and hyphens
-    are allowed. All other characters are replaced with underscores.
-    This prevents path traversal attacks (e.g., ../ or ..\\ on Windows).
-    """
-    # Replace any character that is not alphanumeric, underscore, or hyphen
-    return re.sub(r'[^a-zA-Z0-9_\-]', '_', ref)
+# Import shared sanitization utility
+from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
 
 def get_source_display_name(ref: str) -> str:

@@ -38,93 +38,18 @@ CREDITS_TEXT = [
 
 # ============================================================================
 # Text Processing Utilities
+# Import from shared module for consistency between Desktop and Web
 # ============================================================================
 
-def sanitize_text_for_excel(text: str) -> str:
-    """
-    Remove illegal characters for XML/Excel cells.
-    Excel cells cannot contain certain control characters.
-    """
-    if not text:
-        return ""
-    # Keep only printable characters valid in XML 1.0
-    return "".join(
-        ch for ch in text
-        if (0x20 <= ord(ch) <= 0xD7FF) or (0xE000 <= ord(ch) <= 0xFFFD) or ch in "\t"
-    )
-
-
-def clean_text_single_line(text: str) -> str:
-    """
-    Replace line breaks with spaces and normalize whitespace.
-    Useful for Excel cells where we want continuous text.
-    """
-    if not text:
-        return ""
-    text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
-    # Collapse multiple spaces
-    while '  ' in text:
-        text = text.replace('  ', ' ')
-    return text.strip()
-
-
-def remove_highlight_markers(text: str) -> str:
-    """Remove * markers used for highlighting in snippets."""
-    if not text:
-        return ""
-    return text.replace('*', '')
-
-
-def make_safe_filename(query: str, default: str = "genizah_results", max_length: int = 50) -> str:
-    """
-    Create a filesystem-safe filename from a search query.
-    Removes illegal characters and limits length.
-    For HTTP Content-Disposition, non-ASCII chars need special handling.
-    """
-    if not query:
-        return default
-    # Remove filesystem-unsafe characters
-    safe = re.sub(r'[\\/*?:"<>|\n\r\t]', '', query)[:max_length]
-    safe = safe.strip() or default
-    return safe
-
-
-def encode_filename_for_header(filename: str) -> str:
-    """
-    Encode filename for Content-Disposition header.
-    Uses RFC 5987 encoding for non-ASCII characters.
-    """
-    from urllib.parse import quote
-    # Check if filename contains non-ASCII characters
-    try:
-        filename.encode('ascii')
-        # Pure ASCII - simple format
-        return f'attachment; filename="{filename}"'
-    except UnicodeEncodeError:
-        # Contains non-ASCII - use RFC 5987 format
-        encoded = quote(filename, safe='')
-        return f"attachment; filename*=UTF-8''{encoded}"
-
-
-def contains_any_term(text: str, terms: List[str]) -> bool:
-    """Check if text contains any of the given search terms (case-insensitive)."""
-    if not text or not terms:
-        return False
-    text_lower = text.lower()
-    return any(term.lower() in text_lower for term in terms)
-
-
-def extract_search_terms(query: str) -> List[str]:
-    """
-    Extract meaningful search terms from a query string.
-    Filters out special operators.
-    """
-    if not query:
-        return []
-    return [
-        t.strip() for t in query.split()
-        if t.strip() and not t.startswith(('=', '?', '~', '/', '$', '#'))
-    ]
+from shared_export_utils import (
+    sanitize_text_for_excel,
+    clean_text_single_line,
+    remove_highlight_markers,
+    make_safe_filename,
+    encode_filename_for_header,
+    contains_any_term,
+    extract_search_terms,
+)
 
 
 # ============================================================================
