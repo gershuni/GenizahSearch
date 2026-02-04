@@ -48,6 +48,13 @@ from .add_to_list_dialog import (
     get_star_icon
 )
 
+from .translate_button import (
+    create_translate_button,
+    create_translatable_text,
+    detect_language,
+    translate_text
+)
+
 __all__ = [
     'create_edit_button',
     'create_edit_text_dialog',
@@ -71,4 +78,8 @@ __all__ = [
     'show_add_to_list_dialog',
     'create_add_to_list_button',
     'get_star_icon',
+    'create_translate_button',
+    'create_translatable_text',
+    'detect_language',
+    'translate_text',
 ]

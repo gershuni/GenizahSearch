@@ -815,3 +815,23 @@ Desktop application Supabase client for community features (corrections, comment
     - Method `__init__` (Line 325)
     - Method `run` (Line 330)
 
+## web/components/translate_button.py
+
+Translation button component for user-generated content (comments, discoveries).
+
+- **Function** `detect_language` - Detect Hebrew vs English based on character analysis
+- **Function** `translate_text` - Translate text using MyMemory free API (Hebrew ↔ English)
+- **Function** `create_translate_button` - Create a translate button with toggle functionality
+- **Function** `create_translatable_text` - Create text element with inline translate button
+
+## web/components/notes_display.py
+
+Notes/comments display component for manuscripts.
+
+- **Function** `render_content_with_mentions` - Render comment content with shelfmark links + translate button
+- **Function** `fetch_document_comments` - Fetch comments for a document
+- **Function** `create_notes_panel` - Create expandable panel showing notes
+- **Function** `create_comment_card` - Display a single comment with translate button
+- **Function** `create_reply_item` - Display a reply item (nested)
+- **Function** `create_notes_button` - Button that opens notes dialog
+
