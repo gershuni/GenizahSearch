@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (added in-app software updates)
+> **Last Updated:** 2026-02-04 (sidebar mobile fix, connection stability improvements)
 > **Status:** Active working document
 
 ---
@@ -196,6 +196,9 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Fixed sidebar opening on mobile - now closes by default on screens < 768px | Claude |
+| 2026-02-04 | Improved connection stability - added continuous heartbeat monitoring and reconnect_timeout | Claude |
+| 2026-02-04 | Added Hebrew translations for "Reconnecting...", "Connecting..." | Claude |
 | 2026-02-04 | Implemented in-app software updates - downloads and runs installer silently via Inno Setup | Claude |
 | 2026-02-04 | Added translation button for comments and community messages (Hebrew ↔ English using MyMemory API) | Claude |
 | 2026-02-04 | Marked pending plans as implemented: Mobile, Lists Unification, Joins Feed, Desktop Sync | Claude |

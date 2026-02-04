@@ -1369,20 +1369,56 @@ def create_layout():
     def render_header_right():
         """Render right section: Status + Auth + Help"""
         with ui.row().classes('items-center gap-2 sm:gap-4') as section:
-            # Status Indicator
+            # Status Indicator with continuous heartbeat monitoring
             with ui.row().classes('items-center gap-2 bg-white/15 px-2 sm:px-4 py-1 sm:py-2 rounded-full status-indicator'):
                 status_dot = ui.element('div').classes('w-2 h-2 rounded-full bg-yellow-400')
                 status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
-                def update_status():
-                    if state.is_ready():
-                        status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
-                        status_text.text = tr('Ready')
-                    else:
-                        status_dot.classes('bg-yellow-400', remove='bg-green-400')
-                        status_text.text = tr('Loading...')
+                # Track connection state for reconnection detection
+                connection_state = {'was_connected': False, 'check_count': 0}
 
-                ui.timer(3.0, update_status, once=True)
+                async def update_status():
+                    """Heartbeat function that monitors both server readiness and WebSocket connection."""
+                    try:
+                        connection_state['check_count'] += 1
+
+                        # Check if server-side state is ready
+                        server_ready = state.is_ready()
+
+                        # Perform a lightweight JavaScript ping to verify WebSocket connection
+                        # This also tests the round-trip to catch connection issues
+                        try:
+                            ping_result = await ui.run_javascript('Date.now()', timeout=5.0)
+                            ws_connected = ping_result is not None
+                        except Exception:
+                            ws_connected = False
+
+                        if server_ready and ws_connected:
+                            # All good - show green
+                            status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
+                            status_text.text = tr('Ready')
+                            connection_state['was_connected'] = True
+                        elif connection_state['was_connected'] and not ws_connected:
+                            # Was connected but lost connection - show red/reconnecting
+                            status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
+                            status_text.text = tr('Reconnecting...')
+                        else:
+                            # Still loading or reconnecting
+                            status_dot.classes('bg-yellow-400', remove='bg-green-400 bg-red-400')
+                            if connection_state['check_count'] <= 2:
+                                status_text.text = tr('Loading...')
+                            else:
+                                status_text.text = tr('Connecting...')
+                    except Exception:
+                        # If update itself fails, likely disconnected
+                        if connection_state['was_connected']:
+                            status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
+                            status_text.text = tr('Reconnecting...')
+
+                # Run heartbeat every 10 seconds to monitor connection health
+                # First check after 2 seconds, then continuous
+                ui.timer(2.0, update_status, once=True)
+                ui.timer(10.0, update_status)
 
             # Auth Buttons (Login/Register or User Menu)
             with ui.row().classes('auth-buttons'):
@@ -1410,11 +1446,26 @@ def create_layout():
 
     # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
+    # On mobile (< 768px), we will close it after page load via JavaScript
     drawer_open = app.storage.user.get('drawer_open', True)
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
     main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+
+    # Close drawer on mobile by default (screen width < 768px)
+    # This runs once on page load to ensure mobile users don't see the drawer overlay
+    async def close_drawer_on_mobile():
+        """Close drawer if screen width indicates mobile device."""
+        try:
+            screen_width = await ui.run_javascript('window.innerWidth')
+            if screen_width and screen_width < 768:
+                main_drawer.set_value(False)
+        except Exception:
+            pass  # Silently ignore if JavaScript fails
+
+    # Use a short timer to run after page is fully loaded
+    ui.timer(0.5, close_drawer_on_mobile, once=True)
 
     # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
@@ -1985,6 +2036,11 @@ if __name__ in {'__main__', '__mp_main__'}:
     show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
 
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
+
+    # Reconnect timeout (seconds) - how long client waits before giving up reconnection
+    # Higher value = more patient reconnection attempts under load
+    reconnect_timeout = int(os.environ.get('NICEGUI_RECONNECT_TIMEOUT', '30'))
+
     ui.run(
         title=APP_TITLE,
         port=APP_PORT,
@@ -1992,4 +2048,5 @@ if __name__ in {'__main__', '__mp_main__'}:
         show=show_browser,
         storage_secret='genizah-secret-v5',
         favicon=favicon_path,
+        reconnect_timeout=reconnect_timeout,
     )

@@ -1664,6 +1664,8 @@ TRANSLATIONS = {
     "Max": "מקסימום",
     "Avg": "ממוצע",
     "Ready": "מוכן",
+    "Reconnecting...": "מתחבר מחדש...",
+    "Connecting...": "מתחבר...",
     "Initializing...": "מאתחל...",
     "Service not available": "השירות אינו זמין",
     "Index not found": "האינדקס לא נמצא",

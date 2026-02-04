@@ -354,6 +354,76 @@ ps aux | grep python
 3. Restart service: `sudo systemctl restart genizah-web`
 4. If still broken, rebuild index (see above)
 
+### WebSocket Connection Issues (Connection Lost)
+
+If users report frequent "Connection Lost" or yellow/red status indicators:
+
+**1. Check server resources:**
+```bash
+# Check memory
+free -h
+
+# Check CPU
+top -bn1 | head -20
+
+# Check open connections
+ss -s
+netstat -an | grep :8081 | wc -l
+```
+
+**2. Increase Nginx connection limits** (in `/etc/nginx/nginx.conf`):
+```nginx
+events {
+    worker_connections 4096;  # Increase from default 768
+}
+
+http {
+    # Add keepalive for upstream
+    upstream nicegui {
+        server 127.0.0.1:8081;
+        keepalive 64;
+    }
+}
+```
+
+**3. Optimize Nginx proxy settings** (in `/etc/nginx/sites-available/genizah`):
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8081;
+    # ... existing headers ...
+
+    # WebSocket stability improvements
+    proxy_read_timeout 86400;      # 24 hours (keep long connections alive)
+    proxy_send_timeout 86400;
+    proxy_connect_timeout 60;
+    proxy_buffering off;           # Disable buffering for WebSocket
+
+    # Connection reuse
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";  # Allow connection reuse
+}
+```
+
+**4. Application-level settings** (in `.env`):
+```bash
+# Increase reconnect timeout for clients (seconds)
+NICEGUI_RECONNECT_TIMEOUT=30
+```
+
+**5. Monitor WebSocket connections:**
+```bash
+# Count active WebSocket connections
+sudo ss -tnp | grep ':8081' | wc -l
+
+# Watch connection count in real-time
+watch -n 1 "sudo ss -tnp | grep ':8081' | wc -l"
+```
+
+**6. If under heavy load, consider:**
+- Enabling Cloudflare's "Under Attack" mode temporarily
+- Implementing rate limiting in Cloudflare WAF
+- Scaling up the EC2 instance
+
 ---
 
 ## SSL Certificate
