@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (marked pending plans as implemented)
+> **Last Updated:** 2026-02-04 (added translation button feature)
 > **Status:** Active working document
 
 ---
@@ -195,6 +195,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Added translation button for comments and community messages (Hebrew ↔ English using MyMemory API) | Claude |
 | 2026-02-04 | Marked pending plans as implemented: Mobile, Lists Unification, Joins Feed, Desktop Sync | Claude |
 | 2026-02-04 | Created `shared_export_utils.py` - unified text sanitization, filename helpers for Desktop & Web | Claude |
 | 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
