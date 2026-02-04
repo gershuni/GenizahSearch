@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03 (documentation gaps addressed)
+> **Last Updated:** 2026-02-04 (cache thread-safety and timer race conditions fixed)
 > **Status:** Active working document
 
 ---
@@ -48,13 +48,13 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|----------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
 | P2 Medium Bugs | 1 | 5 | 6 |
-| P3 Low Priority | 3 | 1 | 4 |
+| P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **8** | **27** | **35** |
+| **Total** | **6** | **29** | **35** |
 
 ---
 
@@ -82,8 +82,8 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Auto-save not working** | `text_editor.py:374` | ✅ Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
-| **Race conditions in UI timers** | `joins_panel.py`, `parallels.py` | ❌ Open | Multiple timers can run in parallel |
-| **Cache thread-safety** | `joins_panel.py:17-19` | ❌ Open | Global dict without lock |
+| **Race conditions in UI timers** | `parallels.py`, `search.py` | ✅ Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
+| **Cache thread-safety** | `joins_panel.py:17-19` | ✅ Fixed (2026-02-04) | Added threading.Lock for cache access |
 | **CSRF protection missing** | API endpoints | ❌ Deferred | Low risk - NiceGUI uses WebSocket |
 
 ---
@@ -194,6 +194,8 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Fixed UI timer race conditions in parallels.py and search.py - added timer tracking | Claude |
+| 2026-02-04 | Fixed cache thread-safety in joins_panel.py - added threading.Lock | Claude |
 | 2026-02-03 | Fixed bare `except:` statements - changed all 16 to `except Exception:` | Claude |
 | 2026-02-03 | Verified auto-save in text_editor.py is working (lines 443-454) | Claude |
 | 2026-02-03 | Fixed all 4 documentation gaps: RLS policies, OAuth callback, Cloudflare config, Desktop client | Claude |

@@ -155,6 +155,7 @@ def create_parallels_page(initial_text: str = None):
             self.status = ""
             self.results = []
             self.finished_animation_shown = False
+            self.update_timer = None  # Track timer to prevent duplicates
 
     p_state = ParallelsState()
 
@@ -1069,7 +1070,10 @@ def create_parallels_page(initial_text: str = None):
             # Check if client still exists
             _ = progress_bar.client
         except (RuntimeError, Exception):
-            return  # Client deleted, stop updating
+            # Client deleted, deactivate the timer
+            if p_state.update_timer:
+                p_state.update_timer.deactivate()
+            return
 
         try:
             if p_state.is_running:
@@ -1091,7 +1095,10 @@ def create_parallels_page(initial_text: str = None):
             pass  # Client may be deleted
 
     # Use faster timer for more responsive progress updates
-    ui.timer(0.05, update_ui)
+    # Cancel any existing timer first to prevent duplicates
+    if p_state.update_timer:
+        p_state.update_timer.deactivate()
+    p_state.update_timer = ui.timer(0.05, update_ui)
 
     def cancel_search():
         p_state.is_cancelled = True
