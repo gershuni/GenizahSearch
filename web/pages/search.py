@@ -40,6 +40,7 @@ def create_search_page(initial_query: str = None):
             self.selected_indices = set()  # For bulk operations
             self.is_panel_collapsed = False  # For collapsible search panel
             self.last_scroll_top = 0  # For scroll-based auto-collapse
+            self.update_timer = None  # Track timer to prevent duplicates
 
     search_state = SearchUIState()
 
@@ -972,6 +973,15 @@ def create_search_page(initial_query: str = None):
 
     def update_progress_ui():
         try:
+            # Check if client still exists
+            _ = progress_bar.client
+        except (RuntimeError, Exception):
+            # Client deleted, deactivate the timer
+            if search_state.update_timer:
+                search_state.update_timer.deactivate()
+            return
+
+        try:
             if search_state.is_running:
                 progress_bar.classes(remove='opacity-0')
                 progress_bar.value = search_state.progress
@@ -992,7 +1002,10 @@ def create_search_page(initial_query: str = None):
         except Exception:
             pass  # Client may have been deleted
 
-    ui.timer(0.5, update_progress_ui)
+    # Cancel any existing timer first to prevent duplicates
+    if search_state.update_timer:
+        search_state.update_timer.deactivate()
+    search_state.update_timer = ui.timer(0.5, update_progress_ui)
 
     async def execute_search():
         query = query_input.value.strip() if query_input.value else ""

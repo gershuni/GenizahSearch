@@ -20,7 +20,7 @@ def get_shelfmark_for_id(sys_id: str) -> tuple:
         if state.meta_mgr:
             shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
             return shelfmark or sys_id, title or ''
-    except:
+    except Exception:
         pass
     return sys_id, ''
 

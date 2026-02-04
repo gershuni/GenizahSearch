@@ -5,11 +5,16 @@ from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import re
+import os
 from genizah_core import Config
 from urllib.parse import urlparse
 
 # NOTE: Backend API routes removed - now using Supabase directly
 # Auth, users, corrections, comments, discoveries all go through Supabase
+
+# Cache TTL values (configurable via environment variables)
+NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
+IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -26,14 +31,13 @@ def init_api_routes():
     print("API routes initialized (Supabase mode)")
 
     def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
-        """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached for 5 min."""
+        """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached."""
         import time as _time
-        CACHE_TTL = 300  # 5 minutes
 
         # Check cache first
         if system_id in _cache:
             cache_age = _time.time() - _cache_time.get(system_id, 0)
-            if cache_age < CACHE_TTL:
+            if cache_age < NLI_CACHE_TTL:
                 return _cache[system_id]
 
         # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
@@ -138,7 +142,6 @@ def init_api_routes():
 
     # Image cache: (sys_id, page) -> (content, content_type, timestamp)
     _image_cache = {}
-    _IMAGE_CACHE_TTL = 600  # 10 minutes
 
     @app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0):
@@ -151,7 +154,7 @@ def init_api_routes():
         # Check image cache first
         if cache_key in _image_cache:
             content, content_type, cached_at = _image_cache[cache_key]
-            if _time.time() - cached_at < _IMAGE_CACHE_TTL:
+            if _time.time() - cached_at < IMAGE_CACHE_TTL:
                 return Response(
                     content=content,
                     media_type=content_type,
@@ -227,7 +230,7 @@ def init_api_routes():
         # Check image cache first
         if cache_key in _oxford_image_cache:
             content, content_type, cached_at = _oxford_image_cache[cache_key]
-            if _time.time() - cached_at < _IMAGE_CACHE_TTL:
+            if _time.time() - cached_at < IMAGE_CACHE_TTL:
                 return Response(
                     content=content,
                     media_type=content_type,

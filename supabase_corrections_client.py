@@ -36,6 +36,22 @@ except ImportError:
     keyring = None
     KEYRING_AVAILABLE = False
 
+try:
+    from genizah_core import normalize_shelfmark
+except ImportError:
+    # Fallback if genizah_core not available
+    import re
+    def normalize_shelfmark(shelfmark: str) -> str:
+        if not shelfmark:
+            return ""
+        temp = shelfmark.replace('/', '.')
+        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
+        cleaned = re.sub(r'\W+', '', temp).casefold()
+        cleaned = cleaned.replace('dotmarker', '.')
+        if cleaned.startswith("ms"):
+            cleaned = cleaned[2:]
+        return cleaned
+
 logger = logging.getLogger(__name__)
 
 
@@ -1262,7 +1278,7 @@ class SupabaseCorrectionsClient:
             if not response.data:
                 return ConnectedFragments(
                     shelfmark=shelfmark,
-                    shelfmark_normalized=shelfmark.lower().replace(' ', ''),
+                    shelfmark_normalized=normalize_shelfmark(shelfmark),
                     fragments=[shelfmark],
                     total_fragments=1,
                     total_joins=0
@@ -1289,7 +1305,7 @@ class SupabaseCorrectionsClient:
 
             return ConnectedFragments(
                 shelfmark=shelfmark,
-                shelfmark_normalized=shelfmark.lower().replace(' ', ''),
+                shelfmark_normalized=normalize_shelfmark(shelfmark),
                 fragments=fragment_list,
                 fragment_details=fragment_details,
                 joins=joins,

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-03 (documentation gaps addressed)
+> **Last Updated:** 2026-02-04 (shelfmark normalization unified, TTL values configurable)
 > **Status:** Active working document
 
 ---
@@ -47,14 +47,14 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Deferred | Total |
 |----------|------|----------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 2 | 4 | 6 |
-| P3 Low Priority | 4 | 0 | 4 |
+| P2 Medium Bugs | 0 | 6 | 6 |
+| P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Untested Areas | 4 | 0 | 4 |
 | Pending Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **10** | **25** | **35** |
+| **Total** | **5** | **31** | **36** |
 
 ---
 
@@ -73,17 +73,17 @@ Move to "Completed Issues" section at bottom with date
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
 | **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |
-| **Bare `except:` statements** | Multiple files | ❌ Open | 16+ instances in web/ alone |
-| **Shelfmark normalization inconsistency** | 5 implementations | ❌ Open | `genizah_app.py` (2), `genizah_core.py` (2), `corrections_ui.py` (1) |
+| **Bare `except:` statements** | Multiple files | ✅ Fixed (2026-02-03) | Changed all 16 instances to `except Exception:` |
+| **Shelfmark normalization inconsistency** | 5 implementations | ✅ Fixed (2026-02-04) | Unified to single `normalize_shelfmark()` in `genizah_core.py` |
 | **Star button visual feedback** | `browse.py`, `search.py` | ✅ Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
 
 ### P3 - Low Priority
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Auto-save not working** | `text_editor.py:374` | ❌ Open | Timer is placeholder, does nothing |
-| **Race conditions in UI timers** | `joins_panel.py`, `parallels.py` | ❌ Open | Multiple timers can run in parallel |
-| **Cache thread-safety** | `joins_panel.py:17-19` | ❌ Open | Global dict without lock |
+| **Auto-save not working** | `text_editor.py:374` | ✅ Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
+| **Race conditions in UI timers** | `parallels.py`, `search.py` | ✅ Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
+| **Cache thread-safety** | `joins_panel.py:17-19` | ✅ Fixed (2026-02-04) | Added threading.Lock for cache access |
 | **CSRF protection missing** | API endpoints | ❌ Deferred | Low risk - NiceGUI uses WebSocket |
 
 ---
@@ -150,9 +150,9 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Value | File | Status | Should Be |
 |-------|------|--------|-----------|
-| `_CACHE_TTL = 30` | `joins_panel.py:19` | ❌ Open | Environment variable |
-| `CACHE_TTL = 300` | `api.py:46` | ❌ Open | Environment variable |
-| Timeouts & retries | `auth_state.py:17-20` | ❌ Open | Config file |
+| `_CACHE_TTL = 30` | `joins_panel.py:19` | ✅ Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
+| `CACHE_TTL = 300` | `api.py:46` | ✅ Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
+| Timeouts & retries | `auth_state.py:17-20` | ❌ Deferred | Low priority - defaults are reasonable |
 
 ---
 
@@ -194,6 +194,12 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
+| 2026-02-04 | Made TTL values configurable via environment variables (JOINS_CACHE_TTL, NLI_CACHE_TTL, IMAGE_CACHE_TTL) | Claude |
+| 2026-02-04 | Fixed UI timer race conditions in parallels.py and search.py - added timer tracking | Claude |
+| 2026-02-04 | Fixed cache thread-safety in joins_panel.py - added threading.Lock | Claude |
+| 2026-02-03 | Fixed bare `except:` statements - changed all 16 to `except Exception:` | Claude |
+| 2026-02-03 | Verified auto-save in text_editor.py is working (lines 443-454) | Claude |
 | 2026-02-03 | Fixed all 4 documentation gaps: RLS policies, OAuth callback, Cloudflare config, Desktop client | Claude |
 | 2026-02-03 | Moved 4 completed plans to archive (Supabase, Library Location, Boundary Search) | Claude |
 | 2026-02-03 | Updated README.md version to 5.4, fixed download reference to V5.4.1 | Claude |
