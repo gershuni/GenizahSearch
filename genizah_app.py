@@ -229,12 +229,12 @@ class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
 
     dismissed = pyqtSignal(str) # Emits version string on dismiss
-    update_requested = pyqtSignal(str, str, str)  # version, html_url, zip_url
+    update_requested = pyqtSignal(str, str, str)  # version, html_url, installer_url
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.html_url = ""
-        self.zip_url = ""
+        self.installer_url = ""
         self.version_tag = ""
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -269,15 +269,15 @@ class UpdateNotificationBar(QFrame):
 
         self.hide()
 
-    def show_update(self, version: str, html_url: str, zip_url: str = ""):
+    def show_update(self, version: str, html_url: str, installer_url: str = ""):
         self.version_tag = version
         self.html_url = html_url
-        self.zip_url = zip_url
+        self.installer_url = installer_url
         self.lbl_msg.setText(tr("New version available: {}").format(version))
         self.show()
 
     def on_download(self):
-        self.update_requested.emit(self.version_tag, self.html_url, self.zip_url)
+        self.update_requested.emit(self.version_tag, self.html_url, self.installer_url)
 
     def on_dismiss(self):
         self.hide()
@@ -287,10 +287,10 @@ class UpdateNotificationBar(QFrame):
 class UpdateProgressDialog(QDialog):
     """Shows download progress and handles update installation."""
 
-    def __init__(self, parent, version: str, zip_url: str, html_url: str):
+    def __init__(self, parent, version: str, installer_url: str, html_url: str):
         super().__init__(parent)
         self.version = version
-        self.zip_url = zip_url
+        self.installer_url = installer_url
         self.html_url = html_url
         self.download_thread = None
         self.downloaded_path = None
@@ -351,7 +351,7 @@ class UpdateProgressDialog(QDialog):
         import tempfile
         import os
 
-        if not self.zip_url:
+        if not self.installer_url:
             QMessageBox.warning(
                 self, tr("Download Error"),
                 tr("No direct download available. Opening browser instead...")
@@ -363,11 +363,11 @@ class UpdateProgressDialog(QDialog):
         # Determine download path
         temp_dir = tempfile.gettempdir()
         safe_version = self.version.replace('/', '_').replace('\\', '_')
-        target_path = os.path.join(temp_dir, f"genizah_update_{safe_version}.zip")
+        target_path = os.path.join(temp_dir, f"GenizahSearchPro_{safe_version}_Setup.exe")
 
         # Import and start download thread
         from gui_threads import UpdateDownloaderThread
-        self.download_thread = UpdateDownloaderThread(self.zip_url, target_path)
+        self.download_thread = UpdateDownloaderThread(self.installer_url, target_path)
         self.download_thread.progress_signal.connect(self.on_progress)
         self.download_thread.finished_signal.connect(self.on_download_finished)
         self.download_thread.start()
@@ -397,7 +397,7 @@ class UpdateProgressDialog(QDialog):
         if success:
             self.downloaded_path = result
             self.progress_bar.setValue(100)
-            self.status_label.setText(tr("Download complete. Preparing update..."))
+            self.status_label.setText(tr("Download complete. Installing update..."))
             self.btn_cancel.setEnabled(False)
 
             # Execute the update
@@ -419,9 +419,8 @@ class UpdateProgressDialog(QDialog):
             self.reject()
 
     def execute_update(self):
-        """Generate and run the update script (Windows only)."""
+        """Run the installer in silent mode (Windows only)."""
         import subprocess
-        import tempfile
         import sys
         import os
 
@@ -430,128 +429,45 @@ class UpdateProgressDialog(QDialog):
             QMessageBox.information(
                 self, tr("Update Ready"),
                 tr("The update has been downloaded to:") + f"\n{self.downloaded_path}\n\n" +
-                tr("Please extract and replace the application manually.")
+                tr("Please run the installer manually.")
             )
             self.accept()
             return
 
-        # Get application paths
-        if getattr(sys, 'frozen', False):
-            # Running as compiled executable
-            app_exe = sys.executable
-            app_dir = os.path.dirname(app_exe)
-            exe_name = os.path.basename(app_exe)
-        else:
+        # Check if running as compiled executable
+        if not getattr(sys, 'frozen', False):
             # Running from Python (development mode)
             QMessageBox.information(
                 self, tr("Development Mode"),
                 tr("Auto-update is not available in development mode.") + "\n" +
-                tr("The update has been downloaded to:") + f"\n{self.downloaded_path}"
+                tr("The installer has been downloaded to:") + f"\n{self.downloaded_path}"
             )
             self.accept()
             return
 
-        parent_dir = os.path.dirname(app_dir)
-        backup_dir = app_dir + ".backup"
-
-        # Generate the update batch script
-        script_content = f'''@echo off
-chcp 65001 >nul
-REM GenizahSearch Auto-Update Script
-REM Wait for the application to close
-
-:waitloop
-tasklist /FI "IMAGENAME eq {exe_name}" 2>NUL | find /I /N "{exe_name}" >NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak >NUL
-    goto waitloop
-)
-
-REM Small delay to ensure file handles are released
-timeout /t 2 /nobreak >NUL
-
-REM Backup current version
-if exist "{backup_dir}" (
-    rmdir /S /Q "{backup_dir}"
-)
-move "{app_dir}" "{backup_dir}"
-
-REM Check if move succeeded
-if errorlevel 1 (
-    echo ERROR: Could not backup current version
-    echo Please close all application windows and try again
-    pause
-    exit /b 1
-)
-
-REM Extract new version
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '{self.downloaded_path}' -DestinationPath '{parent_dir}' -Force"
-
-REM Check if extraction succeeded
-if errorlevel 1 (
-    echo ERROR: Could not extract update
-    echo Restoring backup...
-    move "{backup_dir}" "{app_dir}"
-    pause
-    exit /b 1
-)
-
-REM Verify new executable exists
-if not exist "{app_dir}\\{exe_name}" (
-    echo ERROR: Update extraction incomplete
-    echo Restoring backup...
-    rmdir /S /Q "{app_dir}" 2>NUL
-    move "{backup_dir}" "{app_dir}"
-    pause
-    exit /b 1
-)
-
-REM Remove backup after successful update
-rmdir /S /Q "{backup_dir}"
-
-REM Remove downloaded ZIP
-del /Q "{self.downloaded_path}" 2>NUL
-
-REM Restart application
-start "" "{app_dir}\\{exe_name}"
-
-REM Self-delete this script
-del "%~f0"
-'''
-
-        # Write the script to temp folder
-        script_path = os.path.join(tempfile.gettempdir(), 'genizah_update.bat')
-        try:
-            with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(script_content)
-        except IOError as e:
-            QMessageBox.critical(
-                self, tr("Update Error"),
-                tr("Could not create update script: {}").format(str(e))
-            )
-            self.reject()
-            return
-
         # Update status
-        self.status_label.setText(tr("Restarting application..."))
+        self.status_label.setText(tr("Launching installer..."))
 
-        # Run the update script (detached, hidden)
+        # Run the installer with silent mode
+        # The installer will:
+        # 1. Close this running app (CloseApplications=force)
+        # 2. Install the update
+        # 3. Restart the app (RestartApplications=yes)
         try:
             subprocess.Popen(
-                ['cmd', '/c', script_path],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                close_fds=True,
-                cwd=tempfile.gettempdir()
+                [self.downloaded_path, '/VERYSILENT', '/RESTARTAPPLICATIONS'],
+                creationflags=subprocess.DETACHED_PROCESS
             )
         except Exception as e:
             QMessageBox.critical(
                 self, tr("Update Error"),
-                tr("Could not start update process: {}").format(str(e))
+                tr("Could not start installer: {}").format(str(e))
             )
             self.reject()
             return
 
         # Close the dialog and quit the application
+        # The installer will handle closing us, but we quit gracefully to speed things up
         self.accept()
         QApplication.quit()
 
@@ -15462,7 +15378,7 @@ class GenizahGUI(QMainWindow):
         self.update_thread.error_signal.connect(self.on_update_error)
         self.update_thread.start()
 
-    def on_update_result(self, found, version, html_url, zip_url, is_manual):
+    def on_update_result(self, found, version, html_url, installer_url, is_manual):
         # Reset manual button state
         if is_manual:
             self.btn_check_updates.setEnabled(True)
@@ -15486,10 +15402,10 @@ class GenizahGUI(QMainWindow):
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
                 if reply == QMessageBox.StandardButton.Yes:
-                    self.start_in_app_update(version, html_url, zip_url)
+                    self.start_in_app_update(version, html_url, installer_url)
             else:
                 # Notification Bar for auto
-                self.update_bar.show_update(version, html_url, zip_url)
+                self.update_bar.show_update(version, html_url, installer_url)
 
         else:
             if is_manual:
@@ -15507,17 +15423,18 @@ class GenizahGUI(QMainWindow):
         """Save dismissed version to config."""
         save_app_config({'last_dismissed_version': version})
 
-    def start_in_app_update(self, version: str, html_url: str, zip_url: str):
+    def start_in_app_update(self, version: str, html_url: str, installer_url: str):
         """Start the in-app update process with progress dialog."""
         # Hide the notification bar if visible
         self.update_bar.hide()
 
         # Create and show the update progress dialog
-        dialog = UpdateProgressDialog(self, version, zip_url, html_url)
-        dialog.show()
+        # Store reference to prevent garbage collection
+        self.update_dialog = UpdateProgressDialog(self, version, installer_url, html_url)
+        self.update_dialog.show()
 
         # Start the download after dialog is shown
-        QTimer.singleShot(100, dialog.start_download)
+        QTimer.singleShot(100, self.update_dialog.start_download)
 
     def run_indexing(self):
         # 1. Pre-check: Does the input file exist?

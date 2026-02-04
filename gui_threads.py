@@ -344,7 +344,7 @@ class ExternalResourceThread(QThread):
 class UpdateCheckerThread(QThread):
     """Check for updates on GitHub."""
 
-    # found, version, html_url, zip_url, is_manual_check
+    # found, version, html_url, installer_url, is_manual_check
     finished_signal = pyqtSignal(bool, str, str, str, bool)
     error_signal = pyqtSignal(str, bool)
 
@@ -363,12 +363,14 @@ class UpdateCheckerThread(QThread):
                 tag = data.get('tag_name', '').strip()
                 html_url = data.get('html_url', '')
 
-                # Get ZIP asset URL for direct download
+                # Get installer (.exe) asset URL for direct download
                 assets = data.get('assets', [])
-                zip_url = ''
+                installer_url = ''
                 for asset in assets:
-                    if asset.get('name', '').endswith('.zip'):
-                        zip_url = asset.get('browser_download_url', '')
+                    asset_name = asset.get('name', '').lower()
+                    # Look for setup/installer exe (not the main app exe)
+                    if asset_name.endswith('.exe') and ('setup' in asset_name or 'install' in asset_name):
+                        installer_url = asset.get('browser_download_url', '')
                         break
 
                 # Simple SemVer comparison (stripping 'v' prefix)
@@ -381,9 +383,9 @@ class UpdateCheckerThread(QThread):
                 remote_v.extend([0] * (max_len - len(remote_v)))
 
                 if remote_v > curr_v:
-                    self.finished_signal.emit(True, tag, html_url, zip_url, self.is_manual)
+                    self.finished_signal.emit(True, tag, html_url, installer_url, self.is_manual)
                 else:
-                    self.finished_signal.emit(False, tag, html_url, zip_url, self.is_manual)
+                    self.finished_signal.emit(False, tag, html_url, installer_url, self.is_manual)
             else:
                 self.error_signal.emit(f"GitHub API Error: {resp.status_code}", self.is_manual)
 
@@ -392,7 +394,7 @@ class UpdateCheckerThread(QThread):
 
 
 class UpdateDownloaderThread(QThread):
-    """Download update ZIP from GitHub Releases with progress reporting."""
+    """Download update installer from GitHub Releases with progress reporting."""
 
     progress_signal = pyqtSignal(int, int)  # downloaded_bytes, total_bytes
     finished_signal = pyqtSignal(bool, str)  # success, file_path_or_error
@@ -445,12 +447,10 @@ class UpdateDownloaderThread(QThread):
                         downloaded += len(chunk)
                         self.progress_signal.emit(downloaded, total_size)
 
-            # Verify the downloaded file is a valid ZIP
-            import zipfile
-            if not zipfile.is_zipfile(self.target_path):
-                import os
-                os.remove(self.target_path)
-                self.finished_signal.emit(False, "Downloaded file is not a valid ZIP archive")
+            # Verify the downloaded file exists and has content
+            import os
+            if not os.path.exists(self.target_path) or os.path.getsize(self.target_path) == 0:
+                self.finished_signal.emit(False, "Downloaded file is empty or missing")
                 return
 
             self.finished_signal.emit(True, self.target_path)

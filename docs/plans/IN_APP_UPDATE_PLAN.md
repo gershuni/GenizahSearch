@@ -24,12 +24,12 @@ Implement automatic in-app software updates for the GenizahSearch desktop applic
 
 ### Current Flow
 ```
-App starts → Check GitHub API → Show notification bar → User clicks "Download" → Opens browser → User downloads ZIP → User extracts manually → User restarts app
+App starts → Check GitHub API → Show notification bar → User clicks "Download" → Opens browser → User downloads installer → User runs installer manually
 ```
 
 ### Target Flow
 ```
-App starts → Check GitHub API → Show notification bar → User clicks "Update Now" → Download with progress → Extract & replace files → Restart automatically
+App starts → Check GitHub API → Show notification bar → User clicks "Update Now" → Download installer with progress → Run installer silently → App restarts automatically
 ```
 
 ---
@@ -122,45 +122,36 @@ class UpdateProgressDialog(QDialog):
 
 **The Challenge:** On Windows, the running `.exe` file is locked and cannot be replaced.
 
-**Solution:** Use a batch script that runs after the app exits.
+**Solution:** Use the existing Inno Setup installer in silent mode.
 
-**New File:** `update_script.bat` (generated dynamically in temp folder)
+**Installer Settings Added:** (`dist/CompileScriptGenizah.iss`)
 
+```ini
+[Setup]
+CloseApplications=force      ; Auto-close running app
+CloseApplicationsFilter=*.exe
+RestartApplications=yes      ; Restart app after update
+```
+
+**Silent Install Command:**
 ```batch
-@echo off
-REM Wait for the application to close
-:waitloop
-tasklist /FI "IMAGENAME eq GenizahSearchPro.exe" 2>NUL | find /I "GenizahSearchPro.exe" >NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak >NUL
-    goto waitloop
-)
-
-REM Backup current version (optional)
-move "%APP_DIR%" "%APP_DIR%.backup"
-
-REM Extract new version
-powershell -Command "Expand-Archive -Path '%TEMP_ZIP%' -DestinationPath '%PARENT_DIR%' -Force"
-
-REM Remove backup
-rmdir /S /Q "%APP_DIR%.backup"
-
-REM Restart application
-start "" "%APP_DIR%\GenizahSearchPro.exe"
-
-REM Self-delete
-del "%~f0"
+GenizahSearchPro_V5.5.0_Setup.exe /VERYSILENT /RESTARTAPPLICATIONS
 ```
 
 **Process Flow:**
 ```
-1. Download ZIP to %TEMP%\genizah_update_5.5.0.zip
-2. Generate update_script.bat with correct paths
-3. Launch update_script.bat (hidden, detached process)
-4. Close main application via QApplication.quit()
-5. Script waits for app to fully exit
-6. Script replaces files and restarts
+1. Download installer to %TEMP%\GenizahSearchPro_v5.5.0_Setup.exe
+2. Run installer with /VERYSILENT /RESTARTAPPLICATIONS flags
+3. Installer auto-closes running app (CloseApplications=force)
+4. Installer updates files in place
+5. Installer restarts app (RestartApplications=yes)
 ```
+
+**Advantages over batch script approach:**
+- Inno Setup handles all the tricky file locking issues
+- UAC elevation handled properly
+- No need for complex batch scripts
+- Same installer used for fresh installs and updates
 
 ---
 
@@ -182,17 +173,18 @@ def run(self):
         tag = data.get('tag_name', '').strip()
         html_url = data.get('html_url', '')
 
-        # NEW: Get ZIP asset URL
+        # Get installer (.exe) asset URL
         assets = data.get('assets', [])
-        zip_url = None
+        installer_url = ''
         for asset in assets:
-            if asset['name'].endswith('.zip'):
-                zip_url = asset['browser_download_url']
+            asset_name = asset.get('name', '').lower()
+            if asset_name.endswith('.exe') and ('setup' in asset_name or 'install' in asset_name):
+                installer_url = asset.get('browser_download_url', '')
                 break
 
         # ... version comparison ...
         if remote_v > curr_v:
-            self.finished_signal.emit(True, tag, html_url, zip_url, self.is_manual)
+            self.finished_signal.emit(True, tag, html_url, installer_url, self.is_manual)
 ```
 
 **Signal Change:**
@@ -201,7 +193,7 @@ def run(self):
 finished_signal = pyqtSignal(bool, str, str, bool)  # found, version, url, is_manual
 
 # New
-finished_signal = pyqtSignal(bool, str, str, str, bool)  # found, version, html_url, zip_url, is_manual
+finished_signal = pyqtSignal(bool, str, str, str, bool)  # found, version, html_url, installer_url, is_manual
 ```
 
 ---
@@ -212,47 +204,28 @@ finished_signal = pyqtSignal(bool, str, str, str, bool)  # found, version, html_
 |--------|-------|-------------|
 | Add `UpdateProgressDialog` | New (after line 282) | Progress UI |
 | Modify `UpdateNotificationBar` | 248-251 | Change button to "Update Now" |
-| Modify `on_update_result` | 15157-15181 | Store zip_url, show dialog |
-| Add `start_update()` | New | Initiate download |
-| Add `on_download_progress()` | New | Update progress bar |
-| Add `on_download_complete()` | New | Extract and restart |
-| Add `execute_update()` | New | Run batch script |
+| Modify `on_update_result` | 15157-15181 | Store installer_url, show dialog |
+| Add `start_in_app_update()` | New | Initiate download |
+| Add `execute_update()` | New | Run installer silently |
 
 **Key Method: `execute_update()`**
 ```python
-def execute_update(self, zip_path: str):
-    """Generate and run the update script."""
+def execute_update(self):
+    """Run the installer in silent mode (Windows only)."""
     import subprocess
-    import tempfile
 
-    app_dir = os.path.dirname(sys.executable)
-    parent_dir = os.path.dirname(app_dir)
-
-    script_content = f'''@echo off
-:waitloop
-tasklist /FI "IMAGENAME eq GenizahSearchPro.exe" 2>NUL | find /I "GenizahSearchPro.exe" >NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak >NUL
-    goto waitloop
-)
-rmdir /S /Q "{app_dir}"
-powershell -Command "Expand-Archive -Path '{zip_path}' -DestinationPath '{parent_dir}' -Force"
-start "" "{app_dir}\\GenizahSearchPro.exe"
-del "%~f0"
-'''
-
-    script_path = os.path.join(tempfile.gettempdir(), 'genizah_update.bat')
-    with open(script_path, 'w') as f:
-        f.write(script_content)
-
-    # Run detached (won't block app exit)
+    # Run the installer with silent mode
+    # The installer will:
+    # 1. Close this running app (CloseApplications=force)
+    # 2. Install the update
+    # 3. Restart the app (RestartApplications=yes)
     subprocess.Popen(
-        ['cmd', '/c', script_path],
-        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-        close_fds=True
+        [self.downloaded_path, '/VERYSILENT', '/RESTARTAPPLICATIONS'],
+        creationflags=subprocess.DETACHED_PROCESS
     )
 
-    # Exit the application
+    # Close the dialog and quit the application
+    self.accept()
     QApplication.quit()
 ```
 
@@ -264,6 +237,7 @@ del "%~f0"
 |------|------|---------|
 | `gui_threads.py` | Modify | Add `UpdateDownloaderThread`, modify `UpdateCheckerThread` signals |
 | `genizah_app.py` | Modify | Add `UpdateProgressDialog`, modify notification bar, add update methods |
+| `dist/CompileScriptGenizah.iss` | Modify | Add `CloseApplications` and `RestartApplications` settings |
 | `version.py` | No change | - |
 | `build_app.bat` | No change | - |
 
