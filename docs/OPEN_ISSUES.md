@@ -196,6 +196,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Improved connection indicator UX - yellow pulsing dot for loading, no alarming text messages | Claude |
 | 2026-02-04 | Fixed sidebar opening on mobile - now closes by default on screens < 768px | Claude |
 | 2026-02-04 | Improved connection stability - added continuous heartbeat monitoring and reconnect_timeout | Claude |
 | 2026-02-04 | Added Hebrew translations for "Reconnecting...", "Connecting..." | Claude |

@@ -525,6 +525,137 @@ Web-based UI for server management:
 
 ---
 
+## Server Maintenance
+
+### Session Cleanup (Critical!)
+
+NiceGUI stores session data in `.nicegui/` directory. Sessions include cached images users view, so they can grow large (10-20MB each). Without cleanup, this directory can consume 10GB+ and cause memory issues.
+
+**Automated cleanup (via cron):**
+```bash
+# View current cron jobs
+crontab -l
+
+# Should show:
+# 0 3 * * * find /home/ubuntu/GenizahSearch/.nicegui/ -type f -mtime +7 -delete
+```
+
+**Manual cleanup:**
+```bash
+# Check current size
+du -sh /home/ubuntu/GenizahSearch/.nicegui/
+ls -la /home/ubuntu/GenizahSearch/.nicegui/ | wc -l
+
+# Delete sessions older than 7 days
+find /home/ubuntu/GenizahSearch/.nicegui/ -type f -mtime +7 -delete
+
+# Or delete sessions older than 1 day (more aggressive)
+find /home/ubuntu/GenizahSearch/.nicegui/ -type f -mtime +1 -delete
+
+# Nuclear option - delete all (users will need to reconnect)
+rm -rf /home/ubuntu/GenizahSearch/.nicegui/*
+```
+
+### Memory Monitoring
+
+The web application typically uses 2-4GB of RAM. If it exceeds 8GB, session cleanup is needed.
+
+```bash
+# Quick memory check
+free -h
+
+# Check web.main memory usage specifically
+ps aux | grep web.main
+
+# Detailed view with htop
+htop
+```
+
+**Warning signs:**
+- Memory > 8GB → Clean sessions
+- Memory > 12GB → Clean sessions + restart service
+
+### Service Management
+
+```bash
+# Status
+sudo systemctl status genizah-web
+
+# Restart (clears memory)
+sudo systemctl restart genizah-web
+
+# Stop/Start
+sudo systemctl stop genizah-web
+sudo systemctl start genizah-web
+
+# View logs (recent)
+sudo journalctl -u genizah-web -n 100
+
+# View logs (follow live)
+sudo journalctl -u genizah-web -f
+```
+
+### Log Monitoring
+
+**Common log messages to ignore:**
+- `wp-admin/setup-config.php not found` - WordPress scanner bots
+- `/.env not found` - Security scanner bots
+- `RuntimeError: The parent slot...` - User disconnected (handled gracefully)
+
+**Log messages requiring attention:**
+- `MemoryError` - Clean sessions, restart service
+- `Connection refused` to Supabase - Check Supabase status
+- Repeated `502 Bad Gateway` in nginx - Service crashed, restart needed
+
+### Backup
+
+Daily backup runs at 3 AM via cron:
+```bash
+# Check backup status
+cat /home/ubuntu/backups/backup.log
+
+# Manual backup
+/home/ubuntu/GenizahSearch/backup.sh
+```
+
+### Health Check Commands
+
+Run these periodically or when issues are reported:
+
+```bash
+# 1. Memory status
+free -h
+
+# 2. Disk usage
+df -h
+
+# 3. Service status
+sudo systemctl status genizah-web
+
+# 4. Connection count
+netstat -an | grep :8081 | wc -l
+
+# 5. Session storage size
+du -sh /home/ubuntu/GenizahSearch/.nicegui/
+
+# 6. Recent errors
+sudo journalctl -u genizah-web -p err -n 20
+```
+
+### Environment Variables
+
+Key environment variables in `/home/ubuntu/GenizahSearch/.env`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SUPABASE_URL` | Supabase project URL | Required |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key | Required |
+| `NICEGUI_RECONNECT_TIMEOUT` | WebSocket reconnect timeout (seconds) | 30 |
+| `NICEGUI_RELOAD` | Hot reload (dev only) | false |
+| `NICEGUI_SHOW` | Open browser on start | false |
+
+---
+
 ## Resources
 
 - GitHub: https://github.com/gershuni/GenizahSearch
