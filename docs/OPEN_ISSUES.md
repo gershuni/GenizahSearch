@@ -52,10 +52,10 @@ Move to "Completed Issues" section at bottom with date
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
-| Untested Areas | 4 | 0 | 4 |
+| Untested Areas | 5 | 0 | 5 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **5** | **38** | **43** |
+| **Total** | **6** | **38** | **44** |
 
 ---
 
@@ -121,6 +121,7 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | **Concurrency** | ❌ Not Tested | Two users editing same correction simultaneously |
 | **Browser Compatibility** | ❌ Not Tested | Chrome, Firefox, Safari, Edge, Mobile |
 | **Performance** | ❌ Not Tested | 1000+ results, 100+ list items, stress tests |
+| **In-App Update (Desktop)** | ❌ Test on Next Release | Build test version with 5.0.0, verify full update flow works (download → install → auto-restart) |
 
 ---
 
