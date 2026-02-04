@@ -1375,50 +1375,55 @@ def create_layout():
                 status_text = ui.label(tr('Loading...')).classes('text-xs text-white/90 status-text hidden sm:block')
 
                 # Track connection state for reconnection detection
-                connection_state = {'was_connected': False, 'check_count': 0}
+                connection_state = {'was_connected': False, 'check_count': 0, 'timer': None}
 
                 async def update_status():
                     """Heartbeat function that monitors both server readiness and WebSocket connection."""
                     try:
-                        connection_state['check_count'] += 1
+                        # Check if elements still exist (user might have navigated away)
+                        if not status_dot.is_deleted and not status_text.is_deleted:
+                            connection_state['check_count'] += 1
 
-                        # Check if server-side state is ready
-                        server_ready = state.is_ready()
+                            # Check if server-side state is ready
+                            server_ready = state.is_ready()
 
-                        # Perform a lightweight JavaScript ping to verify WebSocket connection
-                        # This also tests the round-trip to catch connection issues
-                        try:
-                            ping_result = await ui.run_javascript('Date.now()', timeout=5.0)
-                            ws_connected = ping_result is not None
-                        except Exception:
-                            ws_connected = False
+                            # Perform a lightweight JavaScript ping to verify WebSocket connection
+                            # This also tests the round-trip to catch connection issues
+                            try:
+                                ping_result = await ui.run_javascript('Date.now()', timeout=5.0)
+                                ws_connected = ping_result is not None
+                            except Exception:
+                                ws_connected = False
 
-                        if server_ready and ws_connected:
-                            # All good - show green
-                            status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
-                            status_text.text = tr('Ready')
-                            connection_state['was_connected'] = True
-                        elif connection_state['was_connected'] and not ws_connected:
-                            # Was connected but lost connection - show red/reconnecting
-                            status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
-                            status_text.text = tr('Reconnecting...')
-                        else:
-                            # Still loading or reconnecting
-                            status_dot.classes('bg-yellow-400', remove='bg-green-400 bg-red-400')
-                            if connection_state['check_count'] <= 2:
-                                status_text.text = tr('Loading...')
+                            if server_ready and ws_connected:
+                                # All good - show green
+                                status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
+                                status_text.text = tr('Ready')
+                                connection_state['was_connected'] = True
+                            elif connection_state['was_connected'] and not ws_connected:
+                                # Was connected but lost connection - show red/reconnecting
+                                status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
+                                status_text.text = tr('Reconnecting...')
                             else:
-                                status_text.text = tr('Connecting...')
+                                # Still loading or reconnecting
+                                status_dot.classes('bg-yellow-400', remove='bg-green-400 bg-red-400')
+                                if connection_state['check_count'] <= 2:
+                                    status_text.text = tr('Loading...')
+                                else:
+                                    status_text.text = tr('Connecting...')
+                        else:
+                            # Elements deleted, deactivate timer
+                            if connection_state['timer']:
+                                connection_state['timer'].deactivate()
                     except Exception:
-                        # If update itself fails, likely disconnected
-                        if connection_state['was_connected']:
-                            status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
-                            status_text.text = tr('Reconnecting...')
+                        # If update itself fails, deactivate timer to prevent further errors
+                        if connection_state['timer']:
+                            connection_state['timer'].deactivate()
 
                 # Run heartbeat every 10 seconds to monitor connection health
                 # First check after 2 seconds, then continuous
                 ui.timer(2.0, update_status, once=True)
-                ui.timer(10.0, update_status)
+                connection_state['timer'] = ui.timer(10.0, update_status)
 
             # Auth Buttons (Login/Register or User Menu)
             with ui.row().classes('auth-buttons'):
