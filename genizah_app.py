@@ -8881,19 +8881,19 @@ class GenizahGUI(QMainWindow):
         for col, header in enumerate(headers, 1):
             ws.cell(row=1, column=col, value=header)
 
-        # Data
+        # Data - use shared_sanitize_excel to prevent formula injection and control chars
         for row, item in enumerate(items, 2):
             sys_id = item.get('sys_id', '')
             library_code = self.meta_mgr.get_library_for_id(sys_id) if sys_id else ''
             library_name = get_library_display(library_code, short=False) if library_code else ''
-            ws.cell(row=row, column=1, value=item.get('shelfmark', ''))
-            ws.cell(row=row, column=2, value=library_name)
-            ws.cell(row=row, column=3, value=self._format_image_display(item.get('img')))
-            ws.cell(row=row, column=4, value=item.get('title', ''))
-            ws.cell(row=row, column=5, value=sys_id)
-            ws.cell(row=row, column=6, value=item.get('source', ''))
-            ws.cell(row=row, column=7, value=', '.join(item.get('tags', [])))
-            ws.cell(row=row, column=8, value=item.get('notes', ''))
+            ws.cell(row=row, column=1, value=shared_sanitize_excel(item.get('shelfmark', '')))
+            ws.cell(row=row, column=2, value=shared_sanitize_excel(library_name))
+            ws.cell(row=row, column=3, value=shared_sanitize_excel(self._format_image_display(item.get('img'))))
+            ws.cell(row=row, column=4, value=shared_sanitize_excel(item.get('title', '')))
+            ws.cell(row=row, column=5, value=shared_sanitize_excel(sys_id))
+            ws.cell(row=row, column=6, value=shared_sanitize_excel(item.get('source', '')))
+            ws.cell(row=row, column=7, value=shared_sanitize_excel(', '.join(item.get('tags', []))))
+            ws.cell(row=row, column=8, value=shared_sanitize_excel(item.get('notes', '')))
 
         default_name = f"{list_name}.xlsx"
         path, _ = QFileDialog.getSaveFileName(
