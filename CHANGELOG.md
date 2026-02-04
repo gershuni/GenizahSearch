@@ -4,6 +4,33 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.5.0] - 2026-02-04
+
+### New Feature: In-App Software Updates
+
+The desktop application can now download and install updates without leaving the app.
+
+#### How It Works
+1. When a new version is available, a notification bar appears at the top
+2. Click "Update Now" to start the update process
+3. A progress dialog shows download progress
+4. After download, the installer runs automatically in silent mode
+5. The app restarts with the new version
+
+#### Technical Details
+- Downloads the official installer from GitHub Releases
+- Uses Inno Setup's silent mode (`/VERYSILENT /RESTARTAPPLICATIONS`)
+- Installer automatically closes the running app, updates files, and restarts
+- UAC prompt will appear (same as manual install) since app is in Program Files
+- Falls back to opening browser if installer not found in release
+
+#### Files Changed
+- `gui_threads.py` - New `UpdateDownloaderThread` class for downloading with progress
+- `genizah_app.py` - New `UpdateProgressDialog` for update UI
+- `CompileScriptGenizah.iss` - Added `CloseApplications` and `RestartApplications` settings
+
+---
+
 ## [5.4.1] - 2026-02-03
 
 ### Enhancement: "Remember Me" Login Feature

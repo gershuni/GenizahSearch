@@ -1,6 +1,6 @@
 # GenizahSearch - Plans & Documentation Index
 
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-04
 
 ---
 
@@ -43,14 +43,14 @@ This is now the **primary plan** that supersedes the lists unification plan. By 
 
 ### 4. In-App Software Updates
 **File:** `IN_APP_UPDATE_PLAN.md`
-**Status:** Planned
+**Status:** ✅ Implemented (2026-02-04)
 **Goal:** Allow users to update the desktop app without leaving the application
 
-Currently the app detects new versions but requires manual download. This plan adds:
-- Download with progress bar directly in app
-- Automatic extraction and file replacement
-- Auto-restart with new version
-- Uses existing GitHub Releases infrastructure
+The app now downloads and installs updates directly:
+- Download installer with progress bar
+- Silent installation via Inno Setup (`/VERYSILENT /RESTARTAPPLICATIONS`)
+- Installer handles closing app, updating files, and restarting
+- Uses existing GitHub Releases infrastructure (no separate ZIP needed)
 
 ### 5. Library Location Feature
 **File:** `LIBRARY_LOCATION_PLAN.md`
@@ -112,14 +112,12 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 4. ✅ Cross-paragraph search (Feb 2026)
 5. ✅ Debug prints removed (Feb 2026)
 6. ✅ Star button visual feedback (Feb 2026)
+7. ✅ In-app software updates (Feb 2026)
 
 ### Short-term
 1. 🔲 Projects UI for web
 2. 🔲 Desktop cloud sync improvements
 3. 🔲 Mobile responsive design
-
-### Short-term (New)
-1. 🔲 In-app software updates (`IN_APP_UPDATE_PLAN.md`)
 
 ### Long-term
 1. 🔲 Performance optimizations

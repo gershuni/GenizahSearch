@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (added translation button feature)
+> **Last Updated:** 2026-02-04 (added in-app software updates)
 > **Status:** Active working document
 
 ---
@@ -53,9 +53,9 @@ Move to "Completed Issues" section at bottom with date
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
 | Untested Areas | 4 | 0 | 4 |
-| Implemented Plans | 0 | 4 | 4 |
+| Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **5** | **37** | **42** |
+| **Total** | **5** | **38** | **43** |
 
 ---
 
@@ -195,6 +195,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Implemented in-app software updates - downloads and runs installer silently via Inno Setup | Claude |
 | 2026-02-04 | Added translation button for comments and community messages (Hebrew ↔ English using MyMemory API) | Claude |
 | 2026-02-04 | Marked pending plans as implemented: Mobile, Lists Unification, Joins Feed, Desktop Sync | Claude |
 | 2026-02-04 | Created `shared_export_utils.py` - unified text sanitization, filename helpers for Desktop & Web | Claude |
