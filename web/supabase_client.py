@@ -618,8 +618,8 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
     """Get corrections with optional filters, including author profile data."""
     try:
         client = get_client()
-        # Join with profiles table to get author name
-        query = client.table('corrections').select('*, profiles:author_id(id, full_name, username)')
+        # Fetch corrections (profile data is fetched separately below)
+        query = client.table('corrections').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
