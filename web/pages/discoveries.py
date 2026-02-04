@@ -25,6 +25,77 @@ from web.state import state
 from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
+from web.components.translate_button import detect_language, translate_text
+
+
+def create_translatable_content(content: str, container_style: str = ''):
+    """
+    Create a text content element with a translate button.
+
+    Args:
+        content: The text content to display
+        container_style: CSS styles for the text element
+    """
+    if not content:
+        return
+
+    # State for translation
+    translation_state = {
+        'is_translated': False,
+        'original_content': content,
+        'translated_content': None,
+        'is_loading': False
+    }
+
+    with ui.column().classes('w-full gap-1'):
+        # Content display
+        text_label = ui.label(content).classes('text-sm whitespace-pre-wrap').style(container_style)
+
+        # Translate button row
+        with ui.row().classes('w-full items-center justify-end'):
+            def toggle_translation():
+                if translation_state['is_loading']:
+                    return
+
+                if translation_state['is_translated']:
+                    # Show original
+                    translation_state['is_translated'] = False
+                    text_label.text = translation_state['original_content']
+                    translate_btn.props('icon=translate')
+                    translate_btn.tooltip(tr('Translate'))
+                else:
+                    if translation_state['translated_content']:
+                        # Use cached
+                        translation_state['is_translated'] = True
+                        text_label.text = translation_state['translated_content']
+                        translate_btn.props('icon=undo')
+                        translate_btn.tooltip(tr('Show original'))
+                    else:
+                        # Fetch translation
+                        translation_state['is_loading'] = True
+                        translate_btn.props('loading')
+
+                        src_lang = detect_language(translation_state['original_content'])
+                        tgt_lang = 'en' if src_lang == 'he' else 'he'
+
+                        translated = translate_text(translation_state['original_content'], src_lang, tgt_lang)
+
+                        translation_state['is_loading'] = False
+                        translate_btn.props(remove='loading')
+
+                        if translated:
+                            translation_state['translated_content'] = translated
+                            translation_state['is_translated'] = True
+                            text_label.text = translated
+                            translate_btn.props('icon=undo')
+                            translate_btn.tooltip(tr('Show original'))
+                        else:
+                            ui.notify(tr('Translation failed'), type='warning')
+
+            translate_btn = ui.button(
+                icon='translate',
+                on_click=toggle_translation
+            ).props('flat round dense size=xs').tooltip(tr('Translate'))
 
 
 def highlight_diff(original: str, corrected: str) -> tuple[str, str]:
@@ -712,8 +783,11 @@ def create_feed_item(item: dict, on_refresh=None):
                                         ui.navigate.to(f'/browse?sys_id={did}')
                                     ui.button(tr('View in browser'), icon='open_in_new', on_click=view_cluster_browse).props('outlined dense')
                         else:
-                            # Full content for non-corrections
-                            ui.label(content).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary); direction: rtl;')
+                            # Full content for non-corrections with translate button
+                            create_translatable_content(
+                                content,
+                                container_style='color: var(--text-primary); direction: rtl;'
+                            )
 
                         # Show related manuscripts if any
                         if related_manuscripts and len(related_manuscripts) > 0:
@@ -919,7 +993,11 @@ def create_response_item(resp: dict):
         with ui.row().classes('w-full items-center justify-between mb-1'):
             ui.label(author_name).classes('text-xs font-medium')
             ui.label(format_date(resp.get('created_at', ''))).classes('text-xs').style('color: var(--text-tertiary);')
-        ui.label(resp.get('content', '')).classes('text-sm whitespace-pre-wrap').style('direction: rtl; color: var(--text-primary);')
+        # Response content with translate button
+        create_translatable_content(
+            resp.get('content', ''),
+            container_style='direction: rtl; color: var(--text-primary);'
+        )
 
 
 def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):

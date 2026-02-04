@@ -16,6 +16,7 @@ from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.supabase_client import get_comments
+from web.components.translate_button import create_translatable_text, detect_language, translate_text
 from typing import Optional, List
 
 
@@ -23,7 +24,7 @@ from typing import Optional, List
 SHELFMARK_MENTION_PATTERN = re.compile(r'\[\[shelfmark:([^\]|]+)\|id:([^\]]+)\]\]')
 
 
-def render_content_with_mentions(content: str, container_classes: str = '', container_style: str = ''):
+def render_content_with_mentions(content: str, container_classes: str = '', container_style: str = '', show_translate: bool = False):
     """
     Render comment content with shelfmark mentions as clickable links.
 
@@ -34,41 +35,133 @@ def render_content_with_mentions(content: str, container_classes: str = '', cont
         content: The comment text content
         container_classes: CSS classes for the container
         container_style: Inline styles for the container
+        show_translate: Whether to show the translate button
+
+    Returns:
+        The text label element (for translation updates) or None
     """
     if not content:
-        return
+        return None
+
+    # State for translation
+    translation_state = {
+        'is_translated': False,
+        'original_content': content,
+        'translated_content': None,
+        'is_loading': False
+    }
 
     # Check if there are any mentions in the content
-    if not SHELFMARK_MENTION_PATTERN.search(content):
-        # No mentions - just display the text directly
-        ui.label(content).classes(f'text-sm whitespace-pre-wrap {container_classes}').style(container_style)
-        return
+    has_mentions = bool(SHELFMARK_MENTION_PATTERN.search(content))
 
-    # Split content by mentions
-    parts = SHELFMARK_MENTION_PATTERN.split(content)
+    # Main content container
+    with ui.column().classes('w-full gap-1'):
+        # Content row
+        content_container = ui.element('div').classes(f'w-full {container_classes}')
+        text_element = None
 
-    # parts will be: [text, shelfmark1, id1, text, shelfmark2, id2, ...]
-    # Every 3 elements: text, shelfmark, id
+        with content_container:
+            if not has_mentions:
+                # No mentions - just display the text directly
+                text_element = ui.label(content).classes('text-sm whitespace-pre-wrap').style(container_style)
+            else:
+                # Has mentions - create row with links
+                with ui.row().classes('flex-wrap items-baseline gap-0').style(container_style):
+                    parts = SHELFMARK_MENTION_PATTERN.split(content)
+                    i = 0
+                    while i < len(parts):
+                        if i % 3 == 0:
+                            text = parts[i]
+                            if text:
+                                ui.label(text).classes('text-sm whitespace-pre-wrap')
+                        elif i % 3 == 1:
+                            shelfmark = parts[i]
+                            doc_id = parts[i + 1] if i + 1 < len(parts) else ''
+                            ui.link(
+                                shelfmark,
+                                target=f'/browse?sys_id={doc_id}'
+                            ).classes('text-primary font-medium hover:underline text-sm').style('cursor: pointer;')
+                            i += 1
+                        i += 1
 
-    with ui.row().classes(f'flex-wrap items-baseline gap-0 {container_classes}').style(container_style):
-        i = 0
-        while i < len(parts):
-            if i % 3 == 0:
-                # Regular text
-                text = parts[i]
-                if text:
-                    ui.label(text).classes('text-sm whitespace-pre-wrap')
-            elif i % 3 == 1:
-                # Shelfmark (next element is id)
-                shelfmark = parts[i]
-                doc_id = parts[i + 1] if i + 1 < len(parts) else ''
+        # Translate button row
+        if show_translate:
+            with ui.row().classes('w-full items-center justify-end'):
+                def toggle_translation():
+                    if translation_state['is_loading']:
+                        return
 
-                ui.link(
-                    shelfmark,
-                    target=f'/browse?sys_id={doc_id}'
-                ).classes('text-primary font-medium hover:underline text-sm').style('cursor: pointer;')
-                i += 1  # Skip the id part
-            i += 1
+                    if translation_state['is_translated']:
+                        # Show original
+                        translation_state['is_translated'] = False
+                        content_container.clear()
+                        with content_container:
+                            if not has_mentions:
+                                ui.label(translation_state['original_content']).classes('text-sm whitespace-pre-wrap').style(container_style)
+                            else:
+                                with ui.row().classes('flex-wrap items-baseline gap-0').style(container_style):
+                                    parts = SHELFMARK_MENTION_PATTERN.split(translation_state['original_content'])
+                                    i = 0
+                                    while i < len(parts):
+                                        if i % 3 == 0:
+                                            text = parts[i]
+                                            if text:
+                                                ui.label(text).classes('text-sm whitespace-pre-wrap')
+                                        elif i % 3 == 1:
+                                            shelfmark = parts[i]
+                                            doc_id = parts[i + 1] if i + 1 < len(parts) else ''
+                                            ui.link(
+                                                shelfmark,
+                                                target=f'/browse?sys_id={doc_id}'
+                                            ).classes('text-primary font-medium hover:underline text-sm').style('cursor: pointer;')
+                                            i += 1
+                                        i += 1
+                        translate_btn.props('icon=translate')
+                        translate_btn.tooltip(tr('Translate'))
+                    else:
+                        # Translate
+                        if translation_state['translated_content']:
+                            # Use cached
+                            translation_state['is_translated'] = True
+                            content_container.clear()
+                            with content_container:
+                                # Strip mentions for translated content (they don't translate well)
+                                ui.label(translation_state['translated_content']).classes('text-sm whitespace-pre-wrap').style(container_style)
+                            translate_btn.props('icon=undo')
+                            translate_btn.tooltip(tr('Show original'))
+                        else:
+                            # Fetch translation
+                            translation_state['is_loading'] = True
+                            translate_btn.props('loading')
+
+                            # Get plain text (without mention markup)
+                            plain_text = SHELFMARK_MENTION_PATTERN.sub(r'\1', translation_state['original_content'])
+
+                            src_lang = detect_language(plain_text)
+                            tgt_lang = 'en' if src_lang == 'he' else 'he'
+
+                            translated = translate_text(plain_text, src_lang, tgt_lang)
+
+                            translation_state['is_loading'] = False
+                            translate_btn.props(remove='loading')
+
+                            if translated:
+                                translation_state['translated_content'] = translated
+                                translation_state['is_translated'] = True
+                                content_container.clear()
+                                with content_container:
+                                    ui.label(translated).classes('text-sm whitespace-pre-wrap').style(container_style)
+                                translate_btn.props('icon=undo')
+                                translate_btn.tooltip(tr('Show original'))
+                            else:
+                                ui.notify(tr('Translation failed'), type='warning')
+
+                translate_btn = ui.button(
+                    icon='translate',
+                    on_click=toggle_translation
+                ).props('flat round dense size=xs').tooltip(tr('Translate'))
+
+    return text_element
 
 
 def fetch_document_comments(document_id: str, page_number: int = None) -> List[dict]:
@@ -204,10 +297,11 @@ def create_comment_card(comment: dict):
 
             ui.label(created_at).classes('text-xs').style('color: var(--text-muted);')
 
-        # Content with shelfmark mentions rendered as links
+        # Content with shelfmark mentions rendered as links + translate button
         render_content_with_mentions(
             content,
-            container_style='direction: rtl; text-align: right; color: var(--text-secondary);'
+            container_style='direction: rtl; text-align: right; color: var(--text-secondary);',
+            show_translate=True
         )
 
         # Reactions summary
@@ -246,11 +340,12 @@ def create_reply_item(reply: dict):
                 ui.label(author_name).classes('font-medium text-xs')
                 ui.label(created_at).classes('text-xs').style('color: var(--text-muted);')
 
-            # Content with shelfmark mentions rendered as links
+            # Content with shelfmark mentions rendered as links + translate button
             render_content_with_mentions(
                 content,
                 container_classes='text-xs',
-                container_style='direction: rtl; text-align: right; color: var(--text-tertiary);'
+                container_style='direction: rtl; text-align: right; color: var(--text-tertiary);',
+                show_translate=True
             )
 
 
