@@ -10,9 +10,9 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
     # File version (Major, Minor, Patch, Build)
-    filevers=(5, 4, 0, 0),
+    filevers=(5, 4, 1, 0),
     # Product version (Major, Minor, Patch, Build)
-    prodvers=(5, 4, 0, 0),
+    prodvers=(5, 4, 1, 0),
     # Contains a bitmask that specifies the valid bits 'flags'
     mask=0x3f,
     # Contains a bitmask that specifies the Boolean attributes of the file.
@@ -37,12 +37,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Genizah Search Project'),
             StringStruct(u'FileDescription', u'Genizah Search Pro - Academic Research Tool for Cairo Genizah Manuscripts'),
-            StringStruct(u'FileVersion', u'5.4.0.0'),
+            StringStruct(u'FileVersion', u'5.4.1.0'),
             StringStruct(u'InternalName', u'GenizahSearchPro'),
             StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Hillel Gershuni / Dicta. CC BY-NC-SA 4.0 License.'),
             StringStruct(u'OriginalFilename', u'GenizahSearchPro.exe'),
             StringStruct(u'ProductName', u'Genizah Search Pro'),
-            StringStruct(u'ProductVersion', u'5.4.0.0'),
+            StringStruct(u'ProductVersion', u'5.4.1.0'),
             StringStruct(u'Comments', u'Open source academic research tool for searching Cairo Genizah manuscripts. Source code available on GitHub.')
           ]
         )
