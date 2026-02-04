@@ -1396,21 +1396,19 @@ def create_layout():
                                 ws_connected = False
 
                             if server_ready and ws_connected:
-                                # All good - show green
-                                status_dot.classes('bg-green-400', remove='bg-yellow-400 bg-red-400')
+                                # All good - show green, steady (remove pulse animation)
+                                status_dot.classes('bg-green-400', remove='bg-yellow-400 animate-pulse')
                                 status_text.text = tr('Ready')
                                 connection_state['was_connected'] = True
-                            elif connection_state['was_connected'] and not ws_connected:
-                                # Was connected but lost connection - show red/reconnecting
-                                status_dot.classes('bg-red-400', remove='bg-green-400 bg-yellow-400')
-                                status_text.text = tr('Reconnecting...')
                             else:
-                                # Still loading or reconnecting
-                                status_dot.classes('bg-yellow-400', remove='bg-green-400 bg-red-400')
-                                if connection_state['check_count'] <= 2:
+                                # Loading or reconnecting - yellow with subtle pulse animation
+                                # Don't show alarming text, just visual indicator
+                                status_dot.classes('bg-yellow-400 animate-pulse', remove='bg-green-400')
+                                # Keep showing "Ready" after initial connection to avoid alarming users
+                                # The yellow pulsing dot is sufficient visual feedback
+                                if not connection_state['was_connected']:
                                     status_text.text = tr('Loading...')
-                                else:
-                                    status_text.text = tr('Connecting...')
+                                # else: keep current text (Ready) - don't change to alarming message
                         else:
                             # Elements deleted, deactivate timer
                             if connection_state['timer']:
