@@ -344,8 +344,8 @@ class ExternalResourceThread(QThread):
 class UpdateCheckerThread(QThread):
     """Check for updates on GitHub."""
 
-    # found, version, url, is_manual_check
-    finished_signal = pyqtSignal(bool, str, str, bool)
+    # found, version, html_url, zip_url, is_manual_check
+    finished_signal = pyqtSignal(bool, str, str, str, bool)
     error_signal = pyqtSignal(str, bool)
 
     def __init__(self, current_version, is_manual=False):
@@ -363,6 +363,14 @@ class UpdateCheckerThread(QThread):
                 tag = data.get('tag_name', '').strip()
                 html_url = data.get('html_url', '')
 
+                # Get ZIP asset URL for direct download
+                assets = data.get('assets', [])
+                zip_url = ''
+                for asset in assets:
+                    if asset.get('name', '').endswith('.zip'):
+                        zip_url = asset.get('browser_download_url', '')
+                        break
+
                 # Simple SemVer comparison (stripping 'v' prefix)
                 curr_v = [int(x) for x in self.current_version.replace('v','').split('.') if x.isdigit()]
                 remote_v = [int(x) for x in tag.replace('v','').split('.') if x.isdigit()]
@@ -373,11 +381,87 @@ class UpdateCheckerThread(QThread):
                 remote_v.extend([0] * (max_len - len(remote_v)))
 
                 if remote_v > curr_v:
-                    self.finished_signal.emit(True, tag, html_url, self.is_manual)
+                    self.finished_signal.emit(True, tag, html_url, zip_url, self.is_manual)
                 else:
-                    self.finished_signal.emit(False, tag, html_url, self.is_manual)
+                    self.finished_signal.emit(False, tag, html_url, zip_url, self.is_manual)
             else:
                 self.error_signal.emit(f"GitHub API Error: {resp.status_code}", self.is_manual)
 
         except Exception as e:
             self.error_signal.emit(str(e), self.is_manual)
+
+
+class UpdateDownloaderThread(QThread):
+    """Download update ZIP from GitHub Releases with progress reporting."""
+
+    progress_signal = pyqtSignal(int, int)  # downloaded_bytes, total_bytes
+    finished_signal = pyqtSignal(bool, str)  # success, file_path_or_error
+
+    def __init__(self, download_url: str, target_path: str):
+        super().__init__()
+        self.download_url = download_url
+        self.target_path = target_path
+        self._cancelled = False
+
+    def cancel(self):
+        """Request cancellation of the download."""
+        self._cancelled = True
+
+    def run(self):
+        try:
+            # Validate URL is from GitHub
+            if not self.download_url.startswith('https://github.com/gershuni/GenizahSearch/'):
+                self.finished_signal.emit(False, "Invalid download URL: not from official repository")
+                return
+
+            # Stream download with progress
+            response = requests.get(
+                self.download_url,
+                stream=True,
+                timeout=600,  # 10 minute timeout for large files
+                allow_redirects=True
+            )
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
+
+            with open(self.target_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if self._cancelled:
+                        f.close()
+                        # Clean up partial file
+                        try:
+                            import os
+                            os.remove(self.target_path)
+                        except:
+                            pass
+                        self.finished_signal.emit(False, "Download cancelled")
+                        return
+
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress_signal.emit(downloaded, total_size)
+
+            # Verify the downloaded file is a valid ZIP
+            import zipfile
+            if not zipfile.is_zipfile(self.target_path):
+                import os
+                os.remove(self.target_path)
+                self.finished_signal.emit(False, "Downloaded file is not a valid ZIP archive")
+                return
+
+            self.finished_signal.emit(True, self.target_path)
+
+        except requests.exceptions.Timeout:
+            self.finished_signal.emit(False, "Download timed out. Please try again.")
+        except requests.exceptions.ConnectionError:
+            self.finished_signal.emit(False, "Network connection error. Check your internet connection.")
+        except requests.exceptions.HTTPError as e:
+            self.finished_signal.emit(False, f"Download failed: HTTP {e.response.status_code}")
+        except IOError as e:
+            self.finished_signal.emit(False, f"Disk error: {str(e)}")
+        except Exception as e:
+            self.finished_signal.emit(False, f"Download error: {str(e)}")

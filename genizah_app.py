@@ -229,10 +229,12 @@ class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
 
     dismissed = pyqtSignal(str) # Emits version string on dismiss
+    update_requested = pyqtSignal(str, str, str)  # version, html_url, zip_url
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.download_url = ""
+        self.html_url = ""
+        self.zip_url = ""
         self.version_tag = ""
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -245,7 +247,7 @@ class UpdateNotificationBar(QFrame):
         self.lbl_msg = QLabel()
         self.lbl_msg.setStyleSheet("font-weight: bold; font-size: 13px; border: none; background: transparent;")
 
-        self.btn_download = QPushButton(tr("Download Update"))
+        self.btn_download = QPushButton(tr("Update Now"))
         self.btn_download.setStyleSheet("background-color: #17a2b8; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
         self.btn_download.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_download.clicked.connect(self.on_download)
@@ -267,19 +269,324 @@ class UpdateNotificationBar(QFrame):
 
         self.hide()
 
-    def show_update(self, version, url):
+    def show_update(self, version: str, html_url: str, zip_url: str = ""):
         self.version_tag = version
-        self.download_url = url
+        self.html_url = html_url
+        self.zip_url = zip_url
         self.lbl_msg.setText(tr("New version available: {}").format(version))
         self.show()
 
     def on_download(self):
-        if self.download_url:
-            QDesktopServices.openUrl(QUrl(self.download_url))
+        self.update_requested.emit(self.version_tag, self.html_url, self.zip_url)
 
     def on_dismiss(self):
         self.hide()
         self.dismissed.emit(self.version_tag)
+
+
+class UpdateProgressDialog(QDialog):
+    """Shows download progress and handles update installation."""
+
+    def __init__(self, parent, version: str, zip_url: str, html_url: str):
+        super().__init__(parent)
+        self.version = version
+        self.zip_url = zip_url
+        self.html_url = html_url
+        self.download_thread = None
+        self.downloaded_path = None
+
+        self.setWindowTitle(tr("Updating GenizahSearch"))
+        self.setModal(True)
+        self.setFixedSize(420, 180)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Title
+        title_label = QLabel(tr("Updating to version {}").format(version))
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                text-align: center;
+                height: 24px;
+            }
+            QProgressBar::chunk {
+                background-color: #17a2b8;
+                border-radius: 3px;
+            }
+        """)
+        layout.addWidget(self.progress_bar)
+
+        # Status label
+        self.status_label = QLabel(tr("Preparing download..."))
+        self.status_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.status_label)
+
+        layout.addStretch()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton(tr("Cancel"))
+        self.btn_cancel.clicked.connect(self.on_cancel)
+        btn_layout.addWidget(self.btn_cancel)
+
+        layout.addLayout(btn_layout)
+
+    def start_download(self):
+        """Start the download process."""
+        import tempfile
+        import os
+
+        if not self.zip_url:
+            QMessageBox.warning(
+                self, tr("Download Error"),
+                tr("No direct download available. Opening browser instead...")
+            )
+            QDesktopServices.openUrl(QUrl(self.html_url))
+            self.reject()
+            return
+
+        # Determine download path
+        temp_dir = tempfile.gettempdir()
+        safe_version = self.version.replace('/', '_').replace('\\', '_')
+        target_path = os.path.join(temp_dir, f"genizah_update_{safe_version}.zip")
+
+        # Import and start download thread
+        from gui_threads import UpdateDownloaderThread
+        self.download_thread = UpdateDownloaderThread(self.zip_url, target_path)
+        self.download_thread.progress_signal.connect(self.on_progress)
+        self.download_thread.finished_signal.connect(self.on_download_finished)
+        self.download_thread.start()
+
+        self.status_label.setText(tr("Downloading..."))
+
+    def on_progress(self, downloaded: int, total: int):
+        """Update progress bar with download progress."""
+        if total > 0:
+            percent = int((downloaded / total) * 100)
+            self.progress_bar.setValue(percent)
+
+            # Format size display
+            downloaded_mb = downloaded / (1024 * 1024)
+            total_mb = total / (1024 * 1024)
+            self.status_label.setText(
+                tr("Downloading: {:.1f} MB / {:.1f} MB").format(downloaded_mb, total_mb)
+            )
+        else:
+            # Unknown total size - show indeterminate
+            self.progress_bar.setMaximum(0)
+            downloaded_mb = downloaded / (1024 * 1024)
+            self.status_label.setText(tr("Downloaded: {:.1f} MB").format(downloaded_mb))
+
+    def on_download_finished(self, success: bool, result: str):
+        """Handle download completion."""
+        if success:
+            self.downloaded_path = result
+            self.progress_bar.setValue(100)
+            self.status_label.setText(tr("Download complete. Preparing update..."))
+            self.btn_cancel.setEnabled(False)
+
+            # Execute the update
+            QTimer.singleShot(500, self.execute_update)
+        else:
+            # Download failed
+            self.progress_bar.setValue(0)
+            self.status_label.setText(tr("Download failed"))
+
+            reply = QMessageBox.question(
+                self, tr("Download Failed"),
+                tr("Failed to download update: {}").format(result) + "\n\n" +
+                tr("Would you like to download manually from the website?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(self.html_url))
+
+            self.reject()
+
+    def execute_update(self):
+        """Generate and run the update script (Windows only)."""
+        import subprocess
+        import tempfile
+        import sys
+        import os
+
+        # Check platform
+        if sys.platform != 'win32':
+            QMessageBox.information(
+                self, tr("Update Ready"),
+                tr("The update has been downloaded to:") + f"\n{self.downloaded_path}\n\n" +
+                tr("Please extract and replace the application manually.")
+            )
+            self.accept()
+            return
+
+        # Get application paths
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            app_exe = sys.executable
+            app_dir = os.path.dirname(app_exe)
+            exe_name = os.path.basename(app_exe)
+        else:
+            # Running from Python (development mode)
+            QMessageBox.information(
+                self, tr("Development Mode"),
+                tr("Auto-update is not available in development mode.") + "\n" +
+                tr("The update has been downloaded to:") + f"\n{self.downloaded_path}"
+            )
+            self.accept()
+            return
+
+        parent_dir = os.path.dirname(app_dir)
+        backup_dir = app_dir + ".backup"
+
+        # Generate the update batch script
+        script_content = f'''@echo off
+chcp 65001 >nul
+REM GenizahSearch Auto-Update Script
+REM Wait for the application to close
+
+:waitloop
+tasklist /FI "IMAGENAME eq {exe_name}" 2>NUL | find /I /N "{exe_name}" >NUL
+if "%ERRORLEVEL%"=="0" (
+    timeout /t 1 /nobreak >NUL
+    goto waitloop
+)
+
+REM Small delay to ensure file handles are released
+timeout /t 2 /nobreak >NUL
+
+REM Backup current version
+if exist "{backup_dir}" (
+    rmdir /S /Q "{backup_dir}"
+)
+move "{app_dir}" "{backup_dir}"
+
+REM Check if move succeeded
+if errorlevel 1 (
+    echo ERROR: Could not backup current version
+    echo Please close all application windows and try again
+    pause
+    exit /b 1
+)
+
+REM Extract new version
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '{self.downloaded_path}' -DestinationPath '{parent_dir}' -Force"
+
+REM Check if extraction succeeded
+if errorlevel 1 (
+    echo ERROR: Could not extract update
+    echo Restoring backup...
+    move "{backup_dir}" "{app_dir}"
+    pause
+    exit /b 1
+)
+
+REM Verify new executable exists
+if not exist "{app_dir}\\{exe_name}" (
+    echo ERROR: Update extraction incomplete
+    echo Restoring backup...
+    rmdir /S /Q "{app_dir}" 2>NUL
+    move "{backup_dir}" "{app_dir}"
+    pause
+    exit /b 1
+)
+
+REM Remove backup after successful update
+rmdir /S /Q "{backup_dir}"
+
+REM Remove downloaded ZIP
+del /Q "{self.downloaded_path}" 2>NUL
+
+REM Restart application
+start "" "{app_dir}\\{exe_name}"
+
+REM Self-delete this script
+del "%~f0"
+'''
+
+        # Write the script to temp folder
+        script_path = os.path.join(tempfile.gettempdir(), 'genizah_update.bat')
+        try:
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write(script_content)
+        except IOError as e:
+            QMessageBox.critical(
+                self, tr("Update Error"),
+                tr("Could not create update script: {}").format(str(e))
+            )
+            self.reject()
+            return
+
+        # Update status
+        self.status_label.setText(tr("Restarting application..."))
+
+        # Run the update script (detached, hidden)
+        try:
+            subprocess.Popen(
+                ['cmd', '/c', script_path],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                close_fds=True,
+                cwd=tempfile.gettempdir()
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, tr("Update Error"),
+                tr("Could not start update process: {}").format(str(e))
+            )
+            self.reject()
+            return
+
+        # Close the dialog and quit the application
+        self.accept()
+        QApplication.quit()
+
+    def on_cancel(self):
+        """Handle cancel button click."""
+        if self.download_thread and self.download_thread.isRunning():
+            reply = QMessageBox.question(
+                self, tr("Cancel Download"),
+                tr("Are you sure you want to cancel the update?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.download_thread.cancel()
+                self.status_label.setText(tr("Cancelling..."))
+                self.btn_cancel.setEnabled(False)
+        else:
+            self.reject()
+
+    def closeEvent(self, event):
+        """Handle dialog close event."""
+        if self.download_thread and self.download_thread.isRunning():
+            reply = QMessageBox.question(
+                self, tr("Cancel Download"),
+                tr("Download is in progress. Cancel and close?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.download_thread.cancel()
+                self.download_thread.wait(3000)  # Wait up to 3 seconds
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+
 
 BATCH_SIZE = 500
 
@@ -4234,6 +4541,7 @@ class GenizahGUI(QMainWindow):
         # Update Bar (Hidden by default)
         self.update_bar = UpdateNotificationBar()
         self.update_bar.dismissed.connect(self.on_update_dismissed)
+        self.update_bar.update_requested.connect(self.start_in_app_update)
         main_layout.addWidget(self.update_bar)
 
         main_layout.addWidget(self.tabs)
@@ -15154,7 +15462,7 @@ class GenizahGUI(QMainWindow):
         self.update_thread.error_signal.connect(self.on_update_error)
         self.update_thread.start()
 
-    def on_update_result(self, found, version, url, is_manual):
+    def on_update_result(self, found, version, html_url, zip_url, is_manual):
         # Reset manual button state
         if is_manual:
             self.btn_check_updates.setEnabled(True)
@@ -15170,15 +15478,18 @@ class GenizahGUI(QMainWindow):
 
             # Show Feedback
             if is_manual:
-                # Dialog for manual
+                # Dialog for manual - offer in-app update
                 msg = tr("A new version is available: {}").format(version)
-                reply = QMessageBox.question(self, tr("Update Available"), msg + "\n\n" + tr("Open download page?"),
-                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                reply = QMessageBox.question(
+                    self, tr("Update Available"),
+                    msg + "\n\n" + tr("Would you like to update now?"),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
                 if reply == QMessageBox.StandardButton.Yes:
-                    QDesktopServices.openUrl(QUrl(url))
+                    self.start_in_app_update(version, html_url, zip_url)
             else:
                 # Notification Bar for auto
-                self.update_bar.show_update(version, url)
+                self.update_bar.show_update(version, html_url, zip_url)
 
         else:
             if is_manual:
@@ -15195,6 +15506,18 @@ class GenizahGUI(QMainWindow):
     def on_update_dismissed(self, version):
         """Save dismissed version to config."""
         save_app_config({'last_dismissed_version': version})
+
+    def start_in_app_update(self, version: str, html_url: str, zip_url: str):
+        """Start the in-app update process with progress dialog."""
+        # Hide the notification bar if visible
+        self.update_bar.hide()
+
+        # Create and show the update progress dialog
+        dialog = UpdateProgressDialog(self, version, zip_url, html_url)
+        dialog.show()
+
+        # Start the download after dialog is shown
+        QTimer.singleShot(100, dialog.start_download)
 
     def run_indexing(self):
         # 1. Pre-check: Does the input file exist?
