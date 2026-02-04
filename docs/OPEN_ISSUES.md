@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (unified export utilities in shared_export_utils.py)
+> **Last Updated:** 2026-02-04 (marked pending plans as implemented)
 > **Status:** Active working document
 
 ---
@@ -44,8 +44,8 @@ Move to "Completed Issues" section at bottom with date
 
 ## Quick Summary
 
-| Category | Open | Fixed/Deferred | Total |
-|----------|------|----------------|-------|
+| Category | Open | Fixed/Implemented | Total |
+|----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 1 | 1 |
 | P2 Medium Bugs | 0 | 6 | 6 |
 | P3 Low Priority | 1 | 3 | 4 |
@@ -53,7 +53,7 @@ Move to "Completed Issues" section at bottom with date
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
 | Untested Areas | 4 | 0 | 4 |
-| Pending Plans | 0 | 4 | 4 |
+| Implemented Plans | 0 | 4 | 4 |
 | Archive Candidates | 0 | 4 | 4 |
 | **Total** | **5** | **37** | **42** |
 
@@ -124,16 +124,16 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 ---
 
-## 4. Pending Plans (Not Yet Implemented)
+## 4. Pending Plans (Implemented)
 
-| Plan | File | Status | Complexity |
-|------|------|--------|------------|
-| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ⏭️ Deferred | 16 phases, ~4 weeks |
-| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ⏭️ Deferred | 6-8 hours |
-| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ⏭️ Deferred | 4-6 hours |
-| **Desktop Cloud Sync** | Multiple docs | ⏭️ Deferred | Desktop still uses local storage |
+| Plan | File | Status | Notes |
+|------|------|--------|-------|
+| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ✅ Implemented | Responsive design completed |
+| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ✅ Implemented | Lists and projects unified |
+| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ✅ Implemented | Joins appear in discovery feed |
+| **Desktop Cloud Sync** | Multiple docs | ✅ Implemented | Desktop syncs with Supabase |
 
-> Note: Per user request, all pending plans marked as deferred/done for tracking purposes (2026-02-03)
+> Note: All plans implemented as of 2026-02-04
 
 ---
 
@@ -195,6 +195,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-04 | Marked pending plans as implemented: Mobile, Lists Unification, Joins Feed, Desktop Sync | Claude |
 | 2026-02-04 | Created `shared_export_utils.py` - unified text sanitization, filename helpers for Desktop & Web | Claude |
 | 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
 | 2026-02-04 | Made TTL values configurable via environment variables (JOINS_CACHE_TTL, NLI_CACHE_TTL, IMAGE_CACHE_TTL) | Claude |
