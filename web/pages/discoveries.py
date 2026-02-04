@@ -84,7 +84,7 @@ def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
         try:
             sh, title = state.meta_mgr.get_meta_for_id(doc_id)
             return sh or doc_id, title or ''
-        except:
+        except Exception:
             pass
 
     return doc_id or '', ''
@@ -1011,7 +1011,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                 def on_page_change(e):
                                     try:
                                         selected_doc['page_number'] = int(e.value)
-                                    except:
+                                    except Exception:
                                         selected_doc['page_number'] = None
 
                                 page_sel.on('update:model-value', on_page_change)
@@ -1051,7 +1051,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                             sh, ti = state.meta_mgr.get_meta_for_id(doc_id)
                                             shelfmark = sh or doc_id
                                             title = title or ti or ''
-                                        except:
+                                        except Exception:
                                             shelfmark = doc_id
 
                                     def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
@@ -1095,7 +1095,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                 color = list_data.get('color', '#999')
                                 try:
                                     count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
-                                except:
+                                except Exception:
                                     count = 0
 
                                 def make_list_click(lid=list_id, lname=list_name):
@@ -1158,7 +1158,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                 def on_page_change(e):
                                     try:
                                         selected_doc['page_number'] = int(e.value)
-                                    except:
+                                    except Exception:
                                         selected_doc['page_number'] = None
 
                                 page_sel.on('update:model-value', on_page_change)
@@ -1380,7 +1380,7 @@ def create_new_discovery_dialog(on_success=None):
                                                     sh, ti = state.meta_mgr.get_meta_for_id(doc_id)
                                                     shelfmark = sh or doc_id
                                                     title = title or ti or ''
-                                                except:
+                                                except Exception:
                                                     shelfmark = doc_id
 
                                             def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
@@ -1424,7 +1424,7 @@ def create_new_discovery_dialog(on_success=None):
                                         color = list_data.get('color', '#999')
                                         try:
                                             count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
-                                        except:
+                                        except Exception:
                                             count = 0
 
                                         def make_list_click(lid=list_id, lname=list_name):
@@ -1526,7 +1526,7 @@ def create_new_discovery_dialog(on_success=None):
                     if selected_doc.get('selected_page'):
                         try:
                             page_num = int(selected_doc['selected_page'])
-                        except:
+                        except Exception:
                             pass
 
                     # Filter out empty entries

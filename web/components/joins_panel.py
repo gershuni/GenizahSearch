@@ -14,10 +14,14 @@ from web.state import state
 from typing import Optional, Callable, Dict, List
 from urllib.parse import quote
 import time
+import threading
 
 # Simple in-memory cache for joins data (key -> (timestamp, data))
 _joins_cache: Dict[str, tuple] = {}
-_CACHE_TTL = 30  # Cache for 30 seconds
+_joins_cache_lock = threading.Lock()
+# Cache TTL (configurable via environment variable, default 30 seconds)
+import os
+_CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
 
 
 def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, force_refresh: bool = False) -> Dict:
@@ -33,10 +37,12 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
     cache_key = f"doc:{document_id}" if document_id else f"shelf:{shelfmark}"
 
     # Check cache (unless force refresh)
-    if not force_refresh and cache_key in _joins_cache:
-        cached_time, cached_data = _joins_cache[cache_key]
-        if time.time() - cached_time < _CACHE_TTL:
-            return cached_data
+    if not force_refresh:
+        with _joins_cache_lock:
+            if cache_key in _joins_cache:
+                cached_time, cached_data = _joins_cache[cache_key]
+                if time.time() - cached_time < _CACHE_TTL:
+                    return cached_data
 
     try:
         # Fetch joins from Supabase
@@ -81,7 +87,8 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
         }
 
         # Cache the result
-        _joins_cache[cache_key] = (time.time(), result)
+        with _joins_cache_lock:
+            _joins_cache[cache_key] = (time.time(), result)
         return result
     except Exception as e:
         print(f"Error fetching connected fragments: {e}")
@@ -95,14 +102,14 @@ def invalidate_joins_cache(document_id: str = None, shelfmark: str = None, clear
     When clear_all is True, clears the entire cache to ensure no stale data
     persists for transitively connected fragments.
     """
-    global _joins_cache
-    if clear_all:
-        _joins_cache.clear()
-        return
-    if document_id:
-        _joins_cache.pop(f"doc:{document_id}", None)
-    if shelfmark:
-        _joins_cache.pop(f"shelf:{shelfmark}", None)
+    with _joins_cache_lock:
+        if clear_all:
+            _joins_cache.clear()
+            return
+        if document_id:
+            _joins_cache.pop(f"doc:{document_id}", None)
+        if shelfmark:
+            _joins_cache.pop(f"shelf:{shelfmark}", None)
 
 
 def delete_join(join_id: int) -> bool:
@@ -212,7 +219,7 @@ def create_joins_dialog(
             if not spinner_state['deleted']:
                 try:
                     spinner_state['spinner'].delete()
-                except:
+                except Exception:
                     pass
                 spinner_state['deleted'] = True
 
@@ -306,7 +313,7 @@ def create_joins_dialog(
                                         title_preview = ' '.join(words)
                                         if len(title.split()) > 4:
                                             title_preview += "..."
-                                except:
+                                except Exception:
                                     pass
 
                             # Create click handler - capture is_current properly
@@ -487,7 +494,7 @@ def show_add_join_form(
                                                     if not item_shelfmark and item_sys_id and state.meta_mgr:
                                                         try:
                                                             item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
-                                                        except:
+                                                        except Exception:
                                                             pass
 
                                                     # Fallback to sys_id only if we can't find shelfmark
@@ -552,7 +559,7 @@ def show_add_join_form(
                                                                         if not item_shelfmark and item_sys_id and state.meta_mgr:
                                                                             try:
                                                                                 item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
-                                                                            except:
+                                                                            except Exception:
                                                                                 pass
 
                                                                         # Fallback to sys_id only if we can't find shelfmark

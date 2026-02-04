@@ -287,7 +287,7 @@ def _render_list_item(
     # Get item count
     try:
         count = lists_mgr._get_list_item_count(list_id)
-    except:
+    except Exception:
         count = 0
 
     # Item container

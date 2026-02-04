@@ -19,10 +19,11 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
 
 try:
-    from genizah_core import tr, CURRENT_LANG
+    from genizah_core import tr, CURRENT_LANG, normalize_shelfmark
 except ImportError:
     def tr(text): return text
     CURRENT_LANG = 'en'
+    def normalize_shelfmark(s): return s.lower().replace(' ', '') if s else ''
 
 from corrections_client import (
     CorrectionsClient, get_corrections_client,
@@ -3264,10 +3265,8 @@ class JoinsDialog(QDialog):
         self.load_joins()
 
     def _normalize_shelfmark(self, text: str) -> str:
-        """Normalize shelfmark for matching (same as ShelfmarkCompleter)."""
-        import re
-        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-        return re.sub(r"[^\w\./]", "", t).lower()
+        """Normalize shelfmark using the canonical function from genizah_core."""
+        return normalize_shelfmark(text)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -3854,11 +3853,16 @@ class JoinsDialog(QDialog):
         # If not picked from list, try to resolve from shelfmark using csv_bank
         if not doc_id_b and self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
             # Build lookup map if not already done
+            norm_frag_b = self._normalize_shelfmark(frag_b)
+            norm_frag_b_no_dots = norm_frag_b.replace('.', '')
             for sys_id, meta in self.meta_mgr.csv_bank.items():
                 shelf = meta.get('shelfmark', '')
-                if shelf and self._normalize_shelfmark(shelf) == self._normalize_shelfmark(frag_b):
-                    doc_id_b = sys_id
-                    break
+                if shelf:
+                    norm_shelf = self._normalize_shelfmark(shelf)
+                    # Exact match or dot-agnostic match
+                    if norm_shelf == norm_frag_b or norm_shelf.replace('.', '') == norm_frag_b_no_dots:
+                        doc_id_b = sys_id
+                        break
 
         # Try to create via API first
         join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
