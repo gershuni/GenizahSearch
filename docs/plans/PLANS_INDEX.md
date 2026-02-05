@@ -123,6 +123,26 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 1. 🔲 Performance optimizations
 2. 🔲 Joins in Discovery Feed
 3. 🔲 Additional features from audit
+4. 🔲 External data integration (PGP, NLI)
+
+---
+
+## Exploration Documents
+
+### External Data Integration
+**File:** `EXTERNAL_DATA_INTEGRATION_EXPLORATION.md`
+**Status:** 🔍 Exploration Phase (awaiting additional data)
+**Goal:** Integrate PGP metadata and NLI CrossReference data to enrich GenizahSearch
+
+**Data Sources Analyzed:**
+- **Princeton Geniza Project (PGP):** ~41K documents with scholarly descriptions, types, tags, dates, transcriptions
+- **NLI CrossReference:** 815K image-level records with library metadata and relationships
+
+**Awaiting:**
+- Joins/relationships file from NLI
+- Dimensions and number of lines data
+
+**Key Finding:** Join strategy validated - `system_number` links to `NLI_AlmaId` and normalized shelfmarks link to PGP data
 
 ---
 
