@@ -20,7 +20,7 @@ from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
-from web.document_service import get_document_for_fragment
+from web.document_service import get_document_for_fragment, get_section_for_page
 
 
 # ============================================================================
@@ -875,7 +875,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         pgp_doc = get_document_for_fragment(page.sys_id)
                         if pgp_doc and pgp_doc.get('transcription'):
                             state.pgp_transcription = {
-                                'content': pgp_doc['transcription'],
+                                'full_content': pgp_doc['transcription'],  # Store full for reference
+                                'content': get_section_for_page(pgp_doc['transcription'], page.p_num),  # Filtered for current page
                                 'attribution': pgp_doc.get('transcription_source', 'PGP'),
                                 'pgp_url': pgp_doc.get('pgp_url'),
                                 'pgpid': pgp_doc.get('pgpid')
