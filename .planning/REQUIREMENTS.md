@@ -29,7 +29,7 @@
 - [ ] **DOC-01**: Multi-fragment PGP records create document groupings in database
 - [ ] **DOC-02**: Single-fragment manuscripts remain unchanged (no document wrapper)
 - [ ] **DOC-03**: Document links to all member fragments via sys_id
-- [ ] **DOC-04**: PGP transcription stored at document level (not fragment level)
+- [x] **DOC-04**: PGP transcription stored at document level (not fragment level)
 
 ### Data Import (IMP)
 
@@ -92,7 +92,7 @@
 | DOC-01 | Phase 1 | Complete |
 | DOC-02 | Phase 1 | Complete |
 | DOC-03 | Phase 1 | Complete |
-| DOC-04 | Phase 3 | Pending |
+| DOC-04 | Phase 3 | Complete |
 | IMP-01 | Phase 2 | Complete |
 | IMP-02 | Phase 2 | Complete |
 | IMP-03 | Phase 2 | Complete |

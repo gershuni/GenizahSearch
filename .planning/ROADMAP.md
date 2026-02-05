@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Database Schema** - Create document and fragment linkage tables in Supabase ✓
 - [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks ✓
-- [ ] **Phase 3: Document Service** - Build service layer for document-fragment operations
+- [x] **Phase 3: Document Service** - Build service layer for document-fragment operations ✓
 - [ ] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector
 - [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
 - [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
@@ -64,7 +64,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 03-01-PLAN.md — Create document service module with Supabase queries
+- [x] 03-01-PLAN.md — Create document service module with Supabase queries ✓
 
 ### Phase 4: Transcription Display
 **Goal**: Users can view PGP transcriptions on browse page with proper attribution
@@ -131,7 +131,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
 | 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
-| 3. Document Service | 0/1 | Ready to execute | - |
+| 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
 | 4. Transcription Display | 0/1 | Not started | - |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
@@ -140,4 +140,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 3 planned (1 plan)*
+*Updated: 2026-02-05 - Phase 3 complete (1 plan)*
