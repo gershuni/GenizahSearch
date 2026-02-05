@@ -139,6 +139,42 @@ Transcription corrections:
 | `reviewed_by` | uuid | Reviewer (if reviewed) |
 | `reviewed_at` | timestamp | Review date |
 
+### documents (PGP Data)
+
+PGP (Princeton Geniza Project) document metadata and transcriptions:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `pgpid` | int | Primary key - PGP document ID |
+| `shelfmark_combined` | text | Raw combined shelfmark from PGP (e.g., "T-S 13J35.3 + AIU VII.A.23") |
+| `document_type` | text | Document type (Letter, Legal document, List, etc.) |
+| `tags` | jsonb | Subject tags array (e.g., ["communal", "marriage"]) |
+| `doc_date_original` | text | Original date notation from source |
+| `doc_date_standard` | text | Standardized date range |
+| `inferred_date_display` | text | Human-readable inferred date |
+| `description` | text | English scholarly description |
+| `transcription` | text | Full transcription content |
+| `transcription_source` | text | Attribution (e.g., "Amir Ashur, PGP") |
+| `pgp_url` | text | Generated URL to PGP website (computed) |
+| `created_at` | timestamp | Import timestamp |
+
+**Note:** This table stores system data imported from PGP, NOT user-generated content. There is no `user_id` column. RLS allows public read access; writes happen via service role during data import.
+
+### document_fragments (PGP Linkages)
+
+Links PGP documents to GenizahSearch fragments:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `document_id` | int | FK to documents.pgpid |
+| `sys_id` | text | GenizahSearch system_number |
+| `shelfmark` | text | Denormalized shelfmark for display |
+| `sequence_order` | int | Order within multi-fragment document |
+| `created_at` | timestamp | Import timestamp |
+
+**Note:** Single-fragment manuscripts do NOT have entries in these tables (DOC-02 requirement). Only multi-fragment documents that are part of PGP joins are stored here.
+
 ---
 
 ## Using the Python Client
