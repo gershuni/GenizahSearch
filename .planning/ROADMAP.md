@@ -31,10 +31,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. `document_fragments` table exists linking documents to sys_ids with sequence ordering
   3. Single-fragment manuscripts have no document record (DOC-02 preserved)
   4. Database schema supports querying "which document contains this sys_id"
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 01-01: Create Supabase schema migrations
+- [ ] 01-01-PLAN.md — Create Supabase migration with documents and document_fragments tables
 
 ### Phase 2: PGP Data Import
 **Goal**: All PGP transcriptions, metadata, and joins are loaded and linked to GenizahSearch records
@@ -128,7 +128,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Database Schema | 0/1 | Not started | - |
+| 1. Database Schema | 0/1 | Planned | - |
 | 2. PGP Data Import | 0/1 | Not started | - |
 | 3. Document Service | 0/1 | Not started | - |
 | 4. Transcription Display | 0/1 | Not started | - |
@@ -139,4 +139,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Consolidated NLI joins (deferred to v2) into PGP joins parsing*
+*Updated: 2026-02-05 - Phase 1 planned (1 plan)*
