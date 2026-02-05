@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Database Schema** - Create document and fragment linkage tables in Supabase ✓
 - [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks ✓
 - [x] **Phase 3: Document Service** - Build service layer for document-fragment operations ✓
-- [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector ✓
+- [ ] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector (UAT gap closure in progress)
 - [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
 - [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
 - [ ] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
@@ -75,11 +75,13 @@ Plans:
   2. Transcription shows source attribution ("Transcription by [scholar name]")
   3. User can click link to view original document on PGP website
   4. PGP transcription appears as primary version when available (above HTR versions)
-**Plans**: 2 plans
+  5. PGP transcription displays correctly per page (recto/verso split)
+**Plans**: 3 plans
 
 Plans:
 - [x] 04-01-PLAN.md — Integrate PGP transcriptions into version selector with attribution ✓
 - [x] 04-02-PLAN.md — Add clickable "View on PGP" link (gap closure for TRANS-03) ✓
+- [ ] 04-03-PLAN.md — Split transcription by recto/verso markers (UAT gap closure)
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -133,7 +135,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
 | 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
 | 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
-| 4. Transcription Display | 2/2 | ✓ Complete | 2026-02-05 |
+| 4. Transcription Display | 2/3 | In progress (UAT gap) | - |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
@@ -141,4 +143,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 4 complete (gap closure for TRANS-03)*
+*Updated: 2026-02-05 - Phase 4 gap closure plan 04-03 created for recto/verso splitting*
