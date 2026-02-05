@@ -46,10 +46,11 @@ Plans:
   3. Multi-fragment shelfmarks (e.g., "T-S 13J35.3 + AIU VII.A.23") are parsed to create join groups
   4. Oxford codicological parts are handled correctly (separate metadata where needed)
   5. Import script is repeatable (can re-run without duplicates)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Build PGP import pipeline
+- [ ] 02-01-PLAN.md — Add page_info column to document_fragments for recto/verso storage
+- [ ] 02-02-PLAN.md — Build PGP import script with two-pass architecture and multi-fragment parsing
 
 ### Phase 3: Document Service
 **Goal**: Service layer enables all downstream features to access document-fragment relationships
@@ -129,7 +130,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
-| 2. PGP Data Import | 0/1 | Not started | - |
+| 2. PGP Data Import | 0/2 | Ready to execute | - |
 | 3. Document Service | 0/1 | Not started | - |
 | 4. Transcription Display | 0/1 | Not started | - |
 | 5. Search Integration | 0/1 | Not started | - |
@@ -139,4 +140,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 1 complete*
+*Updated: 2026-02-05 - Phase 2 planned (2 plans in 2 waves)*
