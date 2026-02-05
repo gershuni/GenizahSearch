@@ -170,6 +170,7 @@ Links PGP documents to GenizahSearch fragments:
 | `document_id` | int | FK to documents.pgpid |
 | `sys_id` | text | GenizahSearch system_number |
 | `shelfmark` | text | Denormalized shelfmark for display |
+| `page_info` | text | Page/folio info (recto, verso, recto and verso) |
 | `sequence_order` | int | Order within multi-fragment document |
 | `created_at` | timestamp | Import timestamp |
 
