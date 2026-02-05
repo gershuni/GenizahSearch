@@ -61,10 +61,10 @@ Plans:
   2. `get_fragments_for_document(pgpid)` returns all linked fragments with ordering
   3. `get_transcription_for_document(pgpid)` returns PGP transcription text
   4. Service handles fragments not in any document gracefully (returns None)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 03-01: Implement DocumentService class
+- [ ] 03-01-PLAN.md — Create document service module with Supabase queries
 
 ### Phase 4: Transcription Display
 **Goal**: Users can view PGP transcriptions on browse page with proper attribution
@@ -131,7 +131,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 |-------|----------------|--------|-----------|
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
 | 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
-| 3. Document Service | 0/1 | Not started | - |
+| 3. Document Service | 0/1 | Ready to execute | - |
 | 4. Transcription Display | 0/1 | Not started | - |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
@@ -140,4 +140,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 2 complete (7,090 documents imported)*
+*Updated: 2026-02-05 - Phase 3 planned (1 plan)*
