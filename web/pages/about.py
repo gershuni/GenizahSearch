@@ -115,6 +115,8 @@ def _create_hebrew_content():
 
         ui.markdown('''
 ועוד עשרות אוספים קטנים יותר בפריז, בודפסט, פילדלפיה, ירושלים ועוד.
+
+(הערה: באוקספורד יש ~4,000 קטעים אך ~25,000 עמודים — הקטעים שם גדולים במיוחד, לעתים מחברות שלמות.)
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right; margin-top: 1rem;')
 
     # === 4. The Research Revolution ===
@@ -298,6 +300,8 @@ Schechter wasn't the first or only one to discover the treasure. Over the years,
 
         ui.markdown('''
 Plus dozens of smaller collections in Paris, Budapest, Philadelphia, Jerusalem, and more.
+
+(Note: Oxford has ~4,000 fragments but ~25,000 folios — the fragments there are unusually large, sometimes entire quires.)
         ''').style('color: var(--text-secondary); margin-top: 1rem;')
 
     # === 4. The Research Revolution ===
