@@ -14,7 +14,7 @@
 - [ ] **JOIN-01**: User can see related fragments on browse page (join group display)
 - [ ] **JOIN-02**: User can navigate to any joined fragment with one click
 - [ ] **JOIN-03**: User sees relationship type (physical join, same composition, etc.)
-- [ ] **JOIN-04**: System imports NLI joins (PartOf, BifolioWith from crossreference)
+- [ ] **JOIN-04**: System imports PGP joins (parsed from multi-fragment shelfmarks)
 - [ ] **JOIN-05**: Existing pairwise joins continue working (backward compatibility)
 
 ### Metadata Enrichment (META)
@@ -35,7 +35,7 @@
 
 - [ ] **IMP-01**: Import 9,364 PGP transcriptions from transcriptions_linked.csv
 - [ ] **IMP-02**: Import PGP document metadata (type, tags, dates, descriptions)
-- [ ] **IMP-03**: Import NLI join relationships (~424K PartOf/BifolioWith records)
+- [ ] **IMP-03**: Parse PGP multi-fragment shelfmarks to create join groups
 - [ ] **IMP-04**: Handle Oxford codicological parts correctly (may have separate metadata)
 
 ---
@@ -48,6 +48,7 @@
 - Network visualization of join relationships
 - User-contributed document groupings
 - PGP people/places integration
+- NLI BifolioWith import (306K image-level bifolio pairs)
 
 ---
 
@@ -66,7 +67,8 @@
 - **Oxford Parts**: Codicological parts (oxford_part_id) have separate metadata from Oxford. Usually one document but not always. Must handle gracefully.
 - **Backward Compatibility**: Existing URLs, user lists, pairwise joins must continue working
 - **Attribution**: PGP transcriptions require scholar attribution per their license
-- **Data Volume**: 41K PGP docs manageable; 815K NLI records use for joins only (not full indexing)
+- **Data Volume**: 41K PGP docs manageable; NLI BifolioWith (306K image-level pairs) deferred to v2
+- **Supabase Free Tier**: 500MB database limit, batch API inserts for large imports
 
 ---
 
@@ -74,28 +76,29 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| TRANS-01 | TBD | Pending |
-| TRANS-02 | TBD | Pending |
-| TRANS-03 | TBD | Pending |
-| TRANS-04 | TBD | Pending |
-| JOIN-01 | TBD | Pending |
-| JOIN-02 | TBD | Pending |
-| JOIN-03 | TBD | Pending |
-| JOIN-04 | TBD | Pending |
-| JOIN-05 | TBD | Pending |
-| META-01 | TBD | Pending |
-| META-02 | TBD | Pending |
-| META-03 | TBD | Pending |
-| META-04 | TBD | Pending |
-| DOC-01 | TBD | Pending |
-| DOC-02 | TBD | Pending |
-| DOC-03 | TBD | Pending |
-| DOC-04 | TBD | Pending |
-| IMP-01 | TBD | Pending |
-| IMP-02 | TBD | Pending |
-| IMP-03 | TBD | Pending |
-| IMP-04 | TBD | Pending |
+| TRANS-01 | Phase 4 | Pending |
+| TRANS-02 | Phase 4 | Pending |
+| TRANS-03 | Phase 4 | Pending |
+| TRANS-04 | Phase 5 | Pending |
+| JOIN-01 | Phase 7 | Pending |
+| JOIN-02 | Phase 7 | Pending |
+| JOIN-03 | Phase 7 | Pending |
+| JOIN-04 | Phase 2 | Pending |
+| JOIN-05 | Phase 7 | Pending |
+| META-01 | Phase 6 | Pending |
+| META-02 | Phase 6 | Pending |
+| META-03 | Phase 6 | Pending |
+| META-04 | Phase 6 | Pending |
+| DOC-01 | Phase 1 | Pending |
+| DOC-02 | Phase 1 | Pending |
+| DOC-03 | Phase 1 | Pending |
+| DOC-04 | Phase 3 | Pending |
+| IMP-01 | Phase 2 | Pending |
+| IMP-02 | Phase 2 | Pending |
+| IMP-03 | Phase 2 | Pending |
+| IMP-04 | Phase 2 | Pending |
 
 ---
 
 *Generated: February 5, 2026*
+*Traceability updated: February 5, 2026*
