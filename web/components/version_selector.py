@@ -182,7 +182,14 @@ def create_version_selector(
                                     ui.label(tr('PGP Transcription')).classes('font-medium text-green-700')
                                     attribution = pgp_transcription.get('attribution', '')
                                     if attribution:
-                                        ui.label(f"{tr('Transcription by')} {attribution}").classes('text-xs').style('color: var(--text-muted);')
+                                        with ui.row().classes('items-center gap-1'):
+                                            ui.label(f"{tr('Transcription by')} {attribution}").classes('text-xs').style('color: var(--text-muted);')
+                                            # External link to PGP website
+                                            pgp_url = pgp_transcription.get('pgp_url')
+                                            if pgp_url:
+                                                with ui.link(target=pgp_url, new_tab=True).classes('ml-1').on('click', lambda e: e.stop_propagation()):
+                                                    ui.icon('open_in_new', size='xs').classes('text-green-600')
+                                                    ui.tooltip(tr('View on PGP'))
 
                         ui.separator()
 
