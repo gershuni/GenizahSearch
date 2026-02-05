@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 4 - Transcription Display (In progress)
+**Current focus:** Phase 5 - Search Integration (Not started)
 
 ## Current Position
 
-Phase: 4 of 7 (Transcription Display)
-Plan: 1 of 2 in current phase (COMPLETE)
-Status: In progress
-Last activity: 2026-02-05 - Completed 04-01-PLAN.md
+Phase: 5 of 7 (Search Integration)
+Plan: 0 of 1 in current phase
+Status: Not started
+Last activity: 2026-02-05 - Completed Phase 4 (Transcription Display)
 
-Progress: [█████░░░░░] 71%
+Progress: [██████░░░░] 86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 9.8 min
-- Total execution time: 49 min
+- Total plans completed: 6
+- Average duration: 8.8 min
+- Total execution time: 53 min
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [█████░░░░░] 71%
 | 01-database-schema | 1 | 8 min | 8 min |
 | 02-pgp-data-import | 2 | 33 min | 16.5 min |
 | 03-document-service | 1 | 4 min | 4 min |
-| 04-transcription-display | 1 | 4 min | 4 min |
+| 04-transcription-display | 2 | 8 min | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (3 min), 02-02 (30 min), 03-01 (4 min), 04-01 (4 min)
-- Trend: UI integration plans executing quickly due to well-prepared service layer
+- Last 5 plans: 02-02 (30 min), 03-01 (4 min), 04-01 (4 min), 04-02 (4 min)
+- Trend: UI integration and gap closure plans executing quickly
 
 *Updated after each plan completion*
 
@@ -78,13 +78,18 @@ Recent decisions affecting current work:
 - Auto-select PGP on page load as default
 - pgp_transcription dict structure: {content, attribution, pgp_url, pgpid}
 
+**04-02 Decisions:**
+- External link icon in PGP menu item for TRANS-03
+- stop_propagation() to prevent menu close when clicking link
+- Tooltip with tr('View on PGP') for accessibility
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - version selector integration complete, ready for multi-fragment display.
+None - Phase 4 (Transcription Display) complete, ready for Phase 5.
 
 ## Data Import Summary
 
@@ -109,10 +114,16 @@ Version selector now supports PGP transcriptions:
 - PGP option appears first in menu with verified icon when available
 - Auto-selects PGP as default version on page load
 - Attribution (scholar name) displayed in menu and notification
+- Clickable "View on PGP" link opens original PGP document in new tab
 - Hebrew translations added for all PGP UI strings
+
+**Requirements Satisfied:**
+- TRANS-01: User can view PGP transcription on browse page ✓
+- TRANS-02: User sees transcription source attribution ✓
+- TRANS-03: User can click through to original PGP document page ✓
 
 ## Session Continuity
 
-Last session: 2026-02-05 20:10
-Stopped at: Completed 04-01-PLAN.md (Version Selector Integration)
+Last session: 2026-02-05 21:00
+Stopped at: Completed Phase 4 (Transcription Display)
 Resume file: None
