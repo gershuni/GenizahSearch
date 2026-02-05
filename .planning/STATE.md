@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 1 of 7 (Database Schema)
-Plan: 0 of 1 in current phase
-Status: Ready to plan
-Last activity: 2026-02-05 - Roadmap finalized
+Plan: 1 of 1 in current phase
+Status: Phase complete
+Last activity: 2026-02-05 - Completed 01-01-PLAN.md
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 1
+- Average duration: 8 min
+- Total execution time: 8 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01-database-schema | 1 | 8 min | 8 min |
 
 **Recent Trend:**
-- Last 5 plans: -
-- Trend: N/A (no data yet)
+- Last 5 plans: 01-01 (8 min)
+- Trend: N/A (baseline established)
 
 *Updated after each plan completion*
 
@@ -48,16 +48,22 @@ Recent decisions affecting current work:
 - PGP joins only for v1 (NLI BifolioWith deferred - image-level, not fragment joins)
 - Transcription search deferred to v2 (display-only for v1)
 
+**01-01 Decisions:**
+- pgpid as natural PRIMARY KEY (matches PGP data source)
+- GENERATED pgp_url column (computed URL avoids duplication)
+- JSONB tags with GIN index (flexible filtering without join table)
+- Denormalized shelfmark in document_fragments (display optimization)
+
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-None yet.
+- User must run migration in Supabase SQL Editor before Phase 2 can proceed
 
 ## Session Continuity
 
-Last session: 2026-02-05
-Stopped at: Roadmap finalized, ready for Phase 1 planning
+Last session: 2026-02-05 17:23
+Stopped at: Completed 01-01-PLAN.md (Database Schema phase complete)
 Resume file: None
