@@ -5,34 +5,34 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 2 - PGP Data Import
+**Current focus:** Phase 2 - PGP Data Import (COMPLETE)
 
 ## Current Position
 
 Phase: 2 of 7 (PGP Data Import)
-Plan: 1 of 1 in current phase
+Plan: 2 of 2 in current phase
 Status: Phase 2 complete
-Last activity: 2026-02-05 - Completed 02-01-PLAN.md (page_info column migration)
+Last activity: 2026-02-05 - Completed 02-02-PLAN.md (PGP data import executed)
 
-Progress: [██░░░░░░░░] 28%
+Progress: [███░░░░░░░] 43%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 5.5 min
-- Total execution time: 11 min
+- Total plans completed: 3
+- Average duration: 13.7 min
+- Total execution time: 41 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-database-schema | 1 | 8 min | 8 min |
-| 02-pgp-data-import | 1 | 3 min | 3 min |
+| 02-pgp-data-import | 2 | 33 min | 16.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (8 min), 02-01 (3 min)
-- Trend: Improving (simple migration plans are faster)
+- Last 5 plans: 01-01 (8 min), 02-01 (3 min), 02-02 (30 min)
+- Trend: Data import plan was longer due to authentication gate pause
 
 *Updated after each plan completion*
 
@@ -58,18 +58,30 @@ Recent decisions affecting current work:
 **02-01 Decisions:**
 - IF NOT EXISTS pattern via DO block for safe migration re-runs
 
+**02-02 Decisions:**
+- Batch size 500 for Supabase upserts (optimal per research)
+- Deduplicate fragments by (document_id, sys_id) before import
+- Single-fragment docs use sys_id from transcriptions_linked.csv directly
+- Multi-fragment docs look up sys_id for each fragment part
+- Two-pass import pattern: documents first, then FK-dependent fragments
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-- User must run migrations in Supabase SQL Editor before Phase 3 can proceed:
-  1. migrations/add_pgp_documents_tables.sql (from Phase 1)
-  2. migrations/add_page_info_column.sql (from Phase 2)
+None - migrations have been run and data is imported.
+
+## Data Import Summary
+
+PGP data successfully imported to Supabase:
+- **Documents:** 7,090 (with transcriptions and metadata)
+- **Document fragments:** 7,764 (sys_id links to GenizahSearch)
+- **Unmatched fragments:** 15 (edge cases with unusual shelfmark patterns)
 
 ## Session Continuity
 
-Last session: 2026-02-05 18:26
-Stopped at: Completed 02-01-PLAN.md (PGP Data Import phase complete)
+Last session: 2026-02-05 18:58
+Stopped at: Completed 02-02-PLAN.md (PGP Data Import phase complete)
 Resume file: None
