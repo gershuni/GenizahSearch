@@ -331,9 +331,8 @@ def upsert_in_batches(
             if on_conflict:
                 client.table(table_name).upsert(batch, on_conflict=on_conflict).execute()
             else:
-                # For document_fragments, we need to handle the composite unique constraint
-                # Use upsert with the unique constraint columns
-                client.table(table_name).upsert(batch).execute()
+                # For document_fragments, specify the composite unique constraint columns
+                client.table(table_name).upsert(batch, on_conflict='document_id,sys_id').execute()
 
         processed += len(batch)
 
@@ -529,9 +528,19 @@ Prerequisites:
         print()
 
         # Pass 2: Create fragment links
+        # Deduplicate by (document_id, sys_id) to avoid constraint violations
+        seen_keys = set()
+        unique_frag_records = []
+        for frag in frag_records:
+            key = (frag['document_id'], frag['sys_id'])
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_frag_records.append(frag)
+
         print("Pass 2: Creating fragment links...")
+        print(f"  (deduplicated: {len(frag_records)} -> {len(unique_frag_records)} unique)")
         frags_processed = upsert_in_batches(
-            client, 'document_fragments', frag_records,
+            client, 'document_fragments', unique_frag_records,
             dry_run=False
         )
         print(f"  Created {frags_processed:,} fragment links")
