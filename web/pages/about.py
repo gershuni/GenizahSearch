@@ -99,11 +99,11 @@ def _create_hebrew_content():
         # Collection cards
         collections = [
             ('קמברידג\'', '~193,000', 'אוסף טיילור-שכטר'),
-            ('ניו יורק (JTS)', '~40,000', 'אוסף אדלר (ENA)'),
+            ('ניו יורק (JTS)', '~43,000', 'אוסף אדלר (ENA)'),
             ('סנקט פטרבורג', '~17,000', 'אוסף פירקוביץ\''),
-            ('אוקספורד', '~25,000', 'ספריית הבודליאנה'),
+            ('אוקספורד', '~4,000', 'ספריית הבודליאנה'),
             ('מנצ\'סטר', '~11,000', 'ספריית ג\'ון ריילנדס'),
-            ('לונדון', '~8,000', 'הספרייה הבריטית'),
+            ('לונדון', '~7,000', 'הספרייה הבריטית'),
         ]
 
         with ui.row().classes('w-full flex-wrap gap-3 justify-center'):
@@ -282,11 +282,11 @@ Schechter wasn't the first or only one to discover the treasure. Over the years,
         # Collection cards
         collections = [
             ('Cambridge', '~193,000', 'Taylor-Schechter Collection'),
-            ('New York (JTS)', '~40,000', 'Adler Collection (ENA)'),
+            ('New York (JTS)', '~43,000', 'Adler Collection (ENA)'),
             ('St. Petersburg', '~17,000', 'Firkovich Collection'),
-            ('Oxford', '~25,000', 'Bodleian Library'),
+            ('Oxford', '~4,000', 'Bodleian Library'),
             ('Manchester', '~11,000', 'John Rylands Library'),
-            ('London', '~8,000', 'British Library'),
+            ('London', '~7,000', 'British Library'),
         ]
 
         with ui.row().classes('w-full flex-wrap gap-3 justify-center'):
