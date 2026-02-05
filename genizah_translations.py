@@ -1894,6 +1894,11 @@ TRANSLATIONS = {
     "User Corrections": "תיקוני משתמשים",
     "No other versions": "אין גרסאות אחרות",
     "User correction": "תיקון משתמש",
+
+    # --- PGP Transcription ---
+    "PGP Transcription": "תעתוק PGP",
+    "Transcription by": "תעתוק מאת",
+    "View on PGP": "צפה ב-PGP",
     "Notes & Comments": "הערות ותגובות",
     "Draft saved": "טיוטה נשמרה",
     "You have unsaved changes. Are you sure you want to close?": "יש לך שינויים שלא נשמרו. האם אתה בטוח שברצונך לסגור?",
