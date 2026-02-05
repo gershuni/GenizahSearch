@@ -35,7 +35,7 @@ GenizahSearch already has a **Joins system** implemented (see `docs/specs/JOINS_
 ### Data Sources Analyzed
 
 1. **Princeton Geniza Project (PGP) Metadata** - Scholarly descriptions, transcriptions, document classification, dating, and people/places data for ~41,000 documents
-2. **NLI CrossReference_Final.csv** - 815,000 image-level records with library metadata, physical relationships, and join keys
+2. **NLI nli_crossreference.csv** - 815,000 image-level records with library metadata, physical relationships, and join keys
 
 Additional data files are expected:
 - Joins/relationships file (fragment physical joins)
@@ -262,9 +262,9 @@ The National Library of Israel (NLI) is a key data provider for GenizahSearch:
 
 **Note:** KTIV contains all Hebrew manuscripts, not just Genizah materials. Filter by collection/library as needed.
 
-### CrossReference_Final.csv
+### nli_crossreference.csv
 
-- **File:** `CrossReference_Final.csv`
+- **File:** `nli_crossreference.csv`
 - **Source:** National Library of Israel
 - **Records:** 814,955 rows (image-level granularity)
 - **Scope:** Comprehensive coverage of major Genizah collections
@@ -498,7 +498,7 @@ https://luna.manchester.ac.uk/luna/servlet/iiif/m/{identifier}/manifest
 
 | Data Source | Records | Status |
 |-------------|---------|--------|
-| CrossReference_Final.csv | 29,931 Manchester images | Available |
+| nli_crossreference.csv | 29,931 Manchester images | Available |
 | IIIF Integration | None | Potential enhancement |
 | Shelfmark Mapping | Via CrossReference | Available |
 
@@ -597,7 +597,7 @@ Images are referenced directly in TEI XML using `<surface>` and `<graphic>` elem
 
 | Data Source | Records | Status |
 |-------------|---------|--------|
-| CrossReference_Final.csv | 2,683 CAJS images | Available |
+| nli_crossreference.csv | 2,683 CAJS images | Available |
 | libraries.csv | CAJS entries | Available |
 | IIIF Integration | None | TEI-based alternative possible |
 
@@ -678,7 +678,7 @@ The JTS collection is also accessible through the Friedberg Genizah Project:
 
 | Data Source | Records | Status |
 |-------------|---------|--------|
-| CrossReference_Final.csv | 83,893 JTS images | Available |
+| nli_crossreference.csv | 83,893 JTS images | Available |
 | libraries.csv | JTS library_code entries | Available |
 | IIIF Integration | None | Via Princeton Figgy possible |
 
@@ -780,7 +780,7 @@ Available via BL Institutional Repository (bl.iro.bl.uk):
 
 | Data Source | Records | Status |
 |-------------|---------|--------|
-| CrossReference_Final.csv | 17,223 BL images | Available |
+| nli_crossreference.csv | 17,223 BL images | Available |
 | Or. collection | 17,068 items | Primary Genizah content |
 | Shapira collection | 155 items | Non-Genizah materials |
 | IIIF Integration | None | Pending BL recovery |
@@ -1296,7 +1296,7 @@ For future sessions continuing this work:
 4. **Plans index:** `docs/plans/PLANS_INDEX.md`
 5. **Local data files:**
    - `libraries.csv` - 217K records, primary metadata
-   - `CrossReference_Final.csv` - 815K NLI image records
+   - `nli_crossreference.csv` - 815K NLI image records
    - `cambridge_genizah.json` - 141K IIIF manifests
 
 ---
@@ -1349,7 +1349,7 @@ titles_non_placeholder: מעשה בית דין...
 | File | Location | Notes |
 |------|----------|-------|
 | libraries.csv | `C:\GenizahSearch\libraries.csv` | Primary metadata (217K records) |
-| CrossReference_Final.csv | `C:\GenizahSearch\CrossReference_Final.csv` | NLI data (815K records) |
+| nli_crossreference.csv | `C:\GenizahSearch\nli_crossreference.csv` | NLI data (815K records) |
 | cambridge_genizah.json | `C:\GenizahSearch\cambridge_genizah.json` | Cambridge IIIF manifest (141K manifests) |
 | Manchester IIIF | LUNA API (no local file) | ~28K items, individual manifest access |
 | Penn/CAJS OPenn | FTP/rsync (no local file) | 420+ items, TEI XML + images |
