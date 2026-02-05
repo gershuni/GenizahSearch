@@ -3,6 +3,7 @@
 Version Selector Component
 
 Allows users to switch between different versions of a transcription:
+- PGP transcription (curated, when available)
 - V0.7 (original transcription)
 - V0.8 (updated transcription)
 - User corrections (approved)
@@ -12,7 +13,7 @@ from nicegui import ui
 from web.translations import tr
 from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict, Any
 
 
 def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
@@ -87,9 +88,23 @@ def create_version_selector(
     page_number: int,
     original_text: str,
     on_version_change: Optional[Callable[[str, dict], None]] = None,
-    size: str = "sm"
+    size: str = "sm",
+    pgp_transcription: Optional[Dict[str, Any]] = None
 ):
-    """Create a version selector dropdown."""
+    """Create a version selector dropdown.
+
+    Args:
+        document_id: The sys_id of the document
+        page_number: The page number
+        original_text: The original V0.8 transcription text
+        on_version_change: Callback when version is selected (text, version_info)
+        size: Button size ('sm', 'md', etc.)
+        pgp_transcription: Optional dict with PGP transcription data:
+            - content: The transcription text
+            - attribution: Scholar/source name
+            - pgp_url: URL to PGP document
+            - pgpid: PGP document ID
+    """
     container = ui.row().classes('items-center gap-2')
 
     with container:
@@ -100,6 +115,23 @@ def create_version_selector(
 
         def load_and_apply_latest():
             """Load versions and apply the latest/default one."""
+            # If PGP transcription is available, auto-select it as primary
+            if pgp_transcription and pgp_transcription.get('content'):
+                attribution = pgp_transcription.get('attribution', 'PGP')
+                version_label.text = 'PGP'
+                version_label.style('color: var(--q-positive);')  # Green for verified
+                if on_version_change:
+                    on_version_change(pgp_transcription['content'], {
+                        'source': 'pgp',
+                        'attribution': attribution,
+                        'pgp_url': pgp_transcription.get('pgp_url'),
+                        'pgpid': pgp_transcription.get('pgpid'),
+                        'is_pgp': True,
+                        'is_default': True
+                    })
+                return
+
+            # Fall back to user corrections or V0.8
             versions_data = fetch_page_versions(document_id, page_number)
             current_default = versions_data.get('current_default')
 
@@ -128,9 +160,36 @@ def create_version_selector(
                 # Rebuild the menu
                 menu.clear()
                 with menu:
+                    # PGP Transcription (first/primary when available)
+                    if pgp_transcription and pgp_transcription.get('content'):
+                        def select_pgp():
+                            version_label.text = 'PGP'
+                            version_label.style('color: var(--q-positive);')
+                            menu.close()
+                            if on_version_change:
+                                on_version_change(pgp_transcription['content'], {
+                                    'source': 'pgp',
+                                    'attribution': pgp_transcription.get('attribution', 'PGP'),
+                                    'pgp_url': pgp_transcription.get('pgp_url'),
+                                    'pgpid': pgp_transcription.get('pgpid'),
+                                    'is_pgp': True
+                                })
+
+                        with ui.menu_item(on_click=select_pgp).classes('text-sm'):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('verified', size='xs').classes('text-green-600')
+                                with ui.column().classes('gap-0'):
+                                    ui.label(tr('PGP Transcription')).classes('font-medium text-green-700')
+                                    attribution = pgp_transcription.get('attribution', '')
+                                    if attribution:
+                                        ui.label(f"{tr('Transcription by')} {attribution}").classes('text-xs').style('color: var(--text-muted);')
+
+                        ui.separator()
+
                     # Original V0.8
                     def select_original():
                         version_label.text = 'V0.8'
+                        version_label.style('color: var(--text-secondary);')
                         menu.close()
                         if on_version_change:
                             on_version_change(original_text, {'source': 'V0.8', 'is_original': True})
@@ -149,6 +208,7 @@ def create_version_selector(
                             def make_select_correction(c=corr, name=author_name):
                                 def select_correction():
                                     version_label.text = f"{tr('by')} {name}"
+                                    version_label.style('color: var(--text-secondary);')
                                     menu.close()
                                     if on_version_change:
                                         on_version_change(c.get('corrected_text', ''), {
@@ -172,7 +232,9 @@ def create_version_selector(
 
 def create_version_badge(source: str = 'original', author: str = None):
     """Create a badge showing the current version source."""
-    if source in ('original', 'V0.8'):
+    if source == 'pgp':
+        return ui.badge('PGP').props('color=positive').classes('text-xs')
+    elif source in ('original', 'V0.8'):
         return ui.badge('V0.8').props('color=grey').classes('text-xs')
     elif source == 'V0.7':
         return ui.badge('V0.7').props('color=grey-7').classes('text-xs')
