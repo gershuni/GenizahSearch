@@ -67,11 +67,11 @@ def _create_hebrew_content():
             h2('סיפור הגילוי', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         ui.markdown('''
-בשנת 1896 הגיעו אגנס סמית לואיס ומרגרט דאנלופ גיבסון, שתי אחיות סקוטיות ומלומדות בזכות עצמן, לביקור בקהיר. הן נכנסו לבית הכנסת העתיק "בן עזרא" והמדריך הראה להן את חדר הגניזה — עליית גג שאליה נדחפו במשך מאות שנים שרידים בלויים של כתבי יד.
+בשנת 1896 הגיעו אגנס סמית לואיס ומרגרט דאנלופ גיבסון, שתי אחיות סקוטיות מלומדות, לביקור בקהיר. הן נכנסו לבית הכנסת העתיק "בן עזרא" והמדריך הראה להן את חדר הגניזה — עליית גג שאליה נדחפו במשך מאות שנים שרידים בלויים של כתבי יד.
 
-הן לקחו איתן כמה דפים שנראו מעניינים והראו אותם לחבר שלהן בקמברידג', שלמה זלמן שכטר. כששכטר ראה את הדפים הוא הבין מיד שמדובר במשהו יוצא דופן: הנוסח העברי המקורי של ספר בן סירא, שעד אז שרד רק בתרגומים.
+הן לקחו איתן דפים שנראו להן מעניינים, והראו כמה מהם לידידן החוקר שלמה זלמן (סולומון) שכטר בקמברידג'. כששכטר ראה את הדפים הוא הבין מיד שמדובר במשהו יוצא דופן: הנוסח העברי המקורי של ספר בן סירא, שעד אז שרד רק בתרגומים.
 
-שכטר נסע לקהיר, שכנע את הקהילה המקומית, וחזר לקמברידג' עם כ-193,000 קטעים. אבל הוא לא היה היחיד — ולאורך השנים התפזרו מאות אלפי קטעים נוספים לספריות ברחבי העולם.
+שכטר נסע לקהיר, שכנע את הקהילה המקומית, וחזר לקמברידג' עם כ-193,000 קטעים. אבל הוא לא היה היחיד וגם לא היה הראשון — ולאורך השנים התפזרו מאות אלפי קטעים נוספים לספריות ברחבי העולם.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === 2. What is a Genizah? ===
@@ -230,8 +230,6 @@ def _create_hebrew_content():
             h2('תודות', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         ui.markdown('''
-לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.
-
 תודה מיוחדת לפרופ' משה קופל, מייסד וראש [דיקטה](https://dicta.org.il/), על התמיכה; לד"ר אבי שמידמן, ראש אגף הפיתוח הטכנולוגי של דיקטה ואחד מארבעת חוקרי פרויקט MiDRASH שהביאו את התעתיקים לעולם; ולאלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר על העצות והתמיכה.
 
 תודה לצוות פרויקט MiDRASH המלא: דניאל שטוקל בן עזרא, מרינה רוסטו, נחום דרשוביץ, יהודית אולשובי-שלנגר, לואיג'י במבצ'י, בנימין קיסלינג, חיים לפין, נורית עזר, אלנה לולי, צפרא סיו, יצחק גילה, בראת קוראר ברכאת, שרווה גוגאוואלה, משה לביא, ורד רזיאל-קרצמר ודריה וסיוטינסקי שפירא.
@@ -239,6 +237,8 @@ def _create_hebrew_content():
 ותודה למשתמשים שכבר משתמשים באתר ובתוכנת Genizah Search Pro למחשב ומשתפים בהתלהבות את התגליות שלהם.
 
 **יוצר האתר:** הלל גרשוני ([gershuni@gmail.com](mailto:gershuni@gmail.com))
+
+*לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
 
@@ -415,8 +415,6 @@ But even if you're not a researcher, you're welcome to explore. You can search f
             h2('Acknowledgments', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         ui.markdown('''
-Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.
-
 Special thanks to Prof. Moshe Koppel, founder and head of [Dicta](https://dicta.org.il/), for his support; to Dr. Avi Shmidman, head of technology development at Dicta and one of the four MiDRASH project researchers who brought these transcriptions to the world; and to Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer for their advice and support.
 
 Thanks to the full MiDRASH project team: Daniel Stökl Ben Ezra, Marina Rustow, Nachum Dershowitz, Judith Olszowy-Schlanger, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Tsafra Siew, Yitzchak Gila, Berat Kurar Barakat, Sharva Gogawale, Moshe Lavee, Vered Raziel-Kretzmer, and Daria Vasyutinsky Shapira.
@@ -424,4 +422,6 @@ Thanks to the full MiDRASH project team: Daniel Stökl Ben Ezra, Marina Rustow, 
 And thanks to the users already using the site and Genizah Search Pro desktop application, who enthusiastically share their discoveries.
 
 **Site Creator:** Hillel Gershuni ([gershuni@gmail.com](mailto:gershuni@gmail.com))
+
+*Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.*
         ''').style('color: var(--text-secondary);')
