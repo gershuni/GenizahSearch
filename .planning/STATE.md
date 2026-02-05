@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 5 - Search Integration (Not started)
+**Current focus:** Phase 5 - Search Integration (Ready to start)
 
 ## Current Position
 
 Phase: 5 of 7 (Search Integration)
 Plan: 0 of 1 in current phase
-Status: Not started
-Last activity: 2026-02-05 - Completed Phase 4 (Transcription Display)
+Status: Ready to start
+Last activity: 2026-02-05 - Completed 04-03-PLAN.md (recto/verso splitting)
 
 Progress: [██████░░░░] 86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 8.8 min
-- Total execution time: 53 min
+- Total plans completed: 7
+- Average duration: 7.7 min
+- Total execution time: 56 min
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [██████░░░░] 86%
 | 01-database-schema | 1 | 8 min | 8 min |
 | 02-pgp-data-import | 2 | 33 min | 16.5 min |
 | 03-document-service | 1 | 4 min | 4 min |
-| 04-transcription-display | 2 | 8 min | 4 min |
+| 04-transcription-display | 3 | 11 min | 3.7 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (30 min), 03-01 (4 min), 04-01 (4 min), 04-02 (4 min)
+- Last 5 plans: 02-02 (30 min), 03-01 (4 min), 04-01 (4 min), 04-02 (4 min), 04-03 (3 min)
 - Trend: UI integration and gap closure plans executing quickly
 
 *Updated after each plan completion*
@@ -83,6 +83,11 @@ Recent decisions affecting current work:
 - stop_propagation() to prevent menu close when clicking link
 - Tooltip with tr('View on PGP') for accessibility
 
+**04-03 Decisions:**
+- Preamble text (before first marker) goes to recto by default
+- Pages beyond 2 show full transcription as fallback for multi-fragment
+- Store full_content alongside filtered content for future reference
+
 ### Pending Todos
 
 None.
@@ -100,11 +105,13 @@ PGP data successfully imported to Supabase:
 
 ## Service Layer Summary
 
-Document service provides 4 functions for accessing PGP data:
+Document service provides 6 functions for accessing PGP data:
 - `get_document_for_fragment(sys_id)` - Look up document by fragment sys_id
 - `get_fragments_for_document(pgpid)` - Get all fragments in sequence order
 - `get_transcription_for_document(pgpid)` - Get transcription text
 - `get_document_metadata(pgpid)` - Get document metadata (type, tags, dates, etc.)
+- `parse_transcription_sections(transcription)` - Parse by Recto/Verso markers
+- `get_section_for_page(transcription, page_num)` - Get section for page number
 
 All functions handle errors gracefully (return None/empty list, never raise).
 
@@ -115,15 +122,17 @@ Version selector now supports PGP transcriptions:
 - Auto-selects PGP as default version on page load
 - Attribution (scholar name) displayed in menu and notification
 - Clickable "View on PGP" link opens original PGP document in new tab
+- Recto/verso splitting shows page-appropriate content
 - Hebrew translations added for all PGP UI strings
 
 **Requirements Satisfied:**
-- TRANS-01: User can view PGP transcription on browse page ✓
-- TRANS-02: User sees transcription source attribution ✓
-- TRANS-03: User can click through to original PGP document page ✓
+- TRANS-01: User can view PGP transcription on browse page
+- TRANS-02: User sees transcription source attribution
+- TRANS-03: User can click through to original PGP document page
+- PGP transcription displays correctly per page (recto/verso split)
 
 ## Session Continuity
 
-Last session: 2026-02-05 21:00
-Stopped at: Completed Phase 4 (Transcription Display)
+Last session: 2026-02-05 21:03
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
