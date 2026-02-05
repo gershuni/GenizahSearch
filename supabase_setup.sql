@@ -166,6 +166,41 @@ CREATE TABLE public.fragment_joins (
 );
 
 -- ============================================
+-- PGP DOCUMENTS
+-- ============================================
+-- Stores PGP document metadata and transcriptions
+-- Multi-fragment documents are linked via document_fragments table
+CREATE TABLE public.documents (
+    pgpid INTEGER PRIMARY KEY,
+    shelfmark_combined TEXT,
+    document_type TEXT,
+    tags JSONB DEFAULT '[]',
+    doc_date_original TEXT,
+    doc_date_standard TEXT,
+    inferred_date_display TEXT,
+    description TEXT,
+    transcription TEXT,
+    transcription_source TEXT,
+    pgp_url TEXT GENERATED ALWAYS AS
+        ('https://geniza.princeton.edu/documents/' || pgpid || '/') STORED,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- DOCUMENT FRAGMENTS (PGP join linkages)
+-- ============================================
+-- Links PGP documents to GenizahSearch fragments via sys_id
+CREATE TABLE public.document_fragments (
+    id SERIAL PRIMARY KEY,
+    document_id INTEGER REFERENCES documents(pgpid) ON DELETE CASCADE,
+    sys_id TEXT NOT NULL,
+    shelfmark TEXT,
+    sequence_order INTEGER DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(document_id, sys_id)
+);
+
+-- ============================================
 -- VOTES TABLES
 -- ============================================
 CREATE TABLE public.correction_votes (
@@ -203,6 +238,10 @@ CREATE INDEX idx_discoveries_user_id ON discoveries(user_id);
 CREATE INDEX idx_fragment_joins_user_id ON fragment_joins(user_id);
 CREATE INDEX idx_fragment_joins_fragment_a ON fragment_joins(fragment_a_sys_id);
 CREATE INDEX idx_fragment_joins_fragment_b ON fragment_joins(fragment_b_sys_id);
+CREATE INDEX idx_document_fragments_sys_id ON document_fragments(sys_id);
+CREATE INDEX idx_document_fragments_document_id ON document_fragments(document_id);
+CREATE INDEX idx_documents_tags ON documents USING GIN (tags);
+CREATE INDEX idx_documents_document_type ON documents(document_type);
 
 
 -- ============================================================================
@@ -221,6 +260,8 @@ ALTER TABLE discoveries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fragment_joins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE correction_votes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE discovery_votes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_fragments ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- PROFILES POLICIES
@@ -311,6 +352,15 @@ CREATE POLICY "Users can view all discovery votes" ON discovery_votes FOR SELECT
 CREATE POLICY "Users can create own discovery votes" ON discovery_votes FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own discovery votes" ON discovery_votes FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own discovery votes" ON discovery_votes FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================
+-- PGP DOCUMENTS POLICIES (public read, no write)
+-- ============================================
+CREATE POLICY "Documents are publicly viewable" ON documents
+FOR SELECT TO public USING (true);
+
+CREATE POLICY "Document fragments are publicly viewable" ON document_fragments
+FOR SELECT TO public USING (true);
 
 
 -- ============================================================================
