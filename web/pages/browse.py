@@ -11,7 +11,7 @@ Features:
 """
 
 from nicegui import ui, app
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import re
 import html as html_module
 
@@ -20,6 +20,7 @@ from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
+from web.document_service import get_document_for_fragment
 
 
 # ============================================================================
@@ -683,6 +684,8 @@ class BrowseState:
         self.edit_loading: bool = False
         self.error_message: Optional[str] = None
         self.fullscreen_edit: bool = False  # Fullscreen edit mode
+        # PGP transcription data
+        self.pgp_transcription: Optional[Dict[str, Any]] = None
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -865,6 +868,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
                     except Exception as track_err:
                         print(f"Failed to track recent item: {track_err}")
+
+                # Check for PGP transcription
+                if page.sys_id:
+                    try:
+                        pgp_doc = get_document_for_fragment(page.sys_id)
+                        if pgp_doc and pgp_doc.get('transcription'):
+                            state.pgp_transcription = {
+                                'content': pgp_doc['transcription'],
+                                'attribution': pgp_doc.get('transcription_source', 'PGP'),
+                                'pgp_url': pgp_doc.get('pgp_url'),
+                                'pgpid': pgp_doc.get('pgpid')
+                            }
+                        else:
+                            state.pgp_transcription = None
+                    except Exception as pgp_err:
+                        print(f"Failed to fetch PGP transcription: {pgp_err}")
+                        state.pgp_transcription = None
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
@@ -2062,7 +2082,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 render_text_content(new_text)
                                 source = version_info.get('source', 'unknown')
                                 author = version_info.get('author', '')
-                                if source == 'user' and author:
+
+                                if source == 'pgp':
+                                    attribution = version_info.get('attribution', 'PGP')
+                                    ui.notify(
+                                        f"{tr('PGP Transcription')} - {attribution}",
+                                        type='positive'
+                                    )
+                                elif source == 'user' and author:
                                     ui.notify(f"{tr('Showing version by')} {author}", type='info')
                                 elif source in ('V0.7', 'V0.8'):
                                     ui.notify(f"{tr('Showing')} {source}", type='info')
@@ -2074,7 +2101,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         document_id=page.sys_id,
                                         page_number=page.p_num,
                                         original_text=page.text,
-                                        on_version_change=handle_version_change
+                                        on_version_change=handle_version_change,
+                                        pgp_transcription=state.pgp_transcription
                                     )
 
                             # Initial render
