@@ -1496,6 +1496,7 @@ def create_layout():
 
                 nav_items = [
                     ('/', 'home', tr('Home'), None),
+                    ('/about', 'info', tr('About the Genizah'), None),
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
@@ -1842,6 +1843,20 @@ def accessibility_page_route():
     with content:
         from web.pages.accessibility import create_accessibility_page
         create_accessibility_page()
+
+
+@ui.page('/about')
+def about_page_route():
+    set_current_page('/about')
+    ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.about import create_about_page
+        create_about_page()
 
 
 @ui.page('/download')
