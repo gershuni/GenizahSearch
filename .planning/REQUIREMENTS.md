@@ -83,7 +83,7 @@
 | JOIN-01 | Phase 7 | Pending |
 | JOIN-02 | Phase 7 | Pending |
 | JOIN-03 | Phase 7 | Pending |
-| JOIN-04 | Phase 2 | Pending |
+| JOIN-04 | Phase 2 | Complete |
 | JOIN-05 | Phase 7 | Pending |
 | META-01 | Phase 6 | Pending |
 | META-02 | Phase 6 | Pending |
@@ -93,10 +93,10 @@
 | DOC-02 | Phase 1 | Complete |
 | DOC-03 | Phase 1 | Complete |
 | DOC-04 | Phase 3 | Pending |
-| IMP-01 | Phase 2 | Pending |
-| IMP-02 | Phase 2 | Pending |
-| IMP-03 | Phase 2 | Pending |
-| IMP-04 | Phase 2 | Pending |
+| IMP-01 | Phase 2 | Complete |
+| IMP-02 | Phase 2 | Complete |
+| IMP-03 | Phase 2 | Complete |
+| IMP-04 | Phase 2 | Complete |
 
 ---
 

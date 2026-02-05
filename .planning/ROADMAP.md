@@ -13,7 +13,7 @@ This roadmap transforms GenizahSearch from a manuscript browser into a research 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Database Schema** - Create document and fragment linkage tables in Supabase ✓
-- [ ] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks
+- [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks ✓
 - [ ] **Phase 3: Document Service** - Build service layer for document-fragment operations
 - [ ] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector
 - [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
@@ -49,8 +49,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Add page_info column to document_fragments for recto/verso storage
-- [ ] 02-02-PLAN.md — Build PGP import script with two-pass architecture and multi-fragment parsing
+- [x] 02-01-PLAN.md — Add page_info column to document_fragments for recto/verso storage ✓
+- [x] 02-02-PLAN.md — Build PGP import script with two-pass architecture and multi-fragment parsing ✓
 
 ### Phase 3: Document Service
 **Goal**: Service layer enables all downstream features to access document-fragment relationships
@@ -130,7 +130,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
-| 2. PGP Data Import | 0/2 | Ready to execute | - |
+| 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
 | 3. Document Service | 0/1 | Not started | - |
 | 4. Transcription Display | 0/1 | Not started | - |
 | 5. Search Integration | 0/1 | Not started | - |
@@ -140,4 +140,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 2 planned (2 plans in 2 waves)*
+*Updated: 2026-02-05 - Phase 2 complete (7,090 documents imported)*
