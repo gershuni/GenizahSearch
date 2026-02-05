@@ -1,6 +1,6 @@
 # GenizahSearch - Plans & Documentation Index
 
-**Last Updated:** 2026-02-04
+**Last Updated:** 2026-02-05
 
 ---
 
@@ -124,10 +124,23 @@ Coverage: 99.65% of ~217,000 records across 29 institutions including Cambridge,
 2. 🔲 Joins in Discovery Feed
 3. 🔲 Additional features from audit
 4. 🔲 External data integration (PGP, NLI)
+5. 🔲 User-added text search (see `USER_TEXT_SEARCH_PLAN.md`)
 
 ---
 
 ## Exploration Documents
+
+### User-Added Text Search
+**File:** `USER_TEXT_SEARCH_PLAN.md`
+**Status:** 🔲 Planning
+**Goal:** Allow users to add their own texts to search for parallels in the Genizah corpus
+
+**Key Design Question:** How to divide long text into searchable pages?
+- Option A: Delimiter-based (paragraph, verse breaks)
+- Option B: Fixed word count (every X words)
+- Option C: Hybrid (delimiter with word count fallback)
+
+Boundary Search code (`parse_boundaries()`) can be adapted for this feature.
 
 ### External Data Integration
 **File:** `EXTERNAL_DATA_INTEGRATION_EXPLORATION.md`
