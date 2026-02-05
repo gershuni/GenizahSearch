@@ -35,7 +35,9 @@ class TestGetDocumentForFragment:
             'shelfmark_combined': 'T-S 8J5.11',
             'document_type': 'Letter',
             'tags': ['letter', 'commercial'],
-            'dates': '1050-1100 CE',
+            'doc_date_original': '1050-1100 CE',
+            'doc_date_standard': '1050/1100',
+            'inferred_date_display': '11th century',
             'description': 'A commercial letter',
             'transcription': 'Test transcription',
             'transcription_source': 'PGP',
@@ -206,7 +208,9 @@ class TestGetDocumentMetadata:
         mock_response.data = {
             'document_type': 'Letter',
             'tags': ['letter', 'commercial', 'india trade'],
-            'dates': '1050-1100 CE',
+            'doc_date_original': '1050-1100 CE',
+            'doc_date_standard': '1050/1100',
+            'inferred_date_display': '11th century',
             'description': 'A commercial letter about the India trade',
             'pgp_url': 'https://geniza.princeton.edu/documents/1234',
             'shelfmark_combined': 'T-S 8J5.11 + T-S 8J5.12'

@@ -25,7 +25,8 @@ def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
 
     Returns:
         Document dict with all fields (pgpid, shelfmark_combined, document_type,
-        tags, dates, description, transcription, transcription_source, pgp_url),
+        tags, doc_date_original, doc_date_standard, inferred_date_display,
+        description, transcription, transcription_source, pgp_url),
         or None if not found or on error.
     """
     if not sys_id:
@@ -128,8 +129,11 @@ def get_document_metadata(pgpid: int) -> Optional[Dict[str, Any]]:
         pgpid: The PGP document ID
 
     Returns:
-        Dict with document_type, tags, dates, description, pgp_url,
+        Dict with document_type, tags, date fields, description, pgp_url,
         shelfmark_combined. Returns None if not found or on error.
+
+    Note:
+        Date columns are: doc_date_original, doc_date_standard, inferred_date_display
     """
     if not pgpid:
         return None
@@ -138,7 +142,8 @@ def get_document_metadata(pgpid: int) -> Optional[Dict[str, Any]]:
         client = get_client()
 
         response = client.table('documents').select(
-            'document_type, tags, dates, description, pgp_url, shelfmark_combined'
+            'document_type, tags, doc_date_original, doc_date_standard, '
+            'inferred_date_display, description, pgp_url, shelfmark_combined'
         ).eq('pgpid', pgpid).single().execute()
 
         return response.data
