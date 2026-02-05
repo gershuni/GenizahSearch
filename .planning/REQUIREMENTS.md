@@ -89,9 +89,9 @@
 | META-02 | Phase 6 | Pending |
 | META-03 | Phase 6 | Pending |
 | META-04 | Phase 6 | Pending |
-| DOC-01 | Phase 1 | Pending |
-| DOC-02 | Phase 1 | Pending |
-| DOC-03 | Phase 1 | Pending |
+| DOC-01 | Phase 1 | Complete |
+| DOC-02 | Phase 1 | Complete |
+| DOC-03 | Phase 1 | Complete |
 | DOC-04 | Phase 3 | Pending |
 | IMP-01 | Phase 2 | Pending |
 | IMP-02 | Phase 2 | Pending |
