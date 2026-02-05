@@ -75,10 +75,10 @@ Plans:
   2. Transcription shows source attribution ("Transcription by [scholar name]")
   3. User can click link to view original document on PGP website
   4. PGP transcription appears as primary version when available (above HTR versions)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 04-01: Extend version selector with PGP source
+- [ ] 04-01-PLAN.md — Integrate PGP transcriptions into version selector with attribution
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -132,7 +132,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
 | 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
 | 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
-| 4. Transcription Display | 0/1 | Not started | - |
+| 4. Transcription Display | 0/1 | Planned | - |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
@@ -140,4 +140,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 3 complete (1 plan)*
+*Updated: 2026-02-05 - Phase 4 planned (1 plan)*
