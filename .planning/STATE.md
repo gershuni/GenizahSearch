@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 3 - Document Service (COMPLETE)
+**Current focus:** Phase 4 - Transcription Display (In progress)
 
 ## Current Position
 
-Phase: 3 of 7 (Document Service)
-Plan: 1 of 1 in current phase (COMPLETE)
-Status: Phase complete
-Last activity: 2026-02-05 - Completed 03-01-PLAN.md
+Phase: 4 of 7 (Transcription Display)
+Plan: 1 of 2 in current phase (COMPLETE)
+Status: In progress
+Last activity: 2026-02-05 - Completed 04-01-PLAN.md
 
-Progress: [████░░░░░░] 57%
+Progress: [█████░░░░░] 71%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 11.3 min
-- Total execution time: 45 min
+- Total plans completed: 5
+- Average duration: 9.8 min
+- Total execution time: 49 min
 
 **By Phase:**
 
@@ -30,10 +30,11 @@ Progress: [████░░░░░░] 57%
 | 01-database-schema | 1 | 8 min | 8 min |
 | 02-pgp-data-import | 2 | 33 min | 16.5 min |
 | 03-document-service | 1 | 4 min | 4 min |
+| 04-transcription-display | 1 | 4 min | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (8 min), 02-01 (3 min), 02-02 (30 min), 03-01 (4 min)
-- Trend: Service layer plan was fast (no authentication gates, straightforward implementation)
+- Last 5 plans: 02-01 (3 min), 02-02 (30 min), 03-01 (4 min), 04-01 (4 min)
+- Trend: UI integration plans executing quickly due to well-prepared service layer
 
 *Updated after each plan completion*
 
@@ -71,13 +72,19 @@ Recent decisions affecting current work:
 - None semantics for missing/empty data (consistent API)
 - Service layer pattern isolates query details from UI
 
+**04-01 Decisions:**
+- PGP as first menu item (above V0.8) when available
+- Green verified icon and styling for PGP version
+- Auto-select PGP on page load as default
+- pgp_transcription dict structure: {content, attribution, pgp_url, pgpid}
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - document service is ready for UI integration phases.
+None - version selector integration complete, ready for multi-fragment display.
 
 ## Data Import Summary
 
@@ -96,8 +103,16 @@ Document service provides 4 functions for accessing PGP data:
 
 All functions handle errors gracefully (return None/empty list, never raise).
 
+## UI Integration Summary
+
+Version selector now supports PGP transcriptions:
+- PGP option appears first in menu with verified icon when available
+- Auto-selects PGP as default version on page load
+- Attribution (scholar name) displayed in menu and notification
+- Hebrew translations added for all PGP UI strings
+
 ## Session Continuity
 
-Last session: 2026-02-05 19:43
-Stopped at: Completed 03-01-PLAN.md (Document Service phase complete)
+Last session: 2026-02-05 20:10
+Stopped at: Completed 04-01-PLAN.md (Version Selector Integration)
 Resume file: None
