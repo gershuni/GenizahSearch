@@ -170,6 +170,10 @@ def load_documents_metadata(documents_path: str) -> Dict[int, Dict]:
                 'doc_date_original': row.get('doc_date_original', ''),
                 'doc_date_standard': row.get('doc_date_standard', ''),
                 'inferred_date_display': row.get('inferred_date_display', ''),
+                'languages_primary': row.get('languages_primary', ''),
+                'languages_secondary': row.get('languages_secondary', ''),
+                'inferred_date_standard': row.get('inferred_date_standard', ''),
+                'inferred_date_rationale': row.get('inferred_date_rationale', ''),
             }
 
     return documents
@@ -207,6 +211,10 @@ def prepare_document_records(
             'description': meta.get('description', '') or None,
             'transcription': trans_data.get('content', '') or None,
             'transcription_source': trans_data.get('source_scholar', '') or None,
+            'languages_primary': meta.get('languages_primary', '') or None,
+            'languages_secondary': meta.get('languages_secondary', '') or None,
+            'inferred_date_standard': meta.get('inferred_date_standard', '') or None,
+            'inferred_date_rationale': meta.get('inferred_date_rationale', '') or None,
         }
 
         valid_records.append(doc_record)
