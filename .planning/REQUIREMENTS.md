@@ -7,7 +7,7 @@
 - [x] **TRANS-01**: User can view PGP transcription on browse page when available
 - [x] **TRANS-02**: User sees transcription source attribution ("Transcription by [scholar]")
 - [x] **TRANS-03**: User can click through to original PGP document page
-- [ ] **TRANS-04**: User sees "has transcription" indicator in search results
+- [x] **TRANS-04**: User sees "has transcription" indicator in search results
 
 ### Fragment Joins (JOIN)
 
@@ -79,7 +79,7 @@
 | TRANS-01 | Phase 4 | Complete |
 | TRANS-02 | Phase 4 | Complete |
 | TRANS-03 | Phase 4 | Complete |
-| TRANS-04 | Phase 5 | Pending |
+| TRANS-04 | Phase 5 | Complete |
 | JOIN-01 | Phase 7 | Pending |
 | JOIN-02 | Phase 7 | Pending |
 | JOIN-03 | Phase 7 | Pending |

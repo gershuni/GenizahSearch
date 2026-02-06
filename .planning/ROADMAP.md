@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector ✓
 - [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED) ✓
 - [x] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED) ✓
-- [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
+- [x] **Phase 5: Search Integration** - Indicate transcription availability in search results ✓
 - [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
 - [ ] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
 
@@ -127,7 +127,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 05-01-PLAN.md — Add batch transcription lookup and indicator icon to search results
+- [x] 05-01-PLAN.md — Add batch transcription lookup and indicator icon to search results ✓
 
 ### Phase 6: Metadata Display
 **Goal**: Users see PGP document metadata (type, dates, description, tags) on browse page
@@ -171,11 +171,11 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 4. Transcription Display | 3/3 | ✓ Complete | 2026-02-05 |
 | 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
 | 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
-| 5. Search Integration | 0/1 | Planned | - |
+| 5. Search Integration | 1/1 | ✓ Complete | 2026-02-06 |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
 
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-06 - Phase 5 planned: 1 plan for search integration*
+*Updated: 2026-02-06 - Phase 5 complete: search results show transcription indicator*
