@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 4.2 - Multi-Source Import (Complete)
+**Current focus:** Phase 5 - Search Integration
 
 ## Current Position
 
-Phase: 4.2 of 9 (Multi-Source Import)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-02-06 - Completed 04.2-03: Multi-source UI
+Phase: 5 of 9 (Search Integration)
+Plan: 1 of 1 in current phase
+Status: Plan 05-01 complete
+Last activity: 2026-02-06 - Completed 05-01: Add PGP Transcription Indicator
 
-Progress: [██████████] 100%
+Progress: [████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: 10.1 min
-- Total execution time: 111 min
+- Total plans completed: 12
+- Average duration: 9.6 min
+- Total execution time: 115 min
 
 **By Phase:**
 
@@ -33,10 +33,11 @@ Progress: [██████████] 100%
 | 04-transcription-display | 3 | 11 min | 3.7 min |
 | 04.1-separate-translations | 1 | 18 min | 18 min |
 | 04.2-multi-source-import | 3 | 37 min | 12.3 min |
+| 05-search-integration | 1 | 4 min | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min), 04.2-03 (25 min)
-- Trend: UI plans with verification take longer due to bug fixes during testing
+- Last 5 plans: 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min), 04.2-03 (25 min), 05-01 (4 min)
+- Trend: Well-defined plans with clear patterns execute quickly
 
 *Updated after each plan completion*
 
@@ -112,13 +113,19 @@ Recent decisions affecting current work:
 - Show translations on all pages with editions (full-document content)
 - Return None for pages without content (UI can filter appropriately)
 
+**05-01 Decisions:**
+- Batch lookup via `.in_()` query for performance (not N+1)
+- Set return type for O(1) membership checks
+- Icon after library badge, before shelfmark
+- Green "description" icon consistent with PGP styling
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - Phase 4.2 complete. Multi-source UI working with all features.
+None - Phase 5 Plan 01 complete. Search results now show transcription availability indicator.
 
 ### Quick Tasks Completed
 
@@ -128,6 +135,12 @@ None - Phase 4.2 complete. Multi-source UI working with all features.
 | 002 | Page loading progress bar | 2026-02-06 | 034dd67 | [002-browse-loading-progress-bar](./quick/002-browse-loading-progress-bar/) |
 
 ### Roadmap Evolution
+
+- Phase 5 Plan 01 completed: PGP transcription indicator in search results
+  - Batch lookup function added to document_service.py
+  - Green icon appears on search results with transcriptions
+  - Hebrew translation added
+  - TRANS-04 requirement satisfied
 
 - Phase 4.2 completed: Multi-source UI with transcriptions and translations
   - Version selector shows all available transcriptions grouped by scholar
@@ -156,7 +169,7 @@ PGP data successfully imported to Supabase:
 
 ## Service Layer Summary
 
-Document service provides 9 functions for accessing PGP data:
+Document service provides 10 functions for accessing PGP data:
 - `get_document_for_fragment(sys_id)` - Look up document by fragment sys_id
 - `get_fragments_for_document(pgpid)` - Get all fragments in sequence order
 - `get_transcription_for_document(pgpid)` - Get transcription text
@@ -166,8 +179,9 @@ Document service provides 9 functions for accessing PGP data:
 - `get_sources_for_document(pgpid)` - Get all sources (editions + translations)
 - `get_editions_for_document(pgpid)` - Get Digital Editions only
 - `get_translations_for_document(pgpid)` - Get Digital Translations only
+- `get_sys_ids_with_transcriptions(sys_ids)` - Batch check for transcription availability
 
-All functions handle errors gracefully (return None/empty list, never raise).
+All functions handle errors gracefully (return None/empty list/set, never raise).
 
 ## UI Integration Summary
 
@@ -184,6 +198,7 @@ Version selector now supports PGP transcriptions with multi-source display:
 - TRANS-01: User can view PGP transcription on browse page
 - TRANS-02: User sees transcription source attribution
 - TRANS-03: User can click through to original PGP document page
+- TRANS-04: User sees "has transcription" indicator in search results
 - MULTI-01: User can switch between multiple scholars' editions
 - MULTI-02: User can view Hebrew/English translations
 - PGP transcription displays correctly per page (recto/verso split)
@@ -191,5 +206,5 @@ Version selector now supports PGP transcriptions with multi-source display:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04.2-03-PLAN.md (Multi-source UI) - Phase 4.2 complete
+Stopped at: Completed 05-01-PLAN.md (PGP Transcription Indicator) - Phase 5 Plan 01 complete
 Resume file: None
