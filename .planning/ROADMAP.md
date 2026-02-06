@@ -138,10 +138,12 @@ Plans:
   2. Date information (original and/or inferred) displays when available
   3. English description/summary from PGP displays when available
   4. Subject tags from PGP display and are clickable/browseable
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: Add metadata display component to browse page
+- [ ] 06-01-PLAN.md — Add missing metadata columns to DB and update import script
+- [ ] 06-02-PLAN.md — Build PGP metadata display section in browse page metadata panel
+- [ ] 06-03-PLAN.md — Implement tag-based search (service + route + results rendering)
 
 ### Phase 7: Joins UI
 **Goal**: Users can see and navigate fragment relationships on browse page
@@ -172,7 +174,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
 | 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
 | 5. Search Integration | 1/1 | ✓ Complete | 2026-02-06 |
-| 6. Metadata Display | 0/1 | Not started | - |
+| 6. Metadata Display | 0/3 | Planning complete | - |
 | 7. Joins UI | 0/1 | Not started | - |
 
 ---
