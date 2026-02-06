@@ -89,7 +89,8 @@ def create_version_selector(
     original_text: str,
     on_version_change: Optional[Callable[[str, dict], None]] = None,
     size: str = "sm",
-    pgp_transcription: Optional[Dict[str, Any]] = None
+    pgp_transcription: Optional[Dict[str, Any]] = None,
+    all_sources: Optional[List[Dict[str, Any]]] = None
 ):
     """Create a version selector dropdown.
 
@@ -99,13 +100,24 @@ def create_version_selector(
         original_text: The original V0.8 transcription text
         on_version_change: Callback when version is selected (text, version_info)
         size: Button size ('sm', 'md', etc.)
-        pgp_transcription: Optional dict with PGP transcription data:
+        pgp_transcription: Optional dict with PGP transcription data (for backward compat):
             - content: The transcription text
             - attribution: Scholar/source name
             - pgp_url: URL to PGP document
             - pgpid: PGP document ID
+        all_sources: Optional list of all sources from document_sources table.
+            If provided, enables multi-source display with multiple scholars and translations.
     """
     container = ui.row().classes('items-center gap-2')
+
+    # Helper functions to separate editions and translations from all_sources
+    def get_editions(sources: List[Dict]) -> List[Dict]:
+        """Filter sources to Digital Editions only."""
+        return [s for s in sources if 'Edition' in (s.get('doc_relation') or '')]
+
+    def get_translations(sources: List[Dict]) -> List[Dict]:
+        """Filter sources to Digital Translations only."""
+        return [s for s in sources if 'Translation' in (s.get('doc_relation') or '')]
 
     with container:
         # Version indicator
@@ -115,7 +127,27 @@ def create_version_selector(
 
         def load_and_apply_latest():
             """Load versions and apply the latest/default one."""
-            # If PGP transcription is available, auto-select it as primary
+            # If multi-source available, use first edition as default
+            if all_sources:
+                editions = get_editions(all_sources)
+                if editions:
+                    first_edition = editions[0]
+                    attribution = first_edition.get('source_scholar', 'PGP')
+                    version_label.text = 'PGP'
+                    version_label.style('color: var(--q-positive);')  # Green for verified
+                    if on_version_change:
+                        on_version_change(first_edition.get('content', ''), {
+                            'source': 'pgp',
+                            'attribution': attribution,
+                            'pgp_url': pgp_transcription.get('pgp_url') if pgp_transcription else None,
+                            'pgpid': first_edition.get('pgpid'),
+                            'is_pgp': True,
+                            'is_default': True,
+                            'source_id': first_edition.get('id')
+                        })
+                    return
+
+            # Fallback to pgp_transcription for backward compatibility
             if pgp_transcription and pgp_transcription.get('content'):
                 attribution = pgp_transcription.get('attribution', 'PGP')
                 version_label.text = 'PGP'
@@ -160,8 +192,97 @@ def create_version_selector(
                 # Rebuild the menu
                 menu.clear()
                 with menu:
-                    # PGP Transcription (first/primary when available)
-                    if pgp_transcription and pgp_transcription.get('content'):
+                    # Check if we have multi-source data
+                    editions = get_editions(all_sources) if all_sources else []
+                    translations = get_translations(all_sources) if all_sources else []
+                    has_multi_source = len(editions) > 0 or len(translations) > 0
+
+                    # PGP Transcriptions section (multi-source mode)
+                    if has_multi_source and editions:
+                        # Section header for multiple editions
+                        if len(editions) > 1:
+                            ui.label(tr('PGP Transcriptions')).classes('text-xs px-4 py-1 font-semibold').style('color: var(--q-positive);')
+
+                        for idx, edition in enumerate(editions):
+                            scholar = edition.get('source_scholar', 'Unknown')
+
+                            def make_select_edition(ed=edition, scholar_name=scholar):
+                                def select_edition():
+                                    version_label.text = 'PGP'
+                                    version_label.style('color: var(--q-positive);')
+                                    menu.close()
+                                    if on_version_change:
+                                        on_version_change(ed.get('content', ''), {
+                                            'source': 'pgp',
+                                            'attribution': scholar_name,
+                                            'pgp_url': pgp_transcription.get('pgp_url') if pgp_transcription else None,
+                                            'pgpid': ed.get('pgpid'),
+                                            'is_pgp': True,
+                                            'source_id': ed.get('id')
+                                        })
+                                return select_edition
+
+                            with ui.menu_item(on_click=make_select_edition()).classes('text-sm'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.icon('verified', size='xs').classes('text-green-600')
+                                    with ui.column().classes('gap-0'):
+                                        if len(editions) == 1:
+                                            ui.label(tr('PGP Transcription')).classes('font-medium text-green-700')
+                                        ui.label(f"{tr('by')} {scholar}").classes('text-xs' if len(editions) == 1 else 'text-sm').style('color: var(--text-muted);' if len(editions) == 1 else '')
+                                        # External link to PGP website (only for first edition or single)
+                                        if idx == 0 and pgp_transcription and pgp_transcription.get('pgp_url'):
+                                            with ui.row().classes('items-center gap-1'):
+                                                with ui.link(target=pgp_transcription.get('pgp_url'), new_tab=True).classes('ml-1').on('click', lambda e: e.stop_propagation()):
+                                                    ui.icon('open_in_new', size='xs').classes('text-green-600')
+                                                    ui.tooltip(tr('View on PGP'))
+
+                        ui.separator()
+
+                        # Translations section
+                        if translations:
+                            ui.label(tr('Translations')).classes('text-xs px-4 py-1 font-semibold').style('color: var(--q-primary);')
+
+                            # Group by language
+                            hebrew_trans = [t for t in translations if t.get('language') == 'Hebrew']
+                            english_trans = [t for t in translations if t.get('language') == 'English']
+                            other_trans = [t for t in translations if t.get('language') not in ('Hebrew', 'English')]
+
+                            for lang_group, lang_name, lang_key in [
+                                (hebrew_trans, 'Hebrew', 'Hebrew Translation'),
+                                (english_trans, 'English', 'English Translation'),
+                                (other_trans, 'Other', 'Translation')
+                            ]:
+                                for trans in lang_group:
+                                    scholar = trans.get('source_scholar', 'Unknown')
+                                    language = trans.get('language', lang_name)
+
+                                    def make_select_translation(tr_data=trans, scholar_name=scholar, lang=language):
+                                        def select_translation():
+                                            version_label.text = f"{lang} {tr('Translation')}"
+                                            version_label.style('color: var(--q-primary);')
+                                            menu.close()
+                                            if on_version_change:
+                                                on_version_change(tr_data.get('content', ''), {
+                                                    'source': 'translation',
+                                                    'attribution': scholar_name,
+                                                    'language': lang,
+                                                    'pgpid': tr_data.get('pgpid'),
+                                                    'is_translation': True,
+                                                    'source_id': tr_data.get('id')
+                                                })
+                                        return select_translation
+
+                                    with ui.menu_item(on_click=make_select_translation()).classes('text-sm'):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.icon('translate', size='xs').classes('text-blue-600')
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(f"{tr(lang_key)}").classes('text-sm')
+                                                ui.label(f"{tr('by')} {scholar}").classes('text-xs').style('color: var(--text-muted);')
+
+                            ui.separator()
+
+                    # Fallback: Single PGP transcription (backward compatibility mode)
+                    elif pgp_transcription and pgp_transcription.get('content'):
                         def select_pgp():
                             version_label.text = 'PGP'
                             version_label.style('color: var(--q-positive);')
