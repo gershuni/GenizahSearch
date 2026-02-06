@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 7 of 9 (Joins UI)
-Plan: 0 of 1 in current phase
-Status: Not started
-Last activity: 2026-02-06 - Completed Phase 6: Metadata Display (all 3 plans)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-02-06 - Completed 07-01-PLAN.md (Unified Joins Data Layer)
 
-Progress: [############] 100%
+Progress: [################] ~89%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
-- Average duration: 9.7 min
-- Total execution time: 150 min
+- Total plans completed: 16
+- Average duration: 9.3 min
+- Total execution time: 153 min
 
 **By Phase:**
 
@@ -35,10 +35,11 @@ Progress: [############] 100%
 | 04.2-multi-source-import | 3 | 37 min | 12.3 min |
 | 05-search-integration | 1 | 4 min | 4 min |
 | 06-metadata-display | 3 | 35 min | 11.7 min |
+| 07-joins-ui | 1 | 3 min | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 04.2-03 (25 min), 05-01 (4 min), 06-01 (5 min), 06-02 (15 min), 06-03 (15 min)
-- Trend: Interactive plans with user feedback take longer but produce better results
+- Last 5 plans: 05-01 (4 min), 06-01 (5 min), 06-02 (15 min), 06-03 (15 min), 07-01 (3 min)
+- Trend: Pure data-layer plans execute fastest; interactive UI plans take longer
 
 *Updated after each plan completion*
 
@@ -140,9 +141,15 @@ None.
 - Tag results use viewer pane with text preview (not direct navigation)
 - Translate buttons on description in cards and viewer
 
+**07-01 Decisions:**
+- PGP joins use id=None to prevent admin delete button display
+- Single-fragment PGP documents filtered by unique sys_id count > 1
+- Lazy import of document_service inside function body to avoid circular imports
+- Cache key includes pgpid for proper separation; prefix-based invalidation
+
 ### Blockers/Concerns
 
-None - Phase 6 complete. Ready for Phase 7 (Joins UI).
+None - Phase 7 Plan 01 complete. Ready for Plan 02.
 
 ### Quick Tasks Completed
 
@@ -155,6 +162,13 @@ None - Phase 6 complete. Ready for Phase 7 (Joins UI).
 | 005 | Find unused functions report | 2026-02-06 | daef528 | [005-find-unused-functions](./quick/005-find-unused-functions/) |
 
 ### Roadmap Evolution
+
+- Phase 7 Plan 01 completed: Unified joins data layer
+  - fetch_connected_fragments merges user pairwise + PGP multi-fragment joins
+  - pgpid threaded from browse state to joins button (eliminates redundant query)
+  - Single-fragment PGP documents filtered out (no false "Related Fragments")
+  - fragment_details populated for dialog shelfmark-to-docid lookup
+  - JOIN-01 through JOIN-05 requirements satisfied
 
 - Phase 6 completed: Metadata display with tag-based search
   - 4 new metadata columns added (languages, dates)
@@ -239,6 +253,6 @@ Version selector now supports PGP transcriptions with multi-source display:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Phase 6 complete, Phase 7 (Joins UI) not started
+Stopped at: Completed 07-01-PLAN.md (Unified Joins Data Layer)
 Resume file: None
-Notes: Phase 6 completed all 3 plans. Next is Phase 7 (Joins UI) - last phase in roadmap.
+Notes: Phase 7 Plan 01 complete. Plan 02 (inline metadata panel) is next.
