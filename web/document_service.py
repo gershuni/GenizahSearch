@@ -13,7 +13,7 @@ rather than raising exceptions.
 """
 
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from web.supabase_client import get_client
 
 
@@ -351,3 +351,30 @@ def get_translations_for_document(pgpid: int) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error getting translations for document {pgpid}: {e}")
         return []
+
+
+def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
+    """
+    Batch check which sys_ids have PGP transcriptions.
+
+    Args:
+        sys_ids: List of system IDs to check
+
+    Returns:
+        Set of sys_ids that have linked PGP documents with transcriptions
+    """
+    if not sys_ids:
+        return set()
+
+    try:
+        client = get_client()
+        # Query document_fragments for matching sys_ids
+        # Any sys_id in document_fragments has a linked document
+        response = client.table('document_fragments').select(
+            'sys_id'
+        ).in_('sys_id', sys_ids).execute()
+
+        return {row['sys_id'] for row in (response.data or [])}
+    except Exception as e:
+        print(f"Error batch checking transcriptions: {e}")
+        return set()
