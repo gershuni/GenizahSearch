@@ -109,12 +109,12 @@ Plans:
   4. Version selector shows all available transcriptions with scholar names
   5. Translations shown as separate menu section (Hebrew and English distinguished)
   6. User can switch between different scholars' transcriptions
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04.2-01: Schema migration for document_sources table
-- [ ] 04.2-02: Reimport all sources from CSV
-- [ ] 04.2-03: Update version selector to show multiple sources
+- [ ] 04.2-01-PLAN.md — Schema migration for document_sources table
+- [ ] 04.2-02-PLAN.md — Reimport all sources from CSV
+- [ ] 04.2-03-PLAN.md — Update version selector to show multiple sources
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -170,7 +170,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
 | 4. Transcription Display | 3/3 | ✓ Complete | 2026-02-05 |
 | 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
-| 4.2 Multi-Source Import | 0/3 | Not started | - |
+| 4.2 Multi-Source Import | 0/3 | Planned | - |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
@@ -178,4 +178,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-06 - Phase 4.2 inserted for multi-source import (multiple transcriptions + translations per document)*
+*Updated: 2026-02-06 - Phase 4.2 planned: 3 plans in 3 waves (schema -> import -> UI)*
