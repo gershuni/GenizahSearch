@@ -110,6 +110,27 @@ def create_project_tree(
         with tree_container:
             # Render projects with their lists
             with ui.column().classes('w-full gap-2'):
+                # Recently Viewed section (rendered first for quick access)
+                standalone_lists = lists_by_project.get(None, [])
+                system_lists = [l for l in standalone_lists if l.get('is_system')]
+                recently_viewed = [l for l in system_lists if l.get('name') == 'Recently Viewed']
+
+                if recently_viewed:
+                    with ui.element('div').classes('mb-2'):
+                        ui.label(tr('Recent')).classes(
+                            'text-xs font-semibold uppercase mb-2'
+                        ).style('color: var(--text-muted);')
+
+                        for list_data in recently_viewed:
+                            _render_list_item(
+                                list_data=list_data,
+                                lists_mgr=lists_mgr,
+                                selected_list_id=selected_list_id,
+                                on_select=on_select,
+                                on_refresh=on_refresh,
+                                show_color=True
+                            )
+
                 # Projects section
                 for project_id, project_data in projects.items():
                     project_lists = lists_by_project.get(project_id, [])
@@ -125,11 +146,12 @@ def create_project_tree(
                     )
 
                 # Standalone lists section (lists not in any project)
-                standalone_lists = lists_by_project.get(None, [])
+                # Note: standalone_lists, system_lists, recently_viewed already computed above
                 if standalone_lists:
                     # Filter out system lists for separate display
                     regular_lists = [l for l in standalone_lists if not l.get('is_system')]
-                    system_lists = [l for l in standalone_lists if l.get('is_system')]
+                    # Exclude Recently Viewed from system lists (already rendered at top)
+                    other_system_lists = [l for l in system_lists if l.get('name') != 'Recently Viewed']
 
                     if regular_lists:
                         with ui.element('div').classes('mt-4'):
@@ -147,14 +169,14 @@ def create_project_tree(
                                     show_color=True
                                 )
 
-                    # System lists at bottom
-                    if system_lists:
+                    # System lists at bottom (excluding Recently Viewed which is at top)
+                    if other_system_lists:
                         with ui.element('div').classes('mt-4'):
                             ui.label(tr('System')).classes(
                                 'text-xs font-semibold uppercase mb-2'
                             ).style('color: var(--text-muted);')
 
-                            for list_data in system_lists:
+                            for list_data in other_system_lists:
                                 _render_list_item(
                                     list_data=list_data,
                                     lists_mgr=lists_mgr,
