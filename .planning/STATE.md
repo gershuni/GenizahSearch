@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 5 - Search Integration (Ready to start)
+**Current focus:** Phase 4.2 - Multi-Source Import (Ready to plan)
 
 ## Current Position
 
-Phase: 5 of 8 (Search Integration)
-Plan: 0 of 1 in current phase
-Status: Ready to start
-Last activity: 2026-02-06 - Completed Phase 4.1 (translations filtered)
+Phase: 4.2 of 9 (Multi-Source Import)
+Plan: 0 of 3 in current phase
+Status: Ready to plan
+Last activity: 2026-02-06 - Phase 4.2 inserted for multi-source transcriptions/translations
 
 Progress: [████████░░] 88%
 
@@ -101,6 +101,12 @@ None.
 ### Blockers/Concerns
 
 None - Phase 4.1 complete, ready for Phase 5.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 001 | Move Recently Viewed list to top of sidebar | 2026-02-06 | a1d72ae | [001-recently-viewed-list-on-top](./quick/001-recently-viewed-list-on-top/) |
 
 ### Roadmap Evolution
 
