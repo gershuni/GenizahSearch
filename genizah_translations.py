@@ -1901,6 +1901,9 @@ TRANSLATIONS = {
     "Tags": "תגיות",
     "Description": "תיאור",
     "Date": "תאריך",
+    "Tag": "תגית",
+    "No results for tag": "אין תוצאות לתגית",
+    "Searching by tag...": "מחפש לפי תגית...",
 
     # --- PGP Transcription ---
     "Has PGP Transcription": "יש תעתיק PGP",

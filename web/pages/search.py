@@ -16,7 +16,7 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
 from genizah_core import SearchEngine, get_library_display
-from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page
+from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
@@ -24,7 +24,7 @@ import re
 import html
 
 
-def create_search_page(initial_query: str = None):
+def create_search_page(initial_query: str = None, initial_tag: str = None):
     """Create the advanced search page."""
 
     # === State Management ===
@@ -2306,8 +2306,74 @@ def create_search_page(initial_query: str = None):
             fl_id=None
         )
 
+    # Handle tag search
+    if initial_tag:
+        async def load_tag_results():
+            """Load results for a tag-based search."""
+            results_container.clear()
+            with results_container:
+                with ui.column().classes('w-full h-64 items-center justify-center'):
+                    ui.spinner('bars', size='xl', color='primary').classes('mb-4')
+                    ui.label(tr("Searching by tag...")).classes('text-xl font-bold animate-pulse').style('color: var(--primary-600);')
+
+            tag_results = await run.io_bound(get_fragments_by_tag, initial_tag)
+
+            results_container.clear()
+            with results_container:
+                if not tag_results:
+                    with ui.column().classes('w-full h-64 items-center justify-center'):
+                        ui.icon('label_off').classes('text-5xl').style('color: var(--text-muted);')
+                        ui.label(f'{tr("No results for tag")}: "{initial_tag}"').classes('mt-4').style('color: var(--text-muted);')
+                    return
+
+                # Tag results header
+                with ui.column().classes('w-full gap-2 p-4'):
+                    with ui.row().classes('items-center gap-2 mb-3'):
+                        ui.icon('label').classes('text-lg').style('color: var(--success-600);')
+                        ui.label(f'{tr("Tag")}: ').classes('text-sm').style('color: var(--text-secondary);')
+                        ui.badge(initial_tag, color='green').props('outline').classes('text-sm')
+                        ui.label(f'({len(tag_results)} {tr("results")})').classes('text-sm').style('color: var(--text-muted);')
+
+                    # Render tag results as cards
+                    for i, result in enumerate(tag_results):
+                        with ui.card().classes(
+                            'w-full p-4 cursor-pointer transition-all hover:shadow-md'
+                        ).style('border-radius: 10px;'):
+                            with ui.row().classes('w-full items-start justify-between'):
+                                with ui.column().classes('flex-grow min-w-0 gap-1').on(
+                                    'click',
+                                    lambda r=result: ui.navigate.to(f'/browse?sys_id={r["sys_id"]}')
+                                ):
+                                    with ui.row().classes('items-center gap-2 flex-wrap'):
+                                        ui.label(f"#{i + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                            'background: var(--bg-tertiary); color: var(--text-muted);'
+                                        )
+                                        # PGP indicator
+                                        ui.icon('description').classes('text-sm').style(
+                                            'color: var(--success-600);'
+                                        ).tooltip(tr('Has PGP Transcription'))
+                                        ui.label(result.get('shelfmark', 'Unknown')).classes(
+                                            'font-bold break-all'
+                                        ).style('color: var(--primary-700);')
+
+                                    # Document type
+                                    if result.get('document_type'):
+                                        ui.label(result['document_type']).classes('text-xs').style(
+                                            'color: var(--text-tertiary);'
+                                        )
+
+                                    # Description snippet (truncated)
+                                    desc = result.get('description', '') or ''
+                                    if desc:
+                                        truncated = (desc[:150] + '...') if len(desc) > 150 else desc
+                                        ui.label(truncated).classes('text-xs mt-1').style(
+                                            'color: var(--text-secondary); line-height: 1.4;'
+                                        )
+
+        ui.timer(0.1, load_tag_results, once=True)
+
     # Initialize with restored results or initial query
-    if initial_query:
+    elif initial_query:
         ui.timer(0.5, execute_search, once=True)
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"

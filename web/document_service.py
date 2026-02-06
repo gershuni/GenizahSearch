@@ -447,3 +447,60 @@ def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
     except Exception as e:
         print(f"Error batch checking transcriptions: {e}")
         return set()
+
+
+def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
+    """
+    Get all fragments linked to PGP documents with a specific tag.
+
+    Uses GIN-indexed JSONB @> query for efficient tag matching.
+    Returns fragment-level results (one per sys_id) with document metadata.
+
+    Args:
+        tag: Tag string to search for (e.g., "communal", "marriage")
+
+    Returns:
+        List of dicts with sys_id, shelfmark, document_type, description, pgpid.
+        Returns empty list if not found or on error.
+    """
+    if not tag:
+        return []
+
+    try:
+        client = get_client()
+
+        # Step 1: Find documents with this tag (GIN-indexed JSONB query)
+        doc_response = client.table('documents').select(
+            'pgpid, shelfmark_combined, document_type, description'
+        ).contains('tags', [tag]).execute()
+
+        if not doc_response.data:
+            return []
+
+        # Step 2: Batch get all fragments for matching documents
+        doc_ids = [d['pgpid'] for d in doc_response.data]
+        frag_response = client.table('document_fragments').select(
+            'sys_id, shelfmark, document_id'
+        ).in_('document_id', doc_ids).execute()
+
+        if not frag_response.data:
+            return []
+
+        # Step 3: Join fragment info with document metadata
+        doc_map = {d['pgpid']: d for d in doc_response.data}
+        results = []
+        for frag in frag_response.data:
+            doc = doc_map.get(frag['document_id'], {})
+            results.append({
+                'sys_id': frag['sys_id'],
+                'shelfmark': frag['shelfmark'],
+                'document_type': doc.get('document_type', ''),
+                'description': doc.get('description', ''),
+                'pgpid': frag['document_id'],
+            })
+
+        return results
+
+    except Exception as e:
+        print(f"Error searching by tag '{tag}': {e}")
+        return []
