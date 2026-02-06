@@ -112,12 +112,12 @@ def create_version_selector(
 
     # Helper functions to separate editions and translations from all_sources
     def get_editions(sources: List[Dict]) -> List[Dict]:
-        """Filter sources to Digital Editions only."""
-        return [s for s in sources if 'Edition' in (s.get('doc_relation') or '')]
+        """Filter sources to Digital Editions with content for current page."""
+        return [s for s in sources if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
 
     def get_translations(sources: List[Dict]) -> List[Dict]:
-        """Filter sources to Digital Translations only."""
-        return [s for s in sources if 'Translation' in (s.get('doc_relation') or '')]
+        """Filter sources to Digital Translations with content for current page."""
+        return [s for s in sources if 'Translation' in (s.get('doc_relation') or '') and s.get('content')]
 
     with container:
         # Version indicator
@@ -196,6 +196,7 @@ def create_version_selector(
                     editions = get_editions(all_sources) if all_sources else []
                     translations = get_translations(all_sources) if all_sources else []
                     has_multi_source = len(editions) > 0 or len(translations) > 0
+                    print(f"[DEBUG version_selector] all_sources={len(all_sources) if all_sources else 'None'}, editions={len(editions)}, translations={len(translations)}, has_multi_source={has_multi_source}")
 
                     # PGP Transcriptions section (multi-source mode)
                     if has_multi_source and editions:

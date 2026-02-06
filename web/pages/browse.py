@@ -887,13 +887,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             pgpid = pgp_doc.get('pgpid')
                             if pgpid:
                                 all_sources = get_sources_for_document(pgpid)
+                                print(f"[DEBUG] PGPID {pgpid}: fetched {len(all_sources)} sources")
                                 # Apply page filtering to source content (recto/verso split)
                                 for source in all_sources:
                                     if source.get('content'):
                                         source['content'] = get_section_for_page(source['content'], page.p_num)
                                 state.all_sources = all_sources
+                                print(f"[DEBUG] state.all_sources set to {len(state.all_sources)} items")
                             else:
                                 state.all_sources = None
+                                print(f"[DEBUG] No PGPID, state.all_sources = None")
                         else:
                             state.pgp_transcription = None
                             state.all_sources = None

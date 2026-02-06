@@ -218,7 +218,7 @@ def parse_transcription_sections(transcription: str) -> dict:
     return sections
 
 
-def get_section_for_page(transcription: str, page_num: int) -> str:
+def get_section_for_page(transcription: str, page_num: int) -> Optional[str]:
     """
     Get the appropriate transcription section for a page number.
 
@@ -227,17 +227,27 @@ def get_section_for_page(transcription: str, page_num: int) -> str:
         page_num: Page number (1 = recto, 2 = verso for single-fragment docs)
 
     Returns:
-        Section text for the page, or full transcription if no markers found.
+        Section text for the page, None if no content exists for this page,
+        or full transcription if no recto/verso markers found at all.
     """
     sections = parse_transcription_sections(transcription)
 
+    # Check if the transcription has any recto/verso markers
+    has_recto = bool(sections.get('recto'))
+    has_verso = bool(sections.get('verso'))
+
     # Map page number to section type
     # For single-fragment: page 1 = recto, page 2 = verso
-    # For multi-fragment: this mapping may need enhancement later
     if page_num == 1:
         section_list = sections.get('recto', [])
+        # If document has verso-only content, return None for recto page
+        if not section_list and has_verso:
+            return None
     elif page_num == 2:
         section_list = sections.get('verso', [])
+        # If document has recto-only content, return None for verso page
+        if not section_list and has_recto:
+            return None
     else:
         # For pages beyond 2, return full content (multi-fragment case)
         # TODO: Enhance for multi-fragment documents in future
@@ -246,8 +256,8 @@ def get_section_for_page(transcription: str, page_num: int) -> str:
     if section_list:
         return '\n\n'.join(section_list)
 
-    # Fallback: if no content for this page type, return full transcription
-    # (handles documents with only recto or only verso)
+    # No markers found at all - return full transcription
+    # (handles documents without recto/verso structure)
     return transcription
 
 
