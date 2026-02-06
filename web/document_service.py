@@ -249,3 +249,95 @@ def get_section_for_page(transcription: str, page_num: int) -> str:
     # Fallback: if no content for this page type, return full transcription
     # (handles documents with only recto or only verso)
     return transcription
+
+
+def get_sources_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get all sources (editions and translations) for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of source dicts ordered by: doc_relation (Edition first, then Translation),
+        then sequence_order. Returns empty list if not found or on error.
+
+    Note:
+        Each source dict contains: id, pgpid, source_scholar, doc_relation,
+        content, language, content_length, sequence_order, created_at.
+    """
+    if not pgpid:
+        return []
+
+    try:
+        client = get_client()
+
+        # Order by doc_relation (Editions first alphabetically before Translations)
+        # then by sequence_order
+        response = client.table('document_sources').select('*').eq(
+            'pgpid', pgpid
+        ).order('doc_relation', desc=False).order('sequence_order', desc=False).execute()
+
+        return response.data or []
+
+    except Exception as e:
+        print(f"Error getting sources for document {pgpid}: {e}")
+        return []
+
+
+def get_editions_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get Digital Editions for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of edition source dicts (doc_relation contains 'Edition').
+        Useful for transcription selector with multiple scholars.
+    """
+    if not pgpid:
+        return []
+
+    try:
+        client = get_client()
+
+        # Filter to doc_relation containing 'Edition' (Digital Edition, Edition)
+        response = client.table('document_sources').select('*').eq(
+            'pgpid', pgpid
+        ).like('doc_relation', '%Edition%').order('sequence_order', desc=False).execute()
+
+        return response.data or []
+
+    except Exception as e:
+        print(f"Error getting editions for document {pgpid}: {e}")
+        return []
+
+
+def get_translations_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get Digital Translations for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of translation source dicts (doc_relation contains 'Translation').
+        Each includes a 'language' field (Hebrew or English).
+    """
+    if not pgpid:
+        return []
+
+    try:
+        client = get_client()
+
+        # Filter to doc_relation containing 'Translation' (Digital Translation)
+        response = client.table('document_sources').select('*').eq(
+            'pgpid', pgpid
+        ).like('doc_relation', '%Translation%').order('sequence_order', desc=False).execute()
+
+        return response.data or []
+
+    except Exception as e:
+        print(f"Error getting translations for document {pgpid}: {e}")
+        return []
