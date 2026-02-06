@@ -20,7 +20,7 @@ from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
-from web.document_service import get_document_for_fragment, get_section_for_page
+from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document
 
 
 # ============================================================================
@@ -686,6 +686,8 @@ class BrowseState:
         self.fullscreen_edit: bool = False  # Fullscreen edit mode
         # PGP transcription data
         self.pgp_transcription: Optional[Dict[str, Any]] = None
+        # Multi-source data (all editions and translations for this document)
+        self.all_sources: Optional[List[Dict[str, Any]]] = None
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -881,11 +883,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'pgp_url': pgp_doc.get('pgp_url'),
                                 'pgpid': pgp_doc.get('pgpid')
                             }
+                            # Fetch all sources for multi-source display
+                            pgpid = pgp_doc.get('pgpid')
+                            if pgpid:
+                                all_sources = get_sources_for_document(pgpid)
+                                # Apply page filtering to source content (recto/verso split)
+                                for source in all_sources:
+                                    if source.get('content'):
+                                        source['content'] = get_section_for_page(source['content'], page.p_num)
+                                state.all_sources = all_sources
+                            else:
+                                state.all_sources = None
                         else:
                             state.pgp_transcription = None
+                            state.all_sources = None
                     except Exception as pgp_err:
                         print(f"Failed to fetch PGP transcription: {pgp_err}")
                         state.pgp_transcription = None
+                        state.all_sources = None
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
@@ -2090,6 +2105,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         f"{tr('PGP Transcription')} - {attribution}",
                                         type='positive'
                                     )
+                                elif source == 'translation':
+                                    attribution = version_info.get('attribution', '')
+                                    language = version_info.get('language', '')
+                                    ui.notify(
+                                        f"{language} {tr('Translation')} - {attribution}",
+                                        type='info'
+                                    )
                                 elif source == 'user' and author:
                                     ui.notify(f"{tr('Showing version by')} {author}", type='info')
                                 elif source in ('V0.7', 'V0.8'):
@@ -2103,7 +2125,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         page_number=page.p_num,
                                         original_text=page.text,
                                         on_version_change=handle_version_change,
-                                        pgp_transcription=state.pgp_transcription
+                                        pgp_transcription=state.pgp_transcription,
+                                        all_sources=state.all_sources
                                     )
 
                             # Initial render
