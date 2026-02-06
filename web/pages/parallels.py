@@ -1095,6 +1095,8 @@ def create_parallels_page(initial_text: str = None):
     def cancel_search():
         p_state.is_cancelled = True
         p_state.status = tr('Cancelling...')
+        # Hide top page loading bar on cancel
+        ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
 
     async def execute_parallels():
         # Prevent duplicate executions
@@ -1144,6 +1146,9 @@ def create_parallels_page(initial_text: str = None):
         progress_bar.style('opacity: 1;')
         progress_bar.set_value(0)
         status_label.text = tr('Initializing search...')
+
+        # Show top page loading bar during search
+        ui.run_javascript('if (window.__showLoadingBar) window.__showLoadingBar();')
 
         # Clear previous results header and container when starting new search
         results_header.text = tr('Searching...')
@@ -1220,6 +1225,9 @@ def create_parallels_page(initial_text: str = None):
 
         p_state.is_running = False
         p_state.progress = 1.0
+
+        # Hide top page loading bar
+        ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
 
         # Hide the search indicator animation
         search_indicator.style('display: none;')
