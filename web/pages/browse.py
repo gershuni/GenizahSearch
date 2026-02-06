@@ -1602,6 +1602,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             'background: rgba(255, 255, 255, 0.15);'
                         ).tooltip(tr('Search for Parallels'))
 
+                        # PGP link button (only when PGP data exists)
+                        if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                            with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
+                                'flex items-center gap-1 px-2 py-1 rounded'
+                            ).style(
+                                'text-decoration: none; '
+                                'color: #ffffff !important; '
+                                'background: rgba(255, 255, 255, 0.2);'
+                            ):
+                                ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
+
                         # Metadata button
                         ui.button(
                             tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata'),
@@ -1757,7 +1769,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
 
                         # Description (full length)
-                        description = state.pgp_metadata.get('description', '')
+                        description = state.pgp_metadata.get('description') or ''
                         if description:
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
