@@ -2308,6 +2308,56 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
     # Handle tag search
     if initial_tag:
+        def load_tag_in_viewer(result):
+            """Load a tag search result into the viewer pane."""
+            viewer_container.clear()
+            sys_id = result.get('sys_id', '')
+            shelfmark = result.get('shelfmark', 'Unknown')
+            doc_type = result.get('document_type', '')
+            description = (result.get('description', '') or '').strip()
+            pgpid = result.get('pgpid')
+
+            # Look up library info
+            library_name = ''
+            if sys_id and hasattr(state, 'meta_mgr') and state.meta_mgr:
+                library_code = state.meta_mgr.get_library_for_id(sys_id)
+                if library_code:
+                    from genizah_core import get_library_display
+                    library_name = get_library_display(library_code, short=False)
+
+            with viewer_container:
+                with ui.column().classes('w-full gap-2 mb-4'):
+                    # Shelfmark header
+                    display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+                    h2(display_shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
+
+                    # Metadata badges
+                    with ui.row().classes('gap-2 flex-wrap mt-2'):
+                        if doc_type:
+                            ui.badge(doc_type).props('outline')
+                        ui.badge('PGP', color='green').props('outline')
+
+                # PGP metadata
+                with ui.column().classes('w-full gap-4 mt-4'):
+                    if description:
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(description).classes('text-sm').style(
+                                'color: var(--text-primary); white-space: pre-wrap; line-height: 1.6;'
+                            )
+
+                    if pgpid:
+                        with ui.column().classes('gap-1 mt-2'):
+                            ui.label(tr('Princeton Geniza Project')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            pgp_url = f'https://geniza.princeton.edu/documents/{pgpid}'
+                            ui.link(pgp_url, pgp_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                # Actions
+                with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
+                    with ui.link(target=f'/browse?sys_id={sys_id}').classes('btn-primary no-underline'):
+                        ui.icon('menu_book').classes('mr-2')
+                        ui.label(tr('Browse Full Manuscript'))
+
         async def load_tag_results():
             """Load results for a tag-based search."""
             results_container.clear()
@@ -2346,7 +2396,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             with ui.row().classes('w-full items-start justify-between'):
                                 with ui.column().classes('flex-grow min-w-0 gap-1').on(
                                     'click',
-                                    lambda r=result: ui.navigate.to(f'/browse?sys_id={r["sys_id"]}')
+                                    lambda r=result: load_tag_in_viewer(r)
                                 ):
                                     with ui.row().classes('items-center gap-2 flex-wrap'):
                                         ui.label(f"#{i + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
