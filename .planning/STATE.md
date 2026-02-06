@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 Phase: 5 of 9 (Search Integration)
 Plan: 1 of 1 in current phase
 Status: Plan 05-01 complete
-Last activity: 2026-02-06 - Completed quick task 003: Fix progress bar navigation + parallels
+Last activity: 2026-02-06 - Completed quick task 004: Clean up server management script
 
 Progress: [████████████] 100%
 
@@ -134,6 +134,7 @@ None - Phase 5 Plan 01 complete. Search results now show transcription availabil
 | 001 | Move Recently Viewed list to top of sidebar | 2026-02-06 | a1d72ae | [001-recently-viewed-list-on-top](./quick/001-recently-viewed-list-on-top/) |
 | 002 | Page loading progress bar | 2026-02-06 | 034dd67 | [002-browse-loading-progress-bar](./quick/002-browse-loading-progress-bar/) |
 | 003 | Fix progress bar navigation + parallels | 2026-02-06 | 7188c92 | [003-fix-progress-bar-navigation-parallels](./quick/003-fix-progress-bar-navigation-parallels/) |
+| 004 | Clean up server management script | 2026-02-06 | 8550302 | [004-clean-up-server-management-script](./quick/004-clean-up-server-management-script/) |
 
 ### Roadmap Evolution
 
@@ -207,5 +208,5 @@ Version selector now supports PGP transcriptions with multi-source display:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed quick-003 (Fix progress bar navigation + parallels)
+Stopped at: Completed quick-004 (Clean up server management script)
 Resume file: None
