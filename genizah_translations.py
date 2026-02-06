@@ -2170,4 +2170,15 @@ TRANSLATIONS = {
     "Ignore separators that are too close together": "התעלם ממפרידים קרובים מדי",
     "Character or pattern that separates paragraphs in your text": "תו או דפוס שמפריד בין פסקאות בטקסט שלך",
     "Search all text chunks regardless of paragraph breaks": "חפש בכל חלקי הטקסט ללא קשר למעברי פסקה",
+
+    # --- Fragment Joins UI ---
+    "Related Fragments": "קטעים קשורים",
+    "This action cannot be undone.": "פעולה זו אינה ניתנת לביטול.",
+    "Failed to delete join": "מחיקת הצירוף נכשלה",
+    "Select fragment to join:": "בחר קטע לצירוף:",
+    "Selected fragment:": "קטע נבחר:",
+    "Notes (optional)": "הערות (אופציונלי)",
+    "direct": "ישיר",
+    "Delete join (admin)": "מחק צירוף (מנהל)",
+    "Change selection": "שנה בחירה",
 }

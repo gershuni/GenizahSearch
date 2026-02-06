@@ -23,6 +23,7 @@ from web.supabase_client import create_correction, update_correction, get_correc
 from web.components.typography import h1, h2, h3
 from web.components.translate_button import create_translatable_text
 from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document, get_all_sources_for_fragment
+from web.components.joins_panel import fetch_connected_fragments
 
 
 # ============================================================================
@@ -1796,6 +1797,73 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Rationale (with translate button)
                                 if date_rationale:
                                     create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
+
+                    # === Related Fragments Section ===
+                    pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+                    joins_data = fetch_connected_fragments(
+                        shelfmark=page.shelfmark,
+                        document_id=page.sys_id,
+                        pgpid=pgpid_for_joins
+                    )
+
+                    if joins_data.get('total_fragments', 1) > 1:
+                        ui.separator().classes('my-3')
+                        # Header row: title + count badge
+                        related_count = joins_data['total_fragments'] - 1
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h3(tr('Related Fragments'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            ui.badge(str(related_count), color='green').props('dense').classes('text-xs')
+
+                        # Build lookup: shelfmark -> (source, relationship_type) from joins data
+                        current_shelfmark_upper = (page.shelfmark or '').upper()
+                        frag_join_info = {}
+                        for j in joins_data.get('joins', []):
+                            fa = j.get('fragment_a', '')
+                            fb = j.get('fragment_b', '')
+                            src = j.get('source', '')
+                            rel = j.get('relationship_type', '')
+                            # Map the "other" fragment in each join
+                            if fa.upper() != current_shelfmark_upper:
+                                frag_join_info.setdefault(fa.upper(), (src, rel))
+                            if fb.upper() != current_shelfmark_upper:
+                                frag_join_info.setdefault(fb.upper(), (src, rel))
+
+                        # List each related fragment
+                        for frag_shelfmark in joins_data.get('fragments', []):
+                            if frag_shelfmark.upper() == current_shelfmark_upper:
+                                continue  # Skip current fragment
+
+                            # Look up source and relationship from joins
+                            source, relationship_type = frag_join_info.get(frag_shelfmark.upper(), ('', ''))
+
+                            # Map relationship type to display text
+                            if relationship_type == 'physical_join':
+                                rel_display = tr('Physical join')
+                            elif relationship_type == 'same_composition':
+                                rel_display = tr('Same composition')
+                            elif relationship_type:
+                                rel_display = relationship_type
+                            else:
+                                rel_display = ''
+
+                            # Navigation callback (closure)
+                            def make_nav_to(target=frag_shelfmark):
+                                def nav():
+                                    state.shelfmark_query = target
+                                    search_shelfmark()
+                                return nav
+
+                            with ui.row().classes(
+                                'items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded w-full'
+                            ).on('click', make_nav_to()):
+                                ui.icon('description', size='xs').classes('text-gray-500')
+                                ui.label(frag_shelfmark).classes('text-sm font-medium').style('color: var(--text-primary);')
+                                if source == 'PGP':
+                                    ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
+                                if rel_display:
+                                    ui.label(rel_display).classes('text-xs').style('color: var(--text-tertiary);')
+                                ui.space()
+                                ui.icon('arrow_back' if is_rtl() else 'arrow_forward', size='xs').classes('text-gray-400')
 
                     # Export
                     ui.separator().classes('my-3')
