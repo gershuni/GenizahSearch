@@ -141,9 +141,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Add missing metadata columns to DB and update import script
-- [ ] 06-02-PLAN.md — Build PGP metadata display section in browse page metadata panel
-- [ ] 06-03-PLAN.md — Implement tag-based search (service + route + results rendering)
+- [x] 06-01-PLAN.md — Add missing metadata columns to DB and update import script ✓
+- [x] 06-02-PLAN.md — Build PGP metadata display section in browse page metadata panel ✓
+- [x] 06-03-PLAN.md — Implement tag-based search (service + route + results rendering) ✓
 
 ### Phase 7: Joins UI
 **Goal**: Users can see and navigate fragment relationships on browse page
@@ -174,10 +174,10 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
 | 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
 | 5. Search Integration | 1/1 | ✓ Complete | 2026-02-06 |
-| 6. Metadata Display | 0/3 | Planning complete | - |
+| 6. Metadata Display | 3/3 | ✓ Complete | 2026-02-06 |
 | 7. Joins UI | 0/1 | Not started | - |
 
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-06 - Phase 5 complete: search results show transcription indicator*
+*Updated: 2026-02-06 - Phase 6 complete: metadata display with tag search*

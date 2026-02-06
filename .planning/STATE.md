@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 6 - Metadata Display
+**Current focus:** Phase 7 - Joins UI
 
 ## Current Position
 
-Phase: 6 of 9 (Metadata Display)
-Plan: 0 of 3 in current phase
-Status: Planning complete, ready for execution
-Last activity: 2026-02-06 - Completed quick task 005: Find unused functions report
+Phase: 7 of 9 (Joins UI)
+Plan: 0 of 1 in current phase
+Status: Not started
+Last activity: 2026-02-06 - Completed Phase 6: Metadata Display (all 3 plans)
 
-Progress: [            ] 0%
+Progress: [############] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 9.6 min
-- Total execution time: 115 min
+- Total plans completed: 15
+- Average duration: 9.7 min
+- Total execution time: 150 min
 
 **By Phase:**
 
@@ -34,10 +34,11 @@ Progress: [            ] 0%
 | 04.1-separate-translations | 1 | 18 min | 18 min |
 | 04.2-multi-source-import | 3 | 37 min | 12.3 min |
 | 05-search-integration | 1 | 4 min | 4 min |
+| 06-metadata-display | 3 | 35 min | 11.7 min |
 
 **Recent Trend:**
-- Last 5 plans: 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min), 04.2-03 (25 min), 05-01 (4 min)
-- Trend: Well-defined plans with clear patterns execute quickly
+- Last 5 plans: 04.2-03 (25 min), 05-01 (4 min), 06-01 (5 min), 06-02 (15 min), 06-03 (15 min)
+- Trend: Interactive plans with user feedback take longer but produce better results
 
 *Updated after each plan completion*
 
@@ -123,9 +124,25 @@ Recent decisions affecting current work:
 
 None.
 
+**06-01 Decisions:**
+- ALTER TABLE IF NOT EXISTS for safe re-runnable migrations
+- Empty strings converted to None for clean NULL storage
+
+**06-02 Decisions:**
+- PGP button next to Ktiv in header (user preference)
+- Full description (no truncation)
+- `or ''` pattern for None-safe dict.get
+- Translate buttons on metadata text fields
+
+**06-03 Decisions:**
+- filter('tags', 'cs', json.dumps([tag])) for JSONB contains (Supabase client bug workaround)
+- Filter tag results to only browseable fragments (429/7218 not in local index)
+- Tag results use viewer pane with text preview (not direct navigation)
+- Translate buttons on description in cards and viewer
+
 ### Blockers/Concerns
 
-None - Phase 5 Plan 01 complete. Search results now show transcription availability indicator.
+None - Phase 6 complete. Ready for Phase 7 (Joins UI).
 
 ### Quick Tasks Completed
 
@@ -138,6 +155,14 @@ None - Phase 5 Plan 01 complete. Search results now show transcription availabil
 | 005 | Find unused functions report | 2026-02-06 | daef528 | [005-find-unused-functions](./quick/005-find-unused-functions/) |
 
 ### Roadmap Evolution
+
+- Phase 6 completed: Metadata display with tag-based search
+  - 4 new metadata columns added (languages, dates)
+  - PGP metadata section in browse page (type, tags, description, dates)
+  - PGP button in header bar + external links
+  - Tag-based search via /search?tag=X with GIN-indexed JSONB query
+  - Translate buttons on metadata fields
+  - META-01 through META-04 requirements satisfied
 
 - Phase 5 Plan 01 completed: PGP transcription indicator in search results
   - Batch lookup function added to document_service.py
@@ -172,7 +197,7 @@ PGP data successfully imported to Supabase:
 
 ## Service Layer Summary
 
-Document service provides 10 functions for accessing PGP data:
+Document service provides 11 functions for accessing PGP data:
 - `get_document_for_fragment(sys_id)` - Look up document by fragment sys_id
 - `get_fragments_for_document(pgpid)` - Get all fragments in sequence order
 - `get_transcription_for_document(pgpid)` - Get transcription text
@@ -183,6 +208,7 @@ Document service provides 10 functions for accessing PGP data:
 - `get_editions_for_document(pgpid)` - Get Digital Editions only
 - `get_translations_for_document(pgpid)` - Get Digital Translations only
 - `get_sys_ids_with_transcriptions(sys_ids)` - Batch check for transcription availability
+- `get_fragments_by_tag(tag)` - Find all fragments with a given PGP tag
 
 All functions handle errors gracefully (return None/empty list/set, never raise).
 
@@ -205,9 +231,14 @@ Version selector now supports PGP transcriptions with multi-source display:
 - MULTI-01: User can switch between multiple scholars' editions
 - MULTI-02: User can view Hebrew/English translations
 - PGP transcription displays correctly per page (recto/verso split)
+- META-01: Document type displays on browse page
+- META-02: Date information displays when available
+- META-03: English description displays when available
+- META-04: Tags display and are clickable (tag-based search)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed quick-005 (Find unused functions report)
+Stopped at: Phase 6 complete, Phase 7 (Joins UI) not started
 Resume file: None
+Notes: Phase 6 completed all 3 plans. Next is Phase 7 (Joins UI) - last phase in roadmap.
