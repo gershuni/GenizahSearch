@@ -899,7 +899,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 page_sources.append(source)
 
                         state.all_sources = page_sources if page_sources else None
-                        print(f"[DEBUG] page_sources after filter: {len(page_sources)}, contents: {[bool(s.get('content')) for s in page_sources]}")
 
                         # Set pgp_transcription from first edition source for this page
                         pgp_doc = get_document_for_fragment(page.sys_id, page.p_num)
@@ -1592,17 +1591,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
                             ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
 
-                        # Search for Parallels button
-                        ui.button(
-                            tr('Search for Parallels'),
-                            icon='search',
-                            on_click=search_for_parallels
-                        ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
-                            'color: #ffffff !important; '
-                            'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(tr('Search for Parallels'))
-
-                        # PGP link button (only when PGP data exists)
+                        # PGP link button (next to Ktiv, only when PGP data exists)
                         if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
                             with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
                                 'flex items-center gap-1 px-2 py-1 rounded'
@@ -1613,6 +1602,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ):
                                 ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
                                 ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+                        # Search for Parallels button
+                        ui.button(
+                            tr('Search for Parallels'),
+                            icon='search',
+                            on_click=search_for_parallels
+                        ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
+                            'color: #ffffff !important; '
+                            'background: rgba(255, 255, 255, 0.15);'
+                        ).tooltip(tr('Search for Parallels'))
 
                         # Metadata button
                         ui.button(
@@ -1769,11 +1768,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
 
                         # Description (full length)
-                        description = state.pgp_metadata.get('description') or ''
+                        description = (state.pgp_metadata.get('description') or '').strip()
                         if description:
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                ui.html(description).classes('text-sm').style('color: var(--text-primary);')
+                                ui.label(description).classes('text-sm').style('color: var(--text-primary); white-space: pre-wrap;')
 
                         # Dates
                         inferred_display = state.pgp_metadata.get('inferred_date_display')
@@ -2591,7 +2590,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = False
                 update_content()
         elif initial_sys_id:
-            print(f"[DEBUG] Initial load with sys_id={initial_sys_id}, page={initial_page}")
             load_page(p_num=initial_page)
         else:
             # Try to restore previous position
