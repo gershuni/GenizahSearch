@@ -702,7 +702,10 @@ def create_search_page(initial_query: str = None):
             setTimeout(setupScroll, 300);
         }})();
         '''
-        await ui.run_javascript(js_code)
+        try:
+            await ui.run_javascript(js_code, timeout=5.0)
+        except TimeoutError:
+            pass  # JS still executes, timeout is just about awaiting response
 
     # Set up scroll handlers after a short delay
     ui.timer(1.0, setup_scroll_collapse, once=True)
