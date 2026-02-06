@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 4.2 - Multi-Source Import (Ready to plan)
+**Current focus:** Phase 4.2 - Multi-Source Import (In progress)
 
 ## Current Position
 
 Phase: 4.2 of 9 (Multi-Source Import)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-06 - Completed quick task 002: Page loading progress bar
+Last activity: 2026-02-06 - Completed 04.2-02: Import document sources
 
-Progress: [████████░░] 89%
+Progress: [████████░░] 91%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 8.8 min
-- Total execution time: 79 min
+- Total plans completed: 10
+- Average duration: 8.6 min
+- Total execution time: 86 min
 
 **By Phase:**
 
@@ -32,11 +32,11 @@ Progress: [████████░░] 89%
 | 03-document-service | 1 | 4 min | 4 min |
 | 04-transcription-display | 3 | 11 min | 3.7 min |
 | 04.1-separate-translations | 1 | 18 min | 18 min |
-| 04.2-multi-source-import | 1 | 5 min | 5 min |
+| 04.2-multi-source-import | 2 | 12 min | 6 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-01 (4 min), 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min)
-- Trend: Schema-only plan was quick; human action checkpoint for Supabase execution
+- Last 5 plans: 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min)
+- Trend: Import plans run efficiently with batch upserts
 
 *Updated after each plan completion*
 
@@ -101,13 +101,18 @@ Recent decisions affecting current work:
 - content_length column for sorting/filtering without full-text scan
 - sequence_order for ordering multiple sources of same type
 
+**04.2-02 Decisions:**
+- Import all 9,364 records (not deduplicated by pgpid) to preserve multiple editions
+- Language detection via Hebrew character count (>10 Hebrew chars = Hebrew translation)
+- Use languages field for Digital Edition, detect for Digital Translation
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - Phase 4.2 in progress (document_sources table created).
+None - Phase 4.2 progressing well (document_sources populated with 9,364 records).
 
 ### Quick Tasks Completed
 
@@ -130,6 +135,12 @@ PGP data successfully imported to Supabase:
 - **Documents:** 7,090 (with transcriptions and metadata)
 - **Document fragments:** 7,764 (sys_id links to GenizahSearch)
 - **Unmatched fragments:** 15 (edge cases with unusual shelfmark patterns)
+
+**Multi-Source Import (04.2-02):**
+- **Document sources:** 9,364 total records
+  - Digital Editions: 7,664
+  - Digital Translations: 1,696 (Hebrew: 733, English: 963)
+- **Documents with multiple sources:** 1,716 (24.2%)
 
 ## Service Layer Summary
 
@@ -162,5 +173,5 @@ Version selector now supports PGP transcriptions:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04.2-01-PLAN.md
+Stopped at: Completed 04.2-02-PLAN.md (Document sources import)
 Resume file: None
