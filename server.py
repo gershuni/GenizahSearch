@@ -1,19 +1,15 @@
 #!/usr/bin/env python
 """
-CLI to manage the Genizah Search servers (backend + frontend).
+CLI to manage the Genizah Search web server.
 
 Usage:
-    python server.py start     - Start both servers
-    python server.py stop      - Stop both servers
-    python server.py restart   - Restart both servers
-    python server.py status    - Check server status
-    python server.py check     - Quick port check
-    python server.py kill      - Force kill all server processes
-
-    python server.py start backend   - Start backend only
-    python server.py start frontend  - Start frontend only
-    python server.py stop backend    - Stop backend only
-    python server.py stop frontend   - Stop frontend only
+    python server.py              - Interactive server management menu
+    python server.py start        - Start the web server
+    python server.py stop         - Stop the web server
+    python server.py restart      - Restart the web server
+    python server.py status       - Check server status
+    python server.py check        - Quick port check
+    python server.py kill         - Force kill server process on port
 """
 import subprocess
 import sys
@@ -21,26 +17,14 @@ import os
 import signal
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 
 # Config
 PROJECT_DIR = Path(__file__).parent
-PID_DIR = PROJECT_DIR
-
-SERVERS = {
-    'backend': {
-        'port': 8000,
-        'module': 'backend.main',
-        'pid_file': PID_DIR / '.backend.pid',
-        'name': 'Backend API'
-    },
-    'frontend': {
-        'port': 8081,
-        'module': 'web.main',
-        'pid_file': PID_DIR / '.server.pid',
-        'name': 'Web Frontend'
-    }
-}
+PID_FILE = PROJECT_DIR / '.server.pid'
+DEFAULT_PORT = 8081
+MODULE = 'web.main'
+SERVER_NAME = 'Web Server'
 
 
 def get_pid_on_port(port: int) -> Optional[int]:
@@ -59,16 +43,12 @@ def get_pid_on_port(port: int) -> Optional[int]:
     return None
 
 
-def is_server_running(server_key: str) -> Tuple[bool, Optional[int]]:
-    """Check if a specific server is running. Returns (is_running, pid)."""
-    config = SERVERS[server_key]
-    pid_file = config['pid_file']
-    port = config['port']
-
+def is_server_running() -> Tuple[bool, Optional[int]]:
+    """Check if the web server is running. Returns (is_running, pid)."""
     # First check PID file
-    if pid_file.exists():
+    if PID_FILE.exists():
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(PID_FILE.read_text().strip())
             # Verify process exists
             if sys.platform == 'win32':
                 result = subprocess.run(
@@ -81,36 +61,34 @@ def is_server_running(server_key: str) -> Tuple[bool, Optional[int]]:
             pass
 
     # Fallback: check port
-    pid = get_pid_on_port(port)
+    pid = get_pid_on_port(DEFAULT_PORT)
     if pid:
         return True, pid
 
     return False, None
 
 
-def start_server(server_key: str) -> bool:
-    """Start a specific server."""
-    config = SERVERS[server_key]
-    running, pid = is_server_running(server_key)
+def start_server() -> bool:
+    """Start the web server."""
+    running, pid = is_server_running()
 
     if running:
-        print(f"  {config['name']} already running (PID {pid}) on port {config['port']}")
+        print(f"  {SERVER_NAME} already running (PID {pid}) on port {DEFAULT_PORT}")
         return True
 
-    print(f"  Starting {config['name']} on port {config['port']}...")
+    print(f"  Starting {SERVER_NAME} on port {DEFAULT_PORT}...")
 
     # Set working directory
     os.chdir(PROJECT_DIR)
 
     env = os.environ.copy()
-    env['GENIZAH_PORT'] = str(config['port'])
-    if server_key == 'frontend':
-        env['NICEGUI_RELOAD'] = 'false'
+    env['GENIZAH_PORT'] = str(DEFAULT_PORT)
+    env['NICEGUI_RELOAD'] = 'false'
 
     # Start detached process
     if sys.platform == 'win32':
         proc = subprocess.Popen(
-            [sys.executable, "-m", config['module']],
+            [sys.executable, "-m", MODULE],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -118,7 +96,7 @@ def start_server(server_key: str) -> bool:
         )
     else:
         proc = subprocess.Popen(
-            [sys.executable, "-m", config['module']],
+            [sys.executable, "-m", MODULE],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -126,35 +104,33 @@ def start_server(server_key: str) -> bool:
         )
 
     # Save PID
-    config['pid_file'].write_text(str(proc.pid))
+    PID_FILE.write_text(str(proc.pid))
 
     # Wait and verify
     time.sleep(2)
-    running, pid = is_server_running(server_key)
+    running, pid = is_server_running()
     if running:
-        print(f"  {config['name']} started (PID {pid})")
+        print(f"  {SERVER_NAME} started (PID {pid})")
         return True
     else:
-        print(f"  Failed to start {config['name']}")
-        config['pid_file'].unlink(missing_ok=True)
+        print(f"  Failed to start {SERVER_NAME}")
+        PID_FILE.unlink(missing_ok=True)
         return False
 
 
-def stop_server(server_key: str) -> bool:
-    """Stop a specific server."""
-    config = SERVERS[server_key]
-    running, pid = is_server_running(server_key)
+def stop_server() -> bool:
+    """Stop the web server."""
+    running, pid = is_server_running()
 
     if not running:
-        print(f"  {config['name']} is not running")
-        config['pid_file'].unlink(missing_ok=True)
+        print(f"  {SERVER_NAME} is not running")
+        PID_FILE.unlink(missing_ok=True)
         return True
 
-    print(f"  Stopping {config['name']} (PID {pid})...")
+    print(f"  Stopping {SERVER_NAME} (PID {pid})...")
 
     try:
         if sys.platform == 'win32':
-            # Try multiple methods to kill the process on Windows
             # Method 1: taskkill with /F /T
             result = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
@@ -163,9 +139,9 @@ def stop_server(server_key: str) -> bool:
             if result.returncode != 0:
                 print(f"  taskkill returned: {result.stderr.strip()}")
                 # Method 2: Try killing by port
-                port_pid = get_pid_on_port(config['port'])
+                port_pid = get_pid_on_port(DEFAULT_PORT)
                 if port_pid and port_pid != pid:
-                    print(f"  Trying to kill process on port {config['port']} (PID {port_pid})...")
+                    print(f"  Trying to kill process on port {DEFAULT_PORT} (PID {port_pid})...")
                     subprocess.run(
                         ["taskkill", "/F", "/T", "/PID", str(port_pid)],
                         capture_output=True, check=False
@@ -180,14 +156,14 @@ def stop_server(server_key: str) -> bool:
     except Exception as e:
         print(f"  Warning: {e}")
 
-    config['pid_file'].unlink(missing_ok=True)
+    PID_FILE.unlink(missing_ok=True)
 
     # Wait and check multiple times
     for i in range(3):
         time.sleep(1)
-        running, new_pid = is_server_running(server_key)
+        running, new_pid = is_server_running()
         if not running:
-            print(f"  {config['name']} stopped")
+            print(f"  {SERVER_NAME} stopped")
             return True
         elif new_pid and new_pid != pid:
             # Different PID now - try to kill that too
@@ -198,167 +174,144 @@ def stop_server(server_key: str) -> bool:
             )
 
     # Final check
-    running, _ = is_server_running(server_key)
+    running, _ = is_server_running()
     if not running:
-        print(f"  {config['name']} stopped")
+        print(f"  {SERVER_NAME} stopped")
         return True
     else:
-        print(f"  {config['name']} may still be running - try manually: taskkill /F /PID {pid}")
+        print(f"  {SERVER_NAME} may still be running - try manually: taskkill /F /PID {pid}")
         return False
 
 
 def start(target: str = 'all') -> bool:
-    """Start servers."""
-    print("Starting servers...")
-
-    if target == 'all':
-        # Start backend first, then frontend
-        success_backend = start_server('backend')
-        time.sleep(1)
-        success_frontend = start_server('frontend')
-        return success_backend and success_frontend
-    elif target in SERVERS:
-        return start_server(target)
-    else:
-        print(f"Unknown target: {target}")
-        return False
+    """Start the server."""
+    print("Starting server...")
+    return start_server()
 
 
 def stop(target: str = 'all') -> bool:
-    """Stop servers."""
-    print("Stopping servers...")
-
-    if target == 'all':
-        success_frontend = stop_server('frontend')
-        success_backend = stop_server('backend')
-        return success_backend and success_frontend
-    elif target in SERVERS:
-        return stop_server(target)
-    else:
-        print(f"Unknown target: {target}")
-        return False
+    """Stop the server."""
+    print("Stopping server...")
+    return stop_server()
 
 
 def restart(target: str = 'all') -> bool:
-    """Restart servers."""
-    print("Restarting servers...")
-    stop(target)
+    """Restart the server."""
+    print("Restarting server...")
+    stop_server()
     time.sleep(2)
-    return start(target)
+    return start_server()
 
 
 def check():
-    """Quick port check - just show what's on the ports."""
-    print("\n=== Port Check ===")
-    for key, config in SERVERS.items():
-        port = config['port']
-        pid = get_pid_on_port(port)
-        if pid:
-            print(f"  Port {port}: IN USE (PID {pid}) - {config['name']}")
-        else:
-            print(f"  Port {port}: FREE - {config['name']}")
+    """Quick port check - show what's on the server port."""
+    print()
+    print("=== Port Check ===")
+    pid = get_pid_on_port(DEFAULT_PORT)
+    if pid:
+        print(f"  Port {DEFAULT_PORT}: IN USE (PID {pid}) - {SERVER_NAME}")
+    else:
+        print(f"  Port {DEFAULT_PORT}: FREE - {SERVER_NAME}")
     print()
 
 
 def kill():
-    """Force kill all processes on server ports."""
-    print("\n=== Force Killing All Server Processes ===")
+    """Force kill process on the server port."""
+    print()
+    print("=== Force Kill ===")
     killed = False
 
-    for key, config in SERVERS.items():
-        port = config['port']
-        pid = get_pid_on_port(port)
-        if pid:
-            print(f"  Killing processes on port {port} ({config['name']})...")
-            if sys.platform == 'win32':
-                # Method 1: Try taskkill first
+    pid = get_pid_on_port(DEFAULT_PORT)
+    if pid:
+        print(f"  Killing process on port {DEFAULT_PORT} ({SERVER_NAME})...")
+        if sys.platform == 'win32':
+            # Method 1: Try taskkill first
+            result = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, text=True, check=False
+            )
+            if result.returncode == 0:
+                print(f"    Killed PID {pid} via taskkill")
+                killed = True
+            else:
+                # Method 2: Use PowerShell to kill by port (more reliable)
+                print(f"    taskkill failed, trying PowerShell...")
+                ps_cmd = f'''
+                    $connections = Get-NetTCPConnection -LocalPort {DEFAULT_PORT} -ErrorAction SilentlyContinue
+                    foreach ($conn in $connections) {{
+                        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+                        if ($proc) {{
+                            Write-Host "Killing $($proc.ProcessName) (PID $($conn.OwningProcess))"
+                            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+                        }}
+                    }}
+                '''
                 result = subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    ["powershell", "-Command", ps_cmd],
                     capture_output=True, text=True, check=False
                 )
-                if result.returncode == 0:
-                    print(f"    Killed PID {pid} via taskkill")
-                    killed = True
-                else:
-                    # Method 2: Use PowerShell to kill by port (more reliable)
-                    print(f"    taskkill failed, trying PowerShell...")
-                    ps_cmd = f'''
-                        $connections = Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue
-                        foreach ($conn in $connections) {{
-                            $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
-                            if ($proc) {{
-                                Write-Host "Killing $($proc.ProcessName) (PID $($conn.OwningProcess))"
-                                Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-                            }}
-                        }}
-                        # Also kill all python processes as fallback
-                        Get-Process python* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-                    '''
-                    result = subprocess.run(
-                        ["powershell", "-Command", ps_cmd],
-                        capture_output=True, text=True, check=False
-                    )
-                    if result.stdout:
-                        print(f"    {result.stdout.strip()}")
-                    killed = True
-            else:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                    print(f"    Killed PID {pid}")
-                    killed = True
-                except Exception as e:
-                    print(f"    Failed: {e}")
+                if result.stdout:
+                    print(f"    {result.stdout.strip()}")
+                killed = True
         else:
-            print(f"  Port {port} is already free ({config['name']})")
+            try:
+                os.kill(pid, signal.SIGKILL)
+                print(f"    Killed PID {pid}")
+                killed = True
+            except Exception as e:
+                print(f"    Failed: {e}")
+    else:
+        print(f"  Port {DEFAULT_PORT} is already free ({SERVER_NAME})")
 
-        # Clean up PID file
-        config['pid_file'].unlink(missing_ok=True)
+    # Clean up PID file
+    PID_FILE.unlink(missing_ok=True)
 
     if killed:
         time.sleep(3)
 
     # Verify
-    print("\n=== Verifying ===")
+    print()
+    print("=== Verifying ===")
     check()
 
 
 def status():
     """Check server status."""
-    print("\n=== Server Status ===")
-
-    all_running = True
-    for key, config in SERVERS.items():
-        running, pid = is_server_running(key)
-        if running:
-            print(f"  {config['name']}: RUNNING (PID {pid}) on port {config['port']}")
-        else:
-            print(f"  {config['name']}: STOPPED")
-            all_running = False
-
     print()
-    if all_running:
-        print("URLs:")
-        print(f"  Backend API:    http://localhost:{SERVERS['backend']['port']}")
-        print(f"  API Docs:       http://localhost:{SERVERS['backend']['port']}/api/docs")
-        print(f"  Web Interface:  http://localhost:{SERVERS['frontend']['port']}")
+    print("=== Server Status ===")
+
+    running, pid = is_server_running()
+    if running:
+        print(f"  {SERVER_NAME}: [RUNNING] (PID {pid}) on port {DEFAULT_PORT}")
+        print()
+        print(f"  URL: http://localhost:{DEFAULT_PORT}")
+    else:
+        print(f"  {SERVER_NAME}: [STOPPED]")
     print()
 
 
 def show_menu():
-    """Show interactive menu."""
+    """Show interactive menu and return chosen command, or None to exit."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+    print("=" * 50)
+    print("  Genizah Search - Server Management")
+    print("=" * 50)
+
     status()
 
     print("Options:")
-    print("  1. Start all servers")
-    print("  2. Stop all servers")
-    print("  3. Restart all servers")
-    print("  4. Check ports")
-    print("  5. Force kill all")
-    print("  6. Exit")
+    print("  1. Start server")
+    print("  2. Stop server")
+    print("  3. Restart server")
+    print("  4. Status")
+    print("  5. Check ports")
+    print("  6. Force kill")
+    print("  7. Exit")
     print()
 
     try:
-        choice = input("Choose option [1-6]: ").strip()
+        choice = input("Choose option [1-7]: ").strip()
         if choice == "1":
             return "start"
         elif choice == "2":
@@ -366,38 +319,70 @@ def show_menu():
         elif choice == "3":
             return "restart"
         elif choice == "4":
-            return "check"
+            return "status"
         elif choice == "5":
-            return "kill"
+            return "check"
         elif choice == "6":
+            return "kill"
+        elif choice == "7":
             return None
         else:
             print("Invalid choice")
-            return None
+            time.sleep(1)
+            return "continue"
     except (KeyboardInterrupt, EOFError):
         print()
         return None
 
 
+def interactive_loop():
+    """Persistent interactive menu loop."""
+    while True:
+        command = show_menu()
+        if command is None:
+            print("Exiting.")
+            break
+        elif command == "continue":
+            continue
+        elif command == "start":
+            start()
+        elif command == "stop":
+            stop()
+        elif command == "restart":
+            restart()
+        elif command == "status":
+            status()
+        elif command == "check":
+            check()
+        elif command == "kill":
+            kill()
+
+        # Pause so user can see output before screen clears
+        print()
+        try:
+            input("Press Enter to continue...")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+
+
 def main():
     if len(sys.argv) < 2:
-        command = show_menu()
-        if not command:
-            sys.exit(0)
-        target = 'all'
-    else:
-        command = sys.argv[1].lower()
-        target = sys.argv[2].lower() if len(sys.argv) > 2 else 'all'
+        # No arguments: enter interactive loop
+        interactive_loop()
+        sys.exit(0)
+
+    command = sys.argv[1].lower()
 
     if command == "start":
-        success = start(target)
+        success = start()
         status()
         sys.exit(0 if success else 1)
     elif command == "stop":
-        success = stop(target)
+        success = stop()
         sys.exit(0 if success else 1)
     elif command == "restart":
-        success = restart(target)
+        success = restart()
         status()
         sys.exit(0 if success else 1)
     elif command == "status":
