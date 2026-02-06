@@ -13,6 +13,7 @@ rather than raising exceptions.
 """
 
 import re
+import json
 from typing import Optional, List, Dict, Any, Set
 from web.supabase_client import get_client
 
@@ -469,10 +470,10 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
     try:
         client = get_client()
 
-        # Step 1: Find documents with this tag (GIN-indexed JSONB query)
+        # Step 1: Find documents with this tag (GIN-indexed JSONB @> query)
         doc_response = client.table('documents').select(
             'pgpid, shelfmark_combined, document_type, description'
-        ).contains('tags', [tag]).execute()
+        ).filter('tags', 'cs', json.dumps([tag])).execute()
 
         if not doc_response.data:
             return []
