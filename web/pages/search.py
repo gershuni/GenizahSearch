@@ -16,8 +16,9 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
 from genizah_core import SearchEngine, get_library_display
+from web.document_service import get_sys_ids_with_transcriptions
 from urllib.parse import quote
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
 import re
 import html
@@ -41,6 +42,7 @@ def create_search_page(initial_query: str = None):
             self.is_panel_collapsed = False  # For collapsible search panel
             self.last_scroll_top = 0  # For scroll-based auto-collapse
             self.update_timer = None  # Track timer to prevent duplicates
+            self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
 
     search_state = SearchUIState()
 
@@ -1090,6 +1092,16 @@ def create_search_page(initial_query: str = None):
                 return []
 
         results = await run.io_bound(run_core_search)
+
+        # Batch lookup for transcription availability
+        result_sys_ids = [
+            r.get('display', {}).get('id')
+            for r in results
+            if r.get('display', {}).get('id')
+        ]
+        search_state.transcription_sys_ids = await run.io_bound(
+            get_sys_ids_with_transcriptions, result_sys_ids
+        )
 
         # Check if search was cancelled before resetting
         was_cancelled = search_state.is_cancelled
