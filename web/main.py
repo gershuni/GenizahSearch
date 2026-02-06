@@ -1326,6 +1326,54 @@ COMMON_STYLES = '''
             cursor: row-resize;
         }
     }
+
+    /* ========================================================================
+       Page Loading Progress Bar - GitHub/YouTube style
+       ======================================================================== */
+
+    .page-loading-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        z-index: 9999;
+        pointer-events: none;
+        background: linear-gradient(90deg,
+            var(--primary-400) 0%,
+            var(--primary-500) 50%,
+            var(--primary-400) 100%);
+        background-size: 200% 100%;
+        transform: translateX(-100%);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    .page-loading-bar.active {
+        opacity: 1;
+        animation: loading-progress 1.5s ease-in-out infinite,
+                   loading-shimmer 1s linear infinite;
+    }
+
+    @keyframes loading-progress {
+        0% { transform: translateX(-100%); }
+        50% { transform: translateX(-30%); }
+        100% { transform: translateX(-10%); }
+    }
+
+    @keyframes loading-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    .page-loading-bar.complete {
+        animation: loading-complete 0.3s ease-out forwards;
+    }
+
+    @keyframes loading-complete {
+        0% { transform: translateX(-10%); opacity: 1; }
+        100% { transform: translateX(0%); opacity: 0; }
+    }
 </style>
 '''
 
@@ -1338,6 +1386,33 @@ def create_layout():
 
     current_page = app.storage.user.get('current_page', '/')
     rtl_mode = is_rtl()
+
+    # Page loading progress bar element (CSS in COMMON_STYLES)
+    ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>')
+    ui.add_head_html('''<script>
+(function() {
+    document.addEventListener('click', function(e) {
+        const link = e.target.closest('a[href]');
+        if (!link) return;
+        const href = link.getAttribute('href');
+        // Only trigger for internal navigation (not external links or anchors)
+        if (href && href.startsWith('/') && !href.startsWith('//') && !link.target) {
+            const bar = document.getElementById('pageLoadingBar');
+            if (bar) {
+                bar.classList.remove('complete');
+                bar.classList.add('active');
+            }
+        }
+    });
+    window.addEventListener('load', function() {
+        const bar = document.getElementById('pageLoadingBar');
+        if (bar) {
+            bar.classList.remove('active');
+            bar.classList.add('complete');
+        }
+    });
+})();
+</script>''')
 
     # Reference dictionary to store UI elements accessible across function scopes
     refs = {}
