@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 5 - Search Integration (Ready to start)
+**Current focus:** Phase 4.1 - Separate Translations (URGENT - UAT gap)
 
 ## Current Position
 
-Phase: 5 of 7 (Search Integration)
-Plan: 0 of 1 in current phase
-Status: Ready to start
-Last activity: 2026-02-05 - Completed 04-03-PLAN.md (recto/verso splitting)
+Phase: 4.1 of 8 (Separate Translations from Transcriptions)
+Plan: 1 of 1 in current phase
+Status: Phase complete
+Last activity: 2026-02-06 - Completed 04.1-01-PLAN.md (translations filtered)
 
-Progress: [██████░░░░] 86%
+Progress: [████████░░] 88%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 7.7 min
-- Total execution time: 56 min
+- Total plans completed: 8
+- Average duration: 9.3 min
+- Total execution time: 74 min
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [██████░░░░] 86%
 | 02-pgp-data-import | 2 | 33 min | 16.5 min |
 | 03-document-service | 1 | 4 min | 4 min |
 | 04-transcription-display | 3 | 11 min | 3.7 min |
+| 04.1-separate-translations | 1 | 18 min | 18 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (30 min), 03-01 (4 min), 04-01 (4 min), 04-02 (4 min), 04-03 (3 min)
-- Trend: UI integration and gap closure plans executing quickly
+- Last 5 plans: 03-01 (4 min), 04-01 (4 min), 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min)
+- Trend: Data migration plan included human authentication gate (11 min update script)
 
 *Updated after each plan completion*
 
@@ -88,13 +89,26 @@ Recent decisions affecting current work:
 - Pages beyond 2 show full transcription as fallback for multi-fragment
 - Store full_content alongside filtered content for future reference
 
+**04.1-01 Decisions:**
+- Filter at service layer (simplest fix, translations just don't appear)
+- doc_relation='Digital Edition' required to show transcription
+- 'Edition' type (2 records) treated as non-transcription for safety
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - Phase 4 (Transcription Display) complete, ready for Phase 5.
+None - Phase 4.1 complete, ready for Phase 5.
+
+### Roadmap Evolution
+
+- Phase 4.1 completed: Translations now filtered from transcription display
+  - Added doc_relation column to documents table
+  - Service layer filters out Digital Translations (961 records)
+  - Only Digital Editions (6,127) show as "PGP Transcription"
+  - UAT Gap 3 resolved
 
 ## Data Import Summary
 
@@ -133,6 +147,6 @@ Version selector now supports PGP transcriptions:
 
 ## Session Continuity
 
-Last session: 2026-02-05 21:03
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-02-06
+Stopped at: Completed 04.1-01-PLAN.md
 Resume file: None
