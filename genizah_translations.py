@@ -1896,6 +1896,7 @@ TRANSLATIONS = {
     "User correction": "תיקון משתמש",
 
     # --- PGP Transcription ---
+    "Has PGP Transcription": "יש תעתיק PGP",
     "PGP Transcription": "תעתוק PGP",
     "PGP Transcriptions": "תעתוקי PGP",
     "Transcription by": "תעתוק מאת",

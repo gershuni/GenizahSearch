@@ -1196,6 +1196,12 @@ def create_search_page(initial_query: str = None):
                             ui.label(library_code).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--primary-100); color: var(--primary-700);'
                             ).tooltip(full_name)
+                        # PGP transcription indicator
+                        sys_id = display.get('id')
+                        if sys_id and sys_id in search_state.transcription_sys_ids:
+                            ui.icon('description').classes('text-sm').style(
+                                'color: var(--success-600);'
+                            ).tooltip(tr('Has PGP Transcription'))
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
                         ui.label(title_short).classes('text-xs').style(
