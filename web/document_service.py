@@ -17,12 +17,14 @@ from typing import Optional, List, Dict, Any, Set
 from web.supabase_client import get_client
 
 
-def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
+def get_document_for_fragment(sys_id: str, page_num: int = None) -> Optional[Dict[str, Any]]:
     """
     Get the PGP document associated with a fragment.
 
     Args:
         sys_id: The GenizahSearch system ID for the fragment
+        page_num: Optional page number (1=recto, 2=verso) to select the correct
+                  document when multiple PGP documents exist for the same fragment
 
     Returns:
         Document dict with all fields (pgpid, shelfmark_combined, document_type,
@@ -42,16 +44,28 @@ def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
     try:
         client = get_client()
 
-        # First, find the fragment link
+        # First, find all fragment links for this sys_id
         fragment_response = client.table('document_fragments').select(
-            'document_id'
-        ).eq('sys_id', sys_id).limit(1).execute()
+            'document_id, page_info'
+        ).eq('sys_id', sys_id).execute()
 
         if not fragment_response.data:
             return None
 
-        # Get the document_id (which is the pgpid)
-        pgpid = fragment_response.data[0].get('document_id')
+        # If page_num specified, try to find matching page_info
+        # page_num 1 = recto, page_num 2 = verso
+        pgpid = None
+        if page_num and len(fragment_response.data) > 1:
+            target_page = 'recto' if page_num == 1 else 'verso'
+            for frag in fragment_response.data:
+                if frag.get('page_info') == target_page:
+                    pgpid = frag.get('document_id')
+                    break
+
+        # Fallback to first result if no page match or page_num not specified
+        if not pgpid:
+            pgpid = fragment_response.data[0].get('document_id')
+
         if not pgpid:
             return None
 
@@ -292,6 +306,61 @@ def get_sources_for_document(pgpid: int) -> List[Dict[str, Any]]:
 
     except Exception as e:
         print(f"Error getting sources for document {pgpid}: {e}")
+        return []
+
+
+def get_all_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
+
+    Some fragments have multiple PGP documents (e.g., one for recto, one for verso).
+    This function retrieves sources from ALL linked documents.
+
+    Args:
+        sys_id: The GenizahSearch system ID for the fragment
+
+    Returns:
+        List of source dicts from all linked documents, ordered by: doc_relation
+        (Edition first), then sequence_order. Each source includes 'page_info'
+        from fragment link (recto/verso). Returns empty list if not found.
+    """
+    if not sys_id:
+        return []
+
+    try:
+        client = get_client()
+
+        # Get all fragment links for this sys_id
+        fragment_response = client.table('document_fragments').select(
+            'document_id, page_info'
+        ).eq('sys_id', sys_id).execute()
+
+        if not fragment_response.data:
+            return []
+
+        # Collect sources from all linked documents
+        all_sources = []
+        for frag in fragment_response.data:
+            pgpid = frag.get('document_id')
+            page_info = frag.get('page_info')  # 'recto' or 'verso'
+
+            if pgpid:
+                sources = get_sources_for_document(pgpid)
+                # Add page_info to each source so we know which page it belongs to
+                for source in sources:
+                    source['page_info'] = page_info
+                all_sources.extend(sources)
+
+        # Sort: Editions first, then by sequence_order
+        all_sources.sort(key=lambda x: (
+            0 if 'Edition' in (x.get('doc_relation') or '') else 1,
+            x.get('sequence_order', 0)
+        ))
+
+        return all_sources
+
+    except Exception as e:
+        print(f"Error getting all sources for fragment {sys_id}: {e}")
         return []
 
 

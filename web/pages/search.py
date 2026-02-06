@@ -16,7 +16,7 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
 from genizah_core import SearchEngine, get_library_display
-from web.document_service import get_sys_ids_with_transcriptions
+from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
@@ -205,6 +205,15 @@ def create_search_page(initial_query: str = None):
     if 'search_results' in app.storage.user:
         try:
             search_state.results = app.storage.user.get('search_results', [])
+            # Also restore transcription indicators for saved results
+            if search_state.results:
+                result_sys_ids = [
+                    r.get('display', {}).get('id')
+                    for r in search_state.results
+                    if r.get('display', {}).get('id')
+                ]
+                if result_sys_ids:
+                    search_state.transcription_sys_ids = get_sys_ids_with_transcriptions(result_sys_ids)
         except Exception:
             pass
 
@@ -1268,9 +1277,11 @@ def create_search_page(initial_query: str = None):
 
                         # Actions row
                         with ui.row().classes('w-full gap-2 mt-3'):
-                            ui.button(tr('Open in Viewer'), icon='open_in_new',
-                                on_click=lambda: ui.navigate.to(f'/browse?sys_id={display.get("id", "")}&page={display.get("img", "1")}')
-                            ).props('flat dense')
+                            # Use ui.link for full page reload (not SPA navigation)
+                            # This ensures browse page is fully recreated with fresh PGP data
+                            browse_url = f'/browse?sys_id={display.get("id", "")}&page={display.get("img", "1")}'
+                            with ui.link(target=browse_url).classes('no-underline'):
+                                ui.button(tr('Open in Viewer'), icon='open_in_new').props('flat dense')
 
                 mobile_expand.on('show', load_mobile_content)
 
@@ -1547,6 +1558,41 @@ def create_search_page(initial_query: str = None):
             current_p_num = page.p_num if page else adv_state.current_p_num
             total_pages = page.total_pages if page else 1
 
+            # Fetch PGP transcription data for Advanced View
+            pgp_transcription = None
+            all_sources = None
+            if sys_id:
+                try:
+                    all_sources_raw = get_all_sources_for_fragment(sys_id)
+                    current_page_info = 'recto' if current_p_num == 1 else 'verso'
+                    page_sources = []
+                    for src in all_sources_raw:
+                        source_page = src.get('page_info')
+                        if source_page == current_page_info or not source_page:
+                            is_translation = 'Translation' in (src.get('doc_relation') or '')
+                            if src.get('content'):
+                                if not is_translation and not source_page:
+                                    src['content'] = get_section_for_page(src['content'], current_p_num)
+                            page_sources.append(src)
+                    all_sources = page_sources if page_sources else None
+
+                    pgp_doc = get_document_for_fragment(sys_id, current_p_num)
+                    if pgp_doc:
+                        pgpid = pgp_doc.get('pgpid')
+                        doc_relation = pgp_doc.get('doc_relation', '')
+                        is_edition = 'Edition' in doc_relation or not doc_relation
+                        page_content = get_section_for_page(pgp_doc['transcription'], current_p_num) if pgp_doc.get('transcription') else None
+                        if is_edition and page_content:
+                            pgp_transcription = {
+                                'full_content': pgp_doc['transcription'],
+                                'content': page_content,
+                                'attribution': pgp_doc.get('transcription_source', 'PGP'),
+                                'pgp_url': pgp_doc.get('pgp_url'),
+                                'pgpid': pgpid
+                            }
+                except Exception as pgp_err:
+                    print(f"Advanced View: Failed to fetch PGP transcription: {pgp_err}")
+
             # Extract FL ID
             fl_id = adv_state.current_fl_id
             if not fl_id and 'raw_header' in result and state.meta_mgr:
@@ -1576,8 +1622,19 @@ def create_search_page(initial_query: str = None):
                 library_name = get_library_display(library_code, short=False)
             display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
 
+            # Use PGP transcription content if available, otherwise fall back to original
+            if all_sources:
+                editions = [s for s in all_sources if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
+                if editions:
+                    display_text = editions[0].get('content', current_text or '')
+                else:
+                    display_text = current_text or snippet.replace('*', '') if snippet else ''
+            elif pgp_transcription and pgp_transcription.get('content'):
+                display_text = pgp_transcription['content']
+            else:
+                display_text = current_text or snippet.replace('*', '') if snippet else ''
+
             # Apply highlighting from snippet if we have match markers
-            display_text = current_text or snippet.replace('*', '') if snippet else ''
             if snippet and '*' in snippet and display_text:
                 import re as re_module
                 highlighted_terms = re_module.findall(r'\*([^*]+)\*', snippet)
@@ -1635,9 +1692,9 @@ def create_search_page(initial_query: str = None):
                                 browse_url = f'/browse?sys_id={sys_id}'
                                 if fl_id:
                                     browse_url += f'&fl_id={fl_id}'
-                                ui.button(icon='menu_book', on_click=lambda url=browse_url: (
-                                    dialog.close(), ui.navigate.to(url)
-                                )).props('flat round size=sm').tooltip(tr('Browse'))
+                                # Use ui.link for full page reload to ensure browse page recreates with PGP data
+                                with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
+                                    ui.button(icon='menu_book').props('flat round size=sm')
 
                             if display_text:
                                 ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy'))
@@ -1710,9 +1767,9 @@ def create_search_page(initial_query: str = None):
                                     browse_url = f'/browse?sys_id={sys_id}'
                                     if fl_id:
                                         browse_url += f'&fl_id={fl_id}'
-                                    ui.button(icon='menu_book', on_click=lambda url=browse_url: (
-                                        dialog.close(), ui.navigate.to(url)
-                                    )).props('round color=green').tooltip(tr('Browse Full Manuscript'))
+                                    # Use ui.link for full page reload to ensure browse page recreates with PGP data
+                                    with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
+                                        ui.button(icon='menu_book').props('round color=green')
 
                                 def make_add_handler(r):
                                     def handler():
@@ -1798,6 +1855,26 @@ def create_search_page(initial_query: str = None):
 
                     with ui.column().classes(text_panel_classes + ' gap-4'):
 
+                        # Define text container and render function at this scope for version switching
+                        text_content_container = None
+                        current_display_text = {'value': display_text, 'html': text_html}
+
+                        def render_text_section(text_to_render: str):
+                            """Render the text content (called on version change)."""
+                            nonlocal text_content_container
+                            if text_content_container is None:
+                                return
+                            text_content_container.clear()
+                            with text_content_container:
+                                with ui.scroll_area().classes('w-full').style('max-height: 60vh;'):
+                                    with ui.element('div').classes('p-6').style(
+                                        'direction: rtl; text-align: right; '
+                                        'line-height: 2.4; font-size: 1.2rem; font-family: "SBL Hebrew", "David", serif;'
+                                    ):
+                                        html_content = text_to_render.replace('\n', '<br>') if text_to_render else ''
+                                        ui.html(html_content, sanitize=False)
+                            text_content_container.update()
+
                         # Page Text Section with inline editing
                         if display_text or adv_state.edit_mode:
                             with ui.card().classes('w-full').style(f'border-radius: 16px; {panel_border}'):
@@ -1853,13 +1930,11 @@ def create_search_page(initial_query: str = None):
                                             if sys_id and current_text:
                                                 ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props('flat round size=sm').tooltip(tr('Edit'))
 
-                                    # Text content
-                                    with ui.scroll_area().classes('w-full').style('max-height: 60vh;'):
-                                        with ui.element('div').classes('p-6').style(
-                                            'direction: rtl; text-align: right; '
-                                            'line-height: 2.4; font-size: 1.2rem; font-family: "SBL Hebrew", "David", serif;'
-                                        ):
-                                            ui.html(text_html, sanitize=False)
+                                    # Text content - create container (same scope as outer text_content_container)
+                                    text_content_container = ui.element('div').classes('w-full')
+
+                                    # Initial render
+                                    render_text_section(display_text)
 
                         # Community Features Row (compact) - only in view mode
                         if sys_id and current_text and not adv_state.edit_mode:
@@ -1869,11 +1944,31 @@ def create_search_page(initial_query: str = None):
                                     create_comment_button, create_joins_button
                                 )
 
+                                def handle_version_change(new_text: str, version_info: dict):
+                                    """Handle version selection - update displayed text."""
+                                    current_display_text['value'] = new_text
+                                    render_text_section(new_text)
+                                    source = version_info.get('source', 'unknown')
+
+                                    if source == 'pgp':
+                                        attribution = version_info.get('attribution', 'PGP')
+                                        ui.notify(f"{tr('PGP Transcription')} - {attribution}", type='positive')
+                                    elif source == 'translation':
+                                        attribution = version_info.get('attribution', '')
+                                        language = version_info.get('language', '')
+                                        ui.notify(f"{language} {tr('Translation')} - {attribution}", type='info')
+                                    elif source == 'user' and version_info.get('author'):
+                                        ui.notify(f"{tr('Showing version by')} {version_info.get('author')}", type='info')
+                                    elif source in ('V0.7', 'V0.8'):
+                                        ui.notify(f"{tr('Showing')} {source}", type='info')
+
                                 create_version_selector(
                                     document_id=sys_id,
                                     page_number=current_p_num,
                                     original_text=current_text,
-                                    on_version_change=lambda text, meta: None
+                                    on_version_change=handle_version_change,
+                                    pgp_transcription=pgp_transcription,
+                                    all_sources=all_sources
                                 )
 
                                 create_comment_button(
@@ -1957,10 +2052,10 @@ def create_search_page(initial_query: str = None):
                             browse_url = f'/browse?sys_id={sys_id}'
                             if fl_id:
                                 browse_url += f'&fl_id={fl_id}'
-                            ui.button(
-                                tr('Browse Full Manuscript'), icon='menu_book',
-                                on_click=lambda url=browse_url: (dialog.close(), ui.navigate.to(url))
-                            ).classes('btn-primary')
+                            # Use ui.link for full page reload to ensure browse page recreates with PGP data
+                            with ui.link(target=browse_url).classes('btn-primary no-underline'):
+                                ui.icon('menu_book').classes('mr-2')
+                                ui.label(tr('Browse Full Manuscript'))
 
                         text_for_parallels = current_text or snippet.replace('*', '')
                         if text_for_parallels:
@@ -2132,11 +2227,10 @@ def create_search_page(initial_query: str = None):
                     if fl_id:
                         browse_url += f'&fl_id={fl_id}'
 
-                    ui.button(
-                        tr('Browse Full Manuscript'),
-                        icon='menu_book',
-                        on_click=lambda url=browse_url: ui.navigate.to(url)
-                    ).classes('btn-primary')
+                    # Use link styled as button for full page reload
+                    with ui.link(target=browse_url).classes('btn-primary no-underline'):
+                        ui.icon('menu_book').classes('mr-2')
+                        ui.label(tr('Browse Full Manuscript'))
 
                 # Find Parallels - pass the full text to parallels page
                 text_for_parallels = full_text or snippet.replace('*', '')

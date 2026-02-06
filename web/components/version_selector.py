@@ -236,7 +236,7 @@ def create_version_selector(
                                         # External link to PGP website (only for first edition or single)
                                         if idx == 0 and pgp_transcription and pgp_transcription.get('pgp_url'):
                                             with ui.row().classes('items-center gap-1'):
-                                                with ui.link(target=pgp_transcription.get('pgp_url'), new_tab=True).classes('ml-1').on('click', lambda e: e.stop_propagation()):
+                                                with ui.link(target=pgp_transcription.get('pgp_url'), new_tab=True).classes('ml-1'):
                                                     ui.icon('open_in_new', size='xs').classes('text-green-600')
                                                     ui.tooltip(tr('View on PGP'))
 
