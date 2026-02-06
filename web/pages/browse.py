@@ -875,28 +875,41 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if page.sys_id:
                     try:
                         pgp_doc = get_document_for_fragment(page.sys_id)
-                        if pgp_doc and pgp_doc.get('transcription'):
-                            state.pgp_transcription = {
-                                'full_content': pgp_doc['transcription'],  # Store full for reference
-                                'content': get_section_for_page(pgp_doc['transcription'], page.p_num),  # Filtered for current page
-                                'attribution': pgp_doc.get('transcription_source', 'PGP'),
-                                'pgp_url': pgp_doc.get('pgp_url'),
-                                'pgpid': pgp_doc.get('pgpid')
-                            }
-                            # Fetch all sources for multi-source display
+                        if pgp_doc:
                             pgpid = pgp_doc.get('pgpid')
+                            # Fetch all sources for multi-source display
                             if pgpid:
                                 all_sources = get_sources_for_document(pgpid)
-                                print(f"[DEBUG] PGPID {pgpid}: fetched {len(all_sources)} sources")
-                                # Apply page filtering to source content (recto/verso split)
+                                # Apply page filtering to editions only
+                                # Translations keep full content (their markers can be wrong)
                                 for source in all_sources:
                                     if source.get('content'):
-                                        source['content'] = get_section_for_page(source['content'], page.p_num)
+                                        is_translation = 'Translation' in (source.get('doc_relation') or '')
+                                        if not is_translation:
+                                            # Filter editions by recto/verso
+                                            source['content'] = get_section_for_page(source['content'], page.p_num)
+                                        # Translations keep full content - don't filter
                                 state.all_sources = all_sources
-                                print(f"[DEBUG] state.all_sources set to {len(state.all_sources)} items")
                             else:
                                 state.all_sources = None
-                                print(f"[DEBUG] No PGPID, state.all_sources = None")
+
+                            # Set pgp_transcription only if there's actual edition content for this page
+                            # (Don't use documents table transcription if it's a translation)
+                            doc_relation = pgp_doc.get('doc_relation', '')
+                            is_edition = 'Edition' in doc_relation or not doc_relation
+                            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
+
+                            if is_edition and page_content:
+                                state.pgp_transcription = {
+                                    'full_content': pgp_doc['transcription'],
+                                    'content': page_content,
+                                    'attribution': pgp_doc.get('transcription_source', 'PGP'),
+                                    'pgp_url': pgp_doc.get('pgp_url'),
+                                    'pgpid': pgpid
+                                }
+                            else:
+                                # No edition content for this page - clear pgp_transcription
+                                state.pgp_transcription = None
                         else:
                             state.pgp_transcription = None
                             state.all_sources = None
