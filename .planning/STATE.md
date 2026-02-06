@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 Phase: 5 of 9 (Search Integration)
 Plan: 1 of 1 in current phase
 Status: Plan 05-01 complete
-Last activity: 2026-02-06 - Completed 05-01: Add PGP Transcription Indicator
+Last activity: 2026-02-06 - Completed quick task 003: Fix progress bar navigation + parallels
 
 Progress: [████████████] 100%
 
