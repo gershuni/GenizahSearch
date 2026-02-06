@@ -114,6 +114,7 @@ None - Phase 4.2 in progress (document_sources table created).
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 001 | Move Recently Viewed list to top of sidebar | 2026-02-06 | a1d72ae | [001-recently-viewed-list-on-top](./quick/001-recently-viewed-list-on-top/) |
+| 002 | Page loading progress bar | 2026-02-06 | 034dd67 | [002-browse-loading-progress-bar](./quick/002-browse-loading-progress-bar/) |
 
 ### Roadmap Evolution
 
