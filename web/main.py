@@ -1391,24 +1391,41 @@ def create_layout():
     ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>', sanitize=False)
     ui.add_head_html('''<script>
 (function() {
-    document.addEventListener('click', function(e) {
-        const link = e.target.closest('a[href]');
-        if (!link) return;
-        const href = link.getAttribute('href');
-        // Only trigger for internal navigation (not external links or anchors)
-        if (href && href.startsWith('/') && !href.startsWith('//') && !link.target) {
-            const bar = document.getElementById('pageLoadingBar');
-            if (bar) {
-                bar.classList.remove('complete');
-                bar.classList.add('active');
-            }
+    function showLoadingBar() {
+        const bar = document.getElementById('pageLoadingBar');
+        if (bar) {
+            bar.classList.remove('complete');
+            bar.classList.add('active');
         }
-    });
-    window.addEventListener('load', function() {
+    }
+    function hideLoadingBar() {
         const bar = document.getElementById('pageLoadingBar');
         if (bar) {
             bar.classList.remove('active');
             bar.classList.add('complete');
+        }
+    }
+    // Trigger on internal link clicks
+    document.addEventListener('click', function(e) {
+        const link = e.target.closest('a[href]');
+        if (!link) return;
+        const href = link.getAttribute('href');
+        if (href && href.startsWith('/') && !href.startsWith('//') && !link.target) {
+            showLoadingBar();
+        }
+    });
+    // Trigger on Enter key in text inputs (for search/shelfmark navigation)
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text') {
+            showLoadingBar();
+        }
+    });
+    // Hide on page load
+    window.addEventListener('load', hideLoadingBar);
+    // Fallback: hide after 10 seconds if page didn't navigate
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            setTimeout(hideLoadingBar, 10000);
         }
     });
 })();
