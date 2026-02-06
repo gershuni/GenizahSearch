@@ -2318,6 +2318,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
             tag_results = await run.io_bound(get_fragments_by_tag, initial_tag)
 
+            # Filter to only fragments that exist in local index (browseable)
+            if tag_results and hasattr(state, 'meta_mgr') and state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
+                tag_results = [r for r in tag_results if r.get('sys_id') in state.meta_mgr.csv_bank]
+
             results_container.clear()
             with results_container:
                 if not tag_results:
