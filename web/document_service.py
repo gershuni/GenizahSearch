@@ -21,9 +21,6 @@ def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
     """
     Get the PGP document associated with a fragment.
 
-    Only returns Digital Editions (transcriptions of original Hebrew/Aramaic text).
-    Digital Translations (English translations) are filtered out.
-
     Args:
         sys_id: The GenizahSearch system ID for the fragment
 
@@ -31,7 +28,13 @@ def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
         Document dict with all fields (pgpid, shelfmark_combined, document_type,
         tags, doc_date_original, doc_date_standard, inferred_date_display,
         description, transcription, transcription_source, pgp_url, doc_relation),
-        or None if not found, is a translation, or on error.
+        or None if not found or on error.
+
+    Note:
+        The doc_relation field indicates the source type ('Digital Edition' for
+        transcriptions, 'Digital Translation' for translations). The transcription
+        field always contains the imported content regardless of doc_relation.
+        Future: translations could be offered as a separate version option.
     """
     if not sys_id:
         return None
@@ -58,12 +61,7 @@ def get_document_for_fragment(sys_id: str) -> Optional[Dict[str, Any]]:
         ).single().execute()
 
         if doc_response.data:
-            doc = doc_response.data
-            # Filter out translations - only return Digital Editions (transcriptions)
-            # This ensures users see actual transcriptions, not English translations
-            if doc.get('doc_relation') != 'Digital Edition':
-                return None
-            return doc
+            return doc_response.data
 
         return None
 
