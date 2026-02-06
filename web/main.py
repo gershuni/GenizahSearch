@@ -1416,8 +1416,11 @@ def create_layout():
     });
     // Trigger on Enter key in text inputs (for search/shelfmark navigation)
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text') {
-            showLoadingBar();
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+            const skipTypes = ['submit', 'button', 'checkbox', 'radio', 'file'];
+            if (!skipTypes.includes(e.target.type)) {
+                showLoadingBar();
+            }
         }
     });
     // Hide on page load
