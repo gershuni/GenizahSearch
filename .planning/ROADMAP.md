@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Document Service** - Build service layer for document-fragment operations ✓
 - [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector ✓
 - [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED) ✓
-- [ ] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED)
+- [x] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED) ✓
 - [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
 - [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
 - [ ] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
@@ -112,9 +112,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04.2-01-PLAN.md — Schema migration for document_sources table
-- [ ] 04.2-02-PLAN.md — Reimport all sources from CSV
-- [ ] 04.2-03-PLAN.md — Update version selector to show multiple sources
+- [x] 04.2-01-PLAN.md — Schema migration for document_sources table ✓
+- [x] 04.2-02-PLAN.md — Reimport all sources from CSV ✓
+- [x] 04.2-03-PLAN.md — Update version selector to show multiple sources ✓
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -124,10 +124,10 @@ Plans:
   1. Search results show indicator icon/badge when PGP transcription exists
   2. Indicator is visible without clicking into the result
   3. Performance remains acceptable (indicator lookup does not slow search)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 05-01: Add transcription indicator to search results
+- [ ] 05-01-PLAN.md — Add batch transcription lookup and indicator icon to search results
 
 ### Phase 6: Metadata Display
 **Goal**: Users see PGP document metadata (type, dates, description, tags) on browse page
@@ -170,12 +170,12 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
 | 4. Transcription Display | 3/3 | ✓ Complete | 2026-02-05 |
 | 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
-| 4.2 Multi-Source Import | 0/3 | Planned | - |
-| 5. Search Integration | 0/1 | Not started | - |
+| 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
+| 5. Search Integration | 0/1 | Planned | - |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
 
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-06 - Phase 4.2 planned: 3 plans in 3 waves (schema -> import -> UI)*
+*Updated: 2026-02-06 - Phase 5 planned: 1 plan for search integration*
