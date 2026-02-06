@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 Phase: 4.2 of 9 (Multi-Source Import)
 Plan: 0 of 3 in current phase
 Status: Ready to plan
-Last activity: 2026-02-06 - Phase 4.2 inserted for multi-source transcriptions/translations
+Last activity: 2026-02-06 - Completed quick task 001: Recently Viewed on top
 
 Progress: [████████░░] 88%
 
