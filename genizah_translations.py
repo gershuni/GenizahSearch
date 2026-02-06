@@ -1895,6 +1895,13 @@ TRANSLATIONS = {
     "No other versions": "אין גרסאות אחרות",
     "User correction": "תיקון משתמש",
 
+    # --- PGP Metadata ---
+    "Princeton Geniza Project": "פרויקט הגניזה של פרינסטון",
+    "Document Type": "סוג מסמך",
+    "Tags": "תגיות",
+    "Description": "תיאור",
+    "Date": "תאריך",
+
     # --- PGP Transcription ---
     "Has PGP Transcription": "יש תעתיק PGP",
     "PGP Transcription": "תעתוק PGP",

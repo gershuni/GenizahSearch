@@ -14,6 +14,7 @@ from nicegui import ui, app
 from typing import Optional, List, Dict, Any
 import re
 import html as html_module
+from urllib.parse import quote
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
 from web.translations import tr, is_rtl
@@ -686,6 +687,8 @@ class BrowseState:
         self.fullscreen_edit: bool = False  # Fullscreen edit mode
         # PGP transcription data
         self.pgp_transcription: Optional[Dict[str, Any]] = None
+        # PGP metadata for display in metadata panel
+        self.pgp_metadata: Optional[Dict[str, Any]] = None
         # Multi-source data (all editions and translations for this document)
         self.all_sources: Optional[List[Dict[str, Any]]] = None
 
@@ -901,6 +904,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Set pgp_transcription from first edition source for this page
                         pgp_doc = get_document_for_fragment(page.sys_id, page.p_num)
                         if pgp_doc:
+                            # Populate PGP metadata for display in metadata panel
+                            state.pgp_metadata = {
+                                'document_type': pgp_doc.get('document_type'),
+                                'tags': pgp_doc.get('tags', []),
+                                'description': pgp_doc.get('description'),
+                                'languages_primary': pgp_doc.get('languages_primary'),
+                                'languages_secondary': pgp_doc.get('languages_secondary'),
+                                'doc_date_original': pgp_doc.get('doc_date_original'),
+                                'doc_date_standard': pgp_doc.get('doc_date_standard'),
+                                'inferred_date_display': pgp_doc.get('inferred_date_display'),
+                                'inferred_date_standard': pgp_doc.get('inferred_date_standard'),
+                                'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
+                                'pgp_url': pgp_doc.get('pgp_url'),
+                                'pgpid': pgp_doc.get('pgpid'),
+                            }
+
                             pgpid = pgp_doc.get('pgpid')
                             doc_relation = pgp_doc.get('doc_relation', '')
                             is_edition = 'Edition' in doc_relation or not doc_relation
@@ -918,9 +937,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 state.pgp_transcription = None
                         else:
                             state.pgp_transcription = None
+                            state.pgp_metadata = None
                     except Exception as pgp_err:
                         print(f"Failed to fetch PGP transcription: {pgp_err}")
                         state.pgp_transcription = None
+                        state.pgp_metadata = None
                         state.all_sources = None
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
@@ -1692,6 +1713,80 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Cambridge CUDL
                         if page.is_cambridge and page.external_url:
                             ui.link('Cambridge CUDL', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                    # === PGP Metadata Section ===
+                    if state.pgp_metadata:
+                        ui.separator().classes('my-3')
+                        # Header with link to PGP
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h3(tr('Princeton Geniza Project'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            if state.pgp_metadata.get('pgp_url'):
+                                ui.link('', state.pgp_metadata['pgp_url'], new_tab=True).props(
+                                    'icon=open_in_new flat dense round size=xs'
+                                ).style('color: var(--primary-600);').tooltip(tr('View on PGP'))
+
+                        # Document Type + Languages (inline row)
+                        doc_type = state.pgp_metadata.get('document_type')
+                        lang_primary = state.pgp_metadata.get('languages_primary')
+                        lang_secondary = state.pgp_metadata.get('languages_secondary')
+                        if doc_type or lang_primary:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                type_parts = []
+                                if doc_type:
+                                    type_parts.append(doc_type)
+                                if lang_primary:
+                                    type_parts.append(lang_primary)
+                                if lang_secondary:
+                                    type_parts.append(lang_secondary)
+                                ui.label(' \u00b7 '.join(type_parts)).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Tags (clickable badges)
+                        tags = state.pgp_metadata.get('tags', [])
+                        if tags:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Tags')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                with ui.row().classes('gap-1 flex-wrap'):
+                                    for tag in tags:
+                                        ui.badge(tag, color='green').props('outline clickable').classes(
+                                            'text-xs cursor-pointer'
+                                        ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
+
+                        # Description (truncated with expand for long text)
+                        description = state.pgp_metadata.get('description', '')
+                        if description:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                if len(description) > 250:
+                                    # Show truncated preview with expand
+                                    truncated = description[:250].rsplit(' ', 1)[0] + '...'
+                                    with ui.expansion(text=truncated).classes('text-sm w-full').props('dense').style(
+                                        'color: var(--text-primary);'
+                                    ):
+                                        ui.html(description).classes('text-sm').style('color: var(--text-primary);')
+                                else:
+                                    ui.html(description).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Dates
+                        inferred_display = state.pgp_metadata.get('inferred_date_display')
+                        doc_date_standard = state.pgp_metadata.get('doc_date_standard')
+                        doc_date_original = state.pgp_metadata.get('doc_date_original')
+                        date_rationale = state.pgp_metadata.get('inferred_date_rationale')
+
+                        # Show dates section if any date info exists
+                        if inferred_display or doc_date_standard or doc_date_original:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                # Primary: inferred display date, fallback to standard date
+                                primary_date = inferred_display or doc_date_standard
+                                if primary_date:
+                                    ui.label(primary_date).classes('text-sm font-medium').style('color: var(--text-primary);')
+                                # Secondary: original date (only if different from primary)
+                                if doc_date_original and doc_date_original != primary_date:
+                                    ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+                                # Rationale
+                                if date_rationale:
+                                    ui.label(date_rationale).classes('text-xs italic').style('color: var(--text-tertiary);')
 
                     # Export
                     ui.separator().classes('my-3')
