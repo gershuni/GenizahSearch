@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED) ✓
 - [x] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED) ✓
 - [x] **Phase 5: Search Integration** - Indicate transcription availability in search results ✓
-- [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
+- [x] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page ✓
 - [ ] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
 
 ## Phase Details
@@ -155,10 +155,11 @@ Plans:
   3. Relationship type is displayed (physical join, same composition)
   4. Existing pairwise joins from current system continue working unchanged
   5. PGP joins and existing joins are unified in display
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: Build joins panel component for browse page
+- [ ] 07-01-PLAN.md — Extend joins data layer to unify PGP + user joins and thread pgpid
+- [ ] 07-02-PLAN.md — Add inline Related Fragments panel to metadata sidebar with translations
 
 ## Progress
 
@@ -175,9 +176,9 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 | 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
 | 5. Search Integration | 1/1 | ✓ Complete | 2026-02-06 |
 | 6. Metadata Display | 3/3 | ✓ Complete | 2026-02-06 |
-| 7. Joins UI | 0/1 | Not started | - |
+| 7. Joins UI | 0/2 | Not started | - |
 
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-06 - Phase 6 complete: metadata display with tag search*
+*Updated: 2026-02-06 - Phase 7 planned: 2 plans in 2 waves*
