@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 4.2 - Multi-Source Import (In progress)
+**Current focus:** Phase 4.2 - Multi-Source Import (Complete)
 
 ## Current Position
 
 Phase: 4.2 of 9 (Multi-Source Import)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-02-06 - Completed 04.2-02: Import document sources
+Plan: 3 of 3 in current phase
+Status: Phase complete
+Last activity: 2026-02-06 - Completed 04.2-03: Multi-source UI
 
-Progress: [████████░░] 91%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 8.6 min
-- Total execution time: 86 min
+- Total plans completed: 11
+- Average duration: 10.1 min
+- Total execution time: 111 min
 
 **By Phase:**
 
@@ -32,11 +32,11 @@ Progress: [████████░░] 91%
 | 03-document-service | 1 | 4 min | 4 min |
 | 04-transcription-display | 3 | 11 min | 3.7 min |
 | 04.1-separate-translations | 1 | 18 min | 18 min |
-| 04.2-multi-source-import | 2 | 12 min | 6 min |
+| 04.2-multi-source-import | 3 | 37 min | 12.3 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min)
-- Trend: Import plans run efficiently with batch upserts
+- Last 5 plans: 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min), 04.2-02 (7 min), 04.2-03 (25 min)
+- Trend: UI plans with verification take longer due to bug fixes during testing
 
 *Updated after each plan completion*
 
@@ -106,13 +106,19 @@ Recent decisions affecting current work:
 - Language detection via Hebrew character count (>10 Hebrew chars = Hebrew translation)
 - Use languages field for Digital Edition, detect for Digital Translation
 
+**04.2-03 Decisions:**
+- Group menu into Transcriptions and Translations sections
+- Filter sources by page content (not just page number)
+- Show translations on all pages with editions (full-document content)
+- Return None for pages without content (UI can filter appropriately)
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - Phase 4.2 progressing well (document_sources populated with 9,364 records).
+None - Phase 4.2 complete. Multi-source UI working with all features.
 
 ### Quick Tasks Completed
 
@@ -122,6 +128,12 @@ None - Phase 4.2 progressing well (document_sources populated with 9,364 records
 | 002 | Page loading progress bar | 2026-02-06 | 034dd67 | [002-browse-loading-progress-bar](./quick/002-browse-loading-progress-bar/) |
 
 ### Roadmap Evolution
+
+- Phase 4.2 completed: Multi-source UI with transcriptions and translations
+  - Version selector shows all available transcriptions grouped by scholar
+  - Translations section shows Hebrew/English options
+  - Page-aware filtering ensures correct content per page
+  - UAT verified and approved
 
 - Phase 4.1 completed: Translations now filtered from transcription display
   - Added doc_relation column to documents table
@@ -144,34 +156,40 @@ PGP data successfully imported to Supabase:
 
 ## Service Layer Summary
 
-Document service provides 6 functions for accessing PGP data:
+Document service provides 9 functions for accessing PGP data:
 - `get_document_for_fragment(sys_id)` - Look up document by fragment sys_id
 - `get_fragments_for_document(pgpid)` - Get all fragments in sequence order
 - `get_transcription_for_document(pgpid)` - Get transcription text
 - `get_document_metadata(pgpid)` - Get document metadata (type, tags, dates, etc.)
 - `parse_transcription_sections(transcription)` - Parse by Recto/Verso markers
 - `get_section_for_page(transcription, page_num)` - Get section for page number
+- `get_sources_for_document(pgpid)` - Get all sources (editions + translations)
+- `get_editions_for_document(pgpid)` - Get Digital Editions only
+- `get_translations_for_document(pgpid)` - Get Digital Translations only
 
 All functions handle errors gracefully (return None/empty list, never raise).
 
 ## UI Integration Summary
 
-Version selector now supports PGP transcriptions:
-- PGP option appears first in menu with verified icon when available
-- Auto-selects PGP as default version on page load
-- Attribution (scholar name) displayed in menu and notification
-- Clickable "View on PGP" link opens original PGP document in new tab
-- Recto/verso splitting shows page-appropriate content
-- Hebrew translations added for all PGP UI strings
+Version selector now supports PGP transcriptions with multi-source display:
+- PGP Transcriptions section groups all editions by scholar name
+- Translations section shows Hebrew/English options separately
+- Clicking sources switches displayed content
+- Page-aware filtering shows editions only on pages with content
+- Translations display on all pages (full-document content)
+- Auto-selects first PGP edition as default on page load
+- Hebrew translations added for all multi-source UI strings
 
 **Requirements Satisfied:**
 - TRANS-01: User can view PGP transcription on browse page
 - TRANS-02: User sees transcription source attribution
 - TRANS-03: User can click through to original PGP document page
+- MULTI-01: User can switch between multiple scholars' editions
+- MULTI-02: User can view Hebrew/English translations
 - PGP transcription displays correctly per page (recto/verso split)
 
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04.2-02-PLAN.md (Document sources import)
+Stopped at: Completed 04.2-03-PLAN.md (Multi-source UI) - Phase 4.2 complete
 Resume file: None
