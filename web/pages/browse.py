@@ -1714,6 +1714,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if page.is_cambridge and page.external_url:
                             ui.link('Cambridge CUDL', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
+                        # Princeton Geniza Project
+                        if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                            ui.link('Princeton Geniza Project', state.pgp_metadata['pgp_url'], new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
                     # === PGP Metadata Section ===
                     if state.pgp_metadata:
                         ui.separator().classes('my-3')
@@ -1752,20 +1756,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             'text-xs cursor-pointer'
                                         ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
 
-                        # Description (truncated with expand for long text)
+                        # Description (full length)
                         description = state.pgp_metadata.get('description', '')
                         if description:
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                if len(description) > 250:
-                                    # Show truncated preview with expand
-                                    truncated = description[:250].rsplit(' ', 1)[0] + '...'
-                                    with ui.expansion(text=truncated).classes('text-sm w-full').props('dense').style(
-                                        'color: var(--text-primary);'
-                                    ):
-                                        ui.html(description).classes('text-sm').style('color: var(--text-primary);')
-                                else:
-                                    ui.html(description).classes('text-sm').style('color: var(--text-primary);')
+                                ui.html(description).classes('text-sm').style('color: var(--text-primary);')
 
                         # Dates
                         inferred_display = state.pgp_metadata.get('inferred_date_display')
