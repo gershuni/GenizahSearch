@@ -1388,7 +1388,7 @@ def create_layout():
     rtl_mode = is_rtl()
 
     # Page loading progress bar element (CSS in COMMON_STYLES)
-    ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>')
+    ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>', sanitize=False)
     ui.add_head_html('''<script>
 (function() {
     document.addEventListener('click', function(e) {
