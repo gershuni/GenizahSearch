@@ -21,6 +21,7 @@ from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
+from web.components.translate_button import create_translatable_text
 from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document, get_all_sources_for_fragment
 
 
@@ -1754,7 +1755,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     type_parts.append(lang_primary)
                                 if lang_secondary:
                                     type_parts.append(lang_secondary)
-                                ui.label(' \u00b7 '.join(type_parts)).classes('text-sm').style('color: var(--text-primary);')
+                                type_text = ' \u00b7 '.join(type_parts)
+                                create_translatable_text(type_text, container_style='color: var(--text-primary);')
 
                         # Tags (clickable badges)
                         tags = state.pgp_metadata.get('tags', [])
@@ -1767,12 +1769,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             'text-xs cursor-pointer'
                                         ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
 
-                        # Description (full length)
+                        # Description (full length, with translate button)
                         description = (state.pgp_metadata.get('description') or '').strip()
                         if description:
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                ui.label(description).classes('text-sm').style('color: var(--text-primary); white-space: pre-wrap;')
+                                create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
                         # Dates
                         inferred_display = state.pgp_metadata.get('inferred_date_display')
@@ -1791,9 +1793,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Secondary: original date (only if different from primary)
                                 if doc_date_original and doc_date_original != primary_date:
                                     ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
-                                # Rationale
+                                # Rationale (with translate button)
                                 if date_rationale:
-                                    ui.label(date_rationale).classes('text-xs italic').style('color: var(--text-tertiary);')
+                                    create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
 
                     # Export
                     ui.separator().classes('my-3')
