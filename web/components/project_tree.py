@@ -117,10 +117,6 @@ def create_project_tree(
 
                 if recently_viewed:
                     with ui.element('div').classes('mb-2'):
-                        ui.label(tr('Recent')).classes(
-                            'text-xs font-semibold uppercase mb-2'
-                        ).style('color: var(--text-muted);')
-
                         for list_data in recently_viewed:
                             _render_list_item(
                                 list_data=list_data,
