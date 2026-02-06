@@ -1897,8 +1897,14 @@ TRANSLATIONS = {
 
     # --- PGP Transcription ---
     "PGP Transcription": "תעתוק PGP",
+    "PGP Transcriptions": "תעתוקי PGP",
     "Transcription by": "תעתוק מאת",
     "View on PGP": "צפה ב-PGP",
+    "Translations": "תרגומים",
+    "Translation": "תרגום",
+    "Hebrew Translation": "תרגום עברי",
+    "English Translation": "תרגום אנגלי",
+    "Translation by": "תרגום מאת",
     "Notes & Comments": "הערות ותגובות",
     "Draft saved": "טיוטה נשמרה",
     "You have unsaved changes. Are you sure you want to close?": "יש לך שינויים שלא נשמרו. האם אתה בטוח שברצונך לסגור?",
