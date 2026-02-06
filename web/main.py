@@ -1392,43 +1392,59 @@ def create_layout():
     ui.add_head_html('''<script>
 (function() {
     function showLoadingBar() {
-        const bar = document.getElementById('pageLoadingBar');
+        var bar = document.getElementById('pageLoadingBar');
         if (bar) {
             bar.classList.remove('complete');
             bar.classList.add('active');
         }
     }
     function hideLoadingBar() {
-        const bar = document.getElementById('pageLoadingBar');
+        var bar = document.getElementById('pageLoadingBar');
         if (bar) {
             bar.classList.remove('active');
             bar.classList.add('complete');
         }
     }
-    // Trigger on internal link clicks
+
+    // Expose globally so Python can call via ui.run_javascript
+    window.__showLoadingBar = showLoadingBar;
+    window.__hideLoadingBar = hideLoadingBar;
+
+    // 1. Trigger on <a href> clicks (original behavior)
     document.addEventListener('click', function(e) {
-        const link = e.target.closest('a[href]');
+        var link = e.target.closest('a[href]');
         if (!link) return;
-        const href = link.getAttribute('href');
+        var href = link.getAttribute('href');
         if (href && href.startsWith('/') && !href.startsWith('//') && !link.target) {
             showLoadingBar();
         }
     });
-    // Trigger on Enter key in text inputs (for search/shelfmark navigation)
+
+    // 2. Trigger on Enter key in text inputs (search/shelfmark navigation)
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
-            const skipTypes = ['submit', 'button', 'checkbox', 'radio', 'file'];
-            if (!skipTypes.includes(e.target.type)) {
+            var skipTypes = ['submit', 'button', 'checkbox', 'radio', 'file'];
+            if (skipTypes.indexOf(e.target.type) === -1) {
                 showLoadingBar();
             }
         }
     });
-    // Hide on page load
+
+    // 3. KEY FIX: Trigger on beforeunload - catches ALL navigation methods
+    // This fires when ui.navigate.to() sets window.location, when <a> links navigate,
+    // when the user uses back/forward, etc. It's the universal navigation event.
+    window.addEventListener('beforeunload', function() {
+        showLoadingBar();
+    });
+
+    // 4. Hide on page load (new page finished rendering)
     window.addEventListener('load', hideLoadingBar);
-    // Fallback: hide after 10 seconds if page didn't navigate
+
+    // 5. Fallback: hide after 15 seconds if page didn't navigate
+    // (for Enter key searches that update in-page instead of navigating)
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
-            setTimeout(hideLoadingBar, 10000);
+            setTimeout(hideLoadingBar, 15000);
         }
     });
 })();
