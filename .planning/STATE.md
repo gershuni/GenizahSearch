@@ -133,6 +133,7 @@ None - Phase 5 Plan 01 complete. Search results now show transcription availabil
 |---|-------------|------|--------|-----------|
 | 001 | Move Recently Viewed list to top of sidebar | 2026-02-06 | a1d72ae | [001-recently-viewed-list-on-top](./quick/001-recently-viewed-list-on-top/) |
 | 002 | Page loading progress bar | 2026-02-06 | 034dd67 | [002-browse-loading-progress-bar](./quick/002-browse-loading-progress-bar/) |
+| 003 | Fix progress bar navigation + parallels | 2026-02-06 | 7188c92 | [003-fix-progress-bar-navigation-parallels](./quick/003-fix-progress-bar-navigation-parallels/) |
 
 ### Roadmap Evolution
 
@@ -206,5 +207,5 @@ Version selector now supports PGP transcriptions with multi-source display:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 05-01-PLAN.md (PGP Transcription Indicator) - Phase 5 Plan 01 complete
+Stopped at: Completed quick-003 (Fix progress bar navigation + parallels)
 Resume file: None
