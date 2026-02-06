@@ -2308,9 +2308,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
     # Handle tag search
     if initial_tag:
-        def load_tag_in_viewer(result):
-            """Load a tag search result into the viewer pane."""
-            viewer_container.clear()
+        async def load_tag_in_viewer(result):
+            """Load a tag search result into the viewer pane with page text."""
             sys_id = result.get('sys_id', '')
             shelfmark = result.get('shelfmark', 'Unknown')
             doc_type = result.get('document_type', '')
@@ -2319,12 +2318,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
             # Look up library info
             library_name = ''
+            library_code = ''
             if sys_id and hasattr(state, 'meta_mgr') and state.meta_mgr:
                 library_code = state.meta_mgr.get_library_for_id(sys_id)
                 if library_code:
                     from genizah_core import get_library_display
                     library_name = get_library_display(library_code, short=False)
 
+            # Fetch first page text
+            from web.services import get_service
+            service = get_service()
+            page_data = await run.io_bound(lambda: service.get_browse_page(sys_id, p_num=1))
+            page_text = page_data.text if page_data else ''
+
+            viewer_container.clear()
             with viewer_container:
                 with ui.column().classes('w-full gap-2 mb-4'):
                     # Shelfmark header
@@ -2337,20 +2344,49 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             ui.badge(doc_type).props('outline')
                         ui.badge('PGP', color='green').props('outline')
 
-                # PGP metadata
-                with ui.column().classes('w-full gap-4 mt-4'):
-                    if description:
-                        with ui.column().classes('gap-1'):
-                            ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            ui.label(description).classes('text-sm').style(
-                                'color: var(--text-primary); white-space: pre-wrap; line-height: 1.6;'
-                            )
+                # Content tabs
+                with ui.tabs().classes('w-full') as tabs:
+                    tab_text = ui.tab('text', label=tr('Full Text'))
+                    tab_info = ui.tab('info', label=tr('Metadata'))
 
-                    if pgpid:
-                        with ui.column().classes('gap-1 mt-2'):
-                            ui.label(tr('Princeton Geniza Project')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            pgp_url = f'https://geniza.princeton.edu/documents/{pgpid}'
-                            ui.link(pgp_url, pgp_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                with ui.tab_panels(tabs, value='text').classes('w-full flex-grow'):
+                    # Text tab
+                    with ui.tab_panel('text'):
+                        if page_text:
+                            with ui.scroll_area().classes('w-full h-64'):
+                                with ui.element('div').classes('whitespace-pre-wrap').style(
+                                    'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
+                                ):
+                                    ui.html(html.escape(page_text).replace('\n', '<br>'), sanitize=False)
+                        else:
+                            ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+
+                    # Info tab
+                    with ui.tab_panel('info'):
+                        with ui.column().classes('w-full gap-4'):
+                            if description:
+                                with ui.column().classes('gap-1'):
+                                    ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(description).classes('text-sm').style(
+                                        'color: var(--text-primary); white-space: pre-wrap; line-height: 1.6;'
+                                    )
+
+                            info_items = [
+                                (tr('Library'), library_name or tr('Not available')),
+                                (tr('Shelfmark'), shelfmark),
+                                (tr('System ID'), sys_id or tr('Not available')),
+                            ]
+                            if pgpid:
+                                info_items.append(('PGP ID', str(pgpid)))
+
+                            for label, value in info_items:
+                                with ui.row().classes('w-full items-start gap-4'):
+                                    ui.label(label).classes('font-bold w-32').style('color: var(--text-secondary);')
+                                    ui.label(value).style('color: var(--text-primary);')
+
+                            if pgpid:
+                                pgp_url = f'https://geniza.princeton.edu/documents/{pgpid}'
+                                ui.link(tr('View on PGP'), pgp_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
                 # Actions
                 with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
