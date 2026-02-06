@@ -2024,9 +2024,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 # Joins button - show connected fragments
                                 if page.shelfmark:
+                                    pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
                                     create_joins_button(
                                         shelfmark=page.shelfmark,
                                         document_id=page.sys_id,
+                                        pgpid=pgpid_for_joins,
                                         on_navigate=navigate_to_shelfmark
                                     )
 
