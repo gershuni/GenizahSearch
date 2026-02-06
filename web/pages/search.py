@@ -17,6 +17,7 @@ from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
 from genizah_core import SearchEngine, get_library_display
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag
+from web.components.translate_button import create_translatable_text
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
@@ -2367,9 +2368,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             if description:
                                 with ui.column().classes('gap-1'):
                                     ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(description).classes('text-sm').style(
-                                        'color: var(--text-primary); white-space: pre-wrap; line-height: 1.6;'
-                                    )
+                                    create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap; line-height: 1.6;')
 
                             info_items = [
                                 (tr('Library'), library_name or tr('Not available')),
@@ -2452,13 +2451,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                                             'color: var(--text-tertiary);'
                                         )
 
-                                    # Description snippet (truncated)
+                                    # Description snippet (truncated, with translate)
                                     desc = result.get('description', '') or ''
                                     if desc:
                                         truncated = (desc[:150] + '...') if len(desc) > 150 else desc
-                                        ui.label(truncated).classes('text-xs mt-1').style(
-                                            'color: var(--text-secondary); line-height: 1.4;'
-                                        )
+                                        create_translatable_text(truncated, container_style='color: var(--text-secondary); line-height: 1.4; font-size: 0.75rem;')
 
         ui.timer(0.1, load_tag_results, once=True)
 
