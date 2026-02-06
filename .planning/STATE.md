@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 4.1 - Separate Translations (URGENT - UAT gap)
+**Current focus:** Phase 5 - Search Integration (Ready to start)
 
 ## Current Position
 
-Phase: 4.1 of 8 (Separate Translations from Transcriptions)
-Plan: 1 of 1 in current phase
-Status: Phase complete
-Last activity: 2026-02-06 - Completed 04.1-01-PLAN.md (translations filtered)
+Phase: 5 of 8 (Search Integration)
+Plan: 0 of 1 in current phase
+Status: Ready to start
+Last activity: 2026-02-06 - Completed Phase 4.1 (translations filtered)
 
 Progress: [████████░░] 88%
 

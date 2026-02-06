@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks ✓
 - [x] **Phase 3: Document Service** - Build service layer for document-fragment operations ✓
 - [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector ✓
-- [ ] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED)
+- [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED) ✓
 - [ ] **Phase 5: Search Integration** - Indicate transcription availability in search results
 - [ ] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
 - [ ] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
@@ -95,7 +95,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 04.1-01-PLAN.md — Add doc_relation column and filter translations in document service
+- [x] 04.1-01-PLAN.md — Add doc_relation column and filter translations in document service ✓
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -150,7 +150,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 5 -> 6 -> 7
 | 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
 | 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
 | 4. Transcription Display | 3/3 | ✓ Complete | 2026-02-05 |
-| 4.1 Separate Translations | 0/1 | Planned | - |
+| 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
 | 5. Search Integration | 0/1 | Not started | - |
 | 6. Metadata Display | 0/1 | Not started | - |
 | 7. Joins UI | 0/1 | Not started | - |
@@ -158,4 +158,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 5 -> 6 -> 7
 ---
 
 *Created: 2026-02-05*
-*Updated: 2026-02-05 - Phase 4.1 planned (1 plan for gap closure)*
+*Updated: 2026-02-06 - Phase 4.1 complete (translations filtered from transcription display)*
