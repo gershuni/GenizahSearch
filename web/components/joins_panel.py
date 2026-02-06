@@ -24,17 +24,26 @@ import os
 _CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
 
 
-def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, force_refresh: bool = False) -> Dict:
+def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
+    Merges user-created pairwise joins (fragment_joins table) with PGP
+    multi-fragment document joins (document_fragments table).
+
     Prefers document_id if provided (more reliable).
     Results are cached for 30 seconds.
 
+    Args:
+        shelfmark: Current fragment shelfmark
+        document_id: System ID of the document (sys_id)
+        pgpid: PGP document ID (avoids redundant Supabase lookup)
+        force_refresh: Force cache bypass
+
     Returns:
-        Dict with fragments, joins, and counts
+        Dict with fragments, joins, total_fragments, total_joins, fragment_details
     """
-    # Build cache key
-    cache_key = f"doc:{document_id}" if document_id else f"shelf:{shelfmark}"
+    # Build cache key (include pgpid for proper cache separation)
+    cache_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
 
     # Check cache (unless force refresh)
     if not force_refresh:
@@ -45,7 +54,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
                     return cached_data
 
     try:
-        # Fetch joins from Supabase
+        # Fetch user joins from Supabase
         if document_id:
             joins = get_fragment_joins(fragment_sys_id=document_id)
         elif shelfmark:
@@ -55,21 +64,24 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
                      j.get('fragment_a_shelfmark', '').upper() == shelfmark.upper() or
                      j.get('fragment_b_shelfmark', '').upper() == shelfmark.upper()]
         else:
-            return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0}
+            return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": []}
 
-        if not joins:
-            return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0}
-
-        # Build connected fragments set
+        # Build connected fragments set from user joins
         fragments_set = set()
+        # Track upper-cased shelfmarks to avoid duplicates when merging PGP joins
+        fragments_upper = set()
         formatted_joins = []
+        fragment_details = []
+
         for j in joins:
             frag_a = j.get('fragment_a_shelfmark', '')
             frag_b = j.get('fragment_b_shelfmark', '')
             if frag_a:
                 fragments_set.add(frag_a)
+                fragments_upper.add(frag_a.upper())
             if frag_b:
                 fragments_set.add(frag_b)
+                fragments_upper.add(frag_b.upper())
             formatted_joins.append({
                 'id': j.get('id'),
                 'fragment_a': frag_a,
@@ -79,11 +91,85 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
                 'notes': j.get('notes', '')
             })
 
+        # --- Merge PGP document joins ---
+        from web.document_service import get_document_for_fragment, get_fragments_for_document
+
+        resolved_pgpid = pgpid
+        if not resolved_pgpid and document_id:
+            # Resolve pgpid from document_id (sys_id)
+            pgp_doc = get_document_for_fragment(document_id)
+            if pgp_doc:
+                resolved_pgpid = pgp_doc.get('pgpid')
+
+        if resolved_pgpid:
+            pgp_fragments = get_fragments_for_document(resolved_pgpid)
+
+            # Only include if there are MORE THAN 1 unique sys_ids
+            # (filters out single-fragment PGP documents - no false "Related Fragments")
+            unique_sys_ids = set()
+            for pf in pgp_fragments:
+                sid = pf.get('sys_id')
+                if sid:
+                    unique_sys_ids.add(sid)
+
+            if len(unique_sys_ids) > 1:
+                current_shelfmark_upper = shelfmark.upper() if shelfmark else ''
+
+                for pf in pgp_fragments:
+                    pf_shelfmark = pf.get('shelfmark', '')
+                    pf_sys_id = pf.get('sys_id', '')
+
+                    if not pf_shelfmark:
+                        continue
+
+                    # Populate fragment_details for shelfmark_to_docid lookup in dialog
+                    fragment_details.append({
+                        'shelfmark': pf_shelfmark,
+                        'document_id': pf_sys_id
+                    })
+
+                    # Skip current shelfmark (already in the set implicitly)
+                    if pf_shelfmark.upper() == current_shelfmark_upper:
+                        # Still add to fragments_set if not already there
+                        if pf_shelfmark.upper() not in fragments_upper:
+                            fragments_set.add(pf_shelfmark)
+                            fragments_upper.add(pf_shelfmark.upper())
+                        continue
+
+                    # Deduplicate: skip if already present from user joins
+                    if pf_shelfmark.upper() in fragments_upper:
+                        continue
+
+                    fragments_set.add(pf_shelfmark)
+                    fragments_upper.add(pf_shelfmark.upper())
+
+                    # Create formatted join entry for PGP fragment
+                    formatted_joins.append({
+                        'id': None,  # Not user-created, prevents admin delete button
+                        'fragment_a': shelfmark or '',
+                        'fragment_b': pf_shelfmark,
+                        'relationship_type': 'same_composition',
+                        'source': 'PGP',
+                        'notes': f'PGP Document #{resolved_pgpid}'
+                    })
+
+        # Ensure current shelfmark is in fragments_set
+        if shelfmark and shelfmark.upper() not in fragments_upper:
+            fragments_set.add(shelfmark)
+
+        # If no joins at all (no user joins, no PGP joins), return empty
+        if not formatted_joins:
+            result = {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": fragment_details}
+            with _joins_cache_lock:
+                _joins_cache[cache_key] = (time.time(), result)
+            return result
+
         result = {
             "fragments": list(fragments_set),
             "joins": formatted_joins,
             "total_fragments": len(fragments_set),
-            "total_joins": len(formatted_joins)
+            "total_joins": len(formatted_joins),
+            "fragment_details": fragment_details
         }
 
         # Cache the result
@@ -92,7 +178,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, fo
         return result
     except Exception as e:
         print(f"Error fetching connected fragments: {e}")
-        return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0}
+        return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": []}
 
 
 def invalidate_joins_cache(document_id: str = None, shelfmark: str = None, clear_all: bool = False):
@@ -106,10 +192,17 @@ def invalidate_joins_cache(document_id: str = None, shelfmark: str = None, clear
         if clear_all:
             _joins_cache.clear()
             return
+        # Clear any cache entries matching the document_id or shelfmark
+        # (cache keys now include pgpid suffix, so we match by prefix)
+        keys_to_remove = []
         if document_id:
-            _joins_cache.pop(f"doc:{document_id}", None)
+            prefix = f"doc:{document_id}:"
+            keys_to_remove.extend(k for k in _joins_cache if k.startswith(prefix))
         if shelfmark:
-            _joins_cache.pop(f"shelf:{shelfmark}", None)
+            prefix = f"shelf:{shelfmark}:"
+            keys_to_remove.extend(k for k in _joins_cache if k.startswith(prefix))
+        for k in keys_to_remove:
+            _joins_cache.pop(k, None)
 
 
 def delete_join(join_id: int) -> bool:
@@ -131,6 +224,7 @@ def delete_join(join_id: int) -> bool:
 def create_joins_button(
     shelfmark: str,
     document_id: str = None,
+    pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None,
     size: str = "sm"
 ):
@@ -140,6 +234,7 @@ def create_joins_button(
     Args:
         shelfmark: Current fragment shelfmark
         document_id: System ID of the document (optional)
+        pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Callback when user clicks to navigate to another fragment
         size: Button size (sm, md, lg)
 
@@ -152,7 +247,7 @@ def create_joins_button(
 
     def load_count():
         """Load the count of connected fragments."""
-        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
         join_count['value'] = data.get('total_fragments', 1)
         # Update button style if we have joins - make it prominent
         if button_ref['btn'] and join_count['value'] > 1:
@@ -163,6 +258,7 @@ def create_joins_button(
         create_joins_dialog(
             shelfmark=shelfmark,
             document_id=document_id,
+            pgpid=pgpid,
             on_navigate=on_navigate
         )
 
@@ -183,6 +279,7 @@ def create_joins_button(
 def create_joins_dialog(
     shelfmark: str,
     document_id: str = None,
+    pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None
 ):
     """
@@ -191,6 +288,7 @@ def create_joins_dialog(
     Args:
         shelfmark: Current fragment shelfmark
         document_id: System ID of the document
+        pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Callback when navigating to another fragment
     """
     dialog = ui.dialog()
@@ -213,7 +311,7 @@ def create_joins_dialog(
 
         def load_content():
             """Load and display connected fragments."""
-            data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+            data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
 
             # Delete spinner only if it exists and hasn't been deleted
             if not spinner_state['deleted']:
@@ -693,6 +791,7 @@ def show_add_join_form(
 def create_joins_indicator(
     shelfmark: str,
     document_id: str = None,
+    pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None
 ):
     """
@@ -702,6 +801,7 @@ def create_joins_indicator(
     Args:
         shelfmark: Current fragment shelfmark
         document_id: System ID
+        pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Navigation callback
 
     Returns:
@@ -710,14 +810,14 @@ def create_joins_indicator(
     container = ui.row().classes('items-center gap-1')
 
     def load_and_display():
-        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id)
+        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
         total = data.get('total_fragments', 1)
 
         container.clear()
         with container:
             if total > 1:
                 # Has joins - show clickable indicator
-                with ui.button(on_click=lambda: create_joins_dialog(shelfmark, document_id, on_navigate)).props(
+                with ui.button(on_click=lambda: create_joins_dialog(shelfmark, document_id, pgpid, on_navigate)).props(
                     'flat dense round'
                 ).classes('text-green-700'):
                     ui.icon('link', size='sm')
