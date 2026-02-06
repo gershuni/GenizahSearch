@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 4.2 of 9 (Multi-Source Import)
-Plan: 0 of 3 in current phase
-Status: Ready to plan
-Last activity: 2026-02-06 - Completed quick task 001: Recently Viewed on top
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-02-06 - Completed 04.2-01-PLAN.md (document_sources table)
 
-Progress: [████████░░] 88%
+Progress: [████████░░] 89%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 9.3 min
-- Total execution time: 74 min
+- Total plans completed: 9
+- Average duration: 8.8 min
+- Total execution time: 79 min
 
 **By Phase:**
 
@@ -32,10 +32,11 @@ Progress: [████████░░] 88%
 | 03-document-service | 1 | 4 min | 4 min |
 | 04-transcription-display | 3 | 11 min | 3.7 min |
 | 04.1-separate-translations | 1 | 18 min | 18 min |
+| 04.2-multi-source-import | 1 | 5 min | 5 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-01 (4 min), 04-01 (4 min), 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min)
-- Trend: Data migration plan included human authentication gate (11 min update script)
+- Last 5 plans: 04-01 (4 min), 04-02 (4 min), 04-03 (3 min), 04.1-01 (18 min), 04.2-01 (5 min)
+- Trend: Schema-only plan was quick; human action checkpoint for Supabase execution
 
 *Updated after each plan completion*
 
@@ -94,13 +95,19 @@ Recent decisions affecting current work:
 - doc_relation='Digital Edition' required to show transcription
 - 'Edition' type (2 records) treated as non-transcription for safety
 
+**04.2-01 Decisions:**
+- BIGSERIAL for id column (supports large scale)
+- Composite unique on (pgpid, source_scholar, doc_relation) for deduplication
+- content_length column for sorting/filtering without full-text scan
+- sequence_order for ordering multiple sources of same type
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None - Phase 4.1 complete, ready for Phase 5.
+None - Phase 4.2 in progress (document_sources table created).
 
 ### Quick Tasks Completed
 
@@ -154,5 +161,5 @@ Version selector now supports PGP transcriptions:
 ## Session Continuity
 
 Last session: 2026-02-06
-Stopped at: Completed 04.1-01-PLAN.md
+Stopped at: Completed 04.2-01-PLAN.md
 Resume file: None
