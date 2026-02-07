@@ -1,4 +1,4 @@
-# GenizahSearch — External Data Integration
+# GenizahSearch — Desktop Parity & Transcription Search
 
 ## What This Is
 
@@ -27,13 +27,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-- [ ] PGP transcriptions searchable in Tantivy index (full-text search)
-- [ ] NLI joins import: PartOf relationships from crossreference (~424K)
-- [ ] Shared service layer: extract document_service from web/ for desktop app access
-- [ ] Desktop app: PGP transcription display in browse tab
-- [ ] Desktop app: PGP metadata display
+- [ ] Shared service layer: reshape and extract document_service from web/ to shared module
+- [ ] Desktop app: PGP transcription display in browse tab (full parity with web)
+- [ ] Desktop app: PGP metadata display (type, tags, dates, descriptions)
 - [ ] Desktop app: Related Fragments / joins display
-- [ ] Import remaining ~34K PGP documents (metadata only, no transcriptions)
+- [ ] Desktop app: Tag-based search from PGP metadata
+- [ ] Desktop app: Multi-source version selector (scholars' editions and translations)
+- [ ] Desktop app: PGP transcription indicator in search results
+- [ ] Transcriptions searchable in Tantivy (PGP + user corrections), with filter toggle
+- [ ] Tantivy index rebuild with transcription fields
 
 ### Out of Scope
 
@@ -45,12 +47,23 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - NLI BifolioWith import — 306K image-level bifolio pairs, defer to v2+
 - Build transcription editor — link to external tools instead
 - Build join detection AI — import from NLI/PGP instead
+- NLI joins import — deferred to v5.7.0 (not blocking desktop parity)
+- Import remaining ~34K PGP documents — deferred to v5.7.0 (metadata only, low priority)
+
+## Current Milestone: v5.6.0 Desktop Parity & Transcription Search
+
+**Goal:** Bring all PGP features to the desktop app via a shared service layer, and make transcriptions (PGP + user) searchable in Tantivy with filter controls.
+
+**Target features:**
+- Shared service layer extracted and reshaped from web/document_service.py
+- Desktop app gains full PGP feature parity with web (transcriptions, metadata, joins, tag search, version selector)
+- Transcriptions indexed in Tantivy with search filter toggle (all content / transcriptions only / exclude transcriptions)
 
 ## Context
 
 ### Current State (after v1)
 
-**Shipped:** v1 External Data Integration (2026-02-07)
+**Shipped:** v1 External Data Integration (2026-02-07, git tag v5.5.0)
 - 7,090 PGP documents imported to Supabase (documents, document_fragments, document_sources tables)
 - 9,364 transcription/translation sources with scholar attribution
 - 492 multi-fragment documents with join relationships
@@ -103,8 +116,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 | Two-pass import (docs then fragments) | Respects FK constraints, clean deduplication | Good |
 | JSONB tags with GIN index | Flexible tag queries without join table | Good |
 | Service layer pattern | Isolates Supabase queries from UI code | Good — needs extraction from web/ |
-| Shared service layer (Option C) | Both apps consume same Supabase functions | Pending — next milestone |
-| NLI joins deferred | PartOf relationships add 424K links cheaply, but not blocking v1 | Pending |
+| Shared service layer (Option C) | Both apps consume same Supabase functions | Pending — this milestone |
+| NLI joins deferred to v5.7.0 | PartOf relationships add 424K links cheaply, not blocking desktop parity | — Pending |
+| Reshape service API during extraction | Fix TODO, clean up naming, improve API surface while extracting | — Pending |
+| Transcription search with filter toggle | Default=everything, optional filter for transcriptions only or exclude | — Pending |
+| v5.6.0 version tag | Aligns with existing git tag scheme (v5.5.0 → v5.6.0) | — Pending |
 
 ---
-*Last updated: 2026-02-07 after v1 milestone*
+*Last updated: 2026-02-07 after v5.6.0 milestone start*
