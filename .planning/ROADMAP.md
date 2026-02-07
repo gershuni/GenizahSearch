@@ -45,7 +45,7 @@ Full PGP feature set in web app.
 **Plans:** 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Create shared/ package with supabase_provider and extract document_service
+- [x] 08-01-PLAN.md -- Create shared/ package with supabase_provider and extract document_service
 - [ ] 08-02-PLAN.md -- Web re-export shim, test updates, and smoke tests confirming zero breakage
 
 ### Phase 9: Data Import
@@ -129,7 +129,7 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 8. Foundation | v5.6.0 | 0/2 | Not started | - |
+| 8. Foundation | v5.6.0 | 1/2 | In progress | - |
 | 9. Data Import | v5.6.0 | 0/1 | Not started | - |
 | 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
@@ -138,4 +138,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-07*
+*Last updated: 2026-02-08*
