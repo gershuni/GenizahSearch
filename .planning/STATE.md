@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 8 of 13 (Foundation)
-Plan: 1 of 2
-Status: In progress
-Last activity: 2026-02-08 -- Completed 08-01-PLAN.md
+Phase: 8 of 13 (Foundation) -- COMPLETE
+Plan: 2 of 2
+Status: Phase complete
+Last activity: 2026-02-08 -- Completed 08-02-PLAN.md (Phase 8 complete)
 
-Progress: [█░░░░░░░░░░░░░░░░░░░] 7% (1/14 plans)
+Progress: [██░░░░░░░░░░░░░░░░░░] 14% (2/14 plans)
 
 ## Milestone History
 
@@ -25,15 +25,15 @@ Progress: [█░░░░░░░░░░░░░░░░░░░] 7% (1/1
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v5.6.0)
-- Average duration: ~2 min
-- Total execution time: ~2 min
+- Total plans completed: 2 (v5.6.0)
+- Average duration: ~2.5 min
+- Total execution time: ~5 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 8. Foundation | 1/2 | ~2 min | ~2 min |
+| 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 
 *Updated after each plan completion*
 
@@ -47,21 +47,20 @@ Recent decisions affecting current work:
 - Shared service layer (Option C): Both apps consume same Supabase functions
 - Reshape service API during extraction: Fix TODO, clean up naming
 - Tantivy boolean workaround: Use text field with raw tokenizer for content_type filter
-- DEC-08-01-01: Keep shared/document_service.py API identical during extraction (zero-risk migration)
+- DEC-08-01-01: Keep shared/document_service.py API identical during extraction
+- DEC-08-02-01: Fixed pre-existing mock chain bug in test (Rule 1 auto-fix)
 
 ### Pending Todos
 
-None yet.
+- Multi-fragment document view: add image controls for each image (user feedback during Phase 8 verification, relevant to Phase 11)
 
 ### Blockers/Concerns
 
-- Recto/verso section headers stripped during parsing (v1 tech debt) -- fix opportunistically in Phase 8
-- No integration tests for E2E flows (v1 tech debt) -- add smoke tests in Phase 8
-- Pre-existing test failure: `test_get_document_for_fragment_not_found` in tests/test_document_service.py
+- Recto/verso section headers stripped during parsing (v1 tech debt)
 
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 08-01-PLAN.md
+Stopped at: Phase 8 complete, awaiting verification
 Resume file: None
-Notes: Next step is execute 08-02-PLAN.md (web re-export shim, test updates, smoke tests)
+Notes: Phase 8 Foundation complete. Next: verify phase goal, then Phase 9 (Data Import)

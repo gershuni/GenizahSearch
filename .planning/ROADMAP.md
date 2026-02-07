@@ -24,7 +24,7 @@ Full PGP feature set in web app.
 
 **Phase Numbering:** Continues from v1 milestone (Phase 7). Integer phases 8-13.
 
-- [ ] **Phase 8: Foundation** - Extract shared service layer from web-only module
+- [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
 - [ ] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [ ] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
 - [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
@@ -46,7 +46,7 @@ Full PGP feature set in web app.
 
 Plans:
 - [x] 08-01-PLAN.md -- Create shared/ package with supabase_provider and extract document_service
-- [ ] 08-02-PLAN.md -- Web re-export shim, test updates, and smoke tests confirming zero breakage
+- [x] 08-02-PLAN.md -- Web re-export shim, test updates, and smoke tests confirming zero breakage
 
 ### Phase 9: Data Import
 **Goal**: All ~41,000 PGP documents are available in Supabase, completing the dataset for transcription search indexing and desktop display
@@ -129,7 +129,7 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 8. Foundation | v5.6.0 | 1/2 | In progress | - |
+| 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 0/1 | Not started | - |
 | 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
