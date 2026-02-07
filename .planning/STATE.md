@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Users can search and view PGP's human-curated transcriptions alongside existing content
-**Current focus:** Phase 7 - Joins UI
+**Current focus:** Phase 7 - Joins UI (COMPLETE)
 
 ## Current Position
 
-Phase: 7 of 9 (Joins UI)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-02-06 - Completed 07-01-PLAN.md (Unified Joins Data Layer)
+Phase: 7 of 7 (Joins UI)
+Plan: 2 of 2 in current phase
+Status: Complete
+Last activity: 2026-02-07 - Completed 07-02-PLAN.md (Inline Related Fragments Panel + View All)
 
-Progress: [################] ~89%
+Progress: [####################] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 9.3 min
-- Total execution time: 153 min
+- Total plans completed: 18
+- Average duration: 9.6 min
+- Total execution time: 173 min
 
 **By Phase:**
 
@@ -35,11 +35,11 @@ Progress: [################] ~89%
 | 04.2-multi-source-import | 3 | 37 min | 12.3 min |
 | 05-search-integration | 1 | 4 min | 4 min |
 | 06-metadata-display | 3 | 35 min | 11.7 min |
-| 07-joins-ui | 1 | 3 min | 3 min |
+| 07-joins-ui | 2 | 23 min | 11.5 min |
 
 **Recent Trend:**
-- Last 5 plans: 05-01 (4 min), 06-01 (5 min), 06-02 (15 min), 06-03 (15 min), 07-01 (3 min)
-- Trend: Pure data-layer plans execute fastest; interactive UI plans take longer
+- Last 5 plans: 06-01 (5 min), 06-02 (15 min), 06-03 (15 min), 07-01 (3 min), 07-02 (20 min)
+- Trend: Interactive UI plans with user feedback take longest; pure data-layer plans execute fastest
 
 *Updated after each plan completion*
 
@@ -147,9 +147,15 @@ None.
 - Lazy import of document_service inside function body to avoid circular imports
 - Cache key includes pgpid for proper separation; prefix-based invalidation
 
+**07-02 Decisions:**
+- Inline Related Fragments panel in metadata sidebar (below PGP Metadata, above Export)
+- View All Fragments mode: stacked [Image | Text] per page per fragment in main viewer
+- fragment_details populated from both user joins and PGP joins for unified View All
+- Full PGP transcription shown at bottom of joined view when pgpid available
+
 ### Blockers/Concerns
 
-None - Phase 7 Plan 01 complete. Ready for Plan 02.
+None - All phases complete. Milestone ready for audit.
 
 ### Quick Tasks Completed
 
@@ -163,12 +169,13 @@ None - Phase 7 Plan 01 complete. Ready for Plan 02.
 
 ### Roadmap Evolution
 
-- Phase 7 Plan 01 completed: Unified joins data layer
-  - fetch_connected_fragments merges user pairwise + PGP multi-fragment joins
-  - pgpid threaded from browse state to joins button (eliminates redundant query)
-  - Single-fragment PGP documents filtered out (no false "Related Fragments")
-  - fragment_details populated for dialog shelfmark-to-docid lookup
-  - JOIN-01 through JOIN-05 requirements satisfied
+- Phase 7 completed: Joins UI with unified data + inline panel + View All mode
+  - Plan 01: fetch_connected_fragments merges user pairwise + PGP multi-fragment joins
+  - Plan 02: Inline Related Fragments panel in metadata sidebar
+  - Plan 02: View All Fragments mode in main viewer (stacked [Image | Text])
+  - Plan 02: Hebrew translations for all 27 joins UI strings
+  - Plan 02: fragment_details from both user and PGP joins
+  - JOIN-01 through JOIN-09 requirements satisfied
 
 - Phase 6 completed: Metadata display with tag-based search
   - 4 new metadata columns added (languages, dates)
@@ -252,7 +259,7 @@ Version selector now supports PGP transcriptions with multi-source display:
 
 ## Session Continuity
 
-Last session: 2026-02-06
-Stopped at: Completed 07-01-PLAN.md (Unified Joins Data Layer)
+Last session: 2026-02-07
+Stopped at: All phases complete - milestone ready for audit
 Resume file: None
-Notes: Phase 7 Plan 01 complete. Plan 02 (inline metadata panel) is next.
+Notes: Phase 7 complete. All 7 phases (18 plans) executed successfully.
