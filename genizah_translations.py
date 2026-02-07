@@ -2173,6 +2173,10 @@ TRANSLATIONS = {
 
     # --- Fragment Joins UI ---
     "Related Fragments": "קטעים קשורים",
+    "View whole document": "צפה במסמך המלא",
+    "Full Transcription": "תמלול מלא",
+    "Recto": "רקטו",
+    "Verso": "ורסו",
     "This action cannot be undone.": "פעולה זו אינה ניתנת לביטול.",
     "Failed to delete join": "מחיקת הצירוף נכשלה",
     "Select fragment to join:": "בחר קטע לצירוף:",

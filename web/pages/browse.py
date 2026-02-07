@@ -1808,45 +1808,39 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     if joins_data.get('total_fragments', 1) > 1:
                         ui.separator().classes('my-3')
+                        total_frags = joins_data['total_fragments']
+                        other_count = total_frags - 1  # Exclude current fragment from badge count
+
                         # Header row: title + count badge
-                        related_count = joins_data['total_fragments'] - 1
                         with ui.row().classes('items-center gap-2 mb-2'):
                             h3(tr('Related Fragments'), classes='text-xs font-bold', style='color: var(--text-secondary);')
-                            ui.badge(str(related_count), color='green').props('dense').classes('text-xs')
+                            ui.badge(str(other_count), color='green').props('dense').classes('text-xs')
 
-                        # Build lookup: shelfmark -> (source, relationship_type) from joins data
+                        # Build relationship/source lookup from joins data
                         current_shelfmark_upper = (page.shelfmark or '').upper()
-                        frag_join_info = {}
-                        for j in joins_data.get('joins', []):
-                            fa = j.get('fragment_a', '')
-                            fb = j.get('fragment_b', '')
-                            src = j.get('source', '')
-                            rel = j.get('relationship_type', '')
-                            # Map the "other" fragment in each join
-                            if fa.upper() != current_shelfmark_upper:
-                                frag_join_info.setdefault(fa.upper(), (src, rel))
-                            if fb.upper() != current_shelfmark_upper:
-                                frag_join_info.setdefault(fb.upper(), (src, rel))
+                        joins_list = joins_data.get('joins', [])
+                        frag_info_map = {}  # shelfmark_upper -> {source, relationship_type}
+                        for join_entry in joins_list:
+                            fa = join_entry.get('fragment_a', '')
+                            fb = join_entry.get('fragment_b', '')
+                            src = join_entry.get('source', 'user')
+                            rel = join_entry.get('relationship_type', '')
+                            # Map the OTHER fragment in each join pair
+                            if fa.upper() == current_shelfmark_upper and fb:
+                                frag_info_map[fb.upper()] = {'source': src, 'relationship_type': rel}
+                            elif fb.upper() == current_shelfmark_upper and fa:
+                                frag_info_map[fa.upper()] = {'source': src, 'relationship_type': rel}
 
-                        # List each related fragment
+                        # Clickable fragment rows (skip current fragment)
                         for frag_shelfmark in joins_data.get('fragments', []):
                             if frag_shelfmark.upper() == current_shelfmark_upper:
-                                continue  # Skip current fragment
+                                continue
 
-                            # Look up source and relationship from joins
-                            source, relationship_type = frag_join_info.get(frag_shelfmark.upper(), ('', ''))
+                            info = frag_info_map.get(frag_shelfmark.upper(), {})
+                            frag_source = info.get('source', 'user')
+                            frag_rel_type = info.get('relationship_type', '')
 
-                            # Map relationship type to display text
-                            if relationship_type == 'physical_join':
-                                rel_display = tr('Physical join')
-                            elif relationship_type == 'same_composition':
-                                rel_display = tr('Same composition')
-                            elif relationship_type:
-                                rel_display = relationship_type
-                            else:
-                                rel_display = ''
-
-                            # Navigation callback (closure)
+                            # Navigation handler using search_shelfmark pattern
                             def make_nav_to(target=frag_shelfmark):
                                 def nav():
                                     state.shelfmark_query = target
@@ -1856,14 +1850,125 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.row().classes(
                                 'items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded w-full'
                             ).on('click', make_nav_to()):
-                                ui.icon('description', size='xs').classes('text-gray-500')
-                                ui.label(frag_shelfmark).classes('text-sm font-medium').style('color: var(--text-primary);')
-                                if source == 'PGP':
+                                ui.icon('description').classes('text-gray-500').style('font-size: 1.1rem;')
+                                ui.label(frag_shelfmark).classes('text-sm font-medium')
+                                if frag_source == 'PGP':
                                     ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
-                                if rel_display:
-                                    ui.label(rel_display).classes('text-xs').style('color: var(--text-tertiary);')
-                                ui.space()
-                                ui.icon('arrow_back' if is_rtl() else 'arrow_forward', size='xs').classes('text-gray-400')
+                                if frag_rel_type:
+                                    rel_label = {
+                                        'physical_join': tr('Physical join'),
+                                        'same_composition': tr('Same composition'),
+                                    }.get(frag_rel_type, frag_rel_type)
+                                    ui.label(rel_label).classes('text-xs text-gray-500')
+                                ui.element('div').classes('flex-grow')
+                                ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-gray-400')
+
+                        # View whole document button + dialog
+                        frag_details_for_dialog = joins_data.get('fragment_details', [])
+                        doc_pgpid = pgpid_for_joins
+
+                        def open_document_viewer():
+                            """Open dialog showing all fragment images and full transcription."""
+                            from web.document_service import get_transcription_for_document
+                            dialog = ui.dialog()
+                            with dialog, ui.card().classes('w-[90vw] max-w-[900px] max-h-[90vh] p-0'):
+                                # Header
+                                with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                                    'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                                ):
+                                    with ui.row().classes('items-center gap-2'):
+                                        ui.icon('auto_stories').classes('text-white text-xl')
+                                        header_text = f'{tr("Document")} #{doc_pgpid}' if doc_pgpid else tr('Document')
+                                        ui.label(header_text).classes('text-lg font-bold text-white')
+                                        ui.badge(f'{total_frags} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
+                                    ui.button(icon='close', on_click=dialog.close).props('flat round size=sm text-color=white')
+
+                                # Scrollable content
+                                with ui.scroll_area().classes('w-full').style('max-height: calc(90vh - 70px);'):
+                                    with ui.column().classes('w-full p-4 gap-4'):
+                                        # === Images for each fragment ===
+                                        for fd in frag_details_for_dialog:
+                                            frag_sm = fd.get('shelfmark', '')
+                                            frag_sid = fd.get('document_id', '')
+                                            if not frag_sid:
+                                                continue
+
+                                            # Fragment header
+                                            is_current = frag_sm.upper() == current_shelfmark_upper
+                                            with ui.row().classes('items-center gap-2 mt-2'):
+                                                ui.icon('description', size='xs').classes('text-green-600')
+                                                ui.label(frag_sm).classes('text-sm font-bold').style('color: var(--text-primary);')
+                                                if is_current:
+                                                    ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+
+                                            # Oxford detection for correct image endpoint
+                                            frag_sm_lower = frag_sm.lower()
+                                            frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
+
+                                            # Show recto and verso images side by side
+                                            with ui.row().classes('w-full gap-2 flex-wrap justify-center'):
+                                                for pg_idx in range(2):  # 0=recto, 1=verso
+                                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+                                                    if frag_is_oxford:
+                                                        img_src = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                                    else:
+                                                        img_src = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
+
+                                                    with ui.column().classes('items-center'):
+                                                        ui.label(pg_label).classes('text-xs text-gray-500 mb-1')
+                                                        safe_sid = frag_sid.replace("'", "\\'")
+                                                        is_ox_js = 'true' if frag_is_oxford else 'false'
+                                                        ui.html(f'''
+                                                            <img src="{img_src}"
+                                                                 style="max-height: 350px; max-width: 400px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 4px;"
+                                                                 loading="lazy"
+                                                                 onerror="
+                                                                     if ({is_ox_js}) {{
+                                                                         this.style.display='none';
+                                                                         this.parentElement.style.display='none';
+                                                                     }} else {{
+                                                                         var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                                         if (this.src.indexOf('oxford_image')===-1) {{
+                                                                             this.onerror=function(){{ this.style.display='none'; this.parentElement.style.display='none'; }};
+                                                                             this.src=ox;
+                                                                         }} else {{
+                                                                             this.style.display='none';
+                                                                             this.parentElement.style.display='none';
+                                                                         }}
+                                                                     }}
+                                                                 "
+                                                            />
+                                                        ''')
+                                            ui.separator().classes('my-2')
+
+                                        # === Full Transcription ===
+                                        if doc_pgpid:
+                                            full_text = get_transcription_for_document(doc_pgpid)
+                                            if full_text:
+                                                with ui.row().classes('items-center gap-2 mb-2'):
+                                                    ui.icon('text_snippet', size='xs').classes('text-green-600')
+                                                    ui.label(tr('Full Transcription')).classes('text-sm font-bold').style('color: var(--text-primary);')
+                                                    ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
+                                                ui.html(f'''
+                                                    <div dir="rtl" style="
+                                                        white-space: pre-wrap;
+                                                        font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif;
+                                                        font-size: 1.1rem;
+                                                        line-height: 1.8;
+                                                        padding: 12px;
+                                                        background: var(--bg-secondary, #f9fafb);
+                                                        border-radius: 8px;
+                                                        border: 1px solid #e5e7eb;
+                                                        color: var(--text-primary);
+                                                    ">{full_text}</div>
+                                                ''')
+
+                            dialog.open()
+
+                        ui.button(
+                            tr('View whole document'), icon='auto_stories',
+                            on_click=open_document_viewer
+                        ).props('dense outline color=green').classes('w-full mt-2')
 
                     # Export
                     ui.separator().classes('my-3')
