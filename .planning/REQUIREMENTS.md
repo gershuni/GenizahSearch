@@ -1,7 +1,7 @@
 # Requirements: GenizahSearch v5.6.0
 
 **Defined:** 2026-02-07
-**Core Value:** Users can view and search PGP's human-curated transcriptions alongside manuscript images — in both web and desktop apps
+**Core Value:** Users can view and search PGP's human-curated transcriptions alongside manuscript images -- in both web and desktop apps
 
 ## v5.6.0 Requirements
 
@@ -80,31 +80,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | TBD | Pending |
-| INFRA-02 | TBD | Pending |
-| INFRA-03 | TBD | Pending |
-| DESK-01 | TBD | Pending |
-| DESK-02 | TBD | Pending |
-| DESK-03 | TBD | Pending |
-| DESK-04 | TBD | Pending |
-| DESK-05 | TBD | Pending |
-| DESK-06 | TBD | Pending |
-| SRCH-01 | TBD | Pending |
-| SRCH-02 | TBD | Pending |
-| SRCH-03 | TBD | Pending |
-| SRCH-04 | TBD | Pending |
-| VIEW-01 | TBD | Pending |
-| VIEW-02 | TBD | Pending |
-| VIEW-03 | TBD | Pending |
-| VIEW-04 | TBD | Pending |
-| DATA-01 | TBD | Pending |
-| DATA-02 | TBD | Pending |
+| INFRA-01 | Phase 8 | Pending |
+| INFRA-02 | Phase 8 | Pending |
+| INFRA-03 | Phase 8 | Pending |
+| DESK-01 | Phase 10 | Pending |
+| DESK-02 | Phase 10 | Pending |
+| DESK-03 | Phase 12 | Pending |
+| DESK-04 | Phase 12 | Pending |
+| DESK-05 | Phase 12 | Pending |
+| DESK-06 | Phase 12 | Pending |
+| SRCH-01 | Phase 13 | Pending |
+| SRCH-02 | Phase 13 | Pending |
+| SRCH-03 | Phase 13 | Pending |
+| SRCH-04 | Phase 13 | Pending |
+| VIEW-01 | Phase 11 | Pending |
+| VIEW-02 | Phase 11 | Pending |
+| VIEW-03 | Phase 11 | Pending |
+| VIEW-04 | Phase 11 | Pending |
+| DATA-01 | Phase 9 | Pending |
+| DATA-02 | Phase 9 | Pending |
 
 **Coverage:**
 - v5.6.0 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-07*
-*Last updated: 2026-02-07 after initial definition*
+*Last updated: 2026-02-07 after roadmap creation*
