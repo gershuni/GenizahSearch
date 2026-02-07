@@ -1,4 +1,8 @@
-# Roadmap: External Data Integration
+# Milestone v1: External Data Integration
+
+**Status:** SHIPPED 2026-02-07
+**Phases:** 1-7 (plus 2 inserted: 4.1, 4.2)
+**Total Plans:** 18
 
 ## Overview
 
@@ -12,15 +16,15 @@ This roadmap transforms GenizahSearch from a manuscript browser into a research 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [x] **Phase 1: Database Schema** - Create document and fragment linkage tables in Supabase ✓
-- [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks ✓
-- [x] **Phase 3: Document Service** - Build service layer for document-fragment operations ✓
-- [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector ✓
-- [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED) ✓
-- [x] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED) ✓
-- [x] **Phase 5: Search Integration** - Indicate transcription availability in search results ✓
-- [x] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page ✓
-- [x] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page ✓
+- [x] **Phase 1: Database Schema** - Create document and fragment linkage tables in Supabase
+- [x] **Phase 2: PGP Data Import** - Import transcriptions, metadata, and parse joins from multi-fragment shelfmarks
+- [x] **Phase 3: Document Service** - Build service layer for document-fragment operations
+- [x] **Phase 4: Transcription Display** - Show PGP transcriptions in browse page version selector
+- [x] **Phase 4.1: Separate Translations** - Filter Digital Translations from transcription display (INSERTED)
+- [x] **Phase 4.2: Multi-Source Import** - Import all transcriptions and translations per document (INSERTED)
+- [x] **Phase 5: Search Integration** - Indicate transcription availability in search results
+- [x] **Phase 6: Metadata Display** - Show document type, dates, descriptions, and tags on browse page
+- [x] **Phase 7: Joins UI** - Display and navigate fragment relationships on browse page
 
 ## Phase Details
 
@@ -36,7 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 1 plan
 
 Plans:
-- [x] 01-01-PLAN.md — Create Supabase migration with documents and document_fragments tables ✓
+- [x] 01-01-PLAN.md — Create Supabase migration with documents and document_fragments tables
 
 ### Phase 2: PGP Data Import
 **Goal**: All PGP transcriptions, metadata, and joins are loaded and linked to GenizahSearch records
@@ -51,8 +55,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [x] 02-01-PLAN.md — Add page_info column to document_fragments for recto/verso storage ✓
-- [x] 02-02-PLAN.md — Build PGP import script with two-pass architecture and multi-fragment parsing ✓
+- [x] 02-01-PLAN.md — Add page_info column to document_fragments for recto/verso storage
+- [x] 02-02-PLAN.md — Build PGP import script with two-pass architecture and multi-fragment parsing
 
 ### Phase 3: Document Service
 **Goal**: Service layer enables all downstream features to access document-fragment relationships
@@ -66,7 +70,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [x] 03-01-PLAN.md — Create document service module with Supabase queries ✓
+- [x] 03-01-PLAN.md — Create document service module with Supabase queries
 
 ### Phase 4: Transcription Display
 **Goal**: Users can view PGP transcriptions on browse page with proper attribution
@@ -81,9 +85,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [x] 04-01-PLAN.md — Integrate PGP transcriptions into version selector with attribution ✓
-- [x] 04-02-PLAN.md — Add clickable "View on PGP" link (gap closure for TRANS-03) ✓
-- [x] 04-03-PLAN.md — Split transcription by recto/verso markers (UAT gap closure) ✓
+- [x] 04-01-PLAN.md — Integrate PGP transcriptions into version selector with attribution
+- [x] 04-02-PLAN.md — Add clickable "View on PGP" link (gap closure for TRANS-03)
+- [x] 04-03-PLAN.md — Split transcription by recto/verso markers (UAT gap closure)
 
 ### Phase 4.1: Separate Translations from Transcriptions (INSERTED)
 **Goal**: Filter Digital Translations from transcription display; optionally offer as separate version
@@ -96,7 +100,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [x] 04.1-01-PLAN.md — Add doc_relation column and filter translations in document service ✓
+- [x] 04.1-01-PLAN.md — Add doc_relation column and filter translations in document service
 
 ### Phase 4.2: Multi-Source Import (INSERTED)
 **Goal**: Import all transcriptions and translations per document, with UI to choose between sources
@@ -112,9 +116,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [x] 04.2-01-PLAN.md — Schema migration for document_sources table ✓
-- [x] 04.2-02-PLAN.md — Reimport all sources from CSV ✓
-- [x] 04.2-03-PLAN.md — Update version selector to show multiple sources ✓
+- [x] 04.2-01-PLAN.md — Schema migration for document_sources table
+- [x] 04.2-02-PLAN.md — Reimport all sources from CSV
+- [x] 04.2-03-PLAN.md — Update version selector to show multiple sources
 
 ### Phase 5: Search Integration
 **Goal**: Users can identify which search results have PGP transcriptions available
@@ -127,7 +131,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [x] 05-01-PLAN.md — Add batch transcription lookup and indicator icon to search results ✓
+- [x] 05-01-PLAN.md — Add batch transcription lookup and indicator icon to search results
 
 ### Phase 6: Metadata Display
 **Goal**: Users see PGP document metadata (type, dates, description, tags) on browse page
@@ -141,9 +145,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [x] 06-01-PLAN.md — Add missing metadata columns to DB and update import script ✓
-- [x] 06-02-PLAN.md — Build PGP metadata display section in browse page metadata panel ✓
-- [x] 06-03-PLAN.md — Implement tag-based search (service + route + results rendering) ✓
+- [x] 06-01-PLAN.md — Add missing metadata columns to DB and update import script
+- [x] 06-02-PLAN.md — Build PGP metadata display section in browse page metadata panel
+- [x] 06-03-PLAN.md — Implement tag-based search (service + route + results rendering)
 
 ### Phase 7: Joins UI
 **Goal**: Users can see and navigate fragment relationships on browse page
@@ -158,8 +162,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [x] 07-01-PLAN.md — Extend joins data layer to unify PGP + user joins and thread pgpid ✓
-- [x] 07-02-PLAN.md — Add inline Related Fragments panel to metadata sidebar with translations ✓
+- [x] 07-01-PLAN.md — Extend joins data layer to unify PGP + user joins and thread pgpid
+- [x] 07-02-PLAN.md — Add inline Related Fragments panel to metadata sidebar with translations
 
 ## Progress
 
@@ -168,17 +172,52 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 4.1 -> 4.2 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Database Schema | 1/1 | ✓ Complete | 2026-02-05 |
-| 2. PGP Data Import | 2/2 | ✓ Complete | 2026-02-05 |
-| 3. Document Service | 1/1 | ✓ Complete | 2026-02-05 |
-| 4. Transcription Display | 3/3 | ✓ Complete | 2026-02-05 |
-| 4.1 Separate Translations | 1/1 | ✓ Complete | 2026-02-06 |
-| 4.2 Multi-Source Import | 3/3 | ✓ Complete | 2026-02-06 |
-| 5. Search Integration | 1/1 | ✓ Complete | 2026-02-06 |
-| 6. Metadata Display | 3/3 | ✓ Complete | 2026-02-06 |
-| 7. Joins UI | 2/2 | ✓ Complete | 2026-02-07 |
+| 1. Database Schema | 1/1 | Complete | 2026-02-05 |
+| 2. PGP Data Import | 2/2 | Complete | 2026-02-05 |
+| 3. Document Service | 1/1 | Complete | 2026-02-05 |
+| 4. Transcription Display | 3/3 | Complete | 2026-02-05 |
+| 4.1 Separate Translations | 1/1 | Complete | 2026-02-06 |
+| 4.2 Multi-Source Import | 3/3 | Complete | 2026-02-06 |
+| 5. Search Integration | 1/1 | Complete | 2026-02-06 |
+| 6. Metadata Display | 3/3 | Complete | 2026-02-06 |
+| 7. Joins UI | 2/2 | Complete | 2026-02-07 |
 
 ---
 
-*Created: 2026-02-05*
-*Updated: 2026-02-07 - Phase 7 complete: all 7 phases done, milestone complete*
+## Milestone Summary
+
+**Decimal Phases:**
+- Phase 4.1: Separate Translations (inserted after Phase 4 for UAT gap — translations mixed with transcriptions)
+- Phase 4.2: Multi-Source Import (inserted after Phase 4.1 — documents with multiple scholars' editions)
+
+**Key Decisions:**
+- pgpid as natural PRIMARY KEY (matches PGP data source)
+- Document entity for joins only (single-fragment manuscripts unchanged)
+- PGP transcription as version source (extends existing selector)
+- Two-pass import pattern (documents first, then FK-dependent fragments)
+- Service layer pattern isolates query details from UI
+- Batch lookup for search indicators (not N+1)
+- JSONB tags with GIN index for flexible filtering
+- filter('tags', 'cs', json.dumps()) workaround for Supabase client JSONB bug
+- Lazy import pattern to avoid circular dependencies in joins_panel
+
+**Issues Resolved:**
+- TRANS-03 gap: PGP link missing from version selector (fixed in plan 04-02)
+- UAT Gap 2: Recto/verso headers stripped (minor, deferred)
+- UAT Gap 3: Translations mixed with transcriptions (fixed in Phase 4.1)
+- Non-browseable fragments in tag search (429/7218 filtered out)
+
+**Issues Deferred:**
+- Recto/verso section headers stripped during parsing (minor cosmetic)
+- Phase 6 missing formal VERIFICATION.md
+- No integration tests for E2E flows
+- TODO in document_service.py:253 (multi-fragment enhancement)
+
+**Technical Debt Incurred:**
+- document_service.py lives in web/ — needs extraction to shared location for desktop app access
+- All PGP UI features are web-only (desktop app has no PGP integration)
+
+---
+
+_For current project status, see .planning/PROJECT.md_
+_Archived: 2026-02-07_
