@@ -1938,7 +1938,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                                      }}
                                                                  "
                                                             />
-                                                        ''')
+                                                        ''', sanitize=False)
                                             ui.separator().classes('my-2')
 
                                         # === Full Transcription ===
@@ -1961,7 +1961,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         border: 1px solid #e5e7eb;
                                                         color: var(--text-primary);
                                                     ">{full_text}</div>
-                                                ''')
+                                                ''', sanitize=False)
 
                             dialog.open()
 
