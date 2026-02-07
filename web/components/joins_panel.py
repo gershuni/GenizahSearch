@@ -73,15 +73,26 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
         formatted_joins = []
         fragment_details = []
 
+        # Track which shelfmarks already have fragment_details entries
+        details_upper = set()
+
         for j in joins:
             frag_a = j.get('fragment_a_shelfmark', '')
             frag_b = j.get('fragment_b_shelfmark', '')
+            frag_a_sid = j.get('fragment_a_sys_id', '')
+            frag_b_sid = j.get('fragment_b_sys_id', '')
             if frag_a:
                 fragments_set.add(frag_a)
                 fragments_upper.add(frag_a.upper())
+                if frag_a_sid and frag_a.upper() not in details_upper:
+                    fragment_details.append({'shelfmark': frag_a, 'document_id': frag_a_sid})
+                    details_upper.add(frag_a.upper())
             if frag_b:
                 fragments_set.add(frag_b)
                 fragments_upper.add(frag_b.upper())
+                if frag_b_sid and frag_b.upper() not in details_upper:
+                    fragment_details.append({'shelfmark': frag_b, 'document_id': frag_b_sid})
+                    details_upper.add(frag_b.upper())
             formatted_joins.append({
                 'id': j.get('id'),
                 'fragment_a': frag_a,
@@ -123,10 +134,13 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         continue
 
                     # Populate fragment_details for shelfmark_to_docid lookup in dialog
-                    fragment_details.append({
-                        'shelfmark': pf_shelfmark,
-                        'document_id': pf_sys_id
-                    })
+                    # (skip if already added from user joins)
+                    if pf_shelfmark.upper() not in details_upper:
+                        fragment_details.append({
+                            'shelfmark': pf_shelfmark,
+                            'document_id': pf_sys_id
+                        })
+                        details_upper.add(pf_shelfmark.upper())
 
                     # Skip current shelfmark (already in the set implicitly)
                     if pf_shelfmark.upper() == current_shelfmark_upper:
