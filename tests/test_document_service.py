@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 class TestGetDocumentForFragment:
     """Tests for get_document_for_fragment function."""
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_for_fragment_found(self, mock_get_client):
         """Should return document when fragment is linked."""
         from web.document_service import get_document_for_fragment
@@ -56,7 +56,7 @@ class TestGetDocumentForFragment:
         assert result['shelfmark_combined'] == 'T-S 8J5.11'
         assert result['document_type'] == 'Letter'
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_for_fragment_not_found(self, mock_get_client):
         """Should return None when fragment is not linked."""
         from web.document_service import get_document_for_fragment
@@ -67,7 +67,7 @@ class TestGetDocumentForFragment:
         # Mock fragment query - returns empty
         mock_fragment_chain = MagicMock()
         mock_fragment_chain.data = []
-        mock_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = mock_fragment_chain
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_fragment_chain
 
         result = get_document_for_fragment('999999999')
 
@@ -84,7 +84,7 @@ class TestGetDocumentForFragment:
 class TestGetFragmentsForDocument:
     """Tests for get_fragments_for_document function."""
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_fragments_for_document_found(self, mock_get_client):
         """Should return ordered list of fragments."""
         from web.document_service import get_fragments_for_document
@@ -109,7 +109,7 @@ class TestGetFragmentsForDocument:
         assert result[2]['sequence_order'] == 3
         assert result[0]['shelfmark'] == 'T-S 8J5.11'
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_fragments_for_document_empty(self, mock_get_client):
         """Should return empty list when no fragments found."""
         from web.document_service import get_fragments_for_document
@@ -137,7 +137,7 @@ class TestGetFragmentsForDocument:
 class TestGetTranscriptionForDocument:
     """Tests for get_transcription_for_document function."""
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_transcription_found(self, mock_get_client):
         """Should return transcription string when found."""
         from web.document_service import get_transcription_for_document
@@ -153,7 +153,7 @@ class TestGetTranscriptionForDocument:
 
         assert result == 'This is the transcription text.\nLine 2.'
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_transcription_not_found(self, mock_get_client):
         """Should return None when document not found."""
         from web.document_service import get_transcription_for_document
@@ -169,7 +169,7 @@ class TestGetTranscriptionForDocument:
 
         assert result is None
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_transcription_empty_string(self, mock_get_client):
         """Should return None when transcription is empty string."""
         from web.document_service import get_transcription_for_document
@@ -196,7 +196,7 @@ class TestGetTranscriptionForDocument:
 class TestGetDocumentMetadata:
     """Tests for get_document_metadata function."""
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_metadata_found(self, mock_get_client):
         """Should return metadata dict when document found."""
         from web.document_service import get_document_metadata
@@ -225,7 +225,7 @@ class TestGetDocumentMetadata:
         assert result['document_type'] == 'Letter'
         assert 'letter' in result['tags']
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_metadata_not_found(self, mock_get_client):
         """Should return None when document not found."""
         from web.document_service import get_document_metadata
@@ -252,7 +252,7 @@ class TestGetDocumentMetadata:
 class TestErrorHandling:
     """Tests for error handling across all functions."""
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_for_fragment_error_handling(self, mock_get_client):
         """Should return None on exception, not propagate."""
         from web.document_service import get_document_for_fragment
@@ -265,7 +265,7 @@ class TestErrorHandling:
 
         assert result is None  # Should not raise
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_fragments_for_document_error_handling(self, mock_get_client):
         """Should return empty list on exception, not propagate."""
         from web.document_service import get_fragments_for_document
@@ -278,7 +278,7 @@ class TestErrorHandling:
 
         assert result == []  # Should not raise, return empty list
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_transcription_error_handling(self, mock_get_client):
         """Should return None on exception, not propagate."""
         from web.document_service import get_transcription_for_document
@@ -291,7 +291,7 @@ class TestErrorHandling:
 
         assert result is None  # Should not raise
 
-    @patch('web.document_service.get_client')
+    @patch('shared.document_service.get_client')
     def test_get_document_metadata_error_handling(self, mock_get_client):
         """Should return None on exception, not propagate."""
         from web.document_service import get_document_metadata
