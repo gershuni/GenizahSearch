@@ -2185,4 +2185,7 @@ TRANSLATIONS = {
     "direct": "ישיר",
     "Delete join (admin)": "מחק צירוף (מנהל)",
     "Change selection": "שנה בחירה",
+    "View All Fragments": "הצג את כל הקטעים",
+    "All Fragments": "כל הקטעים",
+    "Full PGP Transcription": "תמלול PGP מלא",
 }

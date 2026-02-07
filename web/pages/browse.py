@@ -693,6 +693,10 @@ class BrowseState:
         self.pgp_metadata: Optional[Dict[str, Any]] = None
         # Multi-source data (all editions and translations for this document)
         self.all_sources: Optional[List[Dict[str, Any]]] = None
+        # Joined fragments view mode
+        self.view_joined: bool = False
+        self.joined_fragments_info: list = []  # [{shelfmark, sys_id}]
+        self.joined_pgpid: Optional[int] = None
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -1012,6 +1016,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             finally:
                 state.is_loading = False
                 update_content()
+
+    def enter_joined_view(fragments_info: list, pgpid: int = None):
+        """Switch main viewer to joined fragments mode showing all fragment images and texts."""
+        state.view_joined = True
+        state.view_all = False
+        state.joined_fragments_info = fragments_info
+        state.joined_pgpid = pgpid
+        update_content()
+
+    def exit_joined_view():
+        """Return to single page view from joined fragments mode."""
+        state.view_joined = False
+        state.joined_fragments_info = []
+        state.joined_pgpid = None
+        update_content()
 
     def search_for_parallels():
         """Navigate to parallels page with current text."""
@@ -2026,6 +2045,147 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
                             else:
                                 ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
+            elif state.view_joined:
+                # === Joined Fragments View ===
+                # Show all joined fragments stacked: each with [Image | Text] per page
+                from web.document_service import get_transcription_for_document
+                current_shelfmark_upper = (page.shelfmark or '').upper()
+
+                with ui.card().classes('w-full').style('min-height: 60vh;'):
+                    # Header
+                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                        'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                    ):
+                        with ui.row().classes('items-center gap-2'):
+                            ui.icon('auto_stories').classes('text-white text-xl')
+                            header_txt = tr('All Fragments')
+                            if state.joined_pgpid:
+                                header_txt = f'{tr("Document")} #{state.joined_pgpid}'
+                            ui.label(header_txt).classes('text-lg font-bold text-white')
+                            ui.badge(f'{len(state.joined_fragments_info)} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
+
+                        ui.button(
+                            tr('Back to Page View'),
+                            icon='arrow_forward' if is_rtl() else 'arrow_back',
+                            on_click=exit_joined_view
+                        ).props('flat dense text-color=white')
+
+                    # Scrollable content with all fragments
+                    with ui.scroll_area().classes('w-full').style('height: 75vh; padding: 16px;'):
+                        with ui.column().classes('w-full gap-4'):
+                            for frag_idx, frag_info in enumerate(state.joined_fragments_info):
+                                frag_sm = frag_info.get('shelfmark', '')
+                                frag_sid = frag_info.get('document_id', '')
+                                if not frag_sid:
+                                    continue
+
+                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
+
+                                # Fragment separator
+                                if frag_idx > 0:
+                                    ui.separator().classes('my-2')
+
+                                # Fragment header
+                                with ui.row().classes('items-center gap-2 mb-2'):
+                                    ui.icon('description').classes('text-green-600')
+                                    ui.label(frag_sm).classes('font-bold text-base').style('color: var(--text-primary);')
+                                    if is_current_frag:
+                                        ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+
+                                # Oxford detection for image endpoint
+                                frag_sm_lower = frag_sm.lower()
+                                frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
+
+                                # Load pages for this fragment
+                                frag_pages = service.get_full_manuscript(frag_sid)
+
+                                if not frag_pages:
+                                    # No text data, just show images
+                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': ''}),
+                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': ''})]
+
+                                # Show each page as [Image | Text] row
+                                for pg in frag_pages:
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else 1
+                                    pg_idx = max(0, pg_num - 1)
+                                    pg_text = pg.text if hasattr(pg, 'text') else ''
+                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+
+                                    # Image URL
+                                    if frag_is_oxford:
+                                        frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                    else:
+                                        frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
+
+                                    # Page label
+                                    ui.label(f'{frag_sm} — {pg_label}').classes('text-xs font-medium text-gray-500 mt-1')
+
+                                    # Side-by-side: [Image | Text]
+                                    with ui.element('div').style(
+                                        'display: flex; flex-direction: row; gap: 12px; width: 100%; min-height: 300px;'
+                                    ):
+                                        # Image panel
+                                        safe_sid = frag_sid.replace("'", "\\'")
+                                        is_ox_js = 'true' if frag_is_oxford else 'false'
+                                        with ui.element('div').style(
+                                            'flex: 0 0 50%; background: #1a1a1a; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 300px;'
+                                        ):
+                                            ui.html(f'''
+                                                <img src="{frag_img_url}"
+                                                     style="max-height: 400px; max-width: 100%; object-fit: contain;"
+                                                     loading="lazy"
+                                                     onerror="
+                                                         if ({is_ox_js}) {{
+                                                             this.style.display='none';
+                                                         }} else {{
+                                                             var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                             if (this.src.indexOf('oxford_image')===-1) {{
+                                                                 this.onerror=function(){{ this.style.display='none'; }};
+                                                                 this.src=ox;
+                                                             }} else {{
+                                                                 this.style.display='none';
+                                                             }}
+                                                         }}
+                                                     "
+                                                />
+                                            ''', sanitize=False)
+
+                                        # Text panel
+                                        with ui.element('div').style(
+                                            'flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; overflow-y: auto; max-height: 400px; background: var(--bg-secondary, #f9fafb);'
+                                        ):
+                                            if pg_text:
+                                                ui.label(pg_text).style(
+                                                    'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
+                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                    'color: var(--text-primary);'
+                                                )
+                                            else:
+                                                ui.label(tr('No text available')).classes('italic text-gray-400')
+
+                            # Full PGP transcription at the bottom
+                            if state.joined_pgpid:
+                                full_text = get_transcription_for_document(state.joined_pgpid)
+                                if full_text:
+                                    ui.separator().classes('my-4')
+                                    with ui.row().classes('items-center gap-2 mb-2'):
+                                        ui.icon('text_snippet', size='xs').classes('text-green-600')
+                                        ui.label(tr('Full PGP Transcription')).classes('text-sm font-bold').style('color: var(--text-primary);')
+                                        ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
+                                    ui.html(f'''
+                                        <div dir="rtl" style="
+                                            white-space: pre-wrap;
+                                            font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif;
+                                            font-size: 1.1rem;
+                                            line-height: 1.8;
+                                            padding: 12px;
+                                            background: var(--bg-secondary, #f9fafb);
+                                            border-radius: 8px;
+                                            border: 1px solid #e5e7eb;
+                                            color: var(--text-primary);
+                                        ">{full_text}</div>
+                                    ''', sanitize=False)
+
             else:
                 # Single page view
                 # Extract FL ID and check if we have an image
@@ -2202,7 +2362,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         shelfmark=page.shelfmark,
                                         document_id=page.sys_id,
                                         pgpid=pgpid_for_joins,
-                                        on_navigate=navigate_to_shelfmark
+                                        on_navigate=navigate_to_shelfmark,
+                                        on_view_all=enter_joined_view
                                     )
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===

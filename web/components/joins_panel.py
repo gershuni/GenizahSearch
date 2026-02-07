@@ -226,6 +226,7 @@ def create_joins_button(
     document_id: str = None,
     pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None,
+    on_view_all: Optional[Callable[[List[Dict], Optional[int]], None]] = None,
     size: str = "sm"
 ):
     """
@@ -236,6 +237,7 @@ def create_joins_button(
         document_id: System ID of the document (optional)
         pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Callback when user clicks to navigate to another fragment
+        on_view_all: Callback(fragment_details, pgpid) to enter joined view mode
         size: Button size (sm, md, lg)
 
     Returns:
@@ -259,7 +261,8 @@ def create_joins_button(
             shelfmark=shelfmark,
             document_id=document_id,
             pgpid=pgpid,
-            on_navigate=on_navigate
+            on_navigate=on_navigate,
+            on_view_all=on_view_all
         )
 
     # Create the button
@@ -280,7 +283,8 @@ def create_joins_dialog(
     shelfmark: str,
     document_id: str = None,
     pgpid: int = None,
-    on_navigate: Optional[Callable[[str], None]] = None
+    on_navigate: Optional[Callable[[str], None]] = None,
+    on_view_all: Optional[Callable[[List[Dict], Optional[int]], None]] = None
 ):
     """
     Create a dialog showing connected fragments and allowing new joins.
@@ -290,6 +294,7 @@ def create_joins_dialog(
         document_id: System ID of the document
         pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Callback when navigating to another fragment
+        on_view_all: Callback(fragment_details, pgpid) to enter joined view mode
     """
     dialog = ui.dialog()
 
@@ -496,6 +501,37 @@ def create_joins_dialog(
                                             'flat dense size=xs color=red'
                                         ).on('click.stop', make_delete_handler(direct_join_id, dialog, frag, frag_doc_id)
                                         ).tooltip(tr('Delete join (admin)'))
+
+                # View All Fragments button
+                if on_view_all and total > 1:
+                    ui.separator().classes('my-2')
+
+                    def handle_view_all():
+                        dialog.close()
+                        # Build fragment info from fragment_details + fallback
+                        frag_info = list(fragment_details) if fragment_details else []
+                        # If no fragment_details (only user joins), build from fragments list
+                        if not frag_info:
+                            for f in fragments:
+                                f_docid = shelfmark_to_docid.get(f.upper())
+                                if f_docid:
+                                    frag_info.append({'shelfmark': f, 'document_id': f_docid})
+                                else:
+                                    # Try csv_bank fallback
+                                    if state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
+                                        import re as _re
+                                        norm = _re.sub(r'[^\w]', '', f).lower()
+                                        if norm.startswith('ms'):
+                                            norm = norm[2:]
+                                        sid = shelf_to_sys.get(norm)
+                                        if sid:
+                                            frag_info.append({'shelfmark': f, 'document_id': sid})
+                        on_view_all(frag_info, pgpid)
+
+                    ui.button(
+                        tr('View All Fragments'), icon='auto_stories',
+                        on_click=handle_view_all
+                    ).props('outline color=green').classes('w-full')
 
                 # Add new join button
                 ui.separator().classes('my-2')
