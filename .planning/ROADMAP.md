@@ -42,11 +42,11 @@ Full PGP feature set in web app.
   2. Web app starts and all PGP features (transcriptions, metadata, tag search, joins) work exactly as before extraction
   3. Desktop app can import and call shared service functions without import errors or path hacks
   4. A single `shared/supabase_provider.py` provides the Supabase client to both apps (no duplicate client initialization for PGP reads)
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 08-01: Create shared/ package with supabase_provider and extract document_service
-- [ ] 08-02: Web re-export shim and smoke tests confirming zero breakage
+- [ ] 08-01-PLAN.md -- Create shared/ package with supabase_provider and extract document_service
+- [ ] 08-02-PLAN.md -- Web re-export shim, test updates, and smoke tests confirming zero breakage
 
 ### Phase 9: Data Import
 **Goal**: All ~41,000 PGP documents are available in Supabase, completing the dataset for transcription search indexing and desktop display
