@@ -28,7 +28,7 @@ Full PGP feature set in web app.
 - [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [x] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
 - [x] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
-- [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
+- [x] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
 - [ ] **Phase 13: Transcription Search** - Index transcriptions in Tantivy with filter controls
 
 ## Phase Details
@@ -114,9 +114,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 12-01-PLAN.md -- PGP metadata in Extended Info (Browse tab + ResultDialog) with clickable tag navigation
-- [ ] 12-02-PLAN.md -- PGP badges, filter toggle, and tag search (both web and desktop apps)
-- [ ] 12-03-PLAN.md -- PGP joins integration in desktop Related Fragments dialog
+- [x] 12-01-PLAN.md -- PGP metadata in Extended Info (Browse tab + ResultDialog) with clickable tag navigation
+- [x] 12-02-PLAN.md -- PGP badges, filter toggle, and tag search (both web and desktop apps)
+- [x] 12-03-PLAN.md -- PGP joins integration in desktop Related Fragments dialog
 
 ### Phase 13: Transcription Search
 **Goal**: Users can search within PGP and user-corrected transcriptions via Tantivy, with filter controls to scope results
@@ -144,9 +144,9 @@ Plans:
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 11. Virtual Reading Desk | v5.6.0 | 13/13 | Needs review (1 feature) | 2026-02-08 |
-| 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
+| 12. Desktop PGP Discovery | v5.6.0 | 3/3 | Complete | 2026-02-08 |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 12 planned -- 3 plans in 1 wave, all parallel)*
+*Last updated: 2026-02-08 (Phase 12 complete -- 3 plans executed in parallel, verified 13/13)*

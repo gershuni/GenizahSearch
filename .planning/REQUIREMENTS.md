@@ -17,10 +17,10 @@ Requirements for Desktop Parity & Transcription Search milestone. Each maps to r
 
 - [x] **DESK-01**: User can view PGP transcriptions in desktop manuscript viewer (auto-selected when available)
 - [x] **DESK-02**: User can switch between scholars' editions and translations via grouped version selector with separators
-- [ ] **DESK-03**: User can view PGP metadata (document type, tags, dates, description) in collapsible panel
-- [ ] **DESK-04**: User can see green indicator in search results for manuscripts with PGP transcriptions
-- [ ] **DESK-05**: User can search by PGP tag (new search mode + clickable tags in metadata panel)
-- [ ] **DESK-06**: User can see PGP-sourced joins in Related Fragments dialog alongside user joins
+- [x] **DESK-03**: User can view PGP metadata (document type, tags, dates, description) in collapsible panel
+- [x] **DESK-04**: User can see green indicator in search results for manuscripts with PGP transcriptions
+- [x] **DESK-05**: User can search by PGP tag (new search mode + clickable tags in metadata panel)
+- [x] **DESK-06**: User can see PGP-sourced joins in Related Fragments dialog alongside user joins
 
 ### Transcription Search
 
@@ -85,10 +85,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFRA-03 | Phase 8 | Complete |
 | DESK-01 | Phase 10 | Complete |
 | DESK-02 | Phase 10 | Complete |
-| DESK-03 | Phase 12 | Pending |
-| DESK-04 | Phase 12 | Pending |
-| DESK-05 | Phase 12 | Pending |
-| DESK-06 | Phase 12 | Pending |
+| DESK-03 | Phase 12 | Complete |
+| DESK-04 | Phase 12 | Complete |
+| DESK-05 | Phase 12 | Complete |
+| DESK-06 | Phase 12 | Complete |
 | SRCH-01 | Phase 13 | Pending |
 | SRCH-02 | Phase 13 | Pending |
 | SRCH-03 | Phase 13 | Pending |
@@ -107,4 +107,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-07*
-*Last updated: 2026-02-08 after Phase 11 completion*
+*Last updated: 2026-02-08 after Phase 12 completion*
