@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk) -- UAT gap closure in progress
-Plan: 8 of 11 (7 original + 4 UAT gap closure plans; 08 complete)
-Status: In progress -- UAT gap closure plans 08-11
-Last activity: 2026-02-08 -- Completed 11-08-PLAN.md (Light Mode header, word wrap, toolbar error)
+Plan: 9 of 11 (7 original + 4 UAT gap closure plans; 08-11 complete, 09-10 remain)
+Status: In progress -- UAT gap closure plans 09-10 remain
+Last activity: 2026-02-08 -- Completed 11-11-PLAN.md (desktop scroll area lifecycle + sync scrolling)
 
-Progress: [███████████████░░░░░] 88% (15/17 plans across phases 8-13)
+Progress: [████████████████░░░░] 94% (16/17 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [███████████████░░░░░] 88% (15
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14 (v5.6.0)
-- Average duration: ~7 min
-- Total execution time: ~87 min
+- Total plans completed: 15 (v5.6.0)
+- Average duration: ~6 min
+- Total execution time: ~90 min
 
 **By Phase:**
 
@@ -36,7 +36,7 @@ Progress: [███████████████░░░░░] 88% (15
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
-| 11. Virtual Reading Desk | 8/11 | ~50 min | ~6 min |
+| 11. Virtual Reading Desk | 9/11 | ~53 min | ~6 min |
 
 *Updated after each plan completion*
 
@@ -61,6 +61,8 @@ Recent decisions affecting current work:
 - DEC-11-03-02: Proportional scroll ratio sync between text/image panes (PyQt equivalent of IntersectionObserver)
 - DEC-11-03-03: QInputDialog for per-fragment version selection (matches desktop UX patterns)
 - DEC-11-08-01: Inline !important for non-buttons, Quasar text-color prop for buttons (Light Mode fix)
+- DEC-11-11-01: Create QScrollArea once at reading desk entry, repopulate container on re-render
+- DEC-11-11-02: Targeted disconnect(handler) instead of blanket disconnect() for scroll sync
 
 ### Data State
 
@@ -135,6 +137,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 11-08-PLAN.md
+Stopped at: Completed 11-11-PLAN.md
 Resume file: None
-Notes: UAT gap closure plan 08 complete (3 fixes: Light Mode header, word wrap, toolbar RuntimeError). Plans 09-11 remain.
+Notes: UAT gap closure plan 11 complete (desktop scroll area lifecycle + sync scrolling). Plans 09-10 remain.
