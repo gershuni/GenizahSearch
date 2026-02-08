@@ -1152,12 +1152,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     })
                 app.storage.user['reading_desk_state'] = {
                     'entries': rd_data,
-                    'pgpid': state.joined_pgpid
+                    'pgpid': state.joined_pgpid,
+                    'selected_sources': state.reading_desk_selected_sources or {}
                 }
             else:
                 app.storage.user.pop('reading_desk_state', None)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ReadingDesk] Error persisting state: {e}")
 
     def _restore_reading_desk_state():
         """Restore reading desk state from app.storage.user after language switch."""
@@ -1166,13 +1167,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if saved and saved.get('entries'):
                 frag_info = saved['entries']
                 pgpid = saved.get('pgpid')
+                selected_sources = saved.get('selected_sources', {})
                 enter_joined_view(
                     [{'shelfmark': e['shelfmark'], 'document_id': e['sys_id']} for e in frag_info],
                     pgpid=pgpid
                 )
+                # Restore selected source preferences after enter_joined_view resets them
+                if selected_sources:
+                    state.reading_desk_selected_sources = selected_sources
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ReadingDesk] Error restoring state: {e}")
         return False
 
     def search_for_parallels():
@@ -3641,9 +3646,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = False
                 update_content()
         elif initial_sys_id:
-            load_page(p_num=initial_page)
+            # Check if reading desk was active before reload (language switch)
+            # Reading desk restore takes priority over sys_id URL param
+            if _restore_reading_desk_state():
+                pass  # Reading desk restored successfully, ignore sys_id
+            else:
+                load_page(p_num=initial_page)
         else:
-            # Try to restore reading desk state first (for language-switch persistence)
+            # Try to restore reading desk state (for language-switch persistence)
             if _restore_reading_desk_state():
                 pass  # Reading desk restored successfully
             else:
