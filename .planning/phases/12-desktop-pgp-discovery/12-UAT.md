@@ -3,7 +3,7 @@ status: complete
 phase: 12-desktop-pgp-discovery
 source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md
 started: 2026-02-08T19:00:00Z
-updated: 2026-02-08T19:10:00Z
+updated: 2026-02-08T19:15:00Z
 ---
 
 ## Current Test
@@ -62,11 +62,35 @@ severity: major
 expected: In the Related Fragments dialog, select a PGP join row. The delete button should be disabled or have no effect -- PGP joins cannot be deleted (only user joins can).
 result: pass
 
+### 12. Tag Search Result Navigation (additional)
+expected: After performing a tag search, clicking on a result should load that manuscript in Browse tab without getting stuck. Typing another shelfmark afterwards should navigate normally.
+result: issue
+reported: "Clicking on a search result from tag search gets the browse tab stuck on this result even if typing another ms"
+severity: major
+
+### 13. ResultDialog from Tag Search (additional)
+expected: Double-clicking a tag search result should open the ResultDialog normally.
+result: issue
+reported: "ResultDialog not working after tag search"
+severity: major
+
+### 14. Tag Search Snippet Content (additional)
+expected: Tag search result snippets should show transcription text (Hebrew), not English metadata.
+result: issue
+reported: "snippet in tag search should be of the text not the english metadata"
+severity: minor
+
+### 15. Bilingual UI Labels (additional)
+expected: All Phase 12 UI elements (PGP Only checkbox, Search Tag button, tag dropdown, PGP badge, Extended Info labels) should have Hebrew translations and switch with the language setting.
+result: issue
+reported: "All features should be bilingual"
+severity: major
+
 ## Summary
 
-total: 11
+total: 15
 passed: 8
-issues: 3
+issues: 7
 pending: 0
 skipped: 0
 
@@ -97,6 +121,46 @@ skipped: 0
   reason: "User reported: It is shown in the dialog box but not in the menu that opens in the same icon with triangle"
   severity: major
   test: 10
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "Tag search results navigate normally without getting Browse tab stuck"
+  status: failed
+  reason: "User reported: Clicking on a search result from tag search gets the browse tab stuck on this result even if typing another ms"
+  severity: major
+  test: 12
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "ResultDialog opens normally from tag search results"
+  status: failed
+  reason: "User reported: ResultDialog not working after tag search"
+  severity: major
+  test: 13
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "Tag search result snippets show transcription text not English metadata"
+  status: failed
+  reason: "User reported: snippet in tag search should be of the text not the english metadata"
+  severity: minor
+  test: 14
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "All Phase 12 UI elements have Hebrew translations and respect language setting"
+  status: failed
+  reason: "User reported: All features should be bilingual"
+  severity: major
+  test: 15
   root_cause: ""
   artifacts: []
   missing: []
