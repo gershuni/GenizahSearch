@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 11 of 13 (Virtual Reading Desk) -- COMPLETE
-Plan: 7 of 7 (all plans + gap closure complete, verified 8/8)
-Status: Phase complete -- verified by gsd-verifier, all must-haves passing
-Last activity: 2026-02-08 -- Phase 11 verified, all 8 gaps closed
+Phase: 11 of 13 (Virtual Reading Desk) -- UAT gap closure in progress
+Plan: 8 of 11 (7 original + 4 UAT gap closure plans; 08 complete)
+Status: In progress -- UAT gap closure plans 08-11
+Last activity: 2026-02-08 -- Completed 11-08-PLAN.md (Light Mode header, word wrap, toolbar error)
 
-Progress: [██████████████░░░░░░] 88% (14/16 plans across phases 8-13)
+Progress: [███████████████░░░░░] 88% (15/17 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,7 +25,7 @@ Progress: [██████████████░░░░░░] 88% (14
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13 (v5.6.0)
+- Total plans completed: 14 (v5.6.0)
 - Average duration: ~7 min
 - Total execution time: ~87 min
 
@@ -36,7 +36,7 @@ Progress: [██████████████░░░░░░] 88% (14
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
-| 11. Virtual Reading Desk | 7/7 | ~44 min | ~6 min |
+| 11. Virtual Reading Desk | 8/11 | ~50 min | ~6 min |
 
 *Updated after each plan completion*
 
@@ -60,6 +60,7 @@ Recent decisions affecting current work:
 - DEC-11-03-01: mouseReleaseEvent + anchorAt() for QTextEdit link clicks (no anchorClicked signal)
 - DEC-11-03-02: Proportional scroll ratio sync between text/image panes (PyQt equivalent of IntersectionObserver)
 - DEC-11-03-03: QInputDialog for per-fragment version selection (matches desktop UX patterns)
+- DEC-11-08-01: Inline !important for non-buttons, Quasar text-color prop for buttons (Light Mode fix)
 
 ### Data State
 
@@ -134,6 +135,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Phase 11 complete and verified
+Stopped at: Completed 11-08-PLAN.md
 Resume file: None
-Notes: Phase 11 fully complete. 7 plans executed (5 original + 2 gap closure). Verification passed 8/8 must-haves. Ready for Phase 12: Desktop PGP Discovery.
+Notes: UAT gap closure plan 08 complete (3 fixes: Light Mode header, word wrap, toolbar RuntimeError). Plans 09-11 remain.
