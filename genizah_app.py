@@ -7137,9 +7137,13 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
 
         # 2. Populate Image Viewer (using new logic)
-        folio_num = _get_folio_number_from_shelfmark(shelf)
-        idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
-        self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
+        # Guard: skip when reading desk is active to preserve stacked image layout.
+        # This handles both new requests and in-flight enrichment threads that
+        # complete after reading desk activation.
+        if not self.browse_reading_desk_active:
+            folio_num = _get_folio_number_from_shelfmark(shelf)
+            idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
+            self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -16027,9 +16031,11 @@ class GenizahGUI(QMainWindow):
         fl_id = self.browse_fl_input.text().strip()
         if not sid and not fl_id and not shelf_query: return
 
-        # Reset UI
-        self.browse_text.setText(tr("Loading metadata..."))
-        self.browse_viewer.load_images({}) # Clear viewer
+        # Reset UI (skip when reading desk is active to preserve stacked view)
+        if not self.browse_reading_desk_active:
+            self.browse_text.setText(tr("Loading metadata..."))
+        if not self.browse_reading_desk_active:
+            self.browse_viewer.load_images({})  # Clear viewer
 
         page_data = None
 
@@ -16155,7 +16161,15 @@ class GenizahGUI(QMainWindow):
         self.enrich_browse_worker.start()
 
         # Try to render page text immediately if possible
-        if page_data:
+        if self.browse_reading_desk_active:
+            # Reading desk is active: instead of rendering single-page view,
+            # add the newly resolved manuscript to the reading desk.
+            sid = self.current_browse_sid
+            shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+            if not shelfmark or shelfmark == "Unknown":
+                shelfmark = sid
+            self._browse_rd_add_entry(sid, shelfmark)
+        elif page_data:
             self.browse_render_page(page_data)
         elif self.current_browse_sid:
             self.browse_load_page()
