@@ -456,12 +456,14 @@ def prepare_source_records(
 
 
 def prepare_footnote_records(
-    footnotes: List[Dict]
+    footnotes: List[Dict],
+    valid_pgpids: Optional[set] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Prepare document_footnotes records for upsert.
 
     Deduplicates by (pgpid, source_slug, doc_relation) composite key.
+    Filters out footnotes referencing pgpids not in documents table (FK safety).
 
     Returns: (valid_records, issues)
     """
@@ -469,12 +471,18 @@ def prepare_footnote_records(
     issues = []
     seen_keys = set()
     duplicate_count = 0
+    orphan_count = 0
 
     for fn in footnotes:
         pgpid = fn['pgpid']
         source = fn.get('source', '')
         source_slug = fn.get('source_slug')
         doc_relation = fn.get('doc_relation', '')
+
+        # Filter out footnotes referencing pgpids not in documents table
+        if valid_pgpids is not None and pgpid not in valid_pgpids:
+            orphan_count += 1
+            continue
 
         if not source:
             issues.append({
@@ -511,6 +519,8 @@ def prepare_footnote_records(
             'content_length': fn.get('content_length'),
         })
 
+    if orphan_count > 0:
+        print(f"    Orphan footnotes (pgpid not in documents): {orphan_count:,}")
     if duplicate_count > 0:
         print(f"    Deduplicated: removed {duplicate_count:,} duplicate footnotes")
 
@@ -519,7 +529,8 @@ def prepare_footnote_records(
 
 def prepare_fragment_records_from_csv(
     fragment_metadata: Dict[str, Dict],
-    gs_lookup: Dict[str, str]
+    gs_lookup: Dict[str, str],
+    valid_pgpids: Optional[set] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Build document_fragments records from fragments.csv.
@@ -527,6 +538,8 @@ def prepare_fragment_records_from_csv(
     Each fragment row has pgpids (semicolon-separated) and metadata.
     For each fragment+pgpid combination, creates a record with sys_id
     looked up via shelfmark normalization.
+
+    Filters out fragments referencing pgpids not in documents table (FK safety).
 
     Assigns sequence_order by grouping fragments per pgpid and ordering
     them by order of encounter.
@@ -536,6 +549,7 @@ def prepare_fragment_records_from_csv(
     valid_records = []
     issues = []
     seen_keys = set()
+    orphan_count = 0
 
     # First pass: collect all records grouped by pgpid for sequence ordering
     pgpid_fragments = defaultdict(list)
@@ -562,6 +576,11 @@ def prepare_fragment_records_from_csv(
             except ValueError:
                 continue
 
+            # Filter out fragments referencing pgpids not in documents table
+            if valid_pgpids is not None and pgpid not in valid_pgpids:
+                orphan_count += 1
+                continue
+
             key = (pgpid, sys_id)
             if key in seen_keys:
                 continue
@@ -576,6 +595,9 @@ def prepare_fragment_records_from_csv(
                 'fragment_url': meta.get('url'),
                 'iiif_url': meta.get('iiif_url'),
             })
+
+    if orphan_count > 0:
+        print(f"    Orphan fragments (pgpid not in documents): {orphan_count:,}")
 
     # Second pass: assign sequence_order and flatten
     for pgpid, frags in pgpid_fragments.items():
@@ -880,15 +902,18 @@ Prerequisites:
     print(f"    Documents with multiple sources: {source_stats['pgpids_with_multiple_sources']:,}")
     print()
 
+    # Build set of valid pgpids for FK safety filtering
+    valid_pgpids = set(documents.keys())
+
     print("  Preparing footnote records...")
-    footnote_records, footnote_issues = prepare_footnote_records(footnotes)
+    footnote_records, footnote_issues = prepare_footnote_records(footnotes, valid_pgpids)
     print(f"    Valid footnotes: {len(footnote_records):,}")
     if footnote_issues:
         print(f"    Issues: {len(footnote_issues):,}")
     print()
 
     print("  Preparing fragment records...")
-    frag_records, frag_issues = prepare_fragment_records_from_csv(fragment_metadata, gs_lookup)
+    frag_records, frag_issues = prepare_fragment_records_from_csv(fragment_metadata, gs_lookup, valid_pgpids)
     print(f"    Valid fragment links: {len(frag_records):,}")
     print(f"    Unmatched fragments: {len(frag_issues):,}")
     if fragment_metadata:
