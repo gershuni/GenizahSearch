@@ -3801,6 +3801,15 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
 
+        # Strip known library code prefix (e.g. "CUL T-S 12.123" -> "T-S 12.123")
+        if query:
+            q = query.strip()
+            for code in LIBRARY_CODES:
+                if q.upper().startswith(code.upper() + ' '):
+                    q = q[len(code):].lstrip()
+                    break
+            query = q
+
         norm_query = self._normalize_shelfmark(query)
         if not norm_query:
             return result
