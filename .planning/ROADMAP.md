@@ -59,7 +59,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md -- Schema migrations and comprehensive import script
+- [x] 09-01-PLAN.md -- Schema migrations and comprehensive import script
 - [ ] 09-02-PLAN.md -- Execute import and verify data integrity
 
 ### Phase 10: Desktop PGP Core
@@ -131,7 +131,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 9. Data Import | v5.6.0 | 0/2 | Not started | - |
+| 9. Data Import | v5.6.0 | 1/2 | In progress | - |
 | 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
@@ -139,4 +139,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08*
+*Last updated: 2026-02-08 (09-01 complete)*
