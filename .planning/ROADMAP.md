@@ -70,11 +70,11 @@ Plans:
   1. When viewing a manuscript with a PGP transcription, the desktop app automatically displays the PGP edition (preferred over HTR V0.8)
   2. The desktop version selector shows PGP editions grouped by scholar and translations grouped by language, with visual separators between groups
   3. Switching between version sources updates the transcription display without freezing the UI (QThread workers handle all Supabase calls)
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 10-01: PGPDataThread worker and transcription display in desktop viewer
-- [ ] 10-02: Multi-source version selector with scholar/language grouping
+- [ ] 10-01-PLAN.md -- PGPSourceWorker QThread, shared helpers, and Browse tab PGP integration
+- [ ] 10-02-PLAN.md -- ResultDialog PGP integration and human verification
 
 ### Phase 11: Virtual Reading Desk
 **Goal**: Users can view multiple manuscripts together in a reading desk, populated from joins, personal lists, or manual entry, in both web and desktop apps
@@ -139,4 +139,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 9 complete)*
+*Last updated: 2026-02-08 (Phase 10 planned)*
