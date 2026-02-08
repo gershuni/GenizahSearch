@@ -1164,6 +1164,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Restore reading desk state from app.storage.user after language switch."""
         try:
             saved = app.storage.user.get('reading_desk_state')
+            print(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
             if saved and saved.get('entries'):
                 frag_info = saved['entries']
                 pgpid = saved.get('pgpid')
@@ -1175,6 +1176,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Restore selected source preferences after enter_joined_view resets them
                 if selected_sources:
                     state.reading_desk_selected_sources = selected_sources
+                print(f"[ReadingDesk] Restored {len(frag_info)} entries")
                 return True
         except Exception as e:
             print(f"[ReadingDesk] Error restoring state: {e}")
@@ -3653,14 +3655,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = False
                 update_content()
         elif initial_sys_id:
-            # Check if reading desk was active before reload (language switch)
-            # Reading desk restore takes priority over sys_id URL param
-            if _restore_reading_desk_state():
-                pass  # Reading desk restored successfully, ignore sys_id
+            # Determine if this is a language-switch reload (same manuscripts)
+            # or cross-page navigation (different manuscript requested)
+            saved_rd = None
+            try:
+                saved_rd = app.storage.user.get('reading_desk_state')
+            except Exception:
+                pass
+
+            if saved_rd and saved_rd.get('entries'):
+                # Check if initial_sys_id matches one of the persisted desk entries
+                persisted_sids = {e.get('sys_id', '') for e in saved_rd['entries']}
+                if initial_sys_id in persisted_sids:
+                    # Language-switch case: sys_id is one of the desk's manuscripts
+                    # Restore the full reading desk
+                    if not _restore_reading_desk_state():
+                        load_page(p_num=initial_page)
+                else:
+                    # Cross-page navigation: user wants a DIFFERENT manuscript
+                    # Clear stale reading desk state and load the requested manuscript
+                    try:
+                        app.storage.user.pop('reading_desk_state', None)
+                    except Exception:
+                        pass
+                    load_page(p_num=initial_page)
             else:
+                # No saved reading desk state, normal page load
                 load_page(p_num=initial_page)
         else:
-            # Try to restore reading desk state (for language-switch persistence)
+            # No sys_id in URL -- try to restore reading desk (language-switch case)
             if _restore_reading_desk_state():
                 pass  # Reading desk restored successfully
             else:
