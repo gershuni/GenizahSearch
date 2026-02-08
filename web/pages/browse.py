@@ -2272,6 +2272,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ui.icon('list_alt', size='3rem').classes('text-gray-300')
                                         ui.label(tr('No lists found')).classes('text-gray-500')
                                 else:
+                                    # Track per-list checkbox selections for "Add Selected" feature
+                                    selections = {}  # list_id -> list of (sys_id, shelfmark, checkbox) tuples
+
                                     for lst in all_lists:
                                         list_id = lst.get('id', '')
                                         list_name = lst.get('name', lst.get('name_en', list_id))
@@ -2364,13 +2367,48 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         with ui.row().classes('items-center gap-2 px-2 py-1').style(
                                                             'border-bottom: 1px solid var(--border-subtle, #f0f0f0);'
                                                         ):
-                                                            ui.icon('description', size='xs').classes('text-gray-400')
-                                                            ui.label(ri['shelfmark']).classes('text-sm flex-1').style('color: var(--text-primary);')
                                                             if already_in:
                                                                 ui.icon('check', size='xs').classes('text-green-500').tooltip(tr('Already in Reading Desk'))
+                                                                ui.label(ri['shelfmark']).classes('text-sm flex-1').style('color: var(--text-primary);')
+                                                            else:
+                                                                cb = ui.checkbox(ri['shelfmark']).classes('text-sm flex-1')
+                                                                if list_id not in selections:
+                                                                    selections[list_id] = []
+                                                                selections[list_id].append((ri['sys_id'], ri['shelfmark'], cb))
 
-                                                    # Add All button
-                                                    with ui.row().classes('w-full justify-end pt-2 px-2'):
+                                                    # Add Selected handler factory
+                                                    def make_add_selected_handler(lid=list_id, dialog_ref=dlg):
+                                                        def add_selected_items():
+                                                            if lid not in selections:
+                                                                return
+                                                            added_count = 0
+                                                            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+                                                            for s_sid, s_sm, s_cb in selections[lid]:
+                                                                if s_cb.value and s_sid not in existing_sids:
+                                                                    _add_sys_id_to_reading_desk(s_sid, s_sm)
+                                                                    existing_sids.add(s_sid)
+                                                                    added_count += 1
+                                                            if added_count > 0:
+                                                                try:
+                                                                    ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
+                                                                except RuntimeError:
+                                                                    pass
+                                                                dialog_ref.close()
+                                                            else:
+                                                                try:
+                                                                    ui.notify(tr('No items selected'), type='info')
+                                                                except RuntimeError:
+                                                                    pass
+                                                        return add_selected_items
+
+                                                    # Button row: Add Selected + Add All
+                                                    with ui.row().classes('w-full justify-end pt-2 px-2 gap-2'):
+                                                        ui.button(
+                                                            tr('Add Selected'),
+                                                            icon='check_circle',
+                                                            on_click=make_add_selected_handler()
+                                                        ).props('dense outline color=green').classes('text-sm')
+
                                                         ui.button(
                                                             f'{tr("Add All")} ({item_count})',
                                                             icon='playlist_add',
