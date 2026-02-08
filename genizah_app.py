@@ -59,6 +59,7 @@ from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
+from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 
 # Community features - corrections, comments, discoveries
 from corrections_client import get_corrections_client
@@ -6802,6 +6803,23 @@ class GenizahGUI(QMainWindow):
         self.browse_edit_mode = False
         self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
+
+        # Install link click handler for genizah:// URLs in QTextEdit
+        # (QTextEdit doesn't have anchorClicked signal like QTextBrowser,
+        # so we intercept mouseReleaseEvent and use anchorAt to detect clicks)
+        _original_mouse_release = self.browse_text.mouseReleaseEvent
+
+        def _browse_text_mouse_release(event, orig=_original_mouse_release):
+            if event.button() == Qt.MouseButton.LeftButton:
+                pos = event.pos()
+                anchor = self.browse_text.anchorAt(pos)
+                if anchor and anchor.startswith("genizah://"):
+                    self._on_browse_link_clicked(QUrl(anchor))
+                    event.accept()
+                    return
+            orig(event)
+
+        self.browse_text.mouseReleaseEvent = _browse_text_mouse_release
         
         # Right: Image Viewer
         self.browse_viewer = ManuscriptViewerWidget()
@@ -6822,6 +6840,15 @@ class GenizahGUI(QMainWindow):
         self.browse_side_panel = QTextBrowser()
         self.browse_lists_panel_sizes = None
         self.browse_current_list_id = None
+
+        # Reading Desk state
+        self.browse_reading_desk_active = False
+        self.browse_reading_desk_state = ReadingDeskState()
+        self.browse_reading_desk_pgpid = None
+        self._browse_rd_worker = None
+        self._browse_rd_image_widgets = []  # list of (sys_id, ZoomableScrollArea, ImageLoaderThread)
+        self._browse_rd_image_scroll = None  # QScrollArea for stacked images
+        self._browse_rd_syncing = False  # prevents infinite scroll sync loop
 
         return panel
 
@@ -7154,8 +7181,35 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_worker.start()
 
     def _on_browse_link_clicked(self, url):
-        """Handle clicks on internal links in browse text (View All mode)."""
+        """Handle clicks on internal links in browse text (View All and Reading Desk modes)."""
         url_str = url.toString()
+
+        # Reading Desk links
+        if url_str.startswith("genizah://rd-navigate/"):
+            sid = url_str.replace("genizah://rd-navigate/", "")
+            if sid:
+                self._browse_exit_reading_desk()
+                self.browse_sys_input.setText(sid)
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self._set_last_browse_field("sys")
+                self.browse_load()
+            return
+
+        if url_str.startswith("genizah://rd-remove/"):
+            sid = url_str.replace("genizah://rd-remove/", "")
+            if sid:
+                self._browse_rd_remove_entry(sid)
+            return
+
+        if url_str.startswith("genizah://rd-version/"):
+            parts = url_str.replace("genizah://rd-version/", "").split("/")
+            if len(parts) >= 2:
+                self._browse_rd_show_version_dialog(parts[0], int(parts[1]))
+            return
+
+        # View All mode links
         if url_str.startswith("genizah://load/"):
             # Extract system ID from URL
             sid = url_str.replace("genizah://load/", "")
@@ -7177,6 +7231,480 @@ class GenizahGUI(QMainWindow):
                     self.browse_shelf_input.setText(shelf)
                 self._set_last_browse_field("sys")
                 self.browse_load()
+
+    # -------------------------------------------------------------------------
+    # Reading Desk -- Desktop dual-pane rendering
+    # -------------------------------------------------------------------------
+
+    def _browse_enter_reading_desk(self, fragments_info, pgpid=None):
+        """Enter reading desk mode with the given fragments.
+
+        Args:
+            fragments_info: list of dicts with keys: sys_id, shelfmark, sequence_order
+            pgpid: optional PGP document ID that groups these fragments
+        """
+        if not fragments_info:
+            return
+
+        self.browse_reading_desk_active = True
+        self.browse_reading_desk_pgpid = pgpid
+
+        # Build entries from fragments info
+        state = ReadingDeskState()
+        state.pgpid = pgpid
+        for frag in fragments_info:
+            sid = frag.get('sys_id', '')
+            shelfmark = frag.get('shelfmark', '')
+            if not shelfmark or shelfmark == "Unknown":
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+                if not shelfmark or shelfmark == "Unknown":
+                    shelfmark = sid
+
+            # Get pages from searcher
+            pages = self.searcher.get_full_manuscript(sid)
+            page_list = []
+            if pages:
+                for p in pages:
+                    page_list.append({
+                        'p_num': p.get('p_num', 1),
+                        'text': p.get('text', ''),
+                        'full_header': p.get('full_header', ''),
+                        'fl_id': p.get('fl_id', '')
+                    })
+
+            entry = ReadingDeskEntry(
+                sys_id=sid,
+                shelfmark=shelfmark,
+                pages=page_list,
+                sequence_order=frag.get('sequence_order', 0)
+            )
+            state.entries.append(entry)
+
+        # Sort by sequence order
+        state.entries.sort(key=lambda e: e.sequence_order)
+        self.browse_reading_desk_state = state
+
+        # Disable normal navigation
+        self.btn_b_prev.setEnabled(False)
+        self.btn_b_next.setEnabled(False)
+        self.combo_browse_page.setEnabled(False)
+        self.btn_b_all.setEnabled(False)
+
+        # Initial render with V0.8 text
+        self._browse_rd_render()
+
+        # Launch background worker to fetch PGP sources
+        sys_ids = [e.sys_id for e in state.entries]
+        if sys_ids:
+            if self._browse_rd_worker is not None:
+                try:
+                    self._browse_rd_worker.finished.disconnect()
+                    self._browse_rd_worker.error.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            self._browse_rd_worker = ReadingDeskWorker(sys_ids)
+            self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
+            self._browse_rd_worker.error.connect(
+                lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
+            )
+            self._browse_rd_worker.start()
+
+    def _browse_rd_on_sources_loaded(self, results):
+        """Handle PGP sources loaded from ReadingDeskWorker."""
+        if not self.browse_reading_desk_active:
+            return
+
+        # Update entries with loaded sources
+        results_map = {sid: (sources, pgp_doc) for sid, sources, pgp_doc in results}
+        for entry in self.browse_reading_desk_state.entries:
+            if entry.sys_id in results_map:
+                sources, pgp_doc = results_map[entry.sys_id]
+                entry.sources = sources
+                entry.pgp_doc = pgp_doc
+
+        # Re-render with PGP data now available
+        self._browse_rd_render()
+
+    def _browse_exit_reading_desk(self):
+        """Exit reading desk mode and restore normal browse view."""
+        if not self.browse_reading_desk_active:
+            return
+
+        self.browse_reading_desk_active = False
+        self.browse_reading_desk_state = ReadingDeskState()
+        self.browse_reading_desk_pgpid = None
+
+        # Stop worker if running
+        if self._browse_rd_worker is not None:
+            try:
+                self._browse_rd_worker.finished.disconnect()
+                self._browse_rd_worker.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self._browse_rd_worker = None
+
+        # Clean up image widgets
+        self._browse_rd_image_widgets = []
+
+        # Restore normal view
+        self._browse_rd_restore_normal_view()
+
+        # Re-enable navigation
+        self.btn_b_prev.setEnabled(True)
+        self.btn_b_next.setEnabled(True)
+        self.combo_browse_page.setEnabled(True)
+        self.btn_b_all.setEnabled(True)
+
+        # Reload current page normally
+        if self.current_browse_sid:
+            self.browse_load_page()
+
+    def _browse_rd_render(self):
+        """Render reading desk: stacked texts in text pane, stacked images in viewer pane.
+
+        This is the key v3 method that produces the dual-pane synchronized reading desk.
+        """
+        state = self.browse_reading_desk_state
+        if not state.entries:
+            return
+
+        # === LEFT PANE: Stacked Texts in browse_text ===
+        html_parts = []
+
+        # Header bar with exit button
+        html_parts.append(
+            "<div style='background: #2c3e50; color: white; padding: 8px 12px; "
+            "margin-bottom: 10px; border-radius: 4px;'>"
+            "<b>Reading Desk</b>"
+        )
+        if state.pgpid:
+            html_parts.append(f" &mdash; PGP #{state.pgpid}")
+        html_parts.append(
+            f" ({len(state.entries)} fragment{'s' if len(state.entries) != 1 else ''})"
+            "</div>"
+        )
+
+        for idx, entry in enumerate(state.entries):
+            sid = entry.sys_id
+            shelfmark = entry.shelfmark
+
+            # Fragment header (clickable to navigate to single view)
+            is_current = (sid == self.current_browse_sid)
+            current_badge = " <span style='background: #27ae60; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;'>Current</span>" if is_current else ""
+            html_parts.append(
+                f"<div id='rd-text-frag-{idx}' style='background: #ecf0f1; padding: 6px 10px; "
+                f"margin-top: {'0' if idx == 0 else '20'}px; border-bottom: 2px solid #3498db;'>"
+                f"<a href='genizah://rd-navigate/{sid}' style='color: #2980b9; text-decoration: none; font-weight: bold;'>"
+                f"{shelfmark}</a>{current_badge}"
+                f" <a href='genizah://rd-remove/{sid}' style='color: #e74c3c; text-decoration: none; font-size: 11px; margin-left: 10px;'>[remove]</a>"
+            )
+
+            # Version selector link
+            if entry.sources:
+                html_parts.append(
+                    f" <a href='genizah://rd-version/{sid}/{idx}' style='color: #8e44ad; text-decoration: none; font-size: 11px; margin-left: 10px;'>[change version]</a>"
+                )
+
+            html_parts.append("</div>")
+
+            # Determine text to show: prefer PGP edition, else V0.8
+            display_text = ""
+            text_direction = "rtl"
+
+            if entry.sources:
+                # Find first edition
+                for src in entry.sources:
+                    if 'Edition' in (src.get('doc_relation') or '') and src.get('content'):
+                        display_text = src['content']
+                        break
+                # If no edition, try first translation
+                if not display_text:
+                    for src in entry.sources:
+                        if src.get('content'):
+                            display_text = src['content']
+                            lang = src.get('language', '')
+                            if lang == 'English':
+                                text_direction = 'ltr'
+                            break
+
+            # Fallback to V0.8 text from pages
+            if not display_text and entry.pages:
+                page_texts = [p.get('text', '') for p in entry.pages if p.get('text')]
+                display_text = '\n\n'.join(page_texts)
+
+            if display_text:
+                html_text = display_text.replace('\n', '<br>')
+                html_parts.append(
+                    f"<div dir='{text_direction}' style='padding: 10px; font-family: SBL Hebrew, serif; "
+                    f"font-size: 16px; line-height: 1.6;'>"
+                    f"{html_text}</div>"
+                )
+            else:
+                html_parts.append(
+                    "<div style='padding: 10px; color: #95a5a6; font-style: italic;'>"
+                    "No text available</div>"
+                )
+
+        full_html = "\n".join(html_parts)
+        self.browse_text.setHtml(full_html)
+
+        # === RIGHT PANE: Stacked Images in viewer pane ===
+        self._browse_rd_render_images()
+
+    def _browse_rd_render_images(self):
+        """Render stacked images in the viewer pane (right side of browse splitter)."""
+        state = self.browse_reading_desk_state
+
+        # Hide normal viewer, create scrollable stacked image area
+        self.browse_viewer.setVisible(False)
+
+        # Create or recreate the image scroll area
+        if self._browse_rd_image_scroll is not None:
+            self._browse_rd_image_scroll.setVisible(False)
+            self._browse_rd_image_scroll.deleteLater()
+
+        self._browse_rd_image_scroll = QScrollArea()
+        self._browse_rd_image_scroll.setWidgetResizable(True)
+        self._browse_rd_image_scroll.setStyleSheet("background: #1a1a2e;")
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(5)
+
+        self._browse_rd_image_widgets = []
+
+        for idx, entry in enumerate(state.entries):
+            sid = entry.sys_id
+            meta = self.meta_mgr.nli_cache.get(sid, {})
+
+            # Fragment header label
+            header = QLabel(f"  {entry.shelfmark}")
+            header.setStyleSheet(
+                "background: #34495e; color: white; padding: 6px 10px; "
+                "font-weight: bold; font-size: 13px;"
+            )
+            header.setObjectName(f"rd-img-frag-{idx}")
+            container_layout.addWidget(header)
+
+            # Get image URLs
+            images_nli = meta.get('images_nli', [])
+            images_ext = meta.get('images_ext', [])
+            image_list = images_ext if images_ext else images_nli
+
+            if not image_list:
+                # Try FL ID fallback
+                fl_ids = meta.get('fl_ids', [])
+                if isinstance(fl_ids, str):
+                    fl_ids = [fl_ids]
+                for fl in fl_ids or []:
+                    digits = re.sub(r"\D", "", str(fl or ""))
+                    if digits:
+                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
+                        image_list = [{'label': f"FL{digits}", 'url': fallback_url}]
+                        break
+
+            if not image_list:
+                no_img = QLabel(tr("No images available"))
+                no_img.setStyleSheet("color: #95a5a6; padding: 20px; font-style: italic;")
+                no_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                container_layout.addWidget(no_img)
+                continue
+
+            # Create a ZoomableScrollArea + controls for each image page
+            for img_idx, img_data in enumerate(image_list):
+                base_url = img_data.get('url', '')
+                label_text = img_data.get('label', f"Page {img_idx + 1}")
+
+                # Controls row: zoom/rotate per image
+                controls = QWidget()
+                controls_layout = QHBoxLayout(controls)
+                controls_layout.setContentsMargins(4, 2, 4, 2)
+                controls_layout.setSpacing(4)
+
+                img_label = QLabel(f"  {label_text}")
+                img_label.setStyleSheet("color: #bdc3c7; font-size: 11px;")
+                controls_layout.addWidget(img_label)
+                controls_layout.addStretch()
+
+                viewer = ZoomableScrollArea()
+                viewer.setMinimumHeight(400)
+                viewer.setMaximumHeight(600)
+
+                btn_zoom_out = QPushButton("-")
+                btn_zoom_out.setFixedWidth(28)
+                btn_zoom_out.setStyleSheet("color: white; background: #555;")
+                btn_zoom_out.clicked.connect(viewer.zoom_out)
+                controls_layout.addWidget(btn_zoom_out)
+
+                btn_zoom_in = QPushButton("+")
+                btn_zoom_in.setFixedWidth(28)
+                btn_zoom_in.setStyleSheet("color: white; background: #555;")
+                btn_zoom_in.clicked.connect(viewer.zoom_in)
+                controls_layout.addWidget(btn_zoom_in)
+
+                btn_rot_left = QPushButton("\u21BA")  # ↺
+                btn_rot_left.setFixedWidth(28)
+                btn_rot_left.setStyleSheet("color: white; background: #555;")
+                btn_rot_left.setToolTip(tr("Rotate Left 90"))
+                btn_rot_left.clicked.connect(lambda checked, v=viewer: v.rotate_view(-90))
+                controls_layout.addWidget(btn_rot_left)
+
+                btn_rot_right = QPushButton("\u21BB")  # ↻
+                btn_rot_right.setFixedWidth(28)
+                btn_rot_right.setStyleSheet("color: white; background: #555;")
+                btn_rot_right.setToolTip(tr("Rotate Right 90"))
+                btn_rot_right.clicked.connect(lambda checked, v=viewer: v.rotate_view(90))
+                controls_layout.addWidget(btn_rot_right)
+
+                container_layout.addWidget(controls)
+                container_layout.addWidget(viewer)
+
+                # Load image
+                viewer.set_status_message(tr("Loading..."))
+                final_url = base_url
+                if final_url and not final_url.endswith('.jpg'):
+                    final_url = f"{final_url}/full/600,/0/default.jpg"
+
+                loader = ImageLoaderThread(final_url)
+                loader.image_loaded.connect(
+                    lambda img, v=viewer: v.set_image(QPixmap.fromImage(img))
+                )
+                loader.load_failed.connect(
+                    lambda v=viewer: v.set_status_message(tr("No Image"))
+                )
+                loader.start()
+
+                self._browse_rd_image_widgets.append((sid, viewer, loader))
+
+        container_layout.addStretch()
+        self._browse_rd_image_scroll.setWidget(container)
+
+        # Add to splitter at viewer position (index 2)
+        self.browse_splitter.addWidget(self._browse_rd_image_scroll)
+        self._browse_rd_image_scroll.setVisible(True)
+
+        # Set up synchronized scrolling between text and image panes
+        self._browse_rd_setup_sync_scroll()
+
+    def _browse_rd_setup_sync_scroll(self):
+        """Set up proportional scroll synchronization between text and image panes."""
+        if not self._browse_rd_image_scroll:
+            return
+
+        text_bar = self.browse_text.verticalScrollBar()
+        image_bar = self._browse_rd_image_scroll.verticalScrollBar()
+
+        def sync_text_to_image(value):
+            if self._browse_rd_syncing:
+                return
+            self._browse_rd_syncing = True
+            try:
+                text_max = text_bar.maximum()
+                image_max = image_bar.maximum()
+                if text_max > 0 and image_max > 0:
+                    ratio = value / text_max
+                    image_bar.setValue(int(ratio * image_max))
+            finally:
+                self._browse_rd_syncing = False
+
+        def sync_image_to_text(value):
+            if self._browse_rd_syncing:
+                return
+            self._browse_rd_syncing = True
+            try:
+                text_max = text_bar.maximum()
+                image_max = image_bar.maximum()
+                if text_max > 0 and image_max > 0:
+                    ratio = value / image_max
+                    text_bar.setValue(int(ratio * text_max))
+            finally:
+                self._browse_rd_syncing = False
+
+        text_bar.valueChanged.connect(sync_text_to_image)
+        image_bar.valueChanged.connect(sync_image_to_text)
+
+    def _browse_rd_restore_normal_view(self):
+        """Hide reading desk image scroll and restore normal viewer."""
+        if self._browse_rd_image_scroll is not None:
+            # Disconnect scroll sync
+            try:
+                self.browse_text.verticalScrollBar().valueChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self._browse_rd_image_scroll.setVisible(False)
+            self._browse_rd_image_scroll.deleteLater()
+            self._browse_rd_image_scroll = None
+
+        # Show normal viewer
+        self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+
+    def _browse_rd_remove_entry(self, sys_id):
+        """Remove a fragment entry from the reading desk and re-render or exit."""
+        state = self.browse_reading_desk_state
+        state.entries = [e for e in state.entries if e.sys_id != sys_id]
+
+        if not state.entries:
+            self._browse_exit_reading_desk()
+        else:
+            self._browse_rd_render()
+
+    def _browse_rd_show_version_dialog(self, sys_id, entry_idx):
+        """Show a dialog to select PGP version source for a specific fragment."""
+        state = self.browse_reading_desk_state
+        if entry_idx < 0 or entry_idx >= len(state.entries):
+            return
+
+        entry = state.entries[entry_idx]
+        if not entry.sources:
+            QMessageBox.information(
+                self, tr("Version Selector"),
+                tr("No PGP sources available for this fragment.")
+            )
+            return
+
+        # Build options list
+        options = []
+        for src in entry.sources:
+            relation = src.get('doc_relation', '')
+            scholar = src.get('source_scholar', 'Unknown')
+            language = src.get('language', '')
+            if 'Edition' in relation:
+                label = f"Edition: {scholar}"
+            elif 'Translation' in relation:
+                label = f"Translation ({language}): {scholar}" if language else f"Translation: {scholar}"
+            else:
+                label = f"{relation}: {scholar}"
+            options.append(label)
+
+        # Add V0.8 fallback
+        options.append("V0.8 (HTR)")
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            tr("Select Version"),
+            tr("Choose a text version for {}:").format(entry.shelfmark),
+            options, 0, False
+        )
+        if not ok:
+            return
+
+        selected_idx = options.index(choice) if choice in options else -1
+        if selected_idx < 0:
+            return
+
+        # Update the entry's displayed text
+        if selected_idx < len(entry.sources):
+            # Selected a PGP source -- reorder sources so selected is first
+            selected_src = entry.sources[selected_idx]
+            entry.sources.remove(selected_src)
+            entry.sources.insert(0, selected_src)
+        else:
+            # V0.8 selected -- clear sources so fallback text is used
+            entry.sources = []
+
+        # Re-render
+        self._browse_rd_render()
 
     def toggle_browse_view_all(self, checked):
         if checked:
