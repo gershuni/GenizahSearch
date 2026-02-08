@@ -85,11 +85,14 @@ Plans:
   2. User can add any manuscript to the reading desk by typing a shelfmark or sys_id
   3. User can populate the reading desk from a personal list (selecting which manuscripts to include)
   4. The reading desk feature works in both the web app and the desktop app with equivalent functionality
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] 11-01-PLAN.md -- Shared ReadingDeskModel + web browse tab joined view enhancement (add/remove/lists)
-- [ ] 11-02-PLAN.md -- Desktop browse tab reading desk mode with add/remove/lists + human verification
+- [ ] 11-01-PLAN.md -- Shared ReadingDeskModel + web dual-pane synchronized reading desk (stacked images/texts, per-image controls, per-fragment version selectors)
+- [ ] 11-02-PLAN.md -- Web entry points and dynamic management (Add to View, toolbar, Add from List, remove, state preservation)
+- [ ] 11-03-PLAN.md -- Desktop dual-pane reading desk rendering (stacked images in viewer, stacked texts with version selectors, synchronized scrolling)
+- [ ] 11-04-PLAN.md -- Desktop entry points and dynamic management (Add to View, toolbar, joins integration, list panel integration)
+- [ ] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -132,7 +135,7 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 0/TBD | Replanning (v3) | - |
+| 11. Virtual Reading Desk | v5.6.0 | 0/5 | Planned (v3) | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
