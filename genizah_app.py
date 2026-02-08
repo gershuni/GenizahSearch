@@ -3235,9 +3235,10 @@ class ResultDialog(QDialog):
                     self.rd_version_combo.addItem(label, data)
                 self.rd_version_combo.blockSignals(False)
 
-            # Store original V0.8 text if not already stored
-            if not hasattr(self, '_rd_original_text') or not self._rd_original_text:
-                self._rd_original_text = self.text_ms.toPlainText()
+            # Store original V0.8 text (always refresh from current display)
+            current_text = self.text_ms.toPlainText()
+            if current_text:
+                self._rd_original_text = current_text
 
             # Auto-select first PGP edition and display it
             edition_data = parent._auto_select_pgp_edition(self.rd_version_combo)
@@ -3721,6 +3722,13 @@ class ResultDialog(QDialog):
         # Start PGP source fetch for this page (runs in background)
         parent = self.parent()
         if parent:
+            # Disconnect old worker signals first to prevent stale results
+            if hasattr(self, '_rd_pgp_worker') and self._rd_pgp_worker is not None:
+                try:
+                    self._rd_pgp_worker.finished_signal.disconnect(self._on_rd_pgp_loaded)
+                    self._rd_pgp_worker.error_signal.disconnect(self._on_rd_pgp_error)
+                except (TypeError, RuntimeError):
+                    pass
             self._rd_pgp_worker = PGPSourceWorker(self.current_sys_id, self.current_p_num or 1)
             self._rd_pgp_worker.finished_signal.connect(self._on_rd_pgp_loaded)
             self._rd_pgp_worker.error_signal.connect(self._on_rd_pgp_error)
@@ -7042,6 +7050,13 @@ class GenizahGUI(QMainWindow):
         self._check_document_community_status()
 
         # Start PGP source fetch (runs in background, populates combo when done)
+        # Disconnect old worker signals first to prevent stale results
+        if self._browse_pgp_worker is not None:
+            try:
+                self._browse_pgp_worker.finished_signal.disconnect(self._on_browse_pgp_loaded)
+                self._browse_pgp_worker.error_signal.disconnect(self._on_browse_pgp_error)
+            except (TypeError, RuntimeError):
+                pass
         self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
@@ -7056,18 +7071,19 @@ class GenizahGUI(QMainWindow):
         if sys_id != self.current_browse_sid:
             return
 
-        # Store PGP data for later use (page changes, ResultDialog)
+        # Store PGP data for later use (page changes)
         self._browse_pgp_sources = sources
         self._browse_pgp_doc = pgp_doc
 
         if not sources:
             return
 
-        # Save existing corrections/versions from the combo before rebuilding
+        # Save existing corrections/versions from the combo before rebuilding.
+        # Only save non-PGP, non-original, non-header items (corrections, V0.7, user versions).
         saved_corrections = []
         for i in range(self.browse_version_combo.count()):
             data = self.browse_version_combo.itemData(i)
-            if data and data.get('source') not in ('original', 'header', None):
+            if data and data.get('source') not in ('original', 'header', 'pgp_edition', 'pgp_translation', None):
                 saved_corrections.append((self.browse_version_combo.itemText(i), data))
 
         # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
@@ -7082,9 +7098,10 @@ class GenizahGUI(QMainWindow):
                     self.browse_version_combo.addItem(label, data)
                 self.browse_version_combo.blockSignals(False)
 
-            # Store original V0.8 text if not already stored
-            if not hasattr(self, 'browse_original_page_text') or not self.browse_original_page_text:
-                self.browse_original_page_text = self.browse_text.toPlainText()
+            # Store original V0.8 text from browse_render_page output
+            current_text = self.browse_text.toPlainText()
+            if current_text:
+                self.browse_original_page_text = current_text
 
             # Auto-select first PGP edition and display it
             edition_data = self._auto_select_pgp_edition(self.browse_version_combo)
@@ -7116,6 +7133,13 @@ class GenizahGUI(QMainWindow):
             return  # No PGP data was loaded for this manuscript
         if not self.current_browse_sid:
             return
+        # Disconnect old worker signals first
+        if self._browse_pgp_worker is not None:
+            try:
+                self._browse_pgp_worker.finished_signal.disconnect(self._on_browse_pgp_loaded)
+                self._browse_pgp_worker.error_signal.disconnect(self._on_browse_pgp_error)
+            except (TypeError, RuntimeError):
+                pass
         # Start a new PGP worker for the current page
         self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
@@ -15442,6 +15466,8 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("sys")
             # Refresh Part context
             self._update_part_state_for_sid(new_sid)
+            # Render page FIRST so text is ready before community status stores it
+            self.browse_render_page(page_data)
             # Kick off metadata enrichment for new manuscript
             cached_meta = self.meta_mgr.nli_cache.get(new_sid)
             if cached_meta:
@@ -15450,11 +15476,9 @@ class GenizahGUI(QMainWindow):
                 self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
                 self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
                 self.enrich_browse_worker.start()
-
-        self.browse_render_page(page_data)
-
-        # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
-        if not is_new_manuscript:
+        else:
+            self.browse_render_page(page_data)
+            # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
             self._browse_refresh_pgp_for_page()
     
     def browse_render_page(self, pd):
