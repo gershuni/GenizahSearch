@@ -438,13 +438,16 @@ def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
 
     try:
         client = get_client()
-        # Query document_fragments for matching sys_ids
-        # Any sys_id in document_fragments has a linked document
-        response = client.table('document_fragments').select(
-            'sys_id'
-        ).in_('sys_id', sys_ids).execute()
-
-        return {row['sys_id'] for row in (response.data or [])}
+        result_set = set()
+        # Chunk to avoid URL length limits with large result sets
+        chunk_size = 200
+        for i in range(0, len(sys_ids), chunk_size):
+            chunk = sys_ids[i:i + chunk_size]
+            response = client.table('document_fragments').select(
+                'sys_id'
+            ).in_('sys_id', chunk).execute()
+            result_set.update(row['sys_id'] for row in (response.data or []))
+        return result_set
     except Exception as e:
         print(f"Error batch checking transcriptions: {e}")
         return set()

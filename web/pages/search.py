@@ -44,6 +44,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
             self.last_scroll_top = 0  # For scroll-based auto-collapse
             self.update_timer = None  # Track timer to prevent duplicates
             self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
+            self.displayed_results = []  # Currently rendered subset (may be filtered)
 
     search_state = SearchUIState()
 
@@ -1158,6 +1159,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
     def render_results(results):
         results_container.clear()
+        search_state.displayed_results = results  # Track current view for Advanced View navigation
 
         # Show loading spinner when search is running - prominent so user knows it's working
         if search_state.is_running:
@@ -1305,7 +1307,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         service = get_service()
         adv_state = AdvancedViewState()
         adv_state.current_result_idx = index
-        adv_state.results = search_state.results
+        adv_state.results = search_state.displayed_results
 
         with ui.dialog().props('maximized') as dialog:
             with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
@@ -1318,7 +1320,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                     with ui.row().classes('items-center gap-3'):
                         ui.button(icon='close', on_click=dialog.close).props('flat round color=white size=sm')
                         adv_state.result_label = ui.label(
-                            f"{tr('Result')} {index + 1} / {len(search_state.results)}"
+                            f"{tr('Result')} {index + 1} / {len(adv_state.results)}"
                         ).classes('text-sm font-medium')
 
                     # Center: Score badge (will be updated in-place)
@@ -1608,7 +1610,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             'pgp_url': pgp_doc.get('pgp_url'),
                             'pgpid': pgpid,
                         }
-                        doc_relation = pgp_doc.get('doc_relation', '')
+                        doc_relation = pgp_doc.get('doc_relation') or ''
                         is_edition = 'Edition' in doc_relation or not doc_relation
                         page_content = get_section_for_page(pgp_doc['transcription'], current_p_num) if pgp_doc.get('transcription') else None
                         if is_edition and page_content:
