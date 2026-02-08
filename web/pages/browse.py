@@ -697,6 +697,10 @@ class BrowseState:
         self.view_joined: bool = False
         self.joined_fragments_info: list = []  # [{shelfmark, sys_id}]
         self.joined_pgpid: Optional[int] = None
+        # Reading desk entries (v3 enhanced joined view)
+        self.reading_desk_entries: list = []
+        # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header, fl_id}], sources: [], pgp_doc: {}}
+        self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -1018,11 +1022,38 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 update_content()
 
     def enter_joined_view(fragments_info: list, pgpid: int = None):
-        """Switch main viewer to joined fragments mode showing all fragment images and texts."""
+        """Switch to reading desk mode showing all fragments in dual-pane layout."""
         state.view_joined = True
         state.view_all = False
         state.joined_fragments_info = fragments_info
         state.joined_pgpid = pgpid
+
+        # Load page data and PGP sources for each fragment
+        from shared.document_service import get_all_sources_for_fragment, get_document_for_fragment
+        entries = []
+        for frag_info in fragments_info:
+            frag_sid = frag_info.get('document_id', '')
+            frag_sm = frag_info.get('shelfmark', '')
+            if not frag_sid:
+                continue
+            pages = service.get_full_manuscript(frag_sid)
+            # Get PGP sources for version selector
+            sources = []
+            pgp_doc = None
+            try:
+                sources = get_all_sources_for_fragment(frag_sid) or []
+                pgp_doc = get_document_for_fragment(frag_sid)
+            except Exception:
+                pass
+            entries.append({
+                'sys_id': frag_sid,
+                'shelfmark': frag_sm,
+                'pages': pages or [],
+                'sources': sources,
+                'pgp_doc': pgp_doc or {}
+            })
+        state.reading_desk_entries = entries
+        state.reading_desk_selected_sources = {}
         update_content()
 
     def exit_joined_view():
@@ -1030,6 +1061,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.view_joined = False
         state.joined_fragments_info = []
         state.joined_pgpid = None
+        state.reading_desk_entries = []
+        state.reading_desk_selected_sources = {}
         update_content()
 
     def search_for_parallels():
@@ -2046,23 +2079,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             else:
                                 ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
             elif state.view_joined:
-                # === Joined Fragments View ===
-                # Show all joined fragments stacked: each with [Image | Text] per page
-                from web.document_service import get_transcription_for_document
+                # === V3 Reading Desk: Dual-Pane Synchronized View ===
+                # Left pane: stacked images with per-image zoom/rotate/drag
+                # Right pane: stacked texts with per-fragment PGP version selector
+                # IntersectionObserver synchronizes scrolling between panes
                 current_shelfmark_upper = (page.shelfmark or '').upper()
 
-                with ui.card().classes('w-full').style('min-height: 60vh;'):
-                    # Header
-                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
-                        'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
-                    ):
-                        with ui.row().classes('items-center gap-2'):
+                def rd_navigate_to_fragment(target_sm):
+                    """Exit reading desk and navigate to a specific fragment."""
+                    exit_joined_view()
+                    state.shelfmark_query = target_sm
+                    search_shelfmark()
+
+                # Header bar
+                with ui.card().classes('w-full mb-2').style(
+                    'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                ):
+                    with ui.row().classes('w-full items-center justify-between p-3'):
+                        with ui.row().classes('items-center gap-3'):
                             ui.icon('auto_stories').classes('text-white text-xl')
-                            header_txt = tr('All Fragments')
+                            header_txt = tr('Reading Desk')
                             if state.joined_pgpid:
-                                header_txt = f'{tr("Document")} #{state.joined_pgpid}'
+                                header_txt = f'{tr("Reading Desk")} — #{state.joined_pgpid}'
                             ui.label(header_txt).classes('text-lg font-bold text-white')
-                            ui.badge(f'{len(state.joined_fragments_info)} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
+                            ui.badge(
+                                f'{len(state.reading_desk_entries)} {tr("fragments")}',
+                                color='white'
+                            ).props('outline dense').classes('text-xs text-white')
 
                         ui.button(
                             tr('Back to Page View'),
@@ -2070,46 +2113,57 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=exit_joined_view
                         ).props('flat dense text-color=white')
 
-                    # Scrollable content with all fragments
-                    with ui.scroll_area().classes('w-full').style('height: 75vh; padding: 16px;'):
-                        with ui.column().classes('w-full gap-4'):
-                            for frag_idx, frag_info in enumerate(state.joined_fragments_info):
-                                frag_sm = frag_info.get('shelfmark', '')
-                                frag_sid = frag_info.get('document_id', '')
-                                if not frag_sid:
-                                    continue
+                # Two-panel flex row (same pattern as single-page view)
+                with ui.element('div').classes('reading-desk-panels').style(
+                    'display: flex; flex-direction: row; gap: 16px; min-height: 70vh; width: 100%;'
+                ):
 
+                    # === LEFT PANE: Image Stack ===
+                    with ui.card().style('flex: 0 0 50%; min-height: 70vh; display: flex; flex-direction: column;'):
+                        ui.label(tr('Manuscript Images')).classes('text-sm font-semibold p-2 border-b').style(
+                            'color: var(--text-secondary); background: #1a1a1a; color: white; border-radius: 8px 8px 0 0;'
+                        )
+                        with ui.scroll_area().classes('rd-image-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                            for frag_idx, entry in enumerate(state.reading_desk_entries):
+                                frag_sm = entry.get('shelfmark', '')
+                                frag_sid = entry.get('sys_id', '')
+                                frag_pages = entry.get('pages', [])
                                 is_current_frag = frag_sm.upper() == current_shelfmark_upper
 
                                 # Fragment separator
                                 if frag_idx > 0:
-                                    ui.separator().classes('my-2')
+                                    ui.separator().classes('my-4')
 
-                                # Fragment header
-                                with ui.row().classes('items-center gap-2 mb-2'):
-                                    ui.icon('description').classes('text-green-600')
-                                    ui.label(frag_sm).classes('font-bold text-base').style('color: var(--text-primary);')
-                                    if is_current_frag:
-                                        ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                # Fragment header (clickable link to navigate)
+                                with ui.element('div').props(f'id="rd-img-frag-{frag_idx}"').classes('reading-desk-fragment'):
+                                    with ui.row().classes('items-center gap-2 p-2').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px; cursor: pointer;'
+                                    ):
+                                        ui.icon('description').classes('text-green-600')
 
-                                # Oxford detection for image endpoint
+                                        def make_nav_handler(sm=frag_sm):
+                                            return lambda: rd_navigate_to_fragment(sm)
+
+                                        ui.label(frag_sm).classes(
+                                            'font-bold text-base cursor-pointer hover:underline'
+                                        ).style('color: var(--text-primary);').on('click', make_nav_handler())
+                                        if is_current_frag:
+                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+
+                                # Oxford detection
                                 frag_sm_lower = frag_sm.lower()
                                 frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
 
-                                # Load pages for this fragment
-                                frag_pages = service.get_full_manuscript(frag_sid)
-
                                 if not frag_pages:
-                                    # No text data, just show images
-                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': ''}),
-                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': ''})]
+                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
+                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
 
-                                # Show each page as [Image | Text] row
-                                for pg in frag_pages:
-                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else 1
+                                # Render each page image with its own controls
+                                for pg_i, pg in enumerate(frag_pages):
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
                                     pg_idx = max(0, pg_num - 1)
-                                    pg_text = pg.text if hasattr(pg, 'text') else ''
                                     pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+                                    viewer_id = f'rd-viewer-{frag_idx}-{pg_i}'
 
                                     # Image URL
                                     if frag_is_oxford:
@@ -2118,73 +2172,391 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
                                     # Page label
-                                    ui.label(f'{frag_sm} — {pg_label}').classes('text-xs font-medium text-gray-500 mt-1')
+                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
 
-                                    # Side-by-side: [Image | Text]
-                                    with ui.element('div').style(
-                                        'display: flex; flex-direction: row; gap: 12px; width: 100%; min-height: 300px;'
+                                    # Per-image controls bar
+                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
+                                        'background: #1a1a1a; border-radius: 4px; margin: 0 4px;'
                                     ):
-                                        # Image panel
-                                        safe_sid = frag_sid.replace("'", "\\'")
-                                        is_ox_js = 'true' if frag_is_oxford else 'false'
-                                        with ui.element('div').style(
-                                            'flex: 0 0 50%; background: #1a1a1a; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 300px;'
-                                        ):
-                                            ui.html(f'''
-                                                <img src="{frag_img_url}"
-                                                     style="max-height: 400px; max-width: 100%; object-fit: contain;"
-                                                     loading="lazy"
-                                                     onerror="
-                                                         if ({is_ox_js}) {{
-                                                             this.style.display='none';
+                                        ui.button(
+                                            icon='remove',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', -0.25)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom out'))
+                                        ui.html(f'<span id="{viewer_id}-zoom-label" style="color: white; font-size: 0.75rem; min-width: 36px; text-align: center;">100%</span>', sanitize=False)
+                                        ui.button(
+                                            icon='add',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdZoom('{vid}', 0.25)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Zoom in'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(
+                                            icon='rotate_left',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', -90)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Left'))
+                                        ui.button(
+                                            icon='rotate_right',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdRotate('{vid}', 90)")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Rotate Right'))
+                                        ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
+                                        ui.button(
+                                            icon='restart_alt',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdResetView('{vid}')")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset View'))
+
+                                    # Image display area with zoom/drag support
+                                    safe_sid = frag_sid.replace("'", "\\'")
+                                    is_ox_js = 'true' if frag_is_oxford else 'false'
+                                    with ui.element('div').style(
+                                        'background: #1a1a1a; border-radius: 0 0 4px 4px; overflow: hidden; '
+                                        'display: flex; align-items: center; justify-content: center; '
+                                        'min-height: 350px; margin: 0 4px 8px 4px; position: relative;'
+                                    ):
+                                        ui.html(f'''
+                                            <img id="{viewer_id}"
+                                                 class="rd-zoomable"
+                                                 src="{frag_img_url}"
+                                                 style="max-height: 500px; max-width: 100%; object-fit: contain; cursor: grab; transition: none;"
+                                                 loading="lazy"
+                                                 draggable="false"
+                                                 onerror="
+                                                     if ({is_ox_js}) {{
+                                                         this.style.display='none';
+                                                     }} else {{
+                                                         var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                         if (this.src.indexOf('oxford_image')===-1) {{
+                                                             this.onerror=function(){{ this.style.display='none'; }};
+                                                             this.src=ox;
                                                          }} else {{
-                                                             var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
-                                                             if (this.src.indexOf('oxford_image')===-1) {{
-                                                                 this.onerror=function(){{ this.style.display='none'; }};
-                                                                 this.src=ox;
-                                                             }} else {{
-                                                                 this.style.display='none';
-                                                             }}
+                                                             this.style.display='none';
                                                          }}
-                                                     "
-                                                />
-                                            ''', sanitize=False)
+                                                     }}
+                                                 "
+                                            />
+                                        ''', sanitize=False)
 
-                                        # Text panel
-                                        with ui.element('div').style(
-                                            'flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; overflow-y: auto; max-height: 400px; background: var(--bg-secondary, #f9fafb);'
-                                        ):
-                                            if pg_text:
-                                                ui.label(pg_text).style(
-                                                    'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
-                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
-                                                    'color: var(--text-primary);'
-                                                )
-                                            else:
-                                                ui.label(tr('No text available')).classes('italic text-gray-400')
+                    # === RIGHT PANE: Text Stack ===
+                    with ui.card().style('flex: 1 1 auto; min-height: 70vh; display: flex; flex-direction: column;'):
+                        ui.label(tr('Transcriptions')).classes('text-sm font-semibold p-2 border-b').style(
+                            'color: var(--text-secondary);'
+                        )
+                        with ui.scroll_area().classes('rd-text-pane w-full').style('flex: 1; height: calc(70vh - 40px);'):
+                            for frag_idx, entry in enumerate(state.reading_desk_entries):
+                                frag_sm = entry.get('shelfmark', '')
+                                frag_sid = entry.get('sys_id', '')
+                                frag_pages = entry.get('pages', [])
+                                frag_sources = entry.get('sources', [])
+                                frag_pgp_doc = entry.get('pgp_doc', {})
+                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
 
-                            # Full PGP transcription at the bottom
-                            if state.joined_pgpid:
-                                full_text = get_transcription_for_document(state.joined_pgpid)
-                                if full_text:
+                                # Fragment separator
+                                if frag_idx > 0:
                                     ui.separator().classes('my-4')
-                                    with ui.row().classes('items-center gap-2 mb-2'):
-                                        ui.icon('text_snippet', size='xs').classes('text-green-600')
-                                        ui.label(tr('Full PGP Transcription')).classes('text-sm font-bold').style('color: var(--text-primary);')
-                                        ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
-                                    ui.html(f'''
-                                        <div dir="rtl" style="
-                                            white-space: pre-wrap;
-                                            font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif;
-                                            font-size: 1.1rem;
-                                            line-height: 1.8;
-                                            padding: 12px;
-                                            background: var(--bg-secondary, #f9fafb);
-                                            border-radius: 8px;
-                                            border: 1px solid #e5e7eb;
-                                            color: var(--text-primary);
-                                        ">{full_text}</div>
-                                    ''', sanitize=False)
+
+                                # Fragment header (clickable link)
+                                with ui.element('div').props(f'id="rd-text-frag-{frag_idx}"').classes('reading-desk-fragment'):
+                                    with ui.row().classes('items-center gap-2 p-2').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px; cursor: pointer;'
+                                    ):
+                                        ui.icon('description').classes('text-green-600')
+
+                                        def make_nav_handler_text(sm=frag_sm):
+                                            return lambda: rd_navigate_to_fragment(sm)
+
+                                        ui.label(frag_sm).classes(
+                                            'font-bold text-base cursor-pointer hover:underline'
+                                        ).style('color: var(--text-primary);').on('click', make_nav_handler_text())
+                                        if is_current_frag:
+                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+
+                                # Per-fragment version selector
+                                # Build source options for dropdown
+                                source_options = {}
+                                source_map = {}  # option_key -> source dict
+                                if frag_sources:
+                                    for src_i, src in enumerate(frag_sources):
+                                        doc_rel = src.get('doc_relation', '')
+                                        scholar = src.get('source_scholar', 'Unknown')
+                                        lang = src.get('language', '')
+                                        if 'Edition' in doc_rel:
+                                            label = f"PGP Edition: {scholar}"
+                                        elif 'Translation' in doc_rel:
+                                            label = f"{lang} Translation: {scholar}"
+                                        else:
+                                            label = f"{doc_rel}: {scholar}"
+                                        key = f"src_{src_i}"
+                                        source_options[key] = label
+                                        source_map[key] = src
+
+                                # Always add V0.8 as fallback
+                                source_options['v08'] = 'V0.8 (HTR)'
+
+                                # Default selection: first PGP edition if available, else first translation, else V0.8
+                                default_key = 'v08'
+                                for k, src in source_map.items():
+                                    if 'Edition' in (src.get('doc_relation') or ''):
+                                        default_key = k
+                                        break
+                                if default_key == 'v08':
+                                    for k, src in source_map.items():
+                                        if 'Translation' in (src.get('doc_relation') or ''):
+                                            default_key = k
+                                            break
+
+                                # Text containers for each page (for version switching)
+                                text_containers = {}
+
+                                if len(source_options) > 1:
+                                    with ui.row().classes('items-center gap-2 px-2 py-1'):
+                                        ui.icon('history', size='xs').classes('text-green-600')
+
+                                        def make_version_handler(f_sid=frag_sid, f_pages=frag_pages, s_map=source_map, t_containers=text_containers):
+                                            def on_change(e):
+                                                selected = e.value
+                                                state.reading_desk_selected_sources[f_sid] = selected
+                                                # Update text display for this fragment
+                                                src = s_map.get(selected)
+                                                if src and src.get('content'):
+                                                    content = src['content']
+                                                    is_translation = 'Translation' in (src.get('doc_relation') or '')
+                                                    is_english = src.get('language') == 'English'
+                                                    text_dir = 'ltr' if (is_translation and is_english) else 'rtl'
+                                                    text_align = 'left' if text_dir == 'ltr' else 'right'
+                                                    from shared.document_service import parse_transcription_sections
+                                                    sections = parse_transcription_sections(content)
+                                                    for pg_key, container in t_containers.items():
+                                                        container.clear()
+                                                        with container:
+                                                            pg_section = 'recto' if pg_key == 0 else 'verso'
+                                                            section_texts = sections.get(pg_section, [])
+                                                            section_text = '\n\n'.join(section_texts) if section_texts else content
+                                                            if section_text:
+                                                                ui.label(section_text).style(
+                                                                    f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                                    f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    f'color: var(--text-primary);'
+                                                                )
+                                                            else:
+                                                                ui.label(tr('No text for this page')).classes('italic text-gray-400')
+                                                else:
+                                                    # V0.8 - use original page text
+                                                    for pg_key, container in t_containers.items():
+                                                        container.clear()
+                                                        with container:
+                                                            pg_text = ''
+                                                            for p in f_pages:
+                                                                p_num = p.p_num if hasattr(p, 'p_num') else 0
+                                                                if max(0, p_num - 1) == pg_key:
+                                                                    pg_text = p.text if hasattr(p, 'text') else ''
+                                                                    break
+                                                            if pg_text:
+                                                                ui.label(pg_text).style(
+                                                                    'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
+                                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    'color: var(--text-primary);'
+                                                                )
+                                                            else:
+                                                                ui.label(tr('No text available')).classes('italic text-gray-400')
+                                            return on_change
+
+                                        ui.select(
+                                            options=source_options,
+                                            value=default_key,
+                                            on_change=make_version_handler()
+                                        ).props('dense outlined').classes('text-sm').style('min-width: 200px;')
+
+                                if not frag_pages:
+                                    frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
+                                                  type('P', (), {'p_num': 2, 'text': '', 'full_header': '', 'fl_id': ''})()]
+
+                                # Determine initial text content based on default source selection
+                                initial_source = source_map.get(default_key)
+                                initial_sections = None
+                                initial_is_ltr = False
+                                if initial_source and initial_source.get('content'):
+                                    from shared.document_service import parse_transcription_sections
+                                    initial_sections = parse_transcription_sections(initial_source['content'])
+                                    is_translation = 'Translation' in (initial_source.get('doc_relation') or '')
+                                    is_english = initial_source.get('language') == 'English'
+                                    initial_is_ltr = is_translation and is_english
+
+                                # Render each page's text
+                                for pg_i, pg in enumerate(frag_pages):
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg_i + 1)
+                                    pg_idx = max(0, pg_num - 1)
+                                    pg_text = pg.text if hasattr(pg, 'text') else ''
+                                    pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
+
+                                    ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
+
+                                    # Text content container (replaceable by version selector)
+                                    tc = ui.column().classes('w-full px-3 py-2')
+                                    text_containers[pg_idx] = tc
+
+                                    with tc:
+                                        # Show PGP source text if available and selected by default
+                                        display_text = pg_text
+                                        text_dir = 'rtl'
+                                        text_align = 'right'
+
+                                        if initial_sections is not None:
+                                            pg_section = 'recto' if pg_idx == 0 else 'verso'
+                                            section_texts = initial_sections.get(pg_section, [])
+                                            if section_texts:
+                                                display_text = '\n\n'.join(section_texts)
+                                            elif pg_idx == 0 and not initial_sections.get('verso'):
+                                                # No markers, use full content for recto
+                                                display_text = initial_source.get('content', pg_text)
+                                            if initial_is_ltr:
+                                                text_dir = 'ltr'
+                                                text_align = 'left'
+
+                                        if display_text:
+                                            ui.label(display_text).style(
+                                                f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
+                                                f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                f'color: var(--text-primary);'
+                                            )
+                                        else:
+                                            ui.label(tr('No text available')).classes('italic text-gray-400')
+
+                # Inject per-image viewer JS (zoom/rotate/drag)
+                ui.run_javascript('''
+                    window.rdViewers = window.rdViewers || {};
+
+                    window.rdZoom = function(viewerId, delta) {
+                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
+                        const state = window.rdViewers[viewerId];
+                        state.scale = Math.max(0.25, Math.min(4, state.scale + delta));
+                        const img = document.getElementById(viewerId);
+                        if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                        const label = document.getElementById(viewerId + '-zoom-label');
+                        if (label) label.textContent = Math.round(state.scale * 100) + '%';
+                    };
+
+                    window.rdRotate = function(viewerId, degrees) {
+                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
+                        const state = window.rdViewers[viewerId];
+                        state.rotation = (state.rotation + degrees + 360) % 360;
+                        const img = document.getElementById(viewerId);
+                        if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                    };
+
+                    window.rdResetView = function(viewerId) {
+                        if (!window.rdViewers[viewerId]) return;
+                        const state = window.rdViewers[viewerId];
+                        state.scale = 1; state.rotation = 0; state.x = 0; state.y = 0;
+                        const img = document.getElementById(viewerId);
+                        if (img) img.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1)';
+                        const label = document.getElementById(viewerId + '-zoom-label');
+                        if (label) label.textContent = '100%';
+                    };
+
+                    // Initialize drag support for all rd-zoomable images
+                    window.rdInitDrag = function(viewerId) {
+                        const img = document.getElementById(viewerId);
+                        if (!img || img.dataset.rdDragInit) return;
+                        img.dataset.rdDragInit = 'true';
+                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
+                        const state = window.rdViewers[viewerId];
+                        img.style.cursor = 'grab';
+                        img.ondragstart = (e) => e.preventDefault();
+
+                        img.onmousedown = function(e) {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            state.isDragging = true;
+                            state.startX = e.clientX - state.x;
+                            state.startY = e.clientY - state.y;
+                            img.style.cursor = 'grabbing';
+                        };
+                        const moveHandler = function(e) {
+                            if (!state.isDragging) return;
+                            state.x = e.clientX - state.startX;
+                            state.y = e.clientY - state.startY;
+                            img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+                        };
+                        const upHandler = function() {
+                            if (state.isDragging) {
+                                state.isDragging = false;
+                                img.style.cursor = 'grab';
+                            }
+                        };
+                        window.addEventListener('mousemove', moveHandler);
+                        window.addEventListener('mouseup', upHandler);
+
+                        img.onwheel = function(e) {
+                            e.preventDefault();
+                            const delta = e.deltaY > 0 ? -0.25 : 0.25;
+                            window.rdZoom(viewerId, delta);
+                        };
+                    };
+
+                    // Init drag for all existing rd-zoomable images
+                    setTimeout(function() {
+                        document.querySelectorAll('.rd-zoomable').forEach(function(img) {
+                            if (img.id) window.rdInitDrag(img.id);
+                        });
+                    }, 300);
+                ''')
+
+                # Inject synchronized scrolling JS
+                rd_frag_count = len(state.reading_desk_entries)
+                ui.run_javascript(f'''
+                    (function() {{
+                        const fragCount = {rd_frag_count};
+                        if (fragCount <= 1) return;
+
+                        // Wait for scroll areas to render
+                        setTimeout(function() {{
+                            const imgPane = document.querySelector('.rd-image-pane .q-scrollarea__container');
+                            const textPane = document.querySelector('.rd-text-pane .q-scrollarea__container');
+                            if (!imgPane || !textPane) {{
+                                console.log('[ReadingDesk] Scroll panes not found');
+                                return;
+                            }}
+
+                            const imgHeaders = document.querySelectorAll('[id^="rd-img-frag-"]');
+                            const textHeaders = document.querySelectorAll('[id^="rd-text-frag-"]');
+
+                            let syncing = false;
+
+                            const imgObserver = new IntersectionObserver((entries) => {{
+                                if (syncing) return;
+                                for (const entry of entries) {{
+                                    if (entry.isIntersecting) {{
+                                        const idx = entry.target.id.replace('rd-img-frag-', '');
+                                        const textTarget = document.getElementById('rd-text-frag-' + idx);
+                                        if (textTarget) {{
+                                            syncing = true;
+                                            textTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+                                            setTimeout(() => syncing = false, 600);
+                                        }}
+                                        break;
+                                    }}
+                                }}
+                            }}, {{root: imgPane, threshold: 0.3}});
+
+                            const textObserver = new IntersectionObserver((entries) => {{
+                                if (syncing) return;
+                                for (const entry of entries) {{
+                                    if (entry.isIntersecting) {{
+                                        const idx = entry.target.id.replace('rd-text-frag-', '');
+                                        const imgTarget = document.getElementById('rd-img-frag-' + idx);
+                                        if (imgTarget) {{
+                                            syncing = true;
+                                            imgTarget.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+                                            setTimeout(() => syncing = false, 600);
+                                        }}
+                                        break;
+                                    }}
+                                }}
+                            }}, {{root: textPane, threshold: 0.3}});
+
+                            imgHeaders.forEach(h => imgObserver.observe(h));
+                            textHeaders.forEach(h => textObserver.observe(h));
+                            console.log('[ReadingDesk] Synchronized scrolling initialized for ' + fragCount + ' fragments');
+                        }}, 500);
+                    }})();
+                ''')
 
             else:
                 # Single page view
