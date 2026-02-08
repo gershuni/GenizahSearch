@@ -7889,6 +7889,23 @@ class GenizahGUI(QMainWindow):
         # Re-establish sync after images finish loading (scroll maximums change)
         QTimer.singleShot(500, self._browse_rd_setup_sync_scroll)
 
+    def _browse_rd_disconnect_sync(self):
+        """Disconnect sync scroll handlers without affecting other signal connections."""
+        if self._rd_text_sync_handler is not None:
+            try:
+                self.browse_text.verticalScrollBar().valueChanged.disconnect(self._rd_text_sync_handler)
+            except (TypeError, RuntimeError):
+                pass
+            self._rd_text_sync_handler = None
+
+        if self._rd_image_sync_handler is not None:
+            try:
+                if self._browse_rd_image_scroll:
+                    self._browse_rd_image_scroll.verticalScrollBar().valueChanged.disconnect(self._rd_image_sync_handler)
+            except (TypeError, RuntimeError):
+                pass
+            self._rd_image_sync_handler = None
+
     def _browse_rd_setup_sync_scroll(self):
         """Set up proportional scroll synchronization between text and image panes."""
         if not self._browse_rd_image_scroll:
@@ -7897,15 +7914,8 @@ class GenizahGUI(QMainWindow):
         text_bar = self.browse_text.verticalScrollBar()
         image_bar = self._browse_rd_image_scroll.verticalScrollBar()
 
-        # Disconnect any existing valueChanged connections to prevent accumulation
-        try:
-            text_bar.valueChanged.disconnect()
-        except (TypeError, RuntimeError):
-            pass
-        try:
-            image_bar.valueChanged.disconnect()
-        except (TypeError, RuntimeError):
-            pass
+        # Disconnect only OUR sync handlers (not all valueChanged connections)
+        self._browse_rd_disconnect_sync()
 
         def sync_text_to_image(value):
             if self._browse_rd_syncing:
@@ -7933,8 +7943,12 @@ class GenizahGUI(QMainWindow):
             finally:
                 self._browse_rd_syncing = False
 
-        text_bar.valueChanged.connect(sync_text_to_image)
-        image_bar.valueChanged.connect(sync_image_to_text)
+        # Store references for targeted disconnect
+        self._rd_text_sync_handler = sync_text_to_image
+        self._rd_image_sync_handler = sync_image_to_text
+
+        text_bar.valueChanged.connect(self._rd_text_sync_handler)
+        image_bar.valueChanged.connect(self._rd_image_sync_handler)
 
     def _browse_rd_restore_normal_view(self):
         """Hide reading desk image scroll and restore normal viewer."""
