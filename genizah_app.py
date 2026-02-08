@@ -3552,7 +3552,16 @@ class ResultDialog(QDialog):
     def load_result_by_index(self, idx):
         data = self.all_results[idx]
         if not data.get('full_text'):
-            data['full_text'] = self.searcher.get_full_text_by_id(data['uid']) or data.get('text', '')
+            uid = data.get('uid')
+            if uid:
+                data['full_text'] = self.searcher.get_full_text_by_id(uid) or data.get('text', '')
+            else:
+                # Tag search results: get full text by sys_id from display dict
+                sid = data.get('display', {}).get('id', '')
+                if sid and self.searcher:
+                    data['full_text'] = self.searcher.get_full_manuscript(sid) or data.get('text', '')
+                else:
+                    data['full_text'] = data.get('text', '')
         self.data = data
         
         # Nav UI Updates
@@ -3561,8 +3570,11 @@ class ResultDialog(QDialog):
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
         
         # Parse Meta
-        ids = self.meta_mgr.parse_full_id_components(data['raw_header'])
+        ids = self.meta_mgr.parse_full_id_components(data.get('raw_header', ''))
         self.current_sys_id = ids['sys_id']
+        if not self.current_sys_id:
+            # Fallback for tag search results: get sys_id from display dict
+            self.current_sys_id = data.get('display', {}).get('id', '')
         try: p = int(ids['p_num'])
         except: p = 1
 
@@ -7468,20 +7480,6 @@ class GenizahGUI(QMainWindow):
             self._search_by_pgp_tag(tag)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
-
-    def _search_by_pgp_tag(self, tag):
-        """Switch to Search tab and initiate a tag search.
-
-        For now, sets the query input to the tag text and triggers an exact search.
-        Plan 12-02 will enhance this with a dedicated tag search dropdown.
-        """
-        self.tabs.setCurrentWidget(self.search_tab)
-        # Store pending tag search for Plan 12-02's tag search infrastructure
-        self._pending_tag_search = tag
-        # Set query and mode for immediate search
-        self.query_input.setText(tag)
-        self.mode_combo.setCurrentIndex(0)  # Exact mode
-        self.toggle_search()
 
     def _browse_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
@@ -12857,7 +12855,8 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
 
     def _search_by_pgp_tag(self, tag):
-        """Entry point for searching by PGP tag (e.g., from browse page links)."""
+        """Entry point for searching by PGP tag (from browse/result dialog links)."""
+        self.tabs.setCurrentWidget(self.search_tab)
         if hasattr(self, 'tag_search_combo'):
             self.tag_search_combo.setCurrentText(tag)
         self._execute_tag_search()
@@ -13442,6 +13441,8 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("fl")
         else:
             self.browse_fl_input.setText("")
+            self.browse_shelf_input.clear()        # Clear stale shelfmark
+            self._set_last_browse_field("sys")     # Force sys_id priority
         self.browse_sys_input.setText(sid)
         self.tabs.setCurrentWidget(self.browse_tab)
         self.browse_load()
