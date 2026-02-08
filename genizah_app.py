@@ -5323,8 +5323,13 @@ class GenizahGUI(QMainWindow):
         """
         editions = [s for s in sources
                      if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
+        # Exclude sources already classified as editions (compound doc_relation like
+        # "Edition ; Translation ; Discussion" should only appear once, as edition)
+        edition_ids = {id(s) for s in editions}
         translations = [s for s in sources
-                         if 'Translation' in (s.get('doc_relation') or '') and s.get('content')]
+                         if 'Translation' in (s.get('doc_relation') or '')
+                         and s.get('content')
+                         and id(s) not in edition_ids]
 
         if not editions and not translations:
             return False

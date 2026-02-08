@@ -500,8 +500,13 @@ class PGPSourceWorker(QThread):
                 source_page = source.get('page_info')
                 is_translation = 'Translation' in (source.get('doc_relation') or '')
 
-                # Include translations regardless of page_info
+                # Include translations regardless of page_info,
+                # but extract correct section if content has recto/verso markers
                 if is_translation:
+                    if not source_page:
+                        content = source.get('content')
+                        if content:
+                            source['content'] = get_section_for_page(content, self.page_num)
                     page_sources.append(source)
                     continue
 
