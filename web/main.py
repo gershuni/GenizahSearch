@@ -1384,6 +1384,14 @@ COMMON_STYLES = '''
 def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
 
+    # Restore persisted language preference (survives ui.navigate.reload)
+    try:
+        saved_lang = app.storage.user.get('ui_language')
+        if saved_lang in ('he', 'en'):
+            set_language(saved_lang)
+    except Exception:
+        pass
+
     current_page = app.storage.user.get('current_page', '/')
     rtl_mode = is_rtl()
 
@@ -1646,6 +1654,10 @@ def create_layout():
                 def toggle_lang():
                     current = get_language()
                     new_lang = 'en' if current == 'he' else 'he'
+                    try:
+                        app.storage.user['ui_language'] = new_lang
+                    except Exception:
+                        pass
                     set_language(new_lang)
                     ui.navigate.reload()
 
