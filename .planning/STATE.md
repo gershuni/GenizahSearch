@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk)
-Plan: 0 of TBD (replanning)
-Status: Replanning -- first attempt reverted after user feedback
-Last activity: 2026-02-08 -- Reverted Phase 11 execution, replanning
+Plan: 0 of TBD (replanning v3)
+Status: Replanning -- second attempt reverted after user feedback on UX vision
+Last activity: 2026-02-08 -- Reverted Phase 11 v2 execution, replanning with synchronized dual-pane vision
 
 Progress: [███████░░░░░░░░░░░░░] 50% (7/14 plans)
 
@@ -47,19 +47,11 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - Shared service layer (Option C): Both apps consume same Supabase functions
-- Reshape service API during extraction: Fix TODO, clean up naming
-- Tantivy boolean workaround: Use text field with raw tokenizer for content_type filter
 - DEC-08-01-01: Keep shared/document_service.py API identical during extraction
-- DEC-08-02-01: Fixed pre-existing mock chain bug in test (Rule 1 auto-fix)
-- DEC-09-01-01: Excluded 177 footnotes with empty doc_relation (NOT NULL constraint)
-- DEC-09-01-02: Footnote dedup removes 1,442 duplicates (24,383 -> 22,764 valid)
-- DEC-09-02-01: Filter orphan pgpids before footnote/fragment upsert (28 footnote + 6 fragment pgpids reference deleted PGP documents)
-- DEC-10-01-01: PGP worker runs after community status; corrections saved and re-added on PGP combo rebuild
+- DEC-09-02-01: Filter orphan pgpids before footnote/fragment upsert
+- DEC-10-01-01: PGP worker runs after community status
 - DEC-10-01-02: Per-source directionality (editions RTL, English translations LTR)
-- DEC-10-01-03: Combo width 240px for both selectors
 - DEC-10-02-01: Replace insertSeparator with disabled text dividers for visibility
-- DEC-10-02-02: Disconnect old PGP worker signals before creating new workers
-- DEC-10-02-03: Exclude PGP sources from corrections filter during combo rebuild
 
 ### Data State
 
@@ -70,7 +62,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Multi-fragment document view: add image controls for each image (user feedback during Phase 8 verification, relevant to Phase 11)
+- Multi-fragment document view: add image controls for each image (relevant to Phase 11)
 
 ### Blockers/Concerns
 
@@ -78,25 +70,46 @@ Recent decisions affecting current work:
 
 ### Phase 11 Replan Context (CRITICAL -- read before replanning)
 
-First attempt (reverted commit 7230bd3) created a separate /reading-desk page (web) and ReadingDeskDialog (desktop). User rejected this approach during verification:
+**Two prior attempts reverted.** Key lessons from each:
 
-**Bugs found:**
-- Web: Only showed one black image box, no text, no multiple manuscripts
-- Web: Add by shelfmark broken
-- Desktop: Didn't fetch PGP joins, only showed one manuscript
+**Attempt 1** (reverted 7230bd3): Separate /reading-desk page (web) + ReadingDeskDialog (desktop). Rejected -- user wants enhancement of existing browse tab, not new pages/dialogs.
 
-**Architecture pivot (user direction):**
-- Do NOT create a separate page/dialog for reading desk
-- ENHANCE the existing "View All Fragments" inline view in the Browse tab (both apps)
-- Add ability to add more manuscripts by search/shelfmark to the existing joined view
-- Add ability to add from personal lists
-- Desktop: integrate with existing lists panel in browse tab (direct "add to view")
-- The reading desk IS the browse tab's multi-fragment view, enhanced with add/remove
-- Keep shared ReadingDeskEntry/ReadingDeskState model concept for data containers
+**Attempt 2** (reverted 8012e03): Enhanced existing browse tab joined view with add/remove. Closer but still wrong UX:
+
+**User feedback on attempt 2 (web):**
+- Image controls missing rotate -- must reuse EXISTING image controls (zoom/rotate per image)
+- No text version selector per fragment (PGP edition/translation chooser)
+- Fragment titles should be links to view that fragment individually (exit joined view, navigate there)
+- "Add by sys_id" is redundant -- remove it, shelfmark is enough
+- Need proper "Add from personal list" dialog (not just a button)
+- Header above "Document #..." is irrelevant in All Fragments view (relates to only one fragment)
+- Switching language exits the view -- must preserve view state
+- No entry point to add manuscripts if no join link exists -- need standalone entry point
+
+**User feedback on attempt 2 (desktop):**
+- "Reading Desk" button in nav bar is not discoverable enough
+- Entry point should be "Add to View" button near the main shelfmark/Go field
+- Lists should have hoverable "+" (add to view) icons on each item
+- View MUST show images alongside text in BOTH panes -- synchronized scrolling
+- Each image in front of each text, scrollable, lazy loaded, correlated side-by-side
+
+**THE KEY ARCHITECTURAL INSIGHT (v3 vision):**
+- BOTH panes (image viewer + text area) become scrollable multi-manuscript views
+- All manuscripts' images stacked in the image pane (with lazy loading, zoom/rotate per image)
+- All manuscripts' texts stacked in the text pane (with per-fragment version selector)
+- **SYNCHRONIZED SCROLLING**: When you scroll past a fragment boundary in one pane, the other pane auto-scrolls to the matching fragment header
+- Version selector and metadata update to reflect the currently-visible fragment
+- This applies to BOTH web and desktop apps
+
+**Entry points (both apps):**
+- "Add to View" button near Go/shelfmark field -- starts reading desk with that manuscript
+- "+" icons on list items -- adds to reading desk without navigating
+- Joins "View All" -- existing entry point, enters reading desk with all joined fragments
+- Shelfmark input in toolbar to add more while in reading desk mode
 
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Reverted Phase 11, needs replanning with new approach
+Stopped at: Reverted Phase 11 v2, needs replanning with synchronized dual-pane vision
 Resume file: None
-Notes: Phase 11 first attempt reverted. User wants enhanced browse tab approach, not separate pages/dialogs. Run /gsd:plan-phase 11 to replan.
+Notes: Third attempt at Phase 11. Core insight: synchronized scrolling between image and text panes, not just enhanced text view. Run /gsd:plan-phase 11 to replan.

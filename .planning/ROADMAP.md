@@ -132,10 +132,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 0/2 | Planned | - |
+| 11. Virtual Reading Desk | v5.6.0 | 0/TBD | Replanning (v3) | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 replanned -- 2 plans, enhance existing browse tabs)*
+*Last updated: 2026-02-08 (Phase 11 replanning v3 -- synchronized dual-pane vision)*
