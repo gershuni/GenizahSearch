@@ -3584,7 +3584,7 @@ class ResultDialog(QDialog):
                 sid = data.get('display', {}).get('id', '')
                 if sid and self.searcher:
                     pages = self.searcher.get_full_manuscript(sid)
-                    data['full_text'] = '\n'.join(pages) if pages else data.get('text', '')
+                    data['full_text'] = '\n'.join(p['text'] for p in pages if p.get('text')) if pages else data.get('text', '')
                 else:
                     data['full_text'] = data.get('text', '')
         self.data = data
