@@ -6615,6 +6615,21 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
+        # Extended Info button and panel (PGP metadata)
+        self.btn_b_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_b_ext_info.setCheckable(True)
+        self.btn_b_ext_info.toggled.connect(self._browse_toggle_extended_info)
+        self.btn_b_ext_info.setVisible(False)
+        top_layout.addWidget(self.btn_b_ext_info)
+
+        self.txt_b_extended_info = QTextBrowser()
+        self.txt_b_extended_info.setVisible(False)
+        self.txt_b_extended_info.setMaximumHeight(200)
+        self.txt_b_extended_info.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
+        self.txt_b_extended_info.setOpenLinks(False)
+        self.txt_b_extended_info.anchorClicked.connect(self._on_browse_ext_link_clicked)
+        top_layout.addWidget(self.txt_b_extended_info)
+
         layout.addWidget(top_container)
 
         # --- Main Splitter (Left: List Panel, Center: Text, Right: Images) ---
@@ -7083,6 +7098,12 @@ class GenizahGUI(QMainWindow):
         if sid != self.current_browse_sid: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
+        # Reset extended info panel for new manuscript
+        self.btn_b_ext_info.setVisible(False)
+        self.btn_b_ext_info.setChecked(False)
+        self.txt_b_extended_info.setVisible(False)
+        self.txt_b_extended_info.setHtml("")
+
         # 1. Update Info Label (Top Bar)
         marc = meta.get('marc', {})
         shelf = meta.get('shelfmark')
@@ -7202,6 +7223,16 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_sources = sources
         self._browse_pgp_doc = pgp_doc
 
+        # Update extended info panel with PGP metadata
+        pgp_html = self._build_pgp_extended_info_html(pgp_doc)
+        if pgp_html:
+            self.txt_b_extended_info.setHtml(pgp_html)
+            self.btn_b_ext_info.setVisible(True)
+        else:
+            self.btn_b_ext_info.setVisible(False)
+            self.btn_b_ext_info.setChecked(False)
+            self.txt_b_extended_info.setVisible(False)
+
         if not sources:
             return
 
@@ -7242,6 +7273,91 @@ class GenizahGUI(QMainWindow):
     def _on_browse_pgp_error(self, sys_id, error_message):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
+
+    def _build_pgp_extended_info_html(self, pgp_doc, palette=None):
+        """Build HTML for PGP metadata section in extended info panels.
+
+        Args:
+            pgp_doc: dict from PGPSourceWorker (document metadata)
+            palette: optional QPalette for text color; defaults to app palette
+
+        Returns:
+            HTML string for the PGP section, or empty string if no PGP data.
+        """
+        if not pgp_doc:
+            return ""
+
+        if palette is None:
+            palette = self.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+
+        pgp_html = (
+            f"<div style='background-color: transparent; color:{text_color}; "
+            "padding: 10px; margin-bottom: 10px; "
+            "border-left: 3px solid #27ae60; text-align: left;' dir='ltr'>"
+        )
+        pgp_html += f"<p style='margin-top:0;'><b>Princeton Geniza Project</b></p>"
+
+        doc_type = pgp_doc.get('document_type')
+        if doc_type:
+            pgp_html += f"<p><b>{tr('Document Type')}:</b> {doc_type}</p>"
+
+        tags = pgp_doc.get('tags', [])
+        if tags:
+            tag_links = []
+            for tag in tags:
+                tag_links.append(
+                    f"<a href='tag:{tag}' style='color: #27ae60; text-decoration: underline;'>{tag}</a>"
+                )
+            pgp_html += f"<p><b>{tr('Tags')}:</b> {', '.join(tag_links)}</p>"
+
+        description = pgp_doc.get('description')
+        if description:
+            pgp_html += f"<p><b>{tr('Description')}:</b> {description}</p>"
+
+        date = pgp_doc.get('inferred_date_display') or pgp_doc.get('doc_date_standard')
+        if date:
+            pgp_html += f"<p><b>{tr('Date')}:</b> {date}</p>"
+
+        pgp_url = pgp_doc.get('pgp_url')
+        if pgp_url:
+            pgp_html += (
+                f"<p><a href='{pgp_url}' style='color: #27ae60; text-decoration: underline;'>"
+                f"{tr('View on PGP')}</a></p>"
+            )
+
+        pgp_html += "</div>"
+        return pgp_html
+
+    def _browse_toggle_extended_info(self, checked):
+        """Toggle browse tab extended info panel visibility."""
+        self.txt_b_extended_info.setVisible(checked)
+        self.btn_b_ext_info.setText(
+            tr("Hide Extended Info") if checked else tr("Show Extended Info")
+        )
+
+    def _on_browse_ext_link_clicked(self, url):
+        """Handle clicks on links in browse tab extended info."""
+        url_str = url.toString()
+        if url_str.startswith('tag:'):
+            tag = url_str[4:]
+            self._search_by_pgp_tag(tag)
+        elif url_str.startswith('http'):
+            QDesktopServices.openUrl(url)
+
+    def _search_by_pgp_tag(self, tag):
+        """Switch to Search tab and initiate a tag search.
+
+        For now, sets the query input to the tag text and triggers an exact search.
+        Plan 12-02 will enhance this with a dedicated tag search dropdown.
+        """
+        self.tabs.setCurrentWidget(self.search_tab)
+        # Store pending tag search for Plan 12-02's tag search infrastructure
+        self._pending_tag_search = tag
+        # Set query and mode for immediate search
+        self.query_input.setText(tag)
+        self.mode_combo.setCurrentIndex(0)  # Exact mode
+        self.toggle_search()
 
     def _browse_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
