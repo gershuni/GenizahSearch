@@ -3088,6 +3088,14 @@ class ResultDialog(QDialog):
         except Exception as e:
             logger.debug("Error fetching corrections: %s", e)
 
+        # Cache corrections/versions for re-appending after PGP combo rebuild
+        self._rd_cached_corrections = []
+        for i in range(self.rd_version_combo.count()):
+            item_data = self.rd_version_combo.itemData(i)
+            if item_data and item_data.get('source') not in ('original', 'header', None):
+                self._rd_cached_corrections.append(
+                    (self.rd_version_combo.itemText(i), item_data))
+
         # Enable combo if we have versions/corrections
         if self.rd_version_combo.count() > 1:
             self.rd_version_combo.setEnabled(True)
@@ -3114,17 +3122,52 @@ class ResultDialog(QDialog):
         source = version_data.get('source')
         version_id = version_data.get('version_id')
         correction_id = version_data.get('correction_id')
+        source_id = version_data.get('source_id')
 
-        cache_key = f"{source}_{version_id or correction_id}" if (version_id or correction_id) else source
+        # Build cache key
+        if source in ('pgp_edition', 'pgp_translation'):
+            cache_key = f"pgp_{source_id}" if source_id else source
+        else:
+            cache_key = f"{source}_{version_id or correction_id}" if (version_id or correction_id) else source
+
         if cache_key in self._rd_versions_cache:
-            self._rd_display_text(self._rd_versions_cache[cache_key])
+            content = self._rd_versions_cache[cache_key]
+            if source == 'pgp_translation':
+                language = version_data.get('language', '')
+                is_rtl = language != 'English'
+                self._rd_display_pgp_text(content, is_rtl=is_rtl)
+            elif source == 'pgp_edition':
+                self._rd_display_pgp_text(content, is_rtl=True)
+            else:
+                self._rd_display_text(content)
             return
 
         if source == "original":
+            # Restore RTL direction for V0.8 text
+            self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             if hasattr(self, '_rd_original_text'):
                 self._rd_display_text(self._rd_original_text)
+        elif source == "pgp_edition":
+            # PGP edition content is stored directly in version_data
+            content = version_data.get('content', '')
+            if content:
+                if source_id:
+                    self._rd_versions_cache[f"pgp_{source_id}"] = content
+                self._rd_display_pgp_text(content, is_rtl=True)
+        elif source == "pgp_translation":
+            # PGP translation content is stored directly in version_data
+            content = version_data.get('content', '')
+            language = version_data.get('language', '')
+            if content:
+                if source_id:
+                    self._rd_versions_cache[f"pgp_{source_id}"] = content
+                # English translations are LTR, everything else RTL
+                is_rtl = language != 'English'
+                self._rd_display_pgp_text(content, is_rtl=is_rtl)
         elif source == "correction":
             # Correction text is included directly in version_data
+            # Restore RTL for corrections (Hebrew text)
+            self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             content = version_data.get('corrected_text', '')
             if content:
                 self._rd_versions_cache[cache_key] = content
@@ -3132,6 +3175,8 @@ class ResultDialog(QDialog):
         elif version_id:
             parent = self.parent()
             if parent and hasattr(parent, 'corrections_client'):
+                # Restore RTL for user versions (Hebrew text)
+                self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                 # Quick server availability check (500ms timeout) to prevent UI freeze
                 if not parent.corrections_client.is_server_available():
                     return
@@ -3148,6 +3193,64 @@ class ResultDialog(QDialog):
         """Display text in the manuscript viewer."""
         if text:
             self.text_ms.setHtml(self._htmlify(text))
+
+    def _rd_display_pgp_text(self, text, is_rtl=True):
+        """Display PGP edition/translation text with proper directionality."""
+        if not text:
+            return
+        direction = 'rtl' if is_rtl else 'ltr'
+        layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
+        self.text_ms.setLayoutDirection(layout_dir)
+        html_text = text.replace('\n', '<br>')
+        self.text_ms.setHtml(f"<div dir='{direction}'>{html_text}</div>")
+        self._refresh_find_highlights()
+
+    def _on_rd_pgp_loaded(self, sys_id, sources, pgp_doc):
+        """Handle PGP sources loaded from background thread."""
+        # Stale-request guard: user may have navigated to a different result
+        if sys_id != self.current_sys_id:
+            return
+
+        # Store PGP data
+        self._rd_pgp_sources = sources
+        self._rd_pgp_doc = pgp_doc
+
+        if not sources:
+            return
+
+        parent = self.parent()
+        if not parent:
+            return
+
+        # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
+        has_pgp = parent._populate_pgp_combo(self.rd_version_combo, sources, pgp_doc)
+
+        if has_pgp:
+            # Re-add cached corrections/versions after V0.8
+            cached = getattr(self, '_rd_cached_corrections', [])
+            if cached:
+                self.rd_version_combo.blockSignals(True)
+                self.rd_version_combo.insertSeparator(self.rd_version_combo.count())
+                for label, data in cached:
+                    self.rd_version_combo.addItem(label, data)
+                self.rd_version_combo.blockSignals(False)
+
+            # Store original V0.8 text if not already stored
+            if not hasattr(self, '_rd_original_text') or not self._rd_original_text:
+                self._rd_original_text = self.text_ms.toPlainText()
+
+            # Auto-select first PGP edition and display it
+            edition_data = parent._auto_select_pgp_edition(self.rd_version_combo)
+            if edition_data:
+                content = edition_data.get('content', '')
+                if content:
+                    self._rd_display_pgp_text(content, is_rtl=True)
+
+            self.rd_version_combo.setEnabled(True)
+
+    def _on_rd_pgp_error(self, sys_id, error_msg):
+        """Handle PGP source fetch error -- silently fall back to existing behavior."""
+        logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
 
     def _rd_toggle_edit_mode(self):
         """Toggle edit mode in ResultDialog."""
@@ -3614,6 +3717,14 @@ class ResultDialog(QDialog):
 
         # Load versions for this page
         self._rd_load_versions()
+
+        # Start PGP source fetch for this page (runs in background)
+        parent = self.parent()
+        if parent:
+            self._rd_pgp_worker = PGPSourceWorker(self.current_sys_id, self.current_p_num or 1)
+            self._rd_pgp_worker.finished_signal.connect(self._on_rd_pgp_loaded)
+            self._rd_pgp_worker.error_signal.connect(self._on_rd_pgp_error)
+            self._rd_pgp_worker.start()
 
         # Update joins menu
         self._rd_update_joins_menu()
