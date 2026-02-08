@@ -557,6 +557,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             placeholder=tr('Filter by text')
                         ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
+                    with ui.row().classes('gap-2 items-center'):
+                        pgp_filter_checkbox = ui.checkbox(tr('PGP Only'), value=False).props('dense')
+                        pgp_filter_checkbox.style('color: var(--success-600);')
+                        ui.label(tr('Show only manuscripts with PGP transcriptions')).classes('text-xs').style('color: var(--text-muted);')
+
                     with ui.row().classes('gap-2'):
                         ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
                             'flat dense color=green size=sm'
@@ -737,6 +742,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         shelfmark_filter = (filter_shelfmark.value or '').lower().strip()
         title_filter = (filter_title.value or '').lower().strip()
         snippet_filter = (filter_snippet.value or '').lower().strip()
+        pgp_only = pgp_filter_checkbox.value
 
         for res in search_state.results:
             display = res.get('display', {})
@@ -751,6 +757,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                 continue
             if snippet_filter and snippet_filter not in snippet:
                 continue
+            # PGP filter
+            if pgp_only:
+                sys_id = display.get('id', '')
+                if sys_id not in search_state.transcription_sys_ids:
+                    continue
 
             filtered.append(res)
 
@@ -763,6 +774,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         filter_shelfmark.value = ''
         filter_title.value = ''
         filter_snippet.value = ''
+        pgp_filter_checkbox.value = False
 
         if search_state.results:
             render_results(search_state.results)
@@ -1212,8 +1224,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         # PGP transcription indicator
                         sys_id = display.get('id')
                         if sys_id and sys_id in search_state.transcription_sys_ids:
-                            ui.icon('description').classes('text-sm').style(
-                                'color: var(--success-600);'
+                            ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                'background: var(--success-100); color: var(--success-700); font-weight: 600;'
                             ).tooltip(tr('Has PGP Transcription'))
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
@@ -2438,8 +2450,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                                             'background: var(--bg-tertiary); color: var(--text-muted);'
                                         )
                                         # PGP indicator
-                                        ui.icon('description').classes('text-sm').style(
-                                            'color: var(--success-600);'
+                                        ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                            'background: var(--success-100); color: var(--success-700); font-weight: 600;'
                                         ).tooltip(tr('Has PGP Transcription'))
                                         ui.label(result.get('shelfmark', 'Unknown')).classes(
                                             'font-bold break-all'
