@@ -90,7 +90,7 @@ Plans:
 Plans:
 - [x] 11-01-PLAN.md -- Shared ReadingDeskModel + web dual-pane synchronized reading desk (stacked images/texts, per-image controls, per-fragment version selectors)
 - [x] 11-02-PLAN.md -- Web entry points and dynamic management (Add to View, toolbar, Add from List, remove, state preservation)
-- [ ] 11-03-PLAN.md -- Desktop dual-pane reading desk rendering (stacked images in viewer, stacked texts with version selectors, synchronized scrolling)
+- [x] 11-03-PLAN.md -- Desktop dual-pane reading desk rendering (stacked images in viewer, stacked texts with version selectors, synchronized scrolling)
 - [ ] 11-04-PLAN.md -- Desktop entry points and dynamic management (Add to View, toolbar, joins integration, list panel integration)
 - [ ] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
 
@@ -135,7 +135,7 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 2/5 | In progress | - |
+| 11. Virtual Reading Desk | v5.6.0 | 3/5 | In progress | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
