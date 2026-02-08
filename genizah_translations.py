@@ -1403,6 +1403,8 @@ TRANSLATIONS = {
     "Welcome to Genizah Search Pro": "ברוכים הבאים ל-Genizah Search Pro",
     "Welcome to Dicta Genizah Search": "ברוכים הבאים לאתר הגניזה של דיקטה",
     "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
+    "What is the Cairo Genizah?": "מהי גניזת קהיר?",
+    "Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time": "מאות אלפי כתבי יד מימי הביניים מעליית גג של בית כנסת בקהיר — זמינים לחיפוש לראשונה",
     "Research Tools": "כלי מחקר",
     "Pages": "עמודים",
     "Lists": "רשימות",

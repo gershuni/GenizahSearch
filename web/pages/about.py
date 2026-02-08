@@ -2,20 +2,45 @@
 """
 About Page - What is the Cairo Genizah?
 
-An introductory page for general audiences explaining:
-1. The discovery story (1896-1897)
-2. What is a genizah and what's in it
-3. Where the fragments are today
-4. The research revolution
-5. Digital projects (FGP, Ktiv, MiDRASH)
-6. About the transcriptions and their limitations
-7. What you can do on this site
-8. Further reading and credits
+A visually engaging introduction for general audiences:
+- Hero banner with synagogue image
+- The story in flowing text (not cards)
+- Key numbers
+- What you can do on this site
+- Disclaimer about transcription quality
+- Credits and further reading
 """
 
-from nicegui import ui, app
+import random
+
+from nicegui import ui
 from web.translations import get_language
-from web.components.typography import h1, h2, h3
+from web.components.typography import h2
+from web.state import state
+
+
+def _html(content: str):
+    """Helper to emit raw HTML without sanitization."""
+    return ui.html(content, sanitize=False)
+
+
+def _navigate_random_fragment():
+    """Navigate to a random Genizah fragment in the browse view."""
+    try:
+        if state.meta_mgr and state.meta_mgr.csv_bank:
+            all_ids = list(state.meta_mgr.csv_bank.keys())
+            random_id = random.choice(all_ids)
+            ui.navigate.to(f'/browse?sys_id={random_id}')
+            return
+    except Exception:
+        pass
+    ui.navigate.to('/browse')
+
+
+# Wikimedia Commons images (public domain)
+# Hero: T-S K5.13 manuscript fragment - a real Genizah page, much more evocative than the renovated synagogue
+HERO_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg'
+SCHECHTER_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/9/9e/Solomon_Schechter_studying_the_fragments_of_the_Cairo_Genizah%2C_c._1898.jpg'
 
 
 def create_about_page():
@@ -24,404 +49,630 @@ def create_about_page():
     lang = get_language()
     is_hebrew = lang == 'he'
 
-    # Language toggle state
-    show_hebrew = {'value': is_hebrew}
+    # Page-level styles
+    ui.add_head_html('''
+    <style>
+    .about-hero {
+        width: 100%;
+        max-width: 900px;
+        height: 320px;
+        border-radius: 16px;
+        overflow: hidden;
+        position: relative;
+        margin: 0 auto;
+    }
+    .about-hero img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center center;
+    }
+    .about-hero-overlay {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(to top, rgba(20,15,5,0.9) 0%, rgba(20,15,5,0.35) 50%, rgba(20,15,5,0.1) 100%);
+        display: flex;
+        align-items: flex-end;
+        padding: 30px 36px;
+    }
+    .about-hero-overlay h1 {
+        font-size: 2.4rem;
+        font-weight: 800;
+        color: #f5e6c8;
+        line-height: 1.3;
+        margin: 0;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    }
 
-    with ui.column().classes('w-full max-w-4xl mx-auto gap-6 fade-in p-4'):
+    .about-body {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 0 16px;
+    }
+    .about-body p, .about-body .about-paragraph {
+        font-size: 1.06rem;
+        line-height: 2.1;
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+    }
+    .about-lead {
+        font-size: 1.2rem !important;
+        font-weight: 300;
+        border-right: 3px solid var(--primary-600, #8b6914);
+        padding-right: 20px;
+        margin-bottom: 32px !important;
+    }
+    [dir="ltr"] .about-lead {
+        border-right: none;
+        border-left: 3px solid var(--primary-600, #8b6914);
+        padding-right: 0;
+        padding-left: 20px;
+    }
 
-        # === Language Toggle ===
-        with ui.row().classes('w-full items-center justify-between mb-4'):
-            h1(
-                'מהי גניזת קהיר?' if show_hebrew['value'] else 'What is the Cairo Genizah?',
-                classes='text-3xl font-bold',
-                style='color: var(--text-primary);'
-            )
+    .about-figure {
+        margin: 32px -20px;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.10);
+    }
+    .about-figure img {
+        width: 100%;
+        display: block;
+    }
+    .about-figure figcaption {
+        font-size: 0.8rem;
+        color: var(--text-tertiary);
+        padding: 10px 16px;
+        text-align: center;
+        background: var(--bg-secondary);
+    }
 
-            def toggle_language():
-                show_hebrew['value'] = not show_hebrew['value']
-                ui.navigate.reload()
+    .about-stats {
+        display: flex;
+        gap: 28px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin: 32px 0;
+        padding: 24px 0;
+        border-top: 1px solid var(--border-light, #e8dcc8);
+        border-bottom: 1px solid var(--border-light, #e8dcc8);
+    }
+    .about-stat { text-align: center; }
+    .about-stat-num {
+        font-size: 1.9rem;
+        font-weight: 800;
+        color: var(--primary-700, #8b6914);
+        display: block;
+    }
+    .about-stat-label {
+        font-size: 0.8rem;
+        color: var(--text-tertiary);
+        margin-top: 2px;
+    }
 
-            ui.button(
-                'English' if show_hebrew['value'] else 'עברית',
-                icon='translate',
-                on_click=toggle_language
-            ).props('flat dense')
+    .about-disclaimer {
+        background: var(--bg-tertiary, #2d1f0e);
+        border: 1px solid var(--border-medium);
+        padding: 22px 26px;
+        border-radius: 12px;
+        margin: 32px 0;
+    }
+    .about-disclaimer p {
+        font-size: 0.92rem !important;
+        line-height: 2 !important;
+        color: var(--text-secondary) !important;
+    }
+    .about-disclaimer strong {
+        color: var(--primary-600, #c89b3c);
+    }
 
-        # === Content Container ===
-        content_container = ui.column().classes('w-full gap-6')
+    .about-section-break {
+        width: 40px;
+        height: 2px;
+        background: var(--primary-600, #c89b3c);
+        margin: 36px auto;
+    }
 
-        with content_container:
-            if show_hebrew['value']:
-                _create_hebrew_content()
-            else:
-                _create_english_content()
+    .about-tools {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin: 24px 0 32px;
+    }
+    .about-tool {
+        border: 1px solid var(--border-light, #e8dcc8);
+        border-radius: 12px;
+        padding: 22px 16px;
+        text-align: center;
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.2s;
+        cursor: pointer;
+        display: block;
+    }
+    .about-tool:hover {
+        border-color: var(--primary-600, #c89b3c);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+        transform: translateY(-2px);
+    }
+    .about-tool-icon { font-size: 1.6rem; margin-bottom: 8px; }
+    .about-tool h3 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0 0 6px;
+    }
+    .about-tool p {
+        font-size: 0.82rem !important;
+        color: var(--text-tertiary) !important;
+        line-height: 1.6 !important;
+        margin: 0 !important;
+    }
+
+    .about-credits {
+        border-top: 1px solid var(--border-light, #e8dcc8);
+        padding-top: 24px;
+        margin-top: 40px;
+    }
+    .about-credits p {
+        font-size: 0.85rem !important;
+        color: var(--text-tertiary) !important;
+        line-height: 2 !important;
+    }
+    .about-credits a {
+        color: var(--primary-600, #8b6914);
+        text-decoration: none;
+    }
+    .about-credits a:hover { text-decoration: underline; }
+
+    .about-body h2 {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin: 28px 0 12px;
+        letter-spacing: -0.01em;
+    }
+    .about-body h2:first-of-type {
+        margin-top: 0;
+    }
+
+    @media (max-width: 640px) {
+        .about-hero { height: 220px; }
+        .about-hero-overlay h1 { font-size: 1.7rem; }
+        .about-tools { grid-template-columns: 1fr; }
+        .about-figure { margin: 24px 0; }
+    }
+    </style>
+    ''')
+
+    # JSON-LD structured data
+    ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "AboutPage",
+        "name": "What is the Cairo Genizah?",
+        "alternativeHeadline": "מהי גניזת קהיר?",
+        "description": "The Cairo Genizah: over 350,000 medieval manuscript fragments from the Ben Ezra Synagogue in Cairo, spanning 1,000 years of Jewish life.",
+        "url": "https://GenizahSearch.com/about",
+        "inLanguage": ["en", "he"],
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "Dicta Genizah Search",
+            "url": "https://GenizahSearch.com"
+        },
+        "about": {
+            "@type": "Collection",
+            "name": "Cairo Genizah",
+            "description": "A collection of over 350,000 medieval Jewish manuscript fragments discovered in the Ben Ezra Synagogue in Cairo, dating from approximately 870 to 1880 CE.",
+            "numberOfItems": 350000,
+            "locationCreated": {
+                "@type": "Place",
+                "name": "Ben Ezra Synagogue",
+                "address": {
+                    "@type": "PostalAddress",
+                    "addressLocality": "Cairo",
+                    "addressCountry": "EG"
+                }
+            }
+        },
+        "mentions": [
+            {
+                "@type": "Person",
+                "name": "Solomon Schechter",
+                "description": "Scholar who recovered approximately 193,000 Genizah fragments from Cairo in 1896"
+            },
+            {
+                "@type": "Person",
+                "name": "Agnes Smith Lewis",
+                "description": "Scottish scholar of Semitic languages who brought Genizah fragments to Cambridge"
+            },
+            {
+                "@type": "Person",
+                "name": "Margaret Gibson",
+                "description": "Scottish scholar of Semitic languages who brought Genizah fragments to Cambridge"
+            }
+        ]
+    }
+    </script>
+    ''')
+
+    with ui.column().classes('w-full gap-0 fade-in'):
+
+        if is_hebrew:
+            _create_hebrew_content()
+        else:
+            _create_english_content()
 
 
 def _create_hebrew_content():
     """Create the Hebrew about content."""
 
-    # === 1. The Discovery Story ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('auto_stories').classes('text-2xl text-primary')
-            h2('סיפור הגילוי', classes='text-xl font-bold', style='color: var(--text-primary);')
+    # === Hero Banner ===
+    _html(f'''
+    <div class="about-hero">
+        <img src="{HERO_IMAGE}" alt="קטע מגניזת קהיר — כתב יד עברי מימי הביניים (T-S K5.13)">
+        <div class="about-hero-overlay">
+            <h1>הגניזה הקהירית</h1>
+        </div>
+    </div>
+    ''')
 
-        ui.markdown('''
-בשנת 1896 הגיעו אגנס סמית לואיס ומרגרט דאנלופ גיבסון, שתי אחיות סקוטיות מלומדות, לביקור בקהיר. הן נכנסו לבית הכנסת העתיק "בן עזרא" והמדריך הראה להן את חדר הגניזה — עליית גג שאליה נדחפו במשך מאות שנים שרידים בלויים של כתבי יד.
+    # === Body ===
+    with ui.column().classes('about-body w-full gap-0 mt-8').style('direction: rtl; text-align: right;'):
 
-הן לקחו איתן דפים שנראו להן מעניינים, והראו כמה מהם לידידן החוקר שלמה זלמן (סולומון) שכטר בקמברידג'. כששכטר ראה את הדפים הוא הבין מיד שמדובר במשהו יוצא דופן: הנוסח העברי המקורי של ספר בן סירא, שעד אז שרד רק בתרגומים.
+        _html('''
+        <p class="about-paragraph about-lead">
+            כשפתחו את עליית הגג של בית הכנסת בן עזרא בקהיר, מצאו שם
+            את הארכיון הגדול ביותר של ימי הביניים היהודיים —
+            מאות אלפי דפים שמספרים על אלף שנים של חיים.
+        </p>
+        ''')
 
-שכטר נסע לקהיר, שכנע את הקהילה המקומית, וחזר לקמברידג' עם כ-193,000 קטעים. אבל הוא לא היה היחיד וגם לא היה הראשון — ולאורך השנים התפזרו מאות אלפי קטעים נוספים לספריות ברחבי העולם.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        _html('<h2>מקום שמירה שהפך לארכיון</h2>')
 
-    # === 2. What is a Genizah? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('help_outline').classes('text-2xl text-primary')
-            h2('מה זו גניזה?', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <p class="about-paragraph">
+            במסורת היהודית אסור לזרוק נייר שכתוב עליו שם ה', ולכן נהגו לאסוף דפים ישנים
+            בחדר מיוחד — "גניזה" — עד שיובאו לקבורה. אבל בקהיר הפכו את הגניזה למין פח אשפה
+            מכובד: דחפו לשם הכל. מכתבים, חוזים, שטרי גירושין, שירי אהבה, מרשמים רפואיים,
+            קמיעות, רשימות מטבח — וכמובן גם תורה, תלמוד, פיוט ופילוסופיה. והכל נשמר שם
+            במשך מאות שנים, כי באקלים היבש של קהיר נייר לא נרקב.
+        </p>
+        ''')
 
-        ui.markdown('''
-במסורת היהודית אסור להשליך דפים שכתוב בהם שם ה'. נהגו לאסוף אותם במקום מיוחד — גניזה — עד שיובאו לקבורה. אבל בפועל הרבה אנשים דחפו לגניזה כל דבר שנכתב באותיות עבריות, שנחשבו לקדושות.
+        # Schechter image
+        _html(f'''
+        <figure class="about-figure">
+            <img src="{SCHECHTER_IMAGE}" alt="שלמה שכטר בוחן קטעי גניזה">
+            <figcaption>שלמה שכטר בוחן קטעי גניזה בספריית קמברידג', סביבות 1898</figcaption>
+        </figure>
+        ''')
 
-וכך הצטברו בעליית הגג של בית הכנסת בן עזרא לא רק ספרי קודש, אלא גם מכתבים אישיים ועסקיים, חוזים, כתובות ושטרי גירושין, רשימות קניות, מרשמים רפואיים, קמיעות, ואפילו דפים בערבית ובשפות אחרות שנקלעו לשם.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        _html('<h2>הגילוי: שכטר והאחיות מסקוטלנד</h2>')
 
-    # === 3. Where are the fragments today? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('public').classes('text-2xl text-primary')
-            h2('איפה הקטעים היום?', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <p class="about-paragraph">
+            ב-1896 הגיעו לקהיר שתי אחיות סקוטיות, אגנס סמית לואיס ומרגרט גיבסון, חוקרות
+            שפות שמיות. הן חזרו לקמברידג' עם כמה דפים שנראו להן מעניינים, והראו אותם לחברן
+            שלמה שכטר. שכטר זיהה ביניהם את הנוסח העברי האבוד של ספר בן סירא. הוא מיהר
+            לקהיר, שכנע את גבאי בית הכנסת, וחזר עם כ-193,000 קטעים.
+        </p>
+        ''')
 
-        ui.markdown('''
-שכטר לא היה הראשון ולא היחיד שעלה על האוצר. במהלך השנים התפזרו הדפים לספריות ברחבי העולם:
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        _html('''
+        <p class="about-paragraph">
+            אבל שכטר לא היה הראשון ולא היחיד. סוחרי עתיקות מכרו קטעים לספריות באירופה ובאמריקה
+            עוד לפניו, ואחריו המשיכו לזרום דפים לכל עבר. היום הם מפוזרים ביותר מ-75 אוספים
+            בקמברידג', ניו יורק, סנקט פטרבורג, אוקספורד, מנצ'סטר, לונדון, פריז, ירושלים ועוד.
+        </p>
+        ''')
 
-        # Collection cards
-        collections = [
-            ('קמברידג\'', '~193,000', 'אוסף טיילור-שכטר'),
-            ('ניו יורק (JTS)', '~43,000', 'אוסף אדלר (ENA)'),
-            ('סנקט פטרבורג', '~17,000', 'אוסף פירקוביץ\''),
-            ('אוקספורד', '~4,000', 'ספריית הבודליאנה'),
-            ('מנצ\'סטר', '~11,000', 'ספריית ג\'ון ריילנדס'),
-            ('לונדון', '~7,000', 'הספרייה הבריטית'),
-        ]
+        # Stats
+        _html('''
+        <div class="about-stats">
+            <div class="about-stat">
+                <span class="about-stat-num">~350,000</span>
+                <span class="about-stat-label">קטעי כתבי יד</span>
+            </div>
+            <div class="about-stat">
+                <span class="about-stat-num">75+</span>
+                <span class="about-stat-label">ספריות בעולם</span>
+            </div>
+            <div class="about-stat">
+                <span class="about-stat-num">~1,000</span>
+                <span class="about-stat-label">שנות היסטוריה</span>
+            </div>
+        </div>
+        ''')
 
-        with ui.row().classes('w-full flex-wrap gap-3 justify-center'):
-            for name, count, desc in collections:
-                with ui.card().classes('p-3 text-center').style('min-width: 140px; background: var(--bg-secondary);'):
-                    ui.label(name).classes('font-bold').style('color: var(--primary-700);')
-                    ui.label(count).classes('text-lg font-bold').style('color: var(--text-primary);')
-                    ui.label(desc).classes('text-xs').style('color: var(--text-tertiary);')
+        _html('<h2>יותר מדי חומר, מעט מדי זמן</h2>')
 
-        ui.markdown('''
-ועוד עשרות אוספים קטנים יותר בפריז, בודפסט, פילדלפיה, ירושלים ועוד.
+        _html('''
+        <p class="about-paragraph">
+            החוקרים שחקרו את הגניזה גילו עולם שלם: דמויות היסטוריות חדשות, גרסאות לא ידועות
+            של ספרים מוכרים, ותיעוד מפורט של חיי יומיום. אבל הם גם הבינו את הבעיה:
+            <strong>יש פשוט יותר מדי חומר</strong>. יותר ממאה שנה חוקרים עובדים על הגניזה,
+            ועדיין מגלים דברים חדשים.
+        </p>
+        ''')
 
-(הערה: באוקספורד יש ~4,000 קטעים אך ~25,000 עמודים — הקטעים שם גדולים במיוחד, לעתים מחברות שלמות.)
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right; margin-top: 1rem;')
+        # Section break
+        _html('<div class="about-section-break"></div>')
 
-    # === 4. The Research Revolution ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('science').classes('text-2xl text-primary')
-            h2('מהפכה במחקר', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('<h2>מהגניזה לעידן הדיגיטלי</h2>')
 
-        ui.markdown('''
-החוקרים התחילו במרץ רב לסרוק את הגניזה, שעשתה **מהפכה בכל תחום שהיא רק נגעה בו**: היסטוריה, תלמוד, פיוט, מחשבת ישראל, מאגיה, ליטורגיה, מקרא, הלכה.
+        _html('''
+        <p class="about-paragraph">
+            ואז הגיעו המחשבים.
+            <strong><a href="https://fjms.genizah.org/" target="_blank">פרויקט הגניזה של פרידברג</a></strong>
+            אסף מאות אלפי תמונות של כל הקטעים מכל הספריות, והמידע שלו הועבר ל<strong><a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank">פרויקט "כתיב"</a></strong>
+            של הספרייה הלאומית.
+            <strong><a href="https://www.midrashproject.org/" target="_blank">פרויקט MiDRASH</a></strong>,
+            בתמיכת האיחוד האירופי, פיתח בינה מלאכותית שקוראת כתבי יד עבריים —
+            ובדצמבר 2024 שחרר
+            <a href="https://zenodo.org/records/14054599" target="_blank">תעתוק אוטומטי</a>
+            של כמעט כל הקטעים.
+        </p>
+        ''')
 
-דמויות חדשות צצו ועלו, גרסאות מעולות של חיבורים ידועים ולא ידועים, פרטים היסטוריים חדשים — כל אלה עלו ועדיין עולים מתוך אותם דפים בלויים וקרועים.
+        _html('''
+        <p class="about-paragraph">
+            האתר פותח בתמיכת <strong><a href="https://dicta.org.il/" target="_blank">עמותת דיקטה</a></strong>,
+            כדי לאפשר חיפוש ועיון בתעתוקי MiDRASH.
+        </p>
+        ''')
 
-**הבעיה?** זה פשוט יותר מדי חומר.
+        # Disclaimer
+        _html('''
+        <div class="about-disclaimer">
+            <p>
+                <strong>הערה על דיוק התעתוקים:</strong>
+                התעתוקים נוצרו באמצעות זיהוי אוטומטי (OCR) ואינם מדויקים. שונות בכתבי היד,
+                דהיית דיו ובלאי החומר מקשים על הזיהוי. עם זאת, גם תעתוק חלקי מאפשר לראשונה
+                חיפוש רוחבי על פני כמעט כל קורפוס הגניזה. כלי החיפוש באתר תוכננו להתמודד עם אי-דיוקים אלה.
+            </p>
+        </div>
+        ''')
 
-יש מאות אלפי דפים, מפוזרים בעשרות ספריות. יותר ממאה שנה חוקרים עובדים לקטלג ולתאר את הקטעים, והם רחוקים ממיצוי. **עד היום, גילויים חדשים מהגניזה הם דבר שבשגרה.**
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        # Tools
+        h2('מה אפשר לעשות כאן', classes='text-xl font-bold mb-2', style='color: var(--text-primary);')
 
-    # === 5. The Digital Age ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('computer').classes('text-2xl text-primary')
-            h2('העידן הדיגיטלי', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <div class="about-tools">
+            <a href="/search" class="about-tool">
+                <div class="about-tool-icon">🔍</div>
+                <h3>חיפוש טקסט</h3>
+                <p>חפשו מילה או ביטוי בכל קטעי הגניזה. חיפוש וריאנטים מתמודד עם שגיאות הקריאה.</p>
+            </a>
+            <a href="/parallels" class="about-tool">
+                <div class="about-tool-icon">📜</div>
+                <h3>מקבילות</h3>
+                <p>הדביקו טקסט מוכר — פיוט, מדרש, קטע תלמודי — ומצאו עדי נוסח חדשים.</p>
+            </a>
+            <a href="/browse" class="about-tool">
+                <div class="about-tool-icon">📖</div>
+                <h3>עיון בכתבי יד</h3>
+                <p>דפדפו בתמונות כתבי היד לצד התעתוק. תקנו, הוסיפו הערות, שתפו.</p>
+            </a>
+        </div>
+        ''')
 
-        ui.markdown('''
-**[פרויקט הגניזה של פרידברג (FGP)](https://fjms.genizah.org/)** — דב פרידברג, נדבן קנדי, גייס את פרופ' יעקב שויקה, ממפתחי [פרויקט השו"ת](https://www.responsa.co.il/) המפורסם, להקמת מפעל דיגיטלי שיאסוף ויקטלג את כל קטעי הגניזה הקהירית. הפרויקט הצליח בענק: מאות אלפי תמונות, רשימת מצאי מקיפה, מידע קטלוגי וביבליוגרפי מצוותי מומחים. במהרה הפך האתר למרכז של כל חוקר שעוסק בגניזה.
-
-**[פרויקט "כתיב"](https://web.nli.org.il/sites/nlis/he/manuscript)** של הספרייה הלאומית, שנתמך גם הוא על ידי פרידברג, מטרתו דיגיטציה מלאה של כלל כתבי היד העבריים הידועים. כל המידע מפרויקט הגניזה של פרידברג הועבר אליו, וכיום ניתן לגשת לחלק גדול מהמידע גם באתר הספרייה הלאומית.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === 6. MiDRASH Project ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('psychology').classes('text-2xl text-primary')
-            h2('פרויקט MiDRASH', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-האתר שלפניכם מבוסס על **[פרויקט MiDRASH](https://www.midrashproject.org/)** — פרויקט בתמיכת האיחוד האירופי שזכה במענק של 10 מיליון יורו. ארבעה חוקרים — אבי שמידמן ונחום דרשוביץ מישראל, ודניאל שטוקל בן עזרא ויהודית אולשובי-שלנגר מאירופה — שילבו את מיטב הידע שלהם בפלאוגרפיה, בתוכן כתבי היד ובמדעי הרוח הדיגיטליים, ופיתחו כלים לקריאה אוטומטית של כתבי יד עבריים.
-
-זו מלאכה קשה מנשוא: לכתבי יד יש צורות שונות, הם כתובים במבנה לא אחיד, לפעמים עם הערות בצד, באמצע, מלמעלה למטה ובאלכסון. אבל הם הצליחו — לא במאה אחוז, רחוק מזה, אבל תוצאה טובה בהרבה ממה שהיינו יכולים לדמיין רק לפני עשר שנים.
-
-בחנוכה תשפ"ה שחרר הפרויקט קובץ של תעתיקים אוטומטיים של כמעט כל קטעי הגניזה הקהירית — והאתר הזה נבנה כדי לאפשר חיפוש ועיון בתוכם.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === 7. About the Transcriptions ===
-    with ui.card().classes('w-full p-6').style('border: 2px solid var(--primary-500); background: var(--bg-tertiary);'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('info').classes('text-2xl text-primary')
-            h2('על התעתוקים באתר', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-התעתוקים באתר נוצרו באופן אוטומטי על ידי מערכת הבינה המלאכותית של פרויקט MiDRASH, ולא עברו הגהה אנושית. כתבי יד הם אתגר קשה לקריאה ממוחשבת: כל סופר כותב אחרת, הדיו דוהה, הקלף נשחק, ולפעמים הטקסט פשוט לא קריא. התוצאה היא שהתעתוקים מכילים שגיאות רבות — החלפות בין אותיות דומות (ד/ר, ה/ח, ו/י), מילים שהמערכת לא הצליחה לפענח, ולפעמים קריאות שגויות לחלוטין.
-
-אז למה בכל זאת להשתמש בהם? כי עד עכשיו לא היה מאגר אחוד שאפשר לחפש בו. תעתיקים ידניים קיימים — ב-FGP (כ-4% מהקטעים), ב[פרויקט הגניזה של פרינסטון (PGP)](https://geniza.princeton.edu/), ובספרים ומאמרים מפוזרים ברחבי העולם — אבל הם מכסים רק חלק קטן מהגניזה ואינם ניתנים לחיפוש במקום אחד. התעתיק האוטומטי של MiDRASH מכסה כמעט את כל הגניזה, וגם אם הוא רחוק משלמות, הוא מאפשר לראשונה חיפוש רוחבי על פני כל החומר. כלי החיפוש באתר תוכננו לעזור להתמודד עם השגיאות ולמצוא תוצאות למרות הרעש.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === 8. Who is this for? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('groups').classes('text-2xl text-primary')
-            h2('למי האתר מיועד?', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-האתר פותח בעיקר עבור חוקרים — היסטוריונים, חוקרי ספרות, בלשנים ואחרים שיודעים לקרוא כתבי יד ולהעריך את הממצאים שלהם.
-
-אבל גם אם אינכם חוקרים, אתם מוזמנים לשוטט. אפשר לחפש מילים, לדפדף בתמונות של כתבי יד בני מאות שנים, ולהתרשם מהעושר של הגניזה. רק זכרו — אם מצאתם משהו שנראה מעניין, כדאי לבדוק עם מומחה אם זה באמת גילוי חדש.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === 9. What can you do on this site? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('explore').classes('text-2xl text-primary')
-            h2('מה אפשר לעשות באתר?', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-**[חיפוש טקסט](/search)** — הזינו מילה או ביטוי וקבלו רשימה של כל הקטעים שבהם הם מופיעים. מצבי החיפוש השונים מאפשרים להתמודד עם שגיאות התעתוק: חיפוש "וריאנטים" מוצא גם צורות עם אותיות מוחלפות (ואפשר לשחק עם עומק הווריאנטים), וחיפוש "עמום" (fuzzy) מוצא מילים דומות גם אם לא זהות. אפשר לחפש גם בכותרות החיבורים.
-
-**[חיפוש מקבילות](/parallels)** — הזינו טקסט שלם (פיוט, קטע מפירוש, מקור ידוע) והמערכת תחפש קטעי גניזה שמכילים קטעים דומים. כך אפשר למצוא עדי נוסח חדשים או ציטוטים לא ידועים.
-
-**[עיון בכתבי יד](/browse)** — דפדפו בתמונות של כתבי היד לצד התעתוק האוטומטי. אפשר לראות את המקור כדי לקרוא את כתב היד באופן בלתי אמצעי ולהתרשם ממנו. ניתן גם לערוך את הטקסט ולשלוח תיקונים, ולכתוב הערות על כתב היד.
-
-**[תוכנת Genizah Search Pro](/download)** — כל היכולות של האתר זמינות גם בתוכנה חינמית למחשב, עם כלים נוספים לחוקרים מתקדמים.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-        # Call to action
-        with ui.row().classes('w-full justify-center gap-4 mt-4 flex-wrap'):
+        # CTA buttons
+        with ui.row().classes('w-full justify-center gap-3 mb-8 flex-wrap'):
             ui.button('התחילו לחפש', icon='search', on_click=lambda: ui.navigate.to('/search')).props('color=primary')
             ui.button('דפדפו בכתבי יד', icon='menu_book', on_click=lambda: ui.navigate.to('/browse')).props('outline')
+            ui.button('קטע גניזה אקראי', icon='casino', on_click=lambda: _navigate_random_fragment()).props('outline')
 
-    # === 10. Further Reading ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('link').classes('text-2xl text-primary')
-            h2('קריאה נוספת', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-**אתרים:**
-- [פרויקט הגניזה של פרינסטון (PGP)](https://geniza.princeton.edu/)
-- [כתיב — הספרייה הלאומית](https://web.nli.org.il/sites/nlis/he/manuscript)
-- [יחידת מחקר הגניזה בקמברידג'](https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit)
-
-**ספרים:**
-- *Sacred Trash* (אדינה הופמן ופיטר קול) — סיפור הגילוי בשפה נגישה
-- *[The Illustrated Cairo Genizah](https://www.medievalists.net/2025/01/new-medieval-books-the-illustrated-cairo-genizah/)* (ניק פוסגיי ומלוני שמירר-לי) — מבוא מאויר לגניזה
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
-
-    # === 11. Credits ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('favorite').classes('text-2xl text-primary')
-            h2('תודות', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-תודה מיוחדת לפרופ' משה קופל, מייסד וראש [דיקטה](https://dicta.org.il/), על התמיכה; לד"ר אבי שמידמן, ראש אגף הפיתוח הטכנולוגי של דיקטה ואחד מארבעת חוקרי פרויקט MiDRASH שהביאו את התעתיקים לעולם; ולאלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר על העצות והתמיכה.
-
-תודה לצוות פרויקט MiDRASH המלא: דניאל שטוקל בן עזרא, מרינה רוסטו, נחום דרשוביץ, יהודית אולשובי-שלנגר, לואיג'י במבצ'י, בנימין קיסלינג, חיים לפין, נורית עזר, אלנה לולי, צפרא סיו, יצחק גילה, בראת קוראר ברכאת, שרווה גוגאוואלה, משה לביא, ורד רזיאל-קרצמר ודריה וסיוטינסקי שפירא.
-
-ותודה למשתמשים שכבר משתמשים באתר ובתוכנת Genizah Search Pro למחשב ומשתפים בהתלהבות את התגליות שלהם.
-
-**יוצר האתר:** הלל גרשוני ([gershuni@gmail.com](mailto:gershuni@gmail.com))
-
-*לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.*
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+        # Credits
+        _html('''
+        <div class="about-credits">
+            <p>
+                האתר מבוסס על תעתוקי
+                <a href="https://www.midrashproject.org/" target="_blank">פרויקט MiDRASH</a>
+                (דניאל שטוקל בן עזרא, אבי שמידמן, נחום דרשוביץ, יהודית אולשובי-שלנגר וצוות הפרויקט).
+                תודה לפרופ' משה קופל ו<a href="https://dicta.org.il/" target="_blank">דיקטה</a> על התמיכה,
+                ולאלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר.
+            </p>
+            <p>
+                קישורים:
+                <a href="https://geniza.princeton.edu/" target="_blank">PGP פרינסטון</a> ·
+                <a href="https://fjms.genizah.org/" target="_blank">פרויקט פרידברג</a> ·
+                <a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank">כתיב</a> ·
+                <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank">גניזת קמברידג'</a>
+            </p>
+            <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
+                לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.
+            </p>
+            <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
+        </div>
+        ''')
 
 
 def _create_english_content():
     """Create the English about content."""
 
-    # === 1. The Discovery Story ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('auto_stories').classes('text-2xl text-primary')
-            h2('The Discovery', classes='text-xl font-bold', style='color: var(--text-primary);')
+    # === Hero Banner ===
+    _html(f'''
+    <div class="about-hero">
+        <img src="{HERO_IMAGE}" alt="Cairo Genizah fragment — medieval Hebrew manuscript (T-S K5.13)">
+        <div class="about-hero-overlay">
+            <h1>The Cairo Genizah</h1>
+        </div>
+    </div>
+    ''')
 
-        ui.markdown('''
-In 1896, Agnes Smith Lewis and Margaret Dunlop Gibson, two Scottish sisters and accomplished scholars in their own right, visited Cairo. They entered the ancient Ben Ezra Synagogue, where their guide showed them the genizah chamber — an attic where worn fragments of manuscripts had been deposited for hundreds of years.
+    # === Body ===
+    with ui.column().classes('about-body w-full gap-0 mt-8'):
 
-They took a few pages that seemed interesting and showed them to their friend at Cambridge, Solomon Schechter. When Schechter saw the pages, he immediately realized he was looking at something extraordinary: the original Hebrew text of the Book of Ben Sira, which until then had survived only in translations.
+        _html('''
+        <p class="about-paragraph about-lead">
+            When they opened the attic of the Ben Ezra Synagogue in Cairo, they found
+            the largest archive of medieval Jewish life ever discovered —
+            hundreds of thousands of pages spanning a thousand years.
+        </p>
+        ''')
 
-Schechter traveled to Cairo, convinced the local community, and returned to Cambridge with approximately 193,000 fragments. But he wasn't the only one — over the years, hundreds of thousands more fragments made their way to libraries around the world.
-        ''').style('color: var(--text-secondary);')
+        _html('<h2>A storeroom that became an archive</h2>')
 
-    # === 2. What is a Genizah? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('help_outline').classes('text-2xl text-primary')
-            h2('What is a Genizah?', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <p class="about-paragraph">
+            In Jewish tradition, it's forbidden to discard paper bearing God's name, so worn pages
+            were stored in a special room — a "genizah" — until they could be buried. But in Cairo,
+            the genizah became a dignified wastebasket: everything went in. Letters, contracts, divorce
+            deeds, love poems, medical prescriptions, amulets, shopping lists — and of course Torah,
+            Talmud, poetry, and philosophy. And it all survived there for centuries, because in Cairo's
+            dry climate paper doesn't decay.
+        </p>
+        ''')
 
-        ui.markdown('''
-In Jewish tradition, it's forbidden to throw away papers containing God's name. Such papers were collected in a special place — a genizah — until they could be buried. But in practice, many people deposited anything written in Hebrew letters into the genizah, as Hebrew letters were considered sacred.
+        # Schechter image
+        _html(f'''
+        <figure class="about-figure">
+            <img src="{SCHECHTER_IMAGE}" alt="Solomon Schechter studying Genizah fragments">
+            <figcaption>Solomon Schechter studying Genizah fragments at Cambridge, c. 1898</figcaption>
+        </figure>
+        ''')
 
-And so, in the attic of the Ben Ezra Synagogue accumulated not only sacred books, but also personal and business letters, contracts, marriage documents and divorce deeds, shopping lists, medical prescriptions, amulets, and even pages in Arabic and other languages that found their way there.
-        ''').style('color: var(--text-secondary);')
+        _html('<h2>The discovery: Schechter and the Scottish sisters</h2>')
 
-    # === 3. Where are the fragments today? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('public').classes('text-2xl text-primary')
-            h2('Where are the Fragments Today?', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <p class="about-paragraph">
+            In 1896, two Scottish sisters — Agnes Smith Lewis and Margaret Gibson, accomplished scholars
+            of Semitic languages — visited Cairo and returned to Cambridge with some intriguing pages.
+            They showed them to their friend Solomon Schechter, who recognized among them the lost Hebrew
+            text of the Book of Ben Sira. He rushed to Cairo, convinced the synagogue wardens, and returned
+            with approximately 193,000 fragments.
+        </p>
+        ''')
 
-        ui.markdown('''
-Schechter wasn't the first or only one to discover the treasure. Over the years, fragments spread to libraries around the world:
-        ''').style('color: var(--text-secondary);')
+        _html('''
+        <p class="about-paragraph">
+            But Schechter was neither the first nor the only one. Antiquities dealers had sold fragments
+            to European and American libraries before him, and more continued flowing in every direction
+            afterward. Today they're scattered across more than 75 collections in Cambridge, New York,
+            St. Petersburg, Oxford, Manchester, London, Paris, Jerusalem, and beyond.
+        </p>
+        ''')
 
-        # Collection cards
-        collections = [
-            ('Cambridge', '~193,000', 'Taylor-Schechter Collection'),
-            ('New York (JTS)', '~43,000', 'Adler Collection (ENA)'),
-            ('St. Petersburg', '~17,000', 'Firkovich Collection'),
-            ('Oxford', '~4,000', 'Bodleian Library'),
-            ('Manchester', '~11,000', 'John Rylands Library'),
-            ('London', '~7,000', 'British Library'),
-        ]
+        # Stats
+        _html('''
+        <div class="about-stats">
+            <div class="about-stat">
+                <span class="about-stat-num">~350,000</span>
+                <span class="about-stat-label">manuscript fragments</span>
+            </div>
+            <div class="about-stat">
+                <span class="about-stat-num">75+</span>
+                <span class="about-stat-label">libraries worldwide</span>
+            </div>
+            <div class="about-stat">
+                <span class="about-stat-num">~1,000</span>
+                <span class="about-stat-label">years of history</span>
+            </div>
+        </div>
+        ''')
 
-        with ui.row().classes('w-full flex-wrap gap-3 justify-center'):
-            for name, count, desc in collections:
-                with ui.card().classes('p-3 text-center').style('min-width: 140px; background: var(--bg-secondary);'):
-                    ui.label(name).classes('font-bold').style('color: var(--primary-700);')
-                    ui.label(count).classes('text-lg font-bold').style('color: var(--text-primary);')
-                    ui.label(desc).classes('text-xs').style('color: var(--text-tertiary);')
+        _html('<h2>Too much material, too little time</h2>')
 
-        ui.markdown('''
-Plus dozens of smaller collections in Paris, Budapest, Philadelphia, Jerusalem, and more.
+        _html('''
+        <p class="about-paragraph">
+            Scholars who studied the Genizah discovered an entire world: new historical figures,
+            unknown versions of familiar books, and detailed documentation of daily life. But they
+            also understood the problem: <strong>there's simply too much material</strong>. For over
+            a century scholars have been working on the Genizah, and new discoveries are still routine.
+        </p>
+        ''')
 
-(Note: Oxford has ~4,000 fragments but ~25,000 folios — the fragments there are unusually large, sometimes entire quires.)
-        ''').style('color: var(--text-secondary); margin-top: 1rem;')
+        # Section break
+        _html('<div class="about-section-break"></div>')
 
-    # === 4. The Research Revolution ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('science').classes('text-2xl text-primary')
-            h2('A Research Revolution', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('<h2>From the Genizah to the digital age</h2>')
 
-        ui.markdown('''
-Scholars eagerly began combing through the Genizah, which **revolutionized every field it touched**: history, Talmud, poetry, Jewish thought, magic, liturgy, Bible studies, Jewish law.
+        _html('''
+        <p class="about-paragraph">
+            Then came the computers.
+            <strong><a href="https://fjms.genizah.org/" target="_blank">The Friedberg Genizah Project</a></strong>
+            collected hundreds of thousands of images of all fragments from all libraries, and its data was transferred to
+            <strong><a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank">the Ktiv Project</a></strong>
+            at the National Library of Israel.
+            <strong><a href="https://www.midrashproject.org/" target="_blank">The MiDRASH Project</a></strong>,
+            funded by the EU, developed AI that reads Hebrew manuscripts —
+            and in December 2024 released
+            <a href="https://zenodo.org/records/14054599" target="_blank">automatic transcriptions</a>
+            of nearly all the fragments.
+        </p>
+        ''')
 
-New figures emerged, superior versions of known and unknown works, new historical details — all rising from those worn and torn pages, and still emerging today.
+        _html('''
+        <p class="about-paragraph">
+            This site was developed with the support of <strong><a href="https://dicta.org.il/" target="_blank">Dicta</a></strong>,
+            to enable searching and browsing within the MiDRASH transcriptions.
+        </p>
+        ''')
 
-**The problem?** It's simply too much material.
+        # Disclaimer
+        _html('''
+        <div class="about-disclaimer">
+            <p>
+                <strong>A note on transcription accuracy:</strong>
+                The transcriptions were generated by automatic text recognition (OCR) and are not fully accurate.
+                Variation in scribal hands, faded ink, and worn writing surfaces all affect recognition quality.
+                Nonetheless, even partial transcriptions enable, for the first time, broad search across nearly
+                the entire Genizah corpus. The search tools on this site were designed to handle these inaccuracies.
+            </p>
+        </div>
+        ''')
 
-There are hundreds of thousands of pages, scattered across dozens of libraries. For over a century, scholars have worked to catalog and describe the fragments, and they're far from finished. **To this day, new discoveries from the Genizah are routine.**
-        ''').style('color: var(--text-secondary);')
+        # Tools
+        h2('What you can do here', classes='text-xl font-bold mb-2', style='color: var(--text-primary);')
 
-    # === 5. The Digital Age ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('computer').classes('text-2xl text-primary')
-            h2('The Digital Age', classes='text-xl font-bold', style='color: var(--text-primary);')
+        _html('''
+        <div class="about-tools">
+            <a href="/search" class="about-tool">
+                <div class="about-tool-icon">🔍</div>
+                <h3>Text Search</h3>
+                <p>Search for a word or phrase across all Genizah fragments. Variant search handles reading errors.</p>
+            </a>
+            <a href="/parallels" class="about-tool">
+                <div class="about-tool-icon">📜</div>
+                <h3>Parallels</h3>
+                <p>Paste a known text — a piyyut, midrash, Talmudic passage — and find new witnesses.</p>
+            </a>
+            <a href="/browse" class="about-tool">
+                <div class="about-tool-icon">📖</div>
+                <h3>Browse Manuscripts</h3>
+                <p>Browse manuscript images alongside the transcription. Correct, annotate, share.</p>
+            </a>
+        </div>
+        ''')
 
-        ui.markdown('''
-**[The Friedberg Genizah Project (FGP)](https://fjms.genizah.org/)** — Dov Friedberg, a Canadian philanthropist, enlisted Prof. Yaacov Choueka, one of the developers of the renowned [Responsa Project](https://www.responsa.co.il/), to create a digital enterprise that would collect and catalog all Cairo Genizah fragments. The project succeeded enormously: hundreds of thousands of images, comprehensive inventories, and cataloging information from teams of experts. The site quickly became the center for every Genizah researcher.
-
-**[The Ktiv Project](https://web.nli.org.il/sites/nlis/en/manuscript)** of the National Library of Israel, also supported by Friedberg, aims to fully digitize all known Hebrew manuscripts. All information from the Friedberg Genizah Project was transferred to it, and today much of this information is accessible through the National Library's website.
-        ''').style('color: var(--text-secondary);')
-
-    # === 6. MiDRASH Project ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('psychology').classes('text-2xl text-primary')
-            h2('The MiDRASH Project', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-This website is based on the **[MiDRASH Project](https://www.midrashproject.org/)** — an EU-funded project that received a grant of 10 million euros. Four researchers — Avi Shmidman and Nachum Dershowitz from Israel, and Daniel Stökl Ben Ezra and Judith Olszowy-Schlanger from Europe — combined their expertise in paleography, manuscript content, and digital humanities to develop tools for automatic reading of Hebrew manuscripts.
-
-This is an enormously difficult task: manuscripts have different forms, they're written in inconsistent layouts, sometimes with notes on the side, in the middle, from top to bottom, and diagonally. But they succeeded — not 100%, far from it, but results far better than we could have imagined just ten years ago.
-
-In December 2024, the project released a file of automatic transcriptions of nearly all Cairo Genizah fragments — and this website was built to enable searching and browsing within them.
-        ''').style('color: var(--text-secondary);')
-
-    # === 7. About the Transcriptions ===
-    with ui.card().classes('w-full p-6').style('border: 2px solid var(--primary-500); background: var(--bg-tertiary);'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('info').classes('text-2xl text-primary')
-            h2('About the Transcriptions', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-The transcriptions on this site were created automatically by the MiDRASH project's AI system and have not undergone human review. Manuscripts are a difficult challenge for computer reading: every scribe writes differently, ink fades, parchment wears, and sometimes the text is simply illegible. The result is that the transcriptions contain many errors — substitutions between similar letters (ד/ר, ה/ח, ו/י), words the system couldn't decipher, and sometimes completely wrong readings.
-
-So why use them at all? Because until now there was no unified database that could be searched. Manual transcriptions exist — in FGP (about 4% of fragments), in the [Princeton Geniza Project (PGP)](https://geniza.princeton.edu/), and in books and articles scattered around the world — but they cover only a small portion of the Genizah and cannot be searched in one place. The MiDRASH automatic transcription covers almost the entire Genizah, and even if it's far from perfect, it enables for the first time a broad search across all the material. The search tools on this site were designed to help cope with errors and find results despite the noise.
-        ''').style('color: var(--text-secondary);')
-
-    # === 8. Who is this for? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('groups').classes('text-2xl text-primary')
-            h2('Who is this Site For?', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-This site was developed primarily for researchers — historians, literature scholars, linguists, and others who can read manuscripts and evaluate their findings.
-
-But even if you're not a researcher, you're welcome to explore. You can search for words, browse images of centuries-old manuscripts, and appreciate the richness of the Genizah. Just remember — if you find something that seems interesting, it's worth checking with an expert whether it's truly a new discovery.
-        ''').style('color: var(--text-secondary);')
-
-    # === 9. What can you do on this site? ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('explore').classes('text-2xl text-primary')
-            h2('What Can You Do on This Site?', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-**[Text Search](/search)** — Enter a word or phrase and get a list of all fragments where they appear. Different search modes help cope with transcription errors: "variants" search finds forms with substituted letters (and you can adjust the variant depth), and "fuzzy" search finds similar words even if not identical. You can also search within composition titles.
-
-**[Parallels Search](/parallels)** — Enter a complete text (a piyyut, a commentary excerpt, a known source) and the system will search for Genizah fragments containing similar passages. This way you can find new textual witnesses or unknown citations.
-
-**[Browse Manuscripts](/browse)** — Browse images of manuscripts alongside the automatic transcription. You can view the source to read the manuscript directly and get an impression of it. You can also edit the text and submit corrections, and write notes about the manuscript.
-
-**[Genizah Search Pro](/download)** — All the site's capabilities are also available in a free desktop application, with additional tools for advanced researchers.
-        ''').style('color: var(--text-secondary);')
-
-        # Call to action
-        with ui.row().classes('w-full justify-center gap-4 mt-4 flex-wrap'):
+        # CTA buttons
+        with ui.row().classes('w-full justify-center gap-3 mb-8 flex-wrap'):
             ui.button('Start Searching', icon='search', on_click=lambda: ui.navigate.to('/search')).props('color=primary')
             ui.button('Browse Manuscripts', icon='menu_book', on_click=lambda: ui.navigate.to('/browse')).props('outline')
+            ui.button('Random Fragment', icon='casino', on_click=lambda: _navigate_random_fragment()).props('outline')
 
-    # === 10. Further Reading ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('link').classes('text-2xl text-primary')
-            h2('Further Reading', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-**Websites:**
-- [Princeton Geniza Project (PGP)](https://geniza.princeton.edu/)
-- [Ktiv — National Library of Israel](https://web.nli.org.il/sites/nlis/en/manuscript)
-- [Cambridge Genizah Research Unit](https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit)
-
-**Books:**
-- *Sacred Trash* (Adina Hoffman & Peter Cole) — The discovery story in accessible prose
-- *[The Illustrated Cairo Genizah](https://www.medievalists.net/2025/01/new-medieval-books-the-illustrated-cairo-genizah/)* (Nick Posegay & Melonie Schmierer-Lee) — An illustrated introduction to the Genizah
-        ''').style('color: var(--text-secondary);')
-
-    # === 11. Credits ===
-    with ui.card().classes('w-full p-6'):
-        with ui.row().classes('items-center gap-3 mb-4'):
-            ui.icon('favorite').classes('text-2xl text-primary')
-            h2('Acknowledgments', classes='text-xl font-bold', style='color: var(--text-primary);')
-
-        ui.markdown('''
-Special thanks to Prof. Moshe Koppel, founder and head of [Dicta](https://dicta.org.il/), for his support; to Dr. Avi Shmidman, head of technology development at Dicta and one of the four MiDRASH project researchers who brought these transcriptions to the world; and to Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer for their advice and support.
-
-Thanks to the full MiDRASH project team: Daniel Stökl Ben Ezra, Marina Rustow, Nachum Dershowitz, Judith Olszowy-Schlanger, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Tsafra Siew, Yitzchak Gila, Berat Kurar Barakat, Sharva Gogawale, Moshe Lavee, Vered Raziel-Kretzmer, and Daria Vasyutinsky Shapira.
-
-And thanks to the users already using the site and Genizah Search Pro desktop application, who enthusiastically share their discoveries.
-
-**Site Creator:** Hillel Gershuni ([gershuni@gmail.com](mailto:gershuni@gmail.com))
-
-*Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.*
-        ''').style('color: var(--text-secondary);')
+        # Credits
+        _html('''
+        <div class="about-credits">
+            <p>
+                This site is based on transcriptions from the
+                <a href="https://www.midrashproject.org/" target="_blank">MiDRASH Project</a>
+                (Daniel Stökl Ben Ezra, Avi Shmidman, Nachum Dershowitz, Judith Olszowy-Schlanger, and team).
+                Thanks to Prof. Moshe Koppel and <a href="https://dicta.org.il/" target="_blank">Dicta</a> for their support,
+                and to Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
+            </p>
+            <p>
+                Links:
+                <a href="https://geniza.princeton.edu/" target="_blank">Princeton Geniza Project</a> ·
+                <a href="https://fjms.genizah.org/" target="_blank">Friedberg Genizah Project</a> ·
+                <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank">Ktiv (NLI)</a> ·
+                <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank">Cambridge Genizah Unit</a>
+            </p>
+            <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
+                Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.
+            </p>
+            <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
+        </div>
+        ''')

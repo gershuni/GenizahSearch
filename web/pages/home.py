@@ -80,6 +80,28 @@ def create_page():
                     mini_stat('library_books', get_doc_count, tr('Pages'))
                     mini_stat('star', get_list_count, tr('Lists'))
 
+        # === About the Genizah Banner ===
+        with ui.card().classes('w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all mt-2').props(
+            'role=button tabindex=0'
+        ).style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
+        ).on('click', lambda: ui.navigate.to('/about')).on('keydown.enter', lambda: ui.navigate.to('/about')).on('keydown.space', lambda: ui.navigate.to('/about')):
+            with ui.row().classes('w-full items-center gap-6 p-5 flex-wrap'):
+                # Manuscript image thumbnail
+                ui.html(
+                    '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg"'
+                    ' alt="" style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
+                    sanitize=False
+                )
+                with ui.column().classes('flex-1 gap-1'):
+                    h3(tr('What is the Cairo Genizah?'),
+                       classes='text-lg font-bold',
+                       style='color: var(--text-primary);')
+                    ui.label(tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time')).classes(
+                        'text-sm'
+                    ).style('color: var(--text-secondary);')
+                ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-2xl').style('color: var(--primary-600);')
+
         # === Main Action Cards Grid ===
         # Changed to H2
         h2(tr('Research Tools'), classes='text-xl font-bold mt-4', style='color: var(--text-primary);')

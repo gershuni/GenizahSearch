@@ -1845,9 +1845,21 @@ def accessibility_page_route():
         create_accessibility_page()
 
 
-@ui.page('/about')
+@ui.page('/about', title='What is the Cairo Genizah? | מהי גניזת קהיר? — Dicta Genizah Search')
 def about_page_route():
     set_current_page('/about')
+    # Page-specific meta tags override the site-wide defaults
+    ui.add_head_html('''
+    <!-- About page SEO overrides -->
+    <meta name="description" content="The Cairo Genizah: over 350,000 medieval manuscript fragments from the Ben Ezra Synagogue in Cairo, spanning 1,000 years of Jewish life. Search the transcriptions for the first time.">
+    <meta property="og:title" content="What is the Cairo Genizah? — Dicta Genizah Search">
+    <meta property="og:description" content="Over 350,000 medieval manuscript fragments from a Cairo synagogue attic, now searchable for the first time. Explore letters, contracts, poetry, and Torah from 1,000 years of Jewish life.">
+    <meta property="og:url" content="https://GenizahSearch.com/about">
+    <meta property="og:type" content="article">
+    <meta name="twitter:title" content="What is the Cairo Genizah? — Dicta Genizah Search">
+    <meta name="twitter:description" content="Over 350,000 medieval manuscript fragments from a Cairo synagogue attic, now searchable for the first time.">
+    <link rel="canonical" href="https://GenizahSearch.com/about">
+    ''')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
