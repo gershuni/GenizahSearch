@@ -9,14 +9,14 @@ Requirements for Desktop Parity & Transcription Search milestone. Each maps to r
 
 ### Infrastructure
 
-- [ ] **INFRA-01**: Shared Supabase client provider accessible by both web and desktop apps
-- [ ] **INFRA-02**: Document service extracted from web/ to shared module with reshaped API (fix TODO, clean naming)
-- [ ] **INFRA-03**: Web app continues working unchanged via re-export shim after extraction
+- [x] **INFRA-01**: Shared Supabase client provider accessible by both web and desktop apps
+- [x] **INFRA-02**: Document service extracted from web/ to shared module with reshaped API (fix TODO, clean naming)
+- [x] **INFRA-03**: Web app continues working unchanged via re-export shim after extraction
 
 ### Desktop PGP Parity
 
-- [ ] **DESK-01**: User can view PGP transcriptions in desktop manuscript viewer (auto-selected when available)
-- [ ] **DESK-02**: User can switch between scholars' editions and translations via grouped version selector with separators
+- [x] **DESK-01**: User can view PGP transcriptions in desktop manuscript viewer (auto-selected when available)
+- [x] **DESK-02**: User can switch between scholars' editions and translations via grouped version selector with separators
 - [ ] **DESK-03**: User can view PGP metadata (document type, tags, dates, description) in collapsible panel
 - [ ] **DESK-04**: User can see green indicator in search results for manuscripts with PGP transcriptions
 - [ ] **DESK-05**: User can search by PGP tag (new search mode + clickable tags in metadata panel)
@@ -31,15 +31,15 @@ Requirements for Desktop Parity & Transcription Search milestone. Each maps to r
 
 ### Virtual Reading Desk
 
-- [ ] **VIEW-01**: User can view all fragments from a joined document together (images + transcriptions)
-- [ ] **VIEW-02**: User can add any manuscript to the reading desk by shelfmark or sys_id
-- [ ] **VIEW-03**: User can add manuscripts to the reading desk from personal lists
-- [ ] **VIEW-04**: Reading desk works in both web and desktop apps
+- [x] **VIEW-01**: User can view all fragments from a joined document together (images + transcriptions)
+- [x] **VIEW-02**: User can add any manuscript to the reading desk by shelfmark or sys_id
+- [x] **VIEW-03**: User can add manuscripts to the reading desk from personal lists
+- [x] **VIEW-04**: Reading desk works in both web and desktop apps
 
 ### Data Import
 
-- [ ] **DATA-01**: Import remaining ~34K PGP documents (metadata only, no transcriptions) to Supabase
-- [ ] **DATA-02**: Document fragments linked for any multi-fragment documents in the new batch
+- [x] **DATA-01**: Import remaining ~34K PGP documents (metadata only, no transcriptions) to Supabase
+- [x] **DATA-02**: Document fragments linked for any multi-fragment documents in the new batch
 
 ## Future Requirements
 
@@ -83,8 +83,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFRA-01 | Phase 8 | Complete |
 | INFRA-02 | Phase 8 | Complete |
 | INFRA-03 | Phase 8 | Complete |
-| DESK-01 | Phase 10 | Pending |
-| DESK-02 | Phase 10 | Pending |
+| DESK-01 | Phase 10 | Complete |
+| DESK-02 | Phase 10 | Complete |
 | DESK-03 | Phase 12 | Pending |
 | DESK-04 | Phase 12 | Pending |
 | DESK-05 | Phase 12 | Pending |
@@ -93,10 +93,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SRCH-02 | Phase 13 | Pending |
 | SRCH-03 | Phase 13 | Pending |
 | SRCH-04 | Phase 13 | Pending |
-| VIEW-01 | Phase 11 | Pending |
-| VIEW-02 | Phase 11 | Pending |
-| VIEW-03 | Phase 11 | Pending |
-| VIEW-04 | Phase 11 | Pending |
+| VIEW-01 | Phase 11 | Complete |
+| VIEW-02 | Phase 11 | Complete |
+| VIEW-03 | Phase 11 | Complete |
+| VIEW-04 | Phase 11 | Complete |
 | DATA-01 | Phase 9 | Complete |
 | DATA-02 | Phase 9 | Complete |
 
@@ -107,4 +107,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-07*
-*Last updated: 2026-02-08 after Phase 9 completion*
+*Last updated: 2026-02-08 after Phase 11 completion*

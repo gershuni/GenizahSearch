@@ -27,7 +27,7 @@ Full PGP feature set in web app.
 - [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
 - [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [x] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
-- [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
+- [x] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
 - [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
 - [ ] **Phase 13: Transcription Search** - Index transcriptions in Tantivy with filter controls
 
@@ -93,8 +93,8 @@ Plans:
 - [x] 11-03-PLAN.md -- Desktop dual-pane reading desk rendering (stacked images in viewer, stacked texts with version selectors, synchronized scrolling)
 - [x] 11-04-PLAN.md -- Desktop entry points and dynamic management (Add to View, toolbar, joins integration, list panel integration)
 - [x] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
-- [ ] 11-06-PLAN.md -- Gap closure: Web reading desk fixes (W1-W5: list dialog, button visibility, badge visibility, word wrap, state persistence)
-- [ ] 11-07-PLAN.md -- Gap closure: Desktop reading desk fixes (D1, D2, D4: scroll sync, button label, button position)
+- [x] 11-06-PLAN.md -- Gap closure: Web reading desk fixes (W1-W5: list dialog, button visibility, badge visibility, word wrap, state persistence)
+- [x] 11-07-PLAN.md -- Gap closure: Desktop reading desk fixes (D1, D2, D4: scroll sync, button label, button position)
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -137,10 +137,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 5/7 | Gap closure | - |
+| 11. Virtual Reading Desk | v5.6.0 | 7/7 | Complete | 2026-02-08 |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 gap closure plans 11-06, 11-07 added)*
+*Last updated: 2026-02-08 (Phase 11 complete — all gaps closed, verified 8/8)*
