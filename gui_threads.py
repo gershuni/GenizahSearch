@@ -467,6 +467,99 @@ class UpdateDownloaderThread(QThread):
             self.finished_signal.emit(False, f"Download error: {str(e)}")
 
 
+class ReadingDeskWorker(QThread):
+    """Batch load fragment data (pages + PGP sources) for the reading desk.
+
+    Loads metadata, page text, and PGP sources for multiple fragments in a
+    background thread to keep the UI responsive.
+    """
+    finished_signal = pyqtSignal(list)
+    progress_signal = pyqtSignal(int, int)  # current, total
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, entries: list, meta_mgr=None):
+        super().__init__()
+        self.entries = entries
+        self.meta_mgr = meta_mgr
+
+    def run(self):
+        try:
+            from shared.document_service import (
+                get_all_sources_for_fragment,
+                get_document_for_fragment,
+            )
+
+            results = []
+            total = len(self.entries)
+            for i, entry in enumerate(self.entries):
+                sys_id = entry.get('sys_id', '')
+                shelfmark = entry.get('shelfmark', '')
+                pgpid = entry.get('pgpid')
+                seq = entry.get('sequence_order', 0)
+
+                # Get shelfmark from meta_mgr if not provided
+                if not shelfmark and self.meta_mgr:
+                    try:
+                        sm, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                        shelfmark = sm or sys_id
+                    except Exception:
+                        shelfmark = sys_id
+
+                # Get title from meta_mgr
+                title = ''
+                library_code = ''
+                if self.meta_mgr:
+                    try:
+                        _, title = self.meta_mgr.get_meta_for_id(sys_id)
+                        library_code = self.meta_mgr.get_library_for_id(sys_id) or ''
+                    except Exception:
+                        pass
+
+                # Get page data from search index
+                pages_data = []
+                if self.meta_mgr:
+                    try:
+                        from genizah_core import SearchEngine
+                        searcher = SearchEngine(self.meta_mgr)
+                        raw_pages = searcher.get_full_manuscript(sys_id)
+                        if raw_pages:
+                            for pg in raw_pages:
+                                pages_data.append({
+                                    'p_num': pg.p_num if hasattr(pg, 'p_num') else 1,
+                                    'text': pg.text if hasattr(pg, 'text') else '',
+                                    'full_header': pg.full_header if hasattr(pg, 'full_header') else '',
+                                })
+                    except Exception:
+                        pass
+
+                if not pages_data:
+                    pages_data = [
+                        {'p_num': 1, 'text': '', 'full_header': ''},
+                        {'p_num': 2, 'text': '', 'full_header': ''}
+                    ]
+
+                sources = get_all_sources_for_fragment(sys_id)
+                pgp_doc = get_document_for_fragment(sys_id)
+
+                results.append({
+                    'sys_id': sys_id,
+                    'shelfmark': shelfmark,
+                    'title': title,
+                    'library_code': library_code,
+                    'pgpid': pgpid,
+                    'sequence_order': seq,
+                    'pages': pages_data,
+                    'sources': sources,
+                    'pgp_doc': pgp_doc or {},
+                })
+
+                self.progress_signal.emit(i + 1, total)
+
+            self.finished_signal.emit(results)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
 class PGPSourceWorker(QThread):
     """Fetch PGP edition/translation sources for a fragment in the background.
 
