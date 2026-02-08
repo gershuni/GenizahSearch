@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk)
-Plan: 1 of 2
-Status: In progress
-Last activity: 2026-02-08 -- Completed 11-01-PLAN.md
+Plan: 2 of 2
+Status: In progress (checkpoint: human-verify)
+Last activity: 2026-02-08 -- 11-02 Task 1 complete, awaiting verification
 
 Progress: [████████░░░░░░░░░░░░] 57% (8/14 plans)
 
@@ -81,6 +81,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 11-01-PLAN.md (Web Reading Desk)
+Stopped at: 11-02 Task 1 complete, checkpoint pending
 Resume file: None
-Notes: Web reading desk page created with shared model, three entry points (pgpid, sys_ids, list_id), per-image zoom/rotate, version selector integration. Next: 11-02 (Desktop Reading Desk).
+Notes: Desktop ReadingDeskDialog and ReadingDeskWorker created. Entry points wired from Browse tab, JoinsDialog, and Lists context menu. Awaiting human verification of both web and desktop reading desk features.
