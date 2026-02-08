@@ -49,17 +49,18 @@ Plans:
 - [x] 08-02-PLAN.md -- Web re-export shim, test updates, and smoke tests confirming zero breakage
 
 ### Phase 9: Data Import
-**Goal**: All ~41,000 PGP documents are available in Supabase, completing the dataset for transcription search indexing and desktop display
+**Goal**: All ~35,839 PGP documents are available in Supabase (full upsert of documents.csv), completing the dataset for transcription search indexing and desktop display. Also imports footnotes/bibliography and fragment metadata from fragments.csv.
 **Depends on**: Phase 8 (uses shared service for verification)
 **Requirements**: DATA-01, DATA-02
 **Success Criteria** (what must be TRUE):
-  1. Supabase documents table contains all ~41,000 PGP documents (the existing 7,090 plus remaining ~34K)
-  2. Multi-fragment documents in the new batch have correct entries in document_fragments linking them to sys_ids
+  1. Supabase documents table contains all ~35,839 PGP documents (existing 7,090 updated + ~28,749 new)
+  2. Multi-fragment documents in the new batch have correct entries in document_fragments linking them to sys_ids, with fragment metadata from fragments.csv
   3. Existing 7,090 documents and 9,364 sources are unchanged (no data corruption from import)
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 09-01: Import remaining PGP documents and link multi-fragment records
+- [ ] 09-01-PLAN.md -- Schema migrations and comprehensive import script
+- [ ] 09-02-PLAN.md -- Execute import and verify data integrity
 
 ### Phase 10: Desktop PGP Core
 **Goal**: Desktop users can view PGP transcriptions in the manuscript viewer and switch between scholars' editions and translations
@@ -130,7 +131,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 9. Data Import | v5.6.0 | 0/1 | Not started | - |
+| 9. Data Import | v5.6.0 | 0/2 | Not started | - |
 | 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
