@@ -1910,6 +1910,15 @@ TRANSLATIONS = {
     "Tag": "תגית",
     "No results for tag": "אין תוצאות לתגית",
     "Searching by tag...": "מחפש לפי תגית...",
+    "PGP Only": "PGP בלבד",
+    "Show only manuscripts with PGP transcriptions": "הצג רק כתבי יד עם תעתוקי PGP",
+    "Search Tag": "חפש תגית",
+    "PGP Tag:": "תגית PGP:",
+    "Search by PGP Tag...": "חפש לפי תגית PGP...",
+    "Searching tag: {}...": "מחפש תגית: {}...",
+    "No results for tag: {}": "אין תוצאות לתגית: {}",
+    "No local results for tag: {}": "אין תוצאות מקומיות לתגית: {}",
+    "Tag: {} - {} results": "תגית: {} - {} תוצאות",
 
     # --- PGP Transcription ---
     "Has PGP Transcription": "יש תעתיק PGP",
