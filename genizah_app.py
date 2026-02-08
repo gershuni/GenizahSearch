@@ -54,7 +54,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -2417,7 +2417,7 @@ class ResultDialog(QDialog):
         community_row.addWidget(QLabel(tr("Version:")))
         self.rd_version_combo = QComboBox()
         self.rd_version_combo.addItem("V0.8", {"source": "original"})
-        self.rd_version_combo.setFixedWidth(180)
+        self.rd_version_combo.setFixedWidth(240)  # Wider for PGP scholar names
         self.rd_version_combo.setEnabled(False)
         self.rd_version_combo.currentIndexChanged.connect(self._rd_change_version)
         community_row.addWidget(self.rd_version_combo)
@@ -5150,6 +5150,91 @@ class GenizahGUI(QMainWindow):
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
+    # ── PGP Version Selector Helpers (shared by Browse tab and ResultDialog) ──
+
+    def _populate_pgp_combo(self, combo, sources, pgp_doc):
+        """Build combo items with PGP editions and translations grouped.
+
+        Matches the web app grouping pattern:
+        PGP Editions (header) -> edition items -> separator ->
+        Translations (header) -> translation items -> separator -> V0.8
+
+        Args:
+            combo: QComboBox to populate
+            sources: list of source dicts from PGPSourceWorker
+            pgp_doc: dict of PGP document metadata
+
+        Returns:
+            True if any PGP editions/translations were added, False if only V0.8.
+        """
+        editions = [s for s in sources
+                     if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
+        translations = [s for s in sources
+                         if 'Translation' in (s.get('doc_relation') or '') and s.get('content')]
+
+        if not editions and not translations:
+            return False
+
+        combo.blockSignals(True)
+        combo.clear()
+
+        # === PGP Editions Group ===
+        if editions:
+            combo.addItem("-- PGP Editions --", {"source": "header"})
+            combo.model().item(combo.count() - 1).setEnabled(False)
+
+            for edition in editions:
+                scholar = edition.get('source_scholar', 'Unknown')
+                label = f"  {scholar}"
+                combo.addItem(label, {
+                    "source": "pgp_edition",
+                    "content": edition.get('content', ''),
+                    "scholar": scholar,
+                    "pgpid": edition.get('pgpid'),
+                    "source_id": edition.get('id')
+                })
+
+        # === Translations Group ===
+        if translations:
+            combo.insertSeparator(combo.count())
+            combo.addItem("-- Translations --", {"source": "header"})
+            combo.model().item(combo.count() - 1).setEnabled(False)
+
+            for trans in translations:
+                scholar = trans.get('source_scholar', 'Unknown')
+                language = trans.get('language', '')
+                label = f"  {language} - {scholar}" if language else f"  {scholar}"
+                combo.addItem(label, {
+                    "source": "pgp_translation",
+                    "content": trans.get('content', ''),
+                    "scholar": scholar,
+                    "language": language,
+                    "pgpid": trans.get('pgpid'),
+                    "source_id": trans.get('id')
+                })
+
+        # === Separator before HTR ===
+        combo.insertSeparator(combo.count())
+
+        # === HTR V0.8 (always present) ===
+        combo.addItem("V0.8", {"source": "original"})
+
+        combo.blockSignals(False)
+        return True
+
+    def _auto_select_pgp_edition(self, combo):
+        """Find the first PGP edition item and set it as current.
+
+        Returns:
+            The item data dict if found, None otherwise.
+        """
+        for i in range(combo.count()):
+            data = combo.itemData(i)
+            if data and data.get('source') == 'pgp_edition':
+                combo.setCurrentIndex(i)
+                return data
+        return None
+
     def _check_document_community_status(self):
         """Check if document has comments and load available versions."""
         if not self.current_browse_sid or not self.corrections_client:
@@ -6436,7 +6521,7 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo = QComboBox()
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.addItem("V0.8", {"source": "original"})
-        self.browse_version_combo.setFixedWidth(180)  # Wider for "by Username (date)"
+        self.browse_version_combo.setFixedWidth(240)  # Wider for PGP scholar names
         self.browse_version_combo.setEnabled(False)
         self.browse_version_combo.blockSignals(False)
         self.browse_version_combo.currentIndexChanged.connect(self._browse_change_version)

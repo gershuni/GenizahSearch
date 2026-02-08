@@ -465,3 +465,59 @@ class UpdateDownloaderThread(QThread):
             self.finished_signal.emit(False, f"Disk error: {str(e)}")
         except Exception as e:
             self.finished_signal.emit(False, f"Download error: {str(e)}")
+
+
+class PGPSourceWorker(QThread):
+    """Fetch PGP edition/translation sources for a fragment in the background.
+
+    Calls shared/document_service functions (lazy-imported) to get all sources
+    and document metadata for a given sys_id and page number.
+    """
+    finished_signal = pyqtSignal(str, list, dict)  # sys_id, page_sources, pgp_doc_dict
+    error_signal = pyqtSignal(str, str)  # sys_id, error_message
+
+    def __init__(self, sys_id: str, page_num: int = 1):
+        super().__init__()
+        self.sys_id = sys_id
+        self.page_num = page_num
+
+    def run(self):
+        try:
+            # Lazy import to avoid issues if Supabase is not configured
+            from shared.document_service import (
+                get_all_sources_for_fragment,
+                get_document_for_fragment,
+                get_section_for_page
+            )
+
+            # Get all sources (editions + translations) for this fragment
+            all_sources = get_all_sources_for_fragment(self.sys_id)
+
+            # Filter sources by page (recto/verso)
+            current_page_info = 'recto' if self.page_num == 1 else 'verso'
+            page_sources = []
+            for source in all_sources:
+                source_page = source.get('page_info')
+                is_translation = 'Translation' in (source.get('doc_relation') or '')
+
+                # Include translations regardless of page_info
+                if is_translation:
+                    page_sources.append(source)
+                    continue
+
+                # For editions: include if page matches or page_info is not set
+                if source_page == current_page_info or not source_page:
+                    # If no page_info, extract the correct recto/verso section
+                    if not source_page:
+                        content = source.get('content')
+                        if content:
+                            source['content'] = get_section_for_page(content, self.page_num)
+                    page_sources.append(source)
+
+            # Get document metadata
+            pgp_doc = get_document_for_fragment(self.sys_id, self.page_num)
+            pgp_doc_dict = pgp_doc if pgp_doc else {}
+
+            self.finished_signal.emit(self.sys_id, page_sources, pgp_doc_dict)
+        except Exception as e:
+            self.error_signal.emit(self.sys_id, str(e))
