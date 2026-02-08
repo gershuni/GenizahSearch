@@ -1063,7 +1063,116 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.joined_pgpid = None
         state.reading_desk_entries = []
         state.reading_desk_selected_sources = {}
+        # Clear persisted reading desk state
+        try:
+            app.storage.user.pop('reading_desk_state', None)
+        except Exception:
+            pass
         update_content()
+
+    def add_to_reading_desk():
+        """Add current manuscript to the reading desk, or start reading desk if not active."""
+        if not state.sys_id or not state.current_page:
+            ui.notify(tr('Please load a manuscript first'), type='warning')
+            return
+
+        current_sid = state.sys_id
+        current_sm = state.current_page.shelfmark or f"ID: {current_sid}"
+
+        if state.view_joined:
+            # Reading desk is already active -- add the current manuscript if not already present
+            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+            if current_sid in existing_sids:
+                ui.notify(tr('Already in Reading Desk'), type='info')
+                return
+
+            # Load data for the new entry
+            from shared.document_service import get_all_sources_for_fragment as rd_get_sources, get_document_for_fragment as rd_get_doc
+            pages = service.get_full_manuscript(current_sid)
+            sources = []
+            pgp_doc = None
+            try:
+                sources = rd_get_sources(current_sid) or []
+                pgp_doc = rd_get_doc(current_sid)
+            except Exception:
+                pass
+            state.reading_desk_entries.append({
+                'sys_id': current_sid,
+                'shelfmark': current_sm,
+                'pages': pages or [],
+                'sources': sources,
+                'pgp_doc': pgp_doc or {}
+            })
+            _persist_reading_desk_state()
+            update_content()
+            ui.notify(f'{current_sm} {tr("added to Reading Desk")}', type='positive')
+        else:
+            # Start reading desk with this manuscript
+            frag_info = [{'shelfmark': current_sm, 'document_id': current_sid}]
+            enter_joined_view(frag_info, pgpid=None)
+            _persist_reading_desk_state()
+
+    def _add_sys_id_to_reading_desk(sys_id: str, shelfmark: str):
+        """Internal helper: add a fragment by sys_id/shelfmark to the active reading desk."""
+        existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+        if sys_id in existing_sids:
+            ui.notify(tr('Already in Reading Desk'), type='info')
+            return
+
+        from shared.document_service import get_all_sources_for_fragment as rd_get_sources, get_document_for_fragment as rd_get_doc
+        pages = service.get_full_manuscript(sys_id)
+        sources = []
+        pgp_doc = None
+        try:
+            sources = rd_get_sources(sys_id) or []
+            pgp_doc = rd_get_doc(sys_id)
+        except Exception:
+            pass
+        state.reading_desk_entries.append({
+            'sys_id': sys_id,
+            'shelfmark': shelfmark,
+            'pages': pages or [],
+            'sources': sources,
+            'pgp_doc': pgp_doc or {}
+        })
+        _persist_reading_desk_state()
+        update_content()
+        ui.notify(f'{shelfmark} {tr("added to Reading Desk")}', type='positive')
+
+    def _persist_reading_desk_state():
+        """Save reading desk state to app.storage.user for language-switch persistence."""
+        try:
+            if state.view_joined and state.reading_desk_entries:
+                rd_data = []
+                for entry in state.reading_desk_entries:
+                    rd_data.append({
+                        'sys_id': entry.get('sys_id', ''),
+                        'shelfmark': entry.get('shelfmark', '')
+                    })
+                app.storage.user['reading_desk_state'] = {
+                    'entries': rd_data,
+                    'pgpid': state.joined_pgpid
+                }
+            else:
+                app.storage.user.pop('reading_desk_state', None)
+        except Exception:
+            pass
+
+    def _restore_reading_desk_state():
+        """Restore reading desk state from app.storage.user after language switch."""
+        try:
+            saved = app.storage.user.get('reading_desk_state')
+            if saved and saved.get('entries'):
+                frag_info = saved['entries']
+                pgpid = saved.get('pgpid')
+                enter_joined_view(
+                    [{'shelfmark': e['shelfmark'], 'document_id': e['sys_id']} for e in frag_info],
+                    pgpid=pgpid
+                )
+                return True
+        except Exception:
+            pass
+        return False
 
     def search_for_parallels():
         """Navigate to parallels page with current text."""
@@ -2738,6 +2847,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         on_view_all=enter_joined_view
                                     )
 
+                            # "Add to View" button -- start or extend reading desk with current manuscript
+                            ui.button(
+                                icon='library_add',
+                                on_click=add_to_reading_desk
+                            ).props(f'flat dense aria-label="{tr("Add to Reading Desk")}"').classes(
+                                'text-green-700'
+                            ).tooltip(tr('Add to Reading Desk'))
+
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
                 # State for image panel visibility
                 show_image_panel = {'value': has_image}  # Start visible if image available
@@ -3302,14 +3419,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         elif initial_sys_id:
             load_page(p_num=initial_page)
         else:
-            # Try to restore previous position
-            saved_position = app.storage.user.get('browse_position')
-            if saved_position and saved_position.get('sys_id'):
-                state.sys_id = saved_position['sys_id']
-                state.shelfmark_query = saved_position.get('shelfmark', '')
-                load_page(p_num=saved_position.get('p_num', 1))
+            # Try to restore reading desk state first (for language-switch persistence)
+            if _restore_reading_desk_state():
+                pass  # Reading desk restored successfully
             else:
-                update_content()
+                # Try to restore previous position
+                saved_position = app.storage.user.get('browse_position')
+                if saved_position and saved_position.get('sys_id'):
+                    state.sys_id = saved_position['sys_id']
+                    state.shelfmark_query = saved_position.get('shelfmark', '')
+                    load_page(p_num=saved_position.get('p_num', 1))
+                else:
+                    update_content()
 
         # Add keyboard event handlers
         ui.add_body_html('''
