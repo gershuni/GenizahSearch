@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 10 of 13 (Desktop PGP Core)
-Plan: 0 of 2
-Status: Phase 9 complete, Phase 10 not started
-Last activity: 2026-02-08 -- Completed 09-02-PLAN.md (Phase 9 complete)
+Plan: 1 of 2
+Status: In progress
+Last activity: 2026-02-08 -- Completed 10-01-PLAN.md
 
-Progress: [████░░░░░░░░░░░░░░░░] 29% (4/14 plans)
+Progress: [█████░░░░░░░░░░░░░░░] 36% (5/14 plans)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [████░░░░░░░░░░░░░░░░] 29% (4/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4 (v5.6.0)
+- Total plans completed: 5 (v5.6.0)
 - Average duration: ~5 min
-- Total execution time: ~19 min
+- Total execution time: ~26 min
 
 **By Phase:**
 
@@ -35,6 +35,7 @@ Progress: [████░░░░░░░░░░░░░░░░] 29% (4/
 |-------|-------|-------|----------|
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
+| 10. Desktop PGP Core | 1/2 | ~7 min | ~7 min |
 
 *Updated after each plan completion*
 
@@ -53,6 +54,9 @@ Recent decisions affecting current work:
 - DEC-09-01-01: Excluded 177 footnotes with empty doc_relation (NOT NULL constraint)
 - DEC-09-01-02: Footnote dedup removes 1,442 duplicates (24,383 -> 22,764 valid)
 - DEC-09-02-01: Filter orphan pgpids before footnote/fragment upsert (28 footnote + 6 fragment pgpids reference deleted PGP documents)
+- DEC-10-01-01: PGP worker runs after community status; corrections saved and re-added on PGP combo rebuild
+- DEC-10-01-02: Per-source directionality (editions RTL, English translations LTR)
+- DEC-10-01-03: Combo width 240px for both selectors
 
 ### Data State
 
@@ -72,6 +76,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 09-02-PLAN.md (Phase 9 complete)
+Stopped at: Completed 10-01-PLAN.md
 Resume file: None
-Notes: Full PGP data import complete. All 35,839 documents with metadata, footnotes, and fragment links in Supabase. Next: Phase 10 (Desktop PGP Core)
+Notes: Browse tab PGP integration complete. PGPSourceWorker and shared helpers ready for Plan 02 (ResultDialog). Next: Phase 10 Plan 02 (ResultDialog PGP Integration)
