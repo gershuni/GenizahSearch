@@ -5786,10 +5786,12 @@ class GenizahGUI(QMainWindow):
                 action.setData(frag)
                 action.triggered.connect(lambda checked, f=frag: self._navigate_to_joined_fragment(f))
 
-        # Add separator and "View All" action
+        # Add separator and "View All" / "Open in Reading Desk" actions
         self.joins_menu.addSeparator()
         view_all = self.joins_menu.addAction(tr("View all joins..."))
         view_all.triggered.connect(self._browse_view_joins)
+        open_rd = self.joins_menu.addAction(tr("Open in Reading Desk"))
+        open_rd.triggered.connect(self._browse_open_joins_in_reading_desk)
 
     def _on_joins_menu_show(self):
         """Called when joins menu is about to show - trigger sync and update."""
@@ -6580,6 +6582,13 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.btn_browse_go)
         row1.addWidget(self.btn_find_parallels)
 
+        # Add to View button for reading desk
+        self.btn_b_add_to_view = QPushButton(tr("Add to View"))
+        self.btn_b_add_to_view.setToolTip(tr("Add current manuscript to Reading Desk"))
+        self.btn_b_add_to_view.setEnabled(False)
+        self.btn_b_add_to_view.clicked.connect(self._browse_add_to_view)
+        row1.addWidget(self.btn_b_add_to_view)
+
         # Add to List button for browse tab
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_browse_add_to_list.clicked.connect(self.browse_add_to_list)
@@ -6795,6 +6804,59 @@ class GenizahGUI(QMainWindow):
         browse_find_row.addWidget(self.browse_find_input)
         text_layout.addLayout(browse_find_row)
 
+        # Reading Desk toolbar (hidden by default, shown when reading desk is active)
+        self.browse_rd_toolbar = QWidget()
+        self.browse_rd_toolbar.setStyleSheet(
+            "background-color: #2d6a4f; border-radius: 4px;"
+        )
+        rd_toolbar_layout = QHBoxLayout(self.browse_rd_toolbar)
+        rd_toolbar_layout.setContentsMargins(10, 5, 10, 5)
+
+        rd_label = QLabel(f"<b style='color: white;'>{tr('Reading Desk')}</b>")
+        rd_toolbar_layout.addWidget(rd_label)
+
+        self.browse_rd_count_label = QLabel()
+        self.browse_rd_count_label.setStyleSheet("color: #a7d8c0; font-weight: bold;")
+        rd_toolbar_layout.addWidget(self.browse_rd_count_label)
+
+        rd_toolbar_layout.addSpacing(10)
+
+        rd_shelf_label = QLabel(f"<span style='color: white;'>{tr('Shelfmark:')}</span>")
+        rd_toolbar_layout.addWidget(rd_shelf_label)
+        self.browse_rd_shelf_input = QLineEdit()
+        self.browse_rd_shelf_input.setPlaceholderText(tr("Add shelfmark..."))
+        self.browse_rd_shelf_input.setFixedWidth(180)
+        self.browse_rd_shelf_input.returnPressed.connect(self._browse_rd_add_by_shelfmark)
+        rd_toolbar_layout.addWidget(self.browse_rd_shelf_input)
+
+        btn_rd_add = QPushButton(tr("Add"))
+        btn_rd_add.setStyleSheet(
+            "background-color: #40916c; color: white; padding: 3px 10px; border-radius: 3px;"
+        )
+        btn_rd_add.clicked.connect(self._browse_rd_add_by_shelfmark)
+        rd_toolbar_layout.addWidget(btn_rd_add)
+
+        rd_toolbar_layout.addSpacing(10)
+
+        btn_rd_add_from_list = QPushButton(tr("Add from List"))
+        btn_rd_add_from_list.setStyleSheet(
+            "background-color: #52b788; color: white; padding: 3px 10px; border-radius: 3px;"
+        )
+        btn_rd_add_from_list.clicked.connect(self._browse_rd_add_from_list)
+        rd_toolbar_layout.addWidget(btn_rd_add_from_list)
+
+        rd_toolbar_layout.addStretch()
+
+        btn_rd_exit = QPushButton(tr("Exit Reading Desk"))
+        btn_rd_exit.setStyleSheet(
+            "background-color: #c0392b; color: white; padding: 3px 10px; border-radius: 3px;"
+        )
+        btn_rd_exit.clicked.connect(self._browse_exit_reading_desk)
+        rd_toolbar_layout.addWidget(btn_rd_exit)
+
+        self.browse_rd_toolbar.hide()
+        text_layout.addWidget(self.browse_rd_toolbar)
+
         # Text display/edit widget
         self.browse_text = QTextEdit()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -6959,13 +7021,26 @@ class GenizahGUI(QMainWindow):
             self.browse_list_items.addItem(list_item)
 
     def browse_on_list_item_clicked(self, item):
-        """Open a list item in the browse tab using FL/Image ID lookup."""
+        """Open a list item in the browse tab using FL/Image ID lookup.
+
+        When reading desk is active, adds the item to the desk instead of navigating.
+        """
         item_id = item.data(Qt.ItemDataRole.UserRole)
         if not item_id or not self.lists_mgr:
             return
 
         entry = self.lists_mgr.get_item(item_id)
         if not entry:
+            return
+
+        # Reading desk mode: add item to desk instead of navigating
+        if self.browse_reading_desk_active:
+            sys_id = entry.get('sys_id')
+            if sys_id:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                if not shelfmark or shelfmark == "Unknown":
+                    shelfmark = entry.get('shelfmark_override') or sys_id
+                self._browse_rd_add_entry(sys_id, shelfmark)
             return
 
         fl_id = entry.get('fl_id')
@@ -6980,11 +7055,11 @@ class GenizahGUI(QMainWindow):
 
         if target_fl:
             clean_fl = str(target_fl).replace('FL', '').strip()
-            
+
             self.browse_fl_input.setText(clean_fl)
-            self._set_last_browse_field("fl") 
+            self._set_last_browse_field("fl")
             self.browse_load()
-            
+
         elif sys_id:
             self.browse_sys_input.setText(str(sys_id))
             self._set_last_browse_field("sys")
@@ -7076,6 +7151,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_view_corrections.setEnabled(True)
         self.btn_b_joins.setEnabled(True)
         self.browse_version_combo.setEnabled(True)
+        self.btn_b_add_to_view.setEnabled(True)
 
         # Update joins dropdown menu
         self._update_joins_dropdown()
@@ -7290,6 +7366,9 @@ class GenizahGUI(QMainWindow):
         self.combo_browse_page.setEnabled(False)
         self.btn_b_all.setEnabled(False)
 
+        # Show reading desk toolbar
+        self.browse_rd_toolbar.show()
+
         # Initial render with V0.8 text
         self._browse_rd_render()
 
@@ -7349,6 +7428,9 @@ class GenizahGUI(QMainWindow):
         # Restore normal view
         self._browse_rd_restore_normal_view()
 
+        # Hide reading desk toolbar
+        self.browse_rd_toolbar.hide()
+
         # Re-enable navigation
         self.btn_b_prev.setEnabled(True)
         self.btn_b_next.setEnabled(True)
@@ -7359,6 +7441,211 @@ class GenizahGUI(QMainWindow):
         if self.current_browse_sid:
             self.browse_load_page()
 
+    def _browse_add_to_view(self):
+        """Handle 'Add to View' button click -- enter reading desk or add current manuscript."""
+        if not self.current_browse_sid:
+            return
+
+        sid = self.current_browse_sid
+        shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+        if not shelfmark or shelfmark == "Unknown":
+            shelfmark = sid
+
+        if not self.browse_reading_desk_active:
+            # Start reading desk with current manuscript
+            frag_info = [{'sys_id': sid, 'shelfmark': shelfmark, 'sequence_order': 0}]
+            self._browse_enter_reading_desk(frag_info)
+        else:
+            # Add current manuscript to existing reading desk
+            self._browse_rd_add_entry(sid, shelfmark)
+
+    def _browse_rd_add_entry(self, sys_id, shelfmark, sequence_order=None):
+        """Add a single manuscript entry to the reading desk (duplicate-safe).
+
+        Args:
+            sys_id: System ID of the manuscript
+            shelfmark: Display shelfmark
+            sequence_order: Optional sort order (default: after last entry)
+        """
+        if not self.browse_reading_desk_active:
+            return
+
+        state = self.browse_reading_desk_state
+
+        # Check for duplicates
+        existing_sids = {e.sys_id for e in state.entries}
+        if sys_id in existing_sids:
+            return
+
+        # Get pages from searcher
+        pages = self.searcher.get_full_manuscript(sys_id)
+        page_list = []
+        if pages:
+            for p in pages:
+                page_list.append({
+                    'p_num': p.get('p_num', 1),
+                    'text': p.get('text', ''),
+                    'full_header': p.get('full_header', ''),
+                    'fl_id': p.get('fl_id', '')
+                })
+
+        if sequence_order is None:
+            sequence_order = max((e.sequence_order for e in state.entries), default=0) + 1
+
+        entry = ReadingDeskEntry(
+            sys_id=sys_id,
+            shelfmark=shelfmark,
+            pages=page_list,
+            sequence_order=sequence_order
+        )
+        state.entries.append(entry)
+        state.entries.sort(key=lambda e: e.sequence_order)
+
+        # Launch ReadingDeskWorker for the new entry's PGP sources
+        if self._browse_rd_worker is not None:
+            try:
+                self._browse_rd_worker.finished.disconnect()
+                self._browse_rd_worker.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        self._browse_rd_worker = ReadingDeskWorker([sys_id])
+        self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
+        self._browse_rd_worker.error.connect(
+            lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
+        )
+        self._browse_rd_worker.start()
+
+        # Re-render immediately with V0.8 text (PGP will update when worker finishes)
+        self._browse_rd_render()
+
+    def _browse_rd_add_by_shelfmark(self):
+        """Add a manuscript to the reading desk by shelfmark (toolbar input)."""
+        text = self.browse_rd_shelf_input.text().strip()
+        if not text:
+            return
+
+        # Resolve shelfmark to sys_id
+        shelf_res = self.meta_mgr.resolve_system_by_shelfmark(text)
+        sid = shelf_res.get('sys_id')
+
+        if not sid and shelf_res.get('options'):
+            options = shelf_res['options']
+            if len(options) == 1:
+                sid = options[0]['sys_id']
+                text = options[0].get('shelfmark', text)
+            else:
+                display_options = []
+                for idx, opt in enumerate(options):
+                    base = opt['shelfmark']
+                    title = (opt.get('title') or "").strip()
+                    if title:
+                        base = f"{base} | {title}"
+                    label = f"{idx + 1}. {base}"
+                    if len(label) > 60:
+                        label = label[:57] + "..."
+                    display_options.append(label)
+                choice, ok = QInputDialog.getItem(
+                    self, tr("Shelfmark"), tr("Multiple shelfmarks found. Select one:"),
+                    display_options, 0, False
+                )
+                if not ok:
+                    return
+                if choice in display_options:
+                    chosen_idx = display_options.index(choice)
+                    sid = options[chosen_idx]['sys_id']
+                    text = options[chosen_idx].get('shelfmark', text)
+
+        if not sid:
+            QMessageBox.warning(self, tr("Not Found"), tr("Shelfmark not found: {}").format(text))
+            return
+
+        shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+        if not shelfmark or shelfmark == "Unknown":
+            shelfmark = text
+
+        self._browse_rd_add_entry(sid, shelfmark)
+        self.browse_rd_shelf_input.clear()
+
+    def _browse_rd_add_from_list(self):
+        """Show the browse lists panel so items can be added to reading desk."""
+        self.browse_set_lists_panel_visible(True)
+
+    def _browse_open_joins_in_reading_desk(self):
+        """Open all joined fragments in the reading desk."""
+        if not self.current_browse_sid:
+            return
+
+        document_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(document_id)
+            except Exception:
+                pass
+
+        if not shelfmark:
+            return
+
+        # Get joins from JoinsManager
+        connected = None
+        if self.joins_mgr:
+            connected = self.joins_mgr.get_connected_fragments_by_id(document_id)
+        if (not connected or connected.get('total_fragments', 0) <= 1) and self.joins_mgr:
+            connected = self.joins_mgr.get_connected_fragments(shelfmark)
+
+        if not connected or connected.get('total_fragments', 0) <= 1:
+            QMessageBox.information(
+                self, tr("Reading Desk"), tr("No joined fragments found.")
+            )
+            return
+
+        # Build fragments_info from connected fragments
+        fragments = connected.get('fragments', [])
+        fragment_details = connected.get('fragment_details', [])
+        shelfmark_to_docid = {}
+        for fd in fragment_details:
+            shelf = fd.get('shelfmark', '') if isinstance(fd, dict) else getattr(fd, 'shelfmark', '')
+            doc_id = fd.get('document_id') if isinstance(fd, dict) else getattr(fd, 'document_id', None)
+            sid = fd.get('sys_id') if isinstance(fd, dict) else getattr(fd, 'sys_id', None)
+            if shelf:
+                if sid:
+                    shelfmark_to_docid[shelf.upper()] = sid
+                elif doc_id:
+                    shelfmark_to_docid[shelf.upper()] = str(doc_id)
+
+        fragments_info = []
+        for idx, frag in enumerate(fragments):
+            frag_sid = shelfmark_to_docid.get(frag.upper())
+            # Fallback: use _shelf_to_sys map
+            if not frag_sid and self._shelf_to_sys:
+                norm = self._normalize_shelfmark(frag) if hasattr(self, '_normalize_shelfmark') else None
+                if norm:
+                    frag_sid = self._shelf_to_sys.get(norm)
+            if frag_sid:
+                fragments_info.append({
+                    'sys_id': frag_sid,
+                    'shelfmark': frag,
+                    'sequence_order': idx
+                })
+
+        if not fragments_info:
+            QMessageBox.information(
+                self, tr("Reading Desk"), tr("Could not resolve fragment identifiers.")
+            )
+            return
+
+        # Check for PGP document context
+        pgpid = None
+        try:
+            from shared.document_service import get_document_for_fragment
+            doc_data = get_document_for_fragment(document_id)
+            if doc_data:
+                pgpid = doc_data.get('pgpid')
+        except Exception:
+            pass
+
+        self._browse_enter_reading_desk(fragments_info, pgpid=pgpid)
+
     def _browse_rd_render(self):
         """Render reading desk: stacked texts in text pane, stacked images in viewer pane.
 
@@ -7367,6 +7654,12 @@ class GenizahGUI(QMainWindow):
         state = self.browse_reading_desk_state
         if not state.entries:
             return
+
+        # Update toolbar count label
+        count = len(state.entries)
+        self.browse_rd_count_label.setText(
+            f" ({count} fragment{'s' if count != 1 else ''})"
+        )
 
         # === LEFT PANE: Stacked Texts in browse_text ===
         html_parts = []
