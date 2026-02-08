@@ -2044,10 +2044,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
                                 ):
                                     with ui.row().classes('items-center gap-2'):
-                                        ui.icon('auto_stories').classes('text-white text-xl')
+                                        ui.icon('auto_stories').classes('text-xl').style('color: white !important;')
                                         header_text = f'{tr("Document")} #{doc_pgpid}' if doc_pgpid else tr('Document')
-                                        ui.label(header_text).classes('text-lg font-bold text-white')
-                                        ui.badge(f'{total_frags} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
+                                        ui.label(header_text).classes('text-lg font-bold').style('color: white !important;')
+                                        ui.badge(f'{total_frags} {tr("fragments")}', color='white').props('outline dense').classes('text-xs').style('color: white !important;')
                                     ui.button(icon='close', on_click=dialog.close).props('flat round size=sm text-color=white')
 
                                 # Scrollable content
@@ -2251,8 +2251,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
                         ):
                             with ui.row().classes('items-center gap-2'):
-                                ui.icon('playlist_add').classes('text-white text-xl')
-                                ui.label(tr('Add from List')).classes('text-lg font-bold text-white')
+                                ui.icon('playlist_add').classes('text-xl').style('color: white !important;')
+                                ui.label(tr('Add from List')).classes('text-lg font-bold').style('color: white !important;')
                             ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
 
                         # Content: list of user's lists with expandable manuscript details
@@ -2377,12 +2377,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ):
                     with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-3'):
-                            ui.icon('auto_stories').classes('text-white text-xl')
+                            ui.icon('auto_stories').classes('text-xl').style('color: white !important;')
                             if state.joined_pgpid:
                                 header_txt = f'{tr("Document")} #{state.joined_pgpid}'
                             else:
                                 header_txt = tr('Reading Desk')
-                            ui.label(header_txt).classes('text-lg font-bold text-white')
+                            ui.label(header_txt).classes('text-lg font-bold').style('color: white !important;')
                             ui.badge(
                                 f'{len(state.reading_desk_entries)} {tr("fragments")}',
                             ).props('dense').classes('text-xs').style(
@@ -2393,7 +2393,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             tr('Back to Page View'),
                             icon='arrow_forward' if is_rtl() else 'arrow_back',
                             on_click=exit_joined_view
-                        ).props('flat dense').style('color: white !important;')
+                        ).props('flat dense text-color=white')
 
                 # === Reading Desk Toolbar ===
                 with ui.card().classes('w-full mb-2 p-2').style(
