@@ -85,14 +85,16 @@ Plans:
   2. User can add any manuscript to the reading desk by typing a shelfmark or sys_id
   3. User can populate the reading desk from a personal list (selecting which manuscripts to include)
   4. The reading desk feature works in both the web app and the desktop app with equivalent functionality
-**Plans:** 5 plans
+**Plans:** 7 plans (5 original + 2 gap closure)
 
 Plans:
 - [x] 11-01-PLAN.md -- Shared ReadingDeskModel + web dual-pane synchronized reading desk (stacked images/texts, per-image controls, per-fragment version selectors)
 - [x] 11-02-PLAN.md -- Web entry points and dynamic management (Add to View, toolbar, Add from List, remove, state preservation)
 - [x] 11-03-PLAN.md -- Desktop dual-pane reading desk rendering (stacked images in viewer, stacked texts with version selectors, synchronized scrolling)
-- [ ] 11-04-PLAN.md -- Desktop entry points and dynamic management (Add to View, toolbar, joins integration, list panel integration)
-- [ ] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
+- [x] 11-04-PLAN.md -- Desktop entry points and dynamic management (Add to View, toolbar, joins integration, list panel integration)
+- [x] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
+- [ ] 11-06-PLAN.md -- Gap closure: Web reading desk fixes (W1-W5: list dialog, button visibility, badge visibility, word wrap, state persistence)
+- [ ] 11-07-PLAN.md -- Gap closure: Desktop reading desk fixes (D1, D2, D4: scroll sync, button label, button position)
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -135,10 +137,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 3/5 | In progress | - |
+| 11. Virtual Reading Desk | v5.6.0 | 5/7 | Gap closure | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 replanning v3 -- synchronized dual-pane vision)*
+*Last updated: 2026-02-08 (Phase 11 gap closure plans 11-06, 11-07 added)*
