@@ -6198,8 +6198,45 @@ class GenizahGUI(QMainWindow):
         row2.addStretch()
         row2.addWidget(btn_help)
 
+        # Row 3: PGP Discovery Controls
+        row3 = QHBoxLayout()
+
+        self.chk_pgp_filter = QCheckBox(tr("PGP Only"))
+        self.chk_pgp_filter.setToolTip(tr("Show only manuscripts with PGP transcriptions"))
+        self.chk_pgp_filter.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self.chk_pgp_filter.toggled.connect(self._on_pgp_filter_toggled)
+
+        self.tag_search_combo = QComboBox()
+        self.tag_search_combo.setEditable(True)
+        self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.tag_search_combo.setFixedWidth(220)
+        self.tag_search_combo.setPlaceholderText(tr("Search by PGP Tag..."))
+        self.tag_search_combo.addItem("")  # empty placeholder item
+        completer = self.tag_search_combo.completer()
+        if completer:
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+
+        self.btn_tag_search = QPushButton(tr("Search Tag"))
+        self.btn_tag_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.btn_tag_search.setFixedWidth(90)
+        self.btn_tag_search.clicked.connect(self._execute_tag_search)
+        self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
+
+        row3.addWidget(self.chk_pgp_filter)
+        row3.addSpacing(20)
+        row3.addWidget(QLabel(tr("PGP Tag:")))
+        row3.addWidget(self.tag_search_combo)
+        row3.addWidget(self.btn_tag_search)
+        row3.addStretch()
+
+        # Lazily load PGP tags in background
+        self._pgp_tags_worker = PGPTagsWorker()
+        self._pgp_tags_worker.finished.connect(self._on_pgp_tags_loaded)
+        self._pgp_tags_worker.start()
+
         top_layout.addLayout(row1)
         top_layout.addLayout(row2)
+        top_layout.addLayout(row3)
         layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
@@ -12557,6 +12594,13 @@ class GenizahGUI(QMainWindow):
             self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(str(meta.get('img', ''))))
             # Src
             self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(str(meta.get('source', ''))))
+            # PGP badge
+            if sid and sid in self._pgp_transcription_sys_ids:
+                pgp_item = QTableWidgetItem("PGP")
+                pgp_item.setForeground(QColor("#27ae60"))
+                self.results_table.setItem(row_idx, self.COL_PGP, pgp_item)
+            else:
+                self.results_table.setItem(row_idx, self.COL_PGP, QTableWidgetItem(""))
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
@@ -12603,6 +12647,15 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnHidden(self.COL_SRC, not has_multiple_sources)
 
         self.load_next_batch()
+
+        # Launch PGP badge worker to mark results with transcriptions
+        sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+        if sys_ids:
+            if self._pgp_badge_worker and self._pgp_badge_worker.isRunning():
+                self._pgp_badge_worker.wait()
+            self._pgp_badge_worker = PGPBadgeWorker(sys_ids)
+            self._pgp_badge_worker.finished.connect(self._on_pgp_badges_loaded)
+            self._pgp_badge_worker.start()
 
     def _open_results_filter_dialog(self, column):
         if column == 1:
@@ -12652,7 +12705,9 @@ class GenizahGUI(QMainWindow):
         # Use cached IDs if available, or empty set (will be populated on first activation via update_cache)
         target_sys_ids = self.list_filter_state.get('cached_ids', set())
 
-        if not self.results_filters and not list_active:
+        pgp_active = self._pgp_filter_active
+
+        if not self.results_filters and not list_active and not pgp_active:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -12684,7 +12739,128 @@ class GenizahGUI(QMainWindow):
                 elif list_mode == 'not_in':
                     if in_list: visible = False
 
+            # C. Check PGP Filter
+            if visible and pgp_active:
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                sys_id = item.text().strip() if item else ""
+                if sys_id not in self._pgp_transcription_sys_ids:
+                    visible = False
+
             self.results_table.setRowHidden(row, not visible)
+
+    def _on_pgp_badges_loaded(self, pgp_sys_ids):
+        """Handle PGP badge worker results - update badge column for all rows."""
+        self._pgp_transcription_sys_ids = pgp_sys_ids
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, self.COL_SYS_ID)
+            if item:
+                sys_id = item.text().strip()
+                if sys_id in pgp_sys_ids:
+                    pgp_item = QTableWidgetItem("PGP")
+                    pgp_item.setForeground(QColor("#27ae60"))
+                    self.results_table.setItem(row, self.COL_PGP, pgp_item)
+                else:
+                    self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
+        self._apply_results_table_filters()
+
+    def _on_pgp_filter_toggled(self, checked):
+        """Handle PGP filter checkbox toggle."""
+        self._pgp_filter_active = checked
+        self._apply_results_table_filters()
+
+    def _on_pgp_tags_loaded(self, tags):
+        """Handle PGP tags worker results - populate tag dropdown."""
+        self._pgp_tags = tags
+        self.tag_search_combo.blockSignals(True)
+        self.tag_search_combo.clear()
+        self.tag_search_combo.addItem("")  # empty placeholder
+        for tag in tags:
+            self.tag_search_combo.addItem(tag)
+        self.tag_search_combo.blockSignals(False)
+
+    def _execute_tag_search(self):
+        """Execute a search by PGP tag from the dropdown."""
+        tag = self.tag_search_combo.currentText().strip()
+        if not tag:
+            return
+        self.status_label.setText(tr("Searching tag: {}...").format(tag))
+        if self._pgp_tag_search_worker and self._pgp_tag_search_worker.isRunning():
+            self._pgp_tag_search_worker.wait()
+        self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
+        self._pgp_tag_search_worker.finished.connect(self._on_tag_search_results)
+        self._pgp_tag_search_worker.start()
+
+    def _on_tag_search_results(self, tag, results):
+        """Handle tag search results - display in results table."""
+        if not results:
+            self.status_label.setText(tr("No results for tag: {}").format(tag))
+            self.last_results = []
+            self.results_loaded = 0
+            self.results_table.setRowCount(0)
+            self.result_row_by_sys_id = {}
+            self.shelfmark_items_by_sid = {}
+            self.title_items_by_sid = {}
+            return
+
+        # Filter to only results whose sys_id exists in local csv_bank
+        valid_results = []
+        for r in results:
+            sid = r.get('sys_id', '')
+            if sid and self.meta_mgr and self.meta_mgr.csv_bank.get(sid):
+                valid_results.append(r)
+
+        if not valid_results:
+            self.status_label.setText(tr("No local results for tag: {}").format(tag))
+            return
+
+        # Convert tag results to search result format
+        formatted = []
+        for r in valid_results:
+            sid = r.get('sys_id', '')
+            shelf, title = self.meta_mgr.get_meta_for_id(sid) if self.meta_mgr else ('Unknown', '')
+            library_code = self.meta_mgr.get_library_for_id(sid) if self.meta_mgr else ''
+            desc = r.get('description', '') or ''
+            doc_type = r.get('document_type', '') or ''
+            snippet = f"{doc_type}: {desc[:120]}..." if desc else doc_type
+            formatted.append({
+                'display': {
+                    'id': sid,
+                    'shelfmark': shelf,
+                    'title': title or '',
+                    'library': library_code or '',
+                    'img': '',
+                    'source': '',
+                },
+                'snippet': snippet,
+                'raw_header': '',
+            })
+
+        # Mark all as PGP
+        self._pgp_transcription_sys_ids = {r['display']['id'] for r in formatted}
+
+        self.chk_search_header.blockSignals(True)
+        self.chk_search_header.setChecked(False)
+        self.chk_search_header.blockSignals(False)
+
+        self.last_results = formatted
+        self.results_loaded = 0
+        self.results_table.setRowCount(0)
+        self.result_row_by_sys_id = {}
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self._res_map_by_sid = {r['display']['id']: r for r in formatted}
+
+        for b in self.export_buttons: b.setEnabled(True)
+        self.results_table.setColumnHidden(self.COL_SRC, True)
+
+        self.load_next_batch()
+        self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
+
+    def _search_by_pgp_tag(self, tag):
+        """Entry point for searching by PGP tag (e.g., from browse page links)."""
+        if hasattr(self, 'tag_search_combo'):
+            self.tag_search_combo.setCurrentText(tag)
+        self._execute_tag_search()
 
     def _open_comp_filter_dialog(self, column):
         header_item = self.comp_tree.headerItem()
