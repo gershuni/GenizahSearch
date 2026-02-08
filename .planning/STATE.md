@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk)
-Plan: 0 of TBD (replanning)
-Status: Replanning -- first attempt reverted after user feedback
-Last activity: 2026-02-08 -- Reverted Phase 11 execution, replanning
+Plan: 1 of 2 (web reading desk)
+Status: In progress
+Last activity: 2026-02-08 -- Completed 11-01-PLAN.md
 
-Progress: [███████░░░░░░░░░░░░░] 50% (7/14 plans)
+Progress: [████████░░░░░░░░░░░░] 57% (8/14 plans)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [███████░░░░░░░░░░░░░] 50% (7/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (v5.6.0)
+- Total plans completed: 8 (v5.6.0)
 - Average duration: ~7 min
-- Total execution time: ~48 min
+- Total execution time: ~53 min
 
 **By Phase:**
 
@@ -36,6 +36,7 @@ Progress: [███████░░░░░░░░░░░░░] 50% (7/
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
+| 11. Virtual Reading Desk | 1/2 | ~5 min | ~5 min |
 
 *Updated after each plan completion*
 
@@ -60,6 +61,8 @@ Recent decisions affecting current work:
 - DEC-10-02-01: Replace insertSeparator with disabled text dividers for visibility
 - DEC-10-02-02: Disconnect old PGP worker signals before creating new workers
 - DEC-10-02-03: Exclude PGP sources from corrections filter during combo rebuild
+- DEC-11-01-01: Use dict-based reading_desk_entries in browse state (simpler for NiceGUI)
+- DEC-11-01-02: Pre-load pages in enter_joined_view (avoids repeated Supabase calls)
 
 ### Data State
 
@@ -70,33 +73,15 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Multi-fragment document view: add image controls for each image (user feedback during Phase 8 verification, relevant to Phase 11)
+- Multi-fragment document view: add image controls for each image -- DONE (11-01, zoom controls added)
 
 ### Blockers/Concerns
 
 - Recto/verso section headers stripped during parsing (v1 tech debt)
 
-### Phase 11 Replan Context (CRITICAL -- read before replanning)
-
-First attempt (reverted commit 7230bd3) created a separate /reading-desk page (web) and ReadingDeskDialog (desktop). User rejected this approach during verification:
-
-**Bugs found:**
-- Web: Only showed one black image box, no text, no multiple manuscripts
-- Web: Add by shelfmark broken
-- Desktop: Didn't fetch PGP joins, only showed one manuscript
-
-**Architecture pivot (user direction):**
-- Do NOT create a separate page/dialog for reading desk
-- ENHANCE the existing "View All Fragments" inline view in the Browse tab (both apps)
-- Add ability to add more manuscripts by search/shelfmark to the existing joined view
-- Add ability to add from personal lists
-- Desktop: integrate with existing lists panel in browse tab (direct "add to view")
-- The reading desk IS the browse tab's multi-fragment view, enhanced with add/remove
-- Keep shared ReadingDeskEntry/ReadingDeskState model concept for data containers
-
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Reverted Phase 11, needs replanning with new approach
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
-Notes: Phase 11 first attempt reverted. User wants enhanced browse tab approach, not separate pages/dialogs. Run /gsd:plan-phase 11 to replan.
+Notes: Web reading desk enhancement complete. Phase 11-02 (desktop reading desk) ready to execute.
