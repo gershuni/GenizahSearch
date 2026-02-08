@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 10 of 13 (Desktop PGP Core)
-Plan: 1 of 2
-Status: In progress
-Last activity: 2026-02-08 -- Completed 10-01-PLAN.md
+Plan: 2 of 2
+Status: Complete
+Last activity: 2026-02-08 -- Completed Phase 10
 
-Progress: [█████░░░░░░░░░░░░░░░] 36% (5/14 plans)
+Progress: [███████░░░░░░░░░░░░░] 50% (7/14 plans)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [█████░░░░░░░░░░░░░░░] 36% (5/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5 (v5.6.0)
-- Average duration: ~5 min
-- Total execution time: ~26 min
+- Total plans completed: 7 (v5.6.0)
+- Average duration: ~7 min
+- Total execution time: ~48 min
 
 **By Phase:**
 
@@ -35,7 +35,7 @@ Progress: [█████░░░░░░░░░░░░░░░] 36% (5/
 |-------|-------|-------|----------|
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
-| 10. Desktop PGP Core | 1/2 | ~7 min | ~7 min |
+| 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
 
 *Updated after each plan completion*
 
@@ -57,6 +57,9 @@ Recent decisions affecting current work:
 - DEC-10-01-01: PGP worker runs after community status; corrections saved and re-added on PGP combo rebuild
 - DEC-10-01-02: Per-source directionality (editions RTL, English translations LTR)
 - DEC-10-01-03: Combo width 240px for both selectors
+- DEC-10-02-01: Replace insertSeparator with disabled text dividers for visibility
+- DEC-10-02-02: Disconnect old PGP worker signals before creating new workers
+- DEC-10-02-03: Exclude PGP sources from corrections filter during combo rebuild
 
 ### Data State
 
@@ -76,6 +79,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 10-01-PLAN.md
+Stopped at: Completed Phase 10 (Desktop PGP Core)
 Resume file: None
-Notes: Browse tab PGP integration complete. PGPSourceWorker and shared helpers ready for Plan 02 (ResultDialog). Next: Phase 10 Plan 02 (ResultDialog PGP Integration)
+Notes: Phase 10 complete. Both Browse tab and ResultDialog display PGP transcriptions with grouped version selectors. Next: Phase 11 (Virtual Reading Desk).

@@ -26,7 +26,7 @@ Full PGP feature set in web app.
 
 - [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
 - [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
-- [ ] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
+- [x] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
 - [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
 - [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
 - [ ] **Phase 13: Transcription Search** - Index transcriptions in Tantivy with filter controls
@@ -73,8 +73,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 10-01-PLAN.md -- PGPSourceWorker QThread, shared helpers, and Browse tab PGP integration
-- [ ] 10-02-PLAN.md -- ResultDialog PGP integration and human verification
+- [x] 10-01-PLAN.md -- PGPSourceWorker QThread, shared helpers, and Browse tab PGP integration
+- [x] 10-02-PLAN.md -- ResultDialog PGP integration and human verification
 
 ### Phase 11: Virtual Reading Desk
 **Goal**: Users can view multiple manuscripts together in a reading desk, populated from joins, personal lists, or manual entry, in both web and desktop apps
@@ -132,11 +132,11 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
+| 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 10 planned)*
+*Last updated: 2026-02-08 (Phase 10 complete)*
