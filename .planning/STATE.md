@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk)
-Plan: 4 of 5 (desktop entry points and toolbar complete)
-Status: In progress -- Plans 11-01, 11-02, 11-03, 11-04 complete, 1 remaining
-Last activity: 2026-02-08 -- Completed 11-04-PLAN.md (desktop reading desk entry points & toolbar)
+Plan: 5 of 5 (human verification complete -- gaps found)
+Status: Gaps found -- All 5 plans executed, verification score 5/8, gap closure needed
+Last activity: 2026-02-08 -- Human verification found 8 issues (5 web, 3 desktop)
 
-Progress: [███████████░░░░░░░░░] 79% (11/14 plans)
+Progress: [████████████░░░░░░░░] 86% (12/14 plans, pending gap closure)
 
 ## Milestone History
 
@@ -36,7 +36,7 @@ Progress: [███████████░░░░░░░░░] 79% (11
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
-| 11. Virtual Reading Desk | 4/5 | ~33 min | ~8 min |
+| 11. Virtual Reading Desk | 5/5 | ~38 min | ~8 min |
 
 *Updated after each plan completion*
 
@@ -115,9 +115,25 @@ Recent decisions affecting current work:
 - Joins "View All" -- existing entry point, enters reading desk with all joined fragments
 - Shelfmark input in toolbar to add more while in reading desk mode
 
+### Phase 11 Verification Issues (from 11-05 human testing)
+
+**Web:**
+- W1: Add from List dialog shows list names only, not manuscripts inside
+- W2: "Back to Page View" button invisible in Light Mode
+- W3: Fragment count badge invisible in Dark Mode
+- W4: Language switch loses reading desk state
+- W5: Missing word wrap in reading desk text pane
+
+**Desktop:**
+- D1: Scroll sync broken — scrolling text pane only moves images pane
+- D2: Toolbar "Add" button confusing/redundant UX
+- D4: "Add to View" button should be right after Go button
+
+**Out of scope (Phase 12):** D3: PGP joins not visible in desktop
+
 ## Session Continuity
 
-Last session: 2026-02-08 11:35 UTC
-Stopped at: Completed 11-04-PLAN.md
+Last session: 2026-02-08
+Stopped at: Phase 11 verification — gaps found, gap closure needed
 Resume file: None
-Notes: Plan 11-04 complete (desktop reading desk entry points & toolbar). All web and desktop reading desk features implemented (plans 01-04). Next: 11-05 (verification). Only verification plan remains for Phase 11.
+Notes: All 5 original plans executed. Human verification found 8 in-scope issues. Need /gsd:plan-phase 11 --gaps for gap closure plans (suggested: 11-06 web fixes, 11-07 desktop fixes).
