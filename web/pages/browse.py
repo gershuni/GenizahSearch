@@ -2250,77 +2250,119 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('Add from List')).classes('text-lg font-bold text-white')
                             ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
 
-                        # Content: list of user's lists
-                        with ui.column().classes('w-full p-4 gap-2'):
-                            all_lists = lists_mgr.get_all_lists(include_recent=False)
-                            if not all_lists:
-                                with ui.column().classes('items-center py-6'):
-                                    ui.icon('list_alt', size='3rem').classes('text-gray-300')
-                                    ui.label(tr('No lists found')).classes('text-gray-500')
-                            else:
-                                for lst in all_lists:
-                                    list_id = lst.get('id', '')
-                                    list_name = lst.get('name', lst.get('name_en', list_id))
-                                    list_color = lst.get('color', '#FFD700')
+                        # Content: list of user's lists with expandable manuscript details
+                        with ui.scroll_area().classes('w-full').style('max-height: 400px;'):
+                            with ui.column().classes('w-full p-4 gap-2'):
+                                all_lists = lists_mgr.get_all_lists(include_recent=False)
+                                if not all_lists:
+                                    with ui.column().classes('items-center py-6'):
+                                        ui.icon('list_alt', size='3rem').classes('text-gray-300')
+                                        ui.label(tr('No lists found')).classes('text-gray-500')
+                                else:
+                                    for lst in all_lists:
+                                        list_id = lst.get('id', '')
+                                        list_name = lst.get('name', lst.get('name_en', list_id))
+                                        list_color = lst.get('color', '#FFD700')
 
-                                    def make_add_list_handler(lid=list_id, lname=list_name, dialog_ref=dlg):
-                                        def add_list_items():
-                                            items = lists_mgr.get_items_in_list_sync(lid)
-                                            if not items:
-                                                ui.notify(f'{lname}: {tr("No items")}', type='info')
-                                                return
-                                            added_count = 0
-                                            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
-                                            for item in items:
-                                                item_sid = item.get('sys_id', '')
-                                                if not item_sid or item_sid in existing_sids:
-                                                    continue
-                                                # Resolve shelfmark
-                                                item_sm = item.get('shelfmark') or item.get('shelfmark_override', '')
-                                                if not item_sm and app_state.meta_mgr:
-                                                    try:
-                                                        item_sm, _ = app_state.meta_mgr.get_meta_for_id(item_sid)
-                                                    except Exception:
-                                                        pass
-                                                if not item_sm:
-                                                    item_sm = item_sid
-                                                # Load full data for the entry
-                                                from shared.document_service import get_all_sources_for_fragment as ld_src, get_document_for_fragment as ld_doc
-                                                pages = service.get_full_manuscript(item_sid)
-                                                sources = []
-                                                pgp_doc_data = None
+                                        # Pre-fetch items for this list to show count and contents
+                                        list_items = []
+                                        try:
+                                            list_items = lists_mgr.get_items_in_list_sync(list_id) or []
+                                        except Exception:
+                                            pass
+
+                                        # Resolve shelfmarks for display
+                                        resolved_items = []
+                                        for item in list_items:
+                                            item_sid = item.get('sys_id', '')
+                                            if not item_sid:
+                                                continue
+                                            item_sm = item.get('shelfmark') or item.get('shelfmark_override', '')
+                                            if not item_sm and app_state.meta_mgr:
                                                 try:
-                                                    sources = ld_src(item_sid) or []
-                                                    pgp_doc_data = ld_doc(item_sid)
+                                                    item_sm, _ = app_state.meta_mgr.get_meta_for_id(item_sid)
                                                 except Exception:
                                                     pass
-                                                state.reading_desk_entries.append({
-                                                    'sys_id': item_sid,
-                                                    'shelfmark': item_sm,
-                                                    'pages': pages or [],
-                                                    'sources': sources,
-                                                    'pgp_doc': pgp_doc_data or {}
-                                                })
-                                                existing_sids.add(item_sid)
-                                                added_count += 1
-                                            if added_count > 0:
-                                                _persist_reading_desk_state()
-                                                update_content()
-                                                ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
-                                            else:
-                                                ui.notify(tr('All items already in Reading Desk'), type='info')
-                                            dialog_ref.close()
-                                        return add_list_items
+                                            if not item_sm:
+                                                item_sm = item_sid
+                                            resolved_items.append({'sys_id': item_sid, 'shelfmark': item_sm})
 
-                                    with ui.card().classes(
-                                        'w-full p-3 cursor-pointer hover:bg-gray-50'
-                                    ).style(
-                                        'border: 1px solid var(--border-subtle, #e5e7eb);'
-                                    ).on('click', make_add_list_handler()):
-                                        with ui.row().classes('items-center gap-3 w-full'):
-                                            ui.icon('circle').style(f'color: {list_color}; font-size: 0.8rem;')
-                                            ui.label(list_name).classes('font-medium flex-1')
-                                            ui.icon('add').classes('text-green-600')
+                                        item_count = len(resolved_items)
+
+                                        def make_add_list_handler(lid=list_id, lname=list_name, dialog_ref=dlg, r_items=resolved_items):
+                                            def add_list_items():
+                                                if not r_items:
+                                                    ui.notify(f'{lname}: {tr("No items")}', type='info')
+                                                    return
+                                                added_count = 0
+                                                existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+                                                for ri in r_items:
+                                                    item_sid = ri['sys_id']
+                                                    item_sm = ri['shelfmark']
+                                                    if item_sid in existing_sids:
+                                                        continue
+                                                    # Load full data for the entry
+                                                    from shared.document_service import get_all_sources_for_fragment as ld_src, get_document_for_fragment as ld_doc
+                                                    pages = service.get_full_manuscript(item_sid)
+                                                    sources = []
+                                                    pgp_doc_data = None
+                                                    try:
+                                                        sources = ld_src(item_sid) or []
+                                                        pgp_doc_data = ld_doc(item_sid)
+                                                    except Exception:
+                                                        pass
+                                                    state.reading_desk_entries.append({
+                                                        'sys_id': item_sid,
+                                                        'shelfmark': item_sm,
+                                                        'pages': pages or [],
+                                                        'sources': sources,
+                                                        'pgp_doc': pgp_doc_data or {}
+                                                    })
+                                                    existing_sids.add(item_sid)
+                                                    added_count += 1
+                                                if added_count > 0:
+                                                    _persist_reading_desk_state()
+                                                    update_content()
+                                                    ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
+                                                else:
+                                                    ui.notify(tr('All items already in Reading Desk'), type='info')
+                                                dialog_ref.close()
+                                            return add_list_items
+
+                                        with ui.expansion(
+                                            group='rd-lists'
+                                        ).classes('w-full').style(
+                                            'border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 8px; margin-bottom: 4px;'
+                                        ) as expansion:
+                                            # Custom header slot
+                                            with expansion.add_slot('header'):
+                                                with ui.row().classes('items-center gap-3 w-full'):
+                                                    ui.icon('circle').style(f'color: {list_color}; font-size: 0.8rem;')
+                                                    ui.label(list_name).classes('font-medium flex-1')
+                                                    ui.badge(str(item_count), color='green').props('dense').classes('text-xs')
+
+                                            # Expansion content: list of manuscripts + Add All button
+                                            with ui.column().classes('w-full gap-1 pb-2'):
+                                                if not resolved_items:
+                                                    ui.label(tr('No items')).classes('text-sm italic text-gray-400 px-2')
+                                                else:
+                                                    for ri in resolved_items:
+                                                        already_in = ri['sys_id'] in {e.get('sys_id') for e in state.reading_desk_entries}
+                                                        with ui.row().classes('items-center gap-2 px-2 py-1').style(
+                                                            'border-bottom: 1px solid var(--border-subtle, #f0f0f0);'
+                                                        ):
+                                                            ui.icon('description', size='xs').classes('text-gray-400')
+                                                            ui.label(ri['shelfmark']).classes('text-sm flex-1').style('color: var(--text-primary);')
+                                                            if already_in:
+                                                                ui.icon('check', size='xs').classes('text-green-500').tooltip(tr('Already in Reading Desk'))
+
+                                                    # Add All button
+                                                    with ui.row().classes('w-full justify-end pt-2 px-2'):
+                                                        ui.button(
+                                                            f'{tr("Add All")} ({item_count})',
+                                                            icon='playlist_add',
+                                                            on_click=make_add_list_handler()
+                                                        ).props('dense color=green').classes('text-sm')
 
                     dlg.open()
 
@@ -2338,14 +2380,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.label(header_txt).classes('text-lg font-bold text-white')
                             ui.badge(
                                 f'{len(state.reading_desk_entries)} {tr("fragments")}',
-                                color='white'
-                            ).props('outline dense').classes('text-xs text-white')
+                            ).props('dense').classes('text-xs').style(
+                                'border: 1px solid white; color: white !important; background: transparent;'
+                            )
 
                         ui.button(
                             tr('Back to Page View'),
                             icon='arrow_forward' if is_rtl() else 'arrow_back',
                             on_click=exit_joined_view
-                        ).props('flat dense text-color=white')
+                        ).props('flat dense').style('color: white !important;')
 
                 # === Reading Desk Toolbar ===
                 with ui.card().classes('w-full mb-2 p-2').style(
@@ -2619,6 +2662,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                                 ui.label(section_text).style(
                                                                     f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
                                                                     f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    f'overflow-wrap: break-word; word-break: break-word; '
                                                                     f'color: var(--text-primary);'
                                                                 )
                                                             else:
@@ -2638,6 +2682,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                                 ui.label(pg_text).style(
                                                                     'font-size: 1.2rem; line-height: 1.9; direction: rtl; text-align: right; '
                                                                     'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                                    'overflow-wrap: break-word; word-break: break-word; '
                                                                     'color: var(--text-primary);'
                                                                 )
                                                             else:
@@ -2675,7 +2720,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
 
                                     # Text content container (replaceable by version selector)
-                                    tc = ui.column().classes('w-full px-3 py-2')
+                                    tc = ui.column().classes('w-full px-3 py-2').style('overflow: hidden;')
                                     text_containers[pg_idx] = tc
 
                                     with tc:
@@ -2700,6 +2745,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             ui.label(display_text).style(
                                                 f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
                                                 f'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                f'overflow-wrap: break-word; word-break: break-word; '
                                                 f'color: var(--text-primary);'
                                             )
                                         else:
