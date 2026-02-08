@@ -27,7 +27,7 @@ Full PGP feature set in web app.
 - [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
 - [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [x] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
-- [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop (UAT gap closure in progress)
+- [x] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
 - [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
 - [ ] **Phase 13: Transcription Search** - Index transcriptions in Tantivy with filter controls
 
@@ -95,10 +95,10 @@ Plans:
 - [x] 11-05-PLAN.md -- Human verification checkpoint (both web and desktop)
 - [x] 11-06-PLAN.md -- Gap closure: Web reading desk fixes (W1-W5: list dialog, button visibility, badge visibility, word wrap, state persistence)
 - [x] 11-07-PLAN.md -- Gap closure: Desktop reading desk fixes (D1, D2, D4: scroll sync, button label, button position)
-- [ ] 11-08-PLAN.md -- UAT gap closure: Web visual/CSS fixes (Light Mode header, word wrap, RuntimeError)
-- [ ] 11-09-PLAN.md -- UAT gap closure: Web state management (language switch + navigation stale state)
-- [ ] 11-10-PLAN.md -- UAT gap closure: Web Add from List individual selection
-- [ ] 11-11-PLAN.md -- UAT gap closure: Desktop scroll area lifecycle and sync signal management
+- [x] 11-08-PLAN.md -- UAT gap closure: Web visual/CSS fixes (Light Mode header, word wrap, RuntimeError)
+- [x] 11-09-PLAN.md -- UAT gap closure: Web state management (language switch + navigation stale state)
+- [x] 11-10-PLAN.md -- UAT gap closure: Web Add from List individual selection
+- [x] 11-11-PLAN.md -- UAT gap closure: Desktop scroll area lifecycle and sync signal management
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -141,10 +141,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 7/11 | UAT gap closure | - |
+| 11. Virtual Reading Desk | v5.6.0 | 11/11 | Complete | 2026-02-08 |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 UAT gap closure -- 4 plans created for 9 diagnosed gaps)*
+*Last updated: 2026-02-08 (Phase 11 complete -- all 11 plans including UAT gap closure, verified 12/12)*
