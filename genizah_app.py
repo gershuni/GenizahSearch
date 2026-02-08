@@ -54,7 +54,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -2704,14 +2704,6 @@ class ResultDialog(QDialog):
             # Load the document in the same ResultDialog
             self.load_by_shelfmark(target_shelfmark)
 
-        def open_reading_desk(entries):
-            """Open the Reading Desk with fragment entries from ResultDialog."""
-            main_win = parent
-            while main_win and not isinstance(main_win, QMainWindow):
-                main_win = main_win.parent()
-            if main_win and hasattr(main_win, '_open_reading_desk_from_entries'):
-                main_win._open_reading_desk_from_entries(entries, source_description=f"Joins: {shelfmark}")
-
         dialog = JoinsDialog(
             self, parent.corrections_client,
             document_id=self.current_sys_id,
@@ -2721,8 +2713,7 @@ class ResultDialog(QDialog):
             joins_mgr=getattr(parent, 'joins_mgr', None),
             shelf_completer=getattr(parent, 'shelf_completer', None),
             lists_mgr=getattr(parent, 'lists_mgr', None),
-            meta_mgr=getattr(parent, 'meta_mgr', None),
-            on_reading_desk=open_reading_desk,
+            meta_mgr=getattr(parent, 'meta_mgr', None)
         )
         dialog.exec()
 
@@ -4238,503 +4229,6 @@ def _set_label_with_tooltip(label, text, max_chars=100):
     label.setToolTip(full or '')
 
 
-class ReadingDeskDialog(QDialog):
-    """Multi-manuscript reading desk for viewing fragments side by side.
-
-    Provides a modeless window where researchers can view multiple manuscript
-    fragments with transcriptions and PGP version selectors. Entry points:
-    - From JoinsDialog (view all joined fragments together)
-    - From Browse tab toolbar (view current manuscript + joins)
-    - From Lists context menu (view all list items together)
-    """
-
-    def __init__(self, parent, meta_mgr=None, lists_mgr=None, initial_entries=None,
-                 pgpid=None, source_description=''):
-        super().__init__(parent)
-        self.meta_mgr = meta_mgr
-        self.lists_mgr = lists_mgr
-        self.entries_data = []
-        self._worker = None
-        self._fragment_widgets = {}  # sys_id -> widget
-        self.pgpid = pgpid
-        self.source_description = source_description
-
-        self.setWindowTitle(tr("Reading Desk"))
-        self.setMinimumSize(900, 700)
-        self.resize(1100, 800)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
-
-        self._build_ui()
-
-        if initial_entries:
-            self._load_entries(initial_entries)
-
-    def _build_ui(self):
-        """Build the dialog layout."""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-
-        # --- Header ---
-        header_layout = QHBoxLayout()
-        title_label = QLabel(tr("Reading Desk"))
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0e7490;")
-        header_layout.addWidget(title_label)
-
-        if self.source_description:
-            desc_label = QLabel(self.source_description)
-            desc_label.setStyleSheet("font-size: 13px; color: #666; margin-left: 12px;")
-            header_layout.addWidget(desc_label)
-
-        self.count_label = QLabel("0")
-        self.count_label.setStyleSheet(
-            "font-size: 11px; background: #0e7490; color: white; "
-            "border-radius: 10px; padding: 2px 8px; font-weight: bold;"
-        )
-        header_layout.addWidget(self.count_label)
-
-        header_layout.addStretch()
-
-        btn_close = QPushButton(tr("Close"))
-        btn_close.clicked.connect(self.close)
-        header_layout.addWidget(btn_close)
-        main_layout.addLayout(header_layout)
-
-        # --- Add toolbar ---
-        add_layout = QHBoxLayout()
-        self.add_input = QLineEdit()
-        self.add_input.setPlaceholderText(tr("Enter shelfmark or sys_id..."))
-        self.add_input.returnPressed.connect(self._add_manuscript)
-        add_layout.addWidget(self.add_input, 1)
-
-        btn_add = QPushButton(tr("Add"))
-        btn_add.setStyleSheet("background-color: #0e7490; color: white; padding: 4px 12px;")
-        btn_add.clicked.connect(self._add_manuscript)
-        add_layout.addWidget(btn_add)
-        main_layout.addLayout(add_layout)
-
-        # --- Loading indicator ---
-        self.loading_label = QLabel(tr("Loading..."))
-        self.loading_label.setStyleSheet("color: #0e7490; font-style: italic;")
-        self.loading_label.setVisible(False)
-        main_layout.addWidget(self.loading_label)
-
-        # --- Scroll area for fragments ---
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_content = QWidget()
-        self.fragments_layout = QVBoxLayout(self.scroll_content)
-        self.fragments_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.fragments_layout.setSpacing(16)
-        scroll.setWidget(self.scroll_content)
-        main_layout.addWidget(scroll, 1)
-
-        # --- Empty state ---
-        self.empty_label = QLabel(tr("No manuscripts on the desk.\nAdd manuscripts using the search bar above."))
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
-        self.fragments_layout.addWidget(self.empty_label)
-
-    def _load_entries(self, entries):
-        """Start background loading of fragment data."""
-        if self._worker is not None:
-            try:
-                self._worker.finished_signal.disconnect()
-                self._worker.progress_signal.disconnect()
-                self._worker.error_signal.disconnect()
-            except Exception:
-                pass
-
-        self.loading_label.setVisible(True)
-        self._worker = ReadingDeskWorker(entries, meta_mgr=self.meta_mgr)
-        self._worker.finished_signal.connect(self._on_data_loaded)
-        self._worker.progress_signal.connect(self._on_progress)
-        self._worker.error_signal.connect(self._on_error)
-        self._worker.start()
-
-    def _on_progress(self, current, total):
-        """Update loading progress."""
-        self.loading_label.setText(tr("Loading {} of {}...").format(current, total))
-
-    def _on_error(self, error_msg):
-        """Handle worker error."""
-        self.loading_label.setVisible(False)
-        QMessageBox.warning(self, tr("Error"), tr("Failed to load data: {}").format(error_msg))
-
-    def _on_data_loaded(self, results):
-        """Handle loaded fragment data from worker."""
-        self.loading_label.setVisible(False)
-
-        # Merge with existing entries (for incremental adds)
-        existing_ids = {d['sys_id'] for d in self.entries_data}
-        for r in results:
-            if r['sys_id'] not in existing_ids:
-                self.entries_data.append(r)
-                existing_ids.add(r['sys_id'])
-
-        self._rebuild_display()
-
-    def _rebuild_display(self):
-        """Rebuild all fragment widgets from entries_data."""
-        # Clear existing widgets
-        while self.fragments_layout.count():
-            item = self.fragments_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        self._fragment_widgets.clear()
-
-        self.count_label.setText(str(len(self.entries_data)))
-
-        if not self.entries_data:
-            self.empty_label = QLabel(tr("No manuscripts on the desk.\nAdd manuscripts using the search bar above."))
-            self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.empty_label.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
-            self.fragments_layout.addWidget(self.empty_label)
-            return
-
-        for data in self.entries_data:
-            widget = self._create_fragment_widget(data)
-            self.fragments_layout.addWidget(widget)
-            self._fragment_widgets[data['sys_id']] = widget
-
-        # Add spacer at end
-        self.fragments_layout.addStretch()
-
-    def _create_fragment_widget(self, data):
-        """Create a widget for a single fragment with pages and version selectors."""
-        sys_id = data['sys_id']
-        shelfmark = data.get('shelfmark', sys_id)
-        library_code = data.get('library_code', '')
-        sources = data.get('sources', [])
-        pgp_doc = data.get('pgp_doc', {})
-        pages = data.get('pages', [])
-
-        frame = QFrame()
-        frame.setFrameShape(QFrame.Shape.StyledPanel)
-        frame.setStyleSheet(
-            "QFrame { border: 1px solid #d1d5db; border-radius: 8px; "
-            "background: palette(window); }"
-        )
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setContentsMargins(12, 8, 12, 8)
-
-        # --- Fragment header ---
-        header = QHBoxLayout()
-        shelf_label = QLabel(shelfmark)
-        shelf_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #0e7490;")
-        shelf_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        header.addWidget(shelf_label)
-
-        if library_code:
-            try:
-                lib_display = get_library_display(library_code, short=True)
-            except Exception:
-                lib_display = library_code
-            if lib_display:
-                lib_badge = QLabel(lib_display)
-                lib_badge.setStyleSheet(
-                    "font-size: 10px; background: #e0f2f1; color: #0e7490; "
-                    "border-radius: 4px; padding: 1px 6px; font-weight: bold;"
-                )
-                header.addWidget(lib_badge)
-
-        header.addStretch()
-
-        # Open in Browse button
-        btn_browse = QPushButton(tr("Open in Browse"))
-        btn_browse.setToolTip(tr("Open this manuscript in the Browse tab"))
-        btn_browse.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        btn_browse.clicked.connect(lambda checked=False, sid=sys_id: self._open_in_browse(sid))
-        header.addWidget(btn_browse)
-
-        # Remove button
-        btn_remove = QPushButton("X")
-        btn_remove.setFixedSize(24, 24)
-        btn_remove.setToolTip(tr("Remove from reading desk"))
-        btn_remove.setStyleSheet(
-            "font-size: 11px; color: #999; border: 1px solid #ddd; border-radius: 4px;"
-        )
-        btn_remove.clicked.connect(lambda checked=False, sid=sys_id: self._remove_fragment(sid))
-        header.addWidget(btn_remove)
-
-        frame_layout.addLayout(header)
-
-        # --- Separator ---
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #e5e7eb;")
-        frame_layout.addWidget(sep)
-
-        # --- Pages (recto/verso) ---
-        for pg in pages:
-            pg_num = pg.get('p_num', 1)
-            pg_text = pg.get('text', '')
-            pg_label_text = tr("Recto") if pg_num == 1 else tr("Verso")
-
-            # Page label
-            page_label = QLabel(f"{shelfmark} -- {pg_label_text}")
-            page_label.setStyleSheet("font-size: 11px; color: #888; margin-top: 4px;")
-            frame_layout.addWidget(page_label)
-
-            # Version selector + text area
-            page_widget = QWidget()
-            page_layout = QVBoxLayout(page_widget)
-            page_layout.setContentsMargins(0, 0, 0, 0)
-
-            # Version combo
-            combo = QComboBox()
-            combo.setFixedWidth(240)
-
-            # Text browser
-            text_browser = QTextBrowser()
-            text_browser.setMinimumHeight(120)
-            text_browser.setMaximumHeight(250)
-            text_browser.setOpenExternalLinks(True)
-            text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-
-            # Filter sources for this page
-            current_page_info = 'recto' if pg_num == 1 else 'verso'
-            from shared.document_service import get_section_for_page
-            page_sources = []
-            for source in sources:
-                source_page = source.get('page_info')
-                is_translation = 'Translation' in (source.get('doc_relation') or '')
-
-                if is_translation:
-                    # Clone the source to avoid mutating original
-                    source_copy = dict(source)
-                    if not source_page:
-                        content = source_copy.get('content')
-                        if content:
-                            source_copy['content'] = get_section_for_page(content, pg_num)
-                    page_sources.append(source_copy)
-                    continue
-
-                if source_page == current_page_info or not source_page:
-                    source_copy = dict(source)
-                    if not source_page:
-                        content = source_copy.get('content')
-                        if content:
-                            source_copy['content'] = get_section_for_page(content, pg_num)
-                    page_sources.append(source_copy)
-
-            # Populate combo using same pattern as _populate_pgp_combo
-            self._populate_desk_combo(combo, page_sources, pg_text)
-
-            # Connect version change
-            combo.currentIndexChanged.connect(
-                lambda idx, c=combo, tb=text_browser: self._on_desk_version_changed(c, tb)
-            )
-
-            # Version selector row
-            combo_row = QHBoxLayout()
-            combo_row.addWidget(QLabel(tr("Version:")))
-            combo_row.addWidget(combo)
-            combo_row.addStretch()
-            page_layout.addLayout(combo_row)
-
-            page_layout.addWidget(text_browser)
-
-            frame_layout.addWidget(page_widget)
-
-            # Display initial text (first PGP edition or V0.8)
-            self._display_initial_text(combo, text_browser)
-
-        return frame
-
-    def _populate_desk_combo(self, combo, page_sources, original_text):
-        """Populate a reading desk version combo with sources and V0.8.
-
-        Similar to _populate_pgp_combo but self-contained for the reading desk.
-        """
-        combo.blockSignals(True)
-        combo.clear()
-
-        editions = [s for s in page_sources
-                    if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
-        edition_ids = {id(s) for s in editions}
-        translations = [s for s in page_sources
-                        if 'Translation' in (s.get('doc_relation') or '')
-                        and s.get('content')
-                        and id(s) not in edition_ids]
-
-        has_pgp = bool(editions) or bool(translations)
-
-        if editions:
-            combo.addItem("-- PGP Editions --", {"source": "header"})
-            combo.model().item(combo.count() - 1).setEnabled(False)
-
-            for edition in editions:
-                scholar = edition.get('source_scholar', 'Unknown')
-                label = f"  {scholar}"
-                combo.addItem(label, {
-                    "source": "pgp_edition",
-                    "content": edition.get('content', ''),
-                    "scholar": scholar,
-                    "pgpid": edition.get('pgpid'),
-                    "source_id": edition.get('id'),
-                })
-
-        if translations:
-            combo.addItem("─────────────", {"source": "header"})
-            combo.model().item(combo.count() - 1).setEnabled(False)
-            combo.addItem("-- Translations --", {"source": "header"})
-            combo.model().item(combo.count() - 1).setEnabled(False)
-
-            for trans in translations:
-                scholar = trans.get('source_scholar', 'Unknown')
-                language = trans.get('language', '')
-                label = f"  {language} - {scholar}" if language else f"  {scholar}"
-                combo.addItem(label, {
-                    "source": "pgp_translation",
-                    "content": trans.get('content', ''),
-                    "scholar": scholar,
-                    "language": language,
-                    "pgpid": trans.get('pgpid'),
-                    "source_id": trans.get('id'),
-                })
-
-        if has_pgp:
-            combo.addItem("─────────────", {"source": "header"})
-            combo.model().item(combo.count() - 1).setEnabled(False)
-
-        # V0.8 (HTR original) -- always present
-        combo.addItem("V0.8", {"source": "original", "content": original_text})
-
-        combo.blockSignals(False)
-
-    def _display_initial_text(self, combo, text_browser):
-        """Display the initial text content -- auto-select first PGP edition or fall back to V0.8."""
-        # Try to select first PGP edition
-        for i in range(combo.count()):
-            data = combo.itemData(i)
-            if data and data.get('source') == 'pgp_edition':
-                combo.setCurrentIndex(i)
-                content = data.get('content', '')
-                if content:
-                    self._render_text(text_browser, content, is_rtl=True)
-                    return
-                break
-
-        # Fall back to V0.8
-        for i in range(combo.count()):
-            data = combo.itemData(i)
-            if data and data.get('source') == 'original':
-                combo.setCurrentIndex(i)
-                content = data.get('content', '')
-                if content:
-                    self._render_text(text_browser, content, is_rtl=True)
-                else:
-                    text_browser.setHtml(
-                        f"<div dir='rtl' style='color: #999;'><i>{tr('No text available')}</i></div>"
-                    )
-                return
-
-    def _on_desk_version_changed(self, combo, text_browser):
-        """Handle version change for a reading desk page combo."""
-        data = combo.currentData()
-        if not data:
-            return
-
-        source = data.get('source', '')
-        if source == 'header':
-            return  # Non-selectable header
-
-        content = data.get('content', '')
-
-        if source == 'pgp_edition':
-            self._render_text(text_browser, content, is_rtl=True)
-        elif source == 'pgp_translation':
-            language = data.get('language', '')
-            is_rtl = language != 'English'
-            self._render_text(text_browser, content, is_rtl=is_rtl)
-        elif source == 'original':
-            self._render_text(text_browser, content, is_rtl=True)
-
-    def _render_text(self, text_browser, text, is_rtl=True):
-        """Render text in a QTextBrowser with proper directionality."""
-        direction = 'rtl' if is_rtl else 'ltr'
-        layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
-        text_browser.setLayoutDirection(layout_dir)
-
-        if text:
-            html_text = text.replace('\n', '<br>')
-            text_browser.setHtml(
-                f"<div dir='{direction}' style='font-family: David, Frank Ruehl, "
-                f"Noto Sans Hebrew, serif; font-size: 14px; line-height: 1.8;'>"
-                f"{html_text}</div>"
-            )
-        else:
-            text_browser.setHtml(
-                f"<div dir='{direction}' style='color: #999;'><i>{tr('No text available')}</i></div>"
-            )
-
-    def _add_manuscript(self):
-        """Add a manuscript by shelfmark or sys_id."""
-        query = self.add_input.text().strip()
-        if not query:
-            return
-
-        # Check if already on the desk
-        for d in self.entries_data:
-            if d['sys_id'] == query or (d.get('shelfmark', '').upper() == query.upper()):
-                QMessageBox.information(self, tr("Already Added"), tr("This manuscript is already on the desk."))
-                return
-
-        # Try resolving as shelfmark via meta_mgr
-        sys_id = None
-        if self.meta_mgr:
-            try:
-                results = self.meta_mgr.search_variants(query)
-                if results:
-                    sys_id = results[0] if isinstance(results[0], str) else results[0].get('sys_id', query)
-            except Exception:
-                pass
-
-        if not sys_id:
-            # Try treating input as sys_id directly
-            if self.meta_mgr:
-                try:
-                    sm, _ = self.meta_mgr.get_meta_for_id(query)
-                    if sm and sm != "Unknown":
-                        sys_id = query
-                except Exception:
-                    pass
-
-        if not sys_id:
-            QMessageBox.warning(self, tr("Not Found"), tr("Could not find manuscript: {}").format(query))
-            return
-
-        self.add_input.clear()
-        entry = {
-            'sys_id': sys_id,
-            'shelfmark': '',
-            'sequence_order': len(self.entries_data),
-        }
-        self._load_entries([entry])
-
-    def _remove_fragment(self, sys_id):
-        """Remove a fragment from the reading desk."""
-        self.entries_data = [d for d in self.entries_data if d['sys_id'] != sys_id]
-        self._rebuild_display()
-
-    def _open_in_browse(self, sys_id):
-        """Open a manuscript in the Browse tab of the main window."""
-        parent = self.parent()
-        while parent and not isinstance(parent, QMainWindow):
-            parent = parent.parent()
-
-        if parent and hasattr(parent, 'browse_sys_input'):
-            parent.browse_sys_input.setText(sys_id)
-            if hasattr(parent, '_set_last_browse_field'):
-                parent._set_last_browse_field("sys")
-            if hasattr(parent, 'tabs') and hasattr(parent, 'browse_tab'):
-                parent.tabs.setCurrentWidget(parent.browse_tab)
-            if hasattr(parent, 'browse_load'):
-                parent.browse_load()
-
-
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -6145,105 +5639,6 @@ class GenizahGUI(QMainWindow):
         )
         dialog.exec()
 
-    # ── Reading Desk ──
-
-    def _open_reading_desk_from_entries(self, entries, source_description='', pgpid=None):
-        """Open a ReadingDeskDialog with the given fragment entries.
-
-        Args:
-            entries: list of dicts with at least 'sys_id', optionally 'shelfmark', 'sequence_order'
-            source_description: descriptive label (e.g. "Joins: T-S 12.123")
-            pgpid: optional PGP document ID
-        """
-        dialog = ReadingDeskDialog(
-            self,
-            meta_mgr=self.meta_mgr,
-            lists_mgr=getattr(self, 'lists_mgr', None),
-            initial_entries=entries,
-            pgpid=pgpid,
-            source_description=source_description,
-        )
-        dialog.show()  # Modeless -- user can keep working
-
-    def _browse_open_reading_desk(self):
-        """Open current browse manuscript (and its joins) in the Reading Desk."""
-        if not self.current_browse_sid:
-            QMessageBox.warning(self, tr("No Document"), tr("Please load a document first."))
-            return
-
-        doc_id = self.current_browse_sid
-        shelfmark = None
-        if self.meta_mgr:
-            try:
-                shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except Exception:
-                pass
-
-        entries = [{'sys_id': doc_id, 'shelfmark': shelfmark or doc_id, 'sequence_order': 0}]
-
-        # Try to add joined fragments
-        if hasattr(self, 'joins_mgr') and self.joins_mgr:
-            connected = self.joins_mgr.get_connected_fragments_by_id(doc_id)
-            if connected and connected.get('total_fragments', 0) > 1:
-                fragments = connected.get('fragments', [])
-                fragment_details = connected.get('fragment_details', [])
-
-                # Build shelfmark -> doc_id map
-                shelf_to_docid = {}
-                for fd in fragment_details:
-                    s = fd.get('shelfmark', '')
-                    d = fd.get('document_id')
-                    if s and d:
-                        shelf_to_docid[s.upper()] = d
-
-                # Resolve sys_ids for join fragments
-                entries = []
-                for idx, frag_shelf in enumerate(fragments):
-                    frag_sid = shelf_to_docid.get(frag_shelf.upper())
-                    if not frag_sid and self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
-                        norm = normalize_shelfmark(frag_shelf)
-                        for sid, meta in self.meta_mgr.csv_bank.items():
-                            s = meta.get('shelfmark', '')
-                            if s and normalize_shelfmark(s) == norm:
-                                frag_sid = sid
-                                break
-                    if frag_sid:
-                        entries.append({'sys_id': frag_sid, 'shelfmark': frag_shelf, 'sequence_order': idx})
-
-        desc = f"Joins: {shelfmark}" if shelfmark and len(entries) > 1 else (shelfmark or doc_id)
-        self._open_reading_desk_from_entries(entries, source_description=desc)
-
-    def _open_list_in_reading_desk(self, list_id=None):
-        """Open all items from a list in the Reading Desk."""
-        if not self.lists_mgr:
-            return
-
-        target_list_id = list_id or getattr(self, 'lists_current_list_id', None)
-        if not target_list_id:
-            return
-
-        lst = self.lists_mgr.data['lists'].get(target_list_id)
-        if not lst:
-            return
-
-        items = self.lists_mgr.get_items_sorted(target_list_id, sort_by='shelfmark')
-        if not items:
-            QMessageBox.information(self, tr("Empty List"), tr("This list has no items."))
-            return
-
-        entries = []
-        for idx, item in enumerate(items):
-            sys_id = item.get('sys_id', item.get('item_id', ''))
-            if sys_id:
-                entries.append({
-                    'sys_id': sys_id,
-                    'shelfmark': item.get('shelfmark', ''),
-                    'sequence_order': idx,
-                })
-
-        list_name = lst.get('name', target_list_id)
-        self._open_reading_desk_from_entries(entries, source_description=f"{tr('From list')}: {list_name}")
-
     def _browse_view_joins(self):
         """View joined fragments for current document."""
         if not self.current_browse_sid:
@@ -6268,10 +5663,6 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("shelf")
             self.browse_load()
 
-        def open_reading_desk(entries):
-            """Open the Reading Desk with fragment entries."""
-            self._open_reading_desk_from_entries(entries, source_description=f"Joins: {shelfmark}")
-
         dialog = JoinsDialog(
             self, self.corrections_client,
             document_id=doc_id,
@@ -6281,8 +5672,7 @@ class GenizahGUI(QMainWindow):
             joins_mgr=getattr(self, 'joins_mgr', None),
             shelf_completer=getattr(self, 'shelf_completer', None),
             lists_mgr=getattr(self, 'lists_mgr', None),
-            meta_mgr=getattr(self, 'meta_mgr', None),
-            on_reading_desk=open_reading_desk,
+            meta_mgr=getattr(self, 'meta_mgr', None)
         )
         dialog.exec()
 
@@ -7353,15 +6743,6 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setMenu(self.joins_menu)
         community_bar.addWidget(self.btn_b_joins)
 
-        # Reading Desk button
-        self.btn_b_reading_desk = QPushButton(tr("Reading Desk"))
-        self.btn_b_reading_desk.setToolTip(tr("Open in Reading Desk"))
-        self.btn_b_reading_desk.setEnabled(False)
-        self.btn_b_reading_desk.setFixedHeight(32)
-        self.btn_b_reading_desk.setStyleSheet("background-color: #0e7490; color: white; border-radius: 4px; padding: 0 8px;")
-        self.btn_b_reading_desk.clicked.connect(self._browse_open_reading_desk)
-        community_bar.addWidget(self.btn_b_reading_desk)
-
         community_bar.addStretch()
         text_layout.addLayout(community_bar)
 
@@ -7667,7 +7048,6 @@ class GenizahGUI(QMainWindow):
         self.btn_b_comment.setEnabled(True)
         self.btn_b_view_corrections.setEnabled(True)
         self.btn_b_joins.setEnabled(True)
-        self.btn_b_reading_desk.setEnabled(True)
         self.browse_version_combo.setEnabled(True)
 
         # Update joins dropdown menu
@@ -9886,12 +9266,6 @@ class GenizahGUI(QMainWindow):
 
         action_word = export_menu.addAction(tr("Word (.docx)"))
         action_word.triggered.connect(lambda: self._export_list_format(list_id, 'word'))
-
-        menu.addSeparator()
-
-        # Open in Reading Desk
-        action_reading_desk = menu.addAction(tr("Open in Reading Desk"))
-        action_reading_desk.triggered.connect(lambda: self._open_list_in_reading_desk(list_id))
 
         action = menu.exec(self.lists_tree.mapToGlobal(pos))
         if lst.get('is_system') or lst.get('is_default'):

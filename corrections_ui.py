@@ -3245,15 +3245,13 @@ class JoinsDialog(QDialog):
         joins_mgr=None,  # JoinsManager for offline-first data
         shelf_completer=None,  # ShelfmarkCompleter instance for autocomplete
         lists_mgr=None,  # ListsManager for picking from personal lists
-        meta_mgr=None,  # MetadataManager for getting titles
-        on_reading_desk=None,  # Callback: on_reading_desk(fragment_entries) to open reading desk
+        meta_mgr=None  # MetadataManager for getting titles
     ):
         super().__init__(parent)
         self.client = client or get_corrections_client()
         self.document_id = document_id
         self.shelfmark = shelfmark
         self.on_browse = on_browse
-        self.on_reading_desk = on_reading_desk
         self.shelf_model = shelf_model
         self.joins_mgr = joins_mgr
         self.shelf_completer = shelf_completer
@@ -3442,13 +3440,6 @@ class JoinsDialog(QDialog):
         self.btn_delete.setVisible(is_admin)
         self.btn_delete.setToolTip(tr("Delete selected join (admin only)"))
         btn_layout.addWidget(self.btn_delete)
-
-        # Reading Desk button -- open all fragments in the reading desk
-        self.btn_reading_desk = QPushButton(tr("Reading Desk"))
-        self.btn_reading_desk.setStyleSheet("background-color: #0e7490; color: white;")
-        self.btn_reading_desk.setToolTip(tr("Open all fragments in the Reading Desk"))
-        self.btn_reading_desk.clicked.connect(self._open_reading_desk)
-        btn_layout.addWidget(self.btn_reading_desk)
 
         btn_layout.addStretch()
 
@@ -4128,56 +4119,6 @@ class JoinsDialog(QDialog):
             callback(shelfmark)
         except Exception as e:
             print(f"[ERROR] Navigation callback failed: {e}", flush=True)
-
-    def _open_reading_desk(self):
-        """Open all connected fragments in the Reading Desk."""
-        if not self.on_reading_desk:
-            QMessageBox.information(
-                self, tr("Reading Desk"),
-                tr("Reading Desk is not available in this context.")
-            )
-            return
-
-        # Collect fragment entries from the fragments list
-        entries = []
-        for i in range(self.fragments_list.count()):
-            item = self.fragments_list.item(i)
-            shelfmark = item.data(Qt.ItemDataRole.UserRole)
-            if not shelfmark:
-                shelfmark = item.text().split(' - ')[0].strip()
-                # Remove "(current)" suffix
-                current_suffix = f" ({tr('current')})"
-                if shelfmark.endswith(current_suffix):
-                    shelfmark = shelfmark[:-len(current_suffix)]
-
-            # Try to resolve sys_id from shelfmark
-            sys_id = None
-            if self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
-                norm_shelf = self._normalize_shelfmark(shelfmark)
-                for sid, meta in self.meta_mgr.csv_bank.items():
-                    s = meta.get('shelfmark', '')
-                    if s and self._normalize_shelfmark(s) == norm_shelf:
-                        sys_id = sid
-                        break
-
-            if sys_id:
-                entries.append({
-                    'sys_id': sys_id,
-                    'shelfmark': shelfmark,
-                    'sequence_order': i,
-                })
-
-        if not entries:
-            QMessageBox.warning(self, tr("No Fragments"), tr("No fragments found to open."))
-            return
-
-        # Close dialog then invoke callback
-        callback = self.on_reading_desk
-        self.accept()
-        try:
-            QTimer.singleShot(50, lambda: callback(entries))
-        except Exception as e:
-            print(f"[ERROR] Reading desk callback failed: {e}", flush=True)
             import traceback
             traceback.print_exc()
 

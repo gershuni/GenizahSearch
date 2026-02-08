@@ -424,26 +424,8 @@ def create_lists_page():
                     if is_system:
                         ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
 
-                # Action buttons
+                # Export button
                 with ui.row().classes('gap-2'):
-                    # Open in Reading Desk button
-                    def make_open_reading_desk(lid=list_id):
-                        def handler():
-                            items = state.lists_mgr.get_items_in_list_sync(lid) if state.lists_mgr else []
-                            sys_ids = [item.get('sys_id', '') for item in items]
-                            sids_str = ','.join(s for s in sys_ids if s)
-                            if sids_str:
-                                ui.navigate.to(f'/reading-desk?sys_ids={sids_str}')
-                            else:
-                                ui.notify(tr('This list is empty'), type='warning')
-                        return handler
-
-                    ui.button(
-                        tr('Reading Desk'),
-                        icon='auto_stories',
-                        on_click=make_open_reading_desk()
-                    ).props('flat').classes('text-teal-700')
-
                     ui.button(
                         tr('Export'),
                         icon='download',

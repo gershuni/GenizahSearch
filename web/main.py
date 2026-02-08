@@ -1611,7 +1611,6 @@ def create_layout():
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse'), None),
-                    ('/reading-desk', 'auto_stories', tr('Reading Desk'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
                 ]
@@ -1851,23 +1850,6 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     with content:
         from web.pages.browse import create_browse_page
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page)
-
-@ui.page('/reading-desk')
-def reading_desk_page_route(pgpid: int = None, sys_ids: str = None, list_id: str = None):
-    set_current_page('/reading-desk')
-    ui.add_head_html(META_TAGS)
-    ui.add_head_html(ANALYTICS_SCRIPT)
-    ui.add_head_html(COMMON_STYLES)
-    ui.add_head_html(apply_theme_immediately())
-
-    content = create_layout()
-    with content:
-        from web.pages.reading_desk import create_reading_desk_page
-        create_reading_desk_page(
-            initial_pgpid=pgpid,
-            initial_sys_ids=sys_ids.split(',') if sys_ids else None,
-            initial_list_id=list_id
-        )
 
 @ui.page('/lists')
 def lists_page_route():

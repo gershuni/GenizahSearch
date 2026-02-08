@@ -547,31 +547,6 @@ def create_joins_dialog(
                         on_click=handle_view_all
                     ).props('outline color=green').classes('w-full')
 
-                # Open in Reading Desk button
-                if total > 1:
-                    def handle_open_reading_desk():
-                        dialog.close()
-                        # Navigate to reading desk page with pgpid or sys_ids
-                        resolved = pgpid
-                        if not resolved and document_id:
-                            from web.document_service import get_document_for_fragment
-                            pgp_doc = get_document_for_fragment(document_id)
-                            if pgp_doc:
-                                resolved = pgp_doc.get('pgpid')
-                        if resolved:
-                            ui.navigate.to(f'/reading-desk?pgpid={resolved}')
-                        else:
-                            # Fallback: pass sys_ids from fragment_details
-                            frag_sids = [fd.get('document_id', '') for fd in (fragment_details or [])]
-                            sids_str = ','.join(s for s in frag_sids if s)
-                            if sids_str:
-                                ui.navigate.to(f'/reading-desk?sys_ids={sids_str}')
-
-                    ui.button(
-                        tr('Open in Reading Desk'), icon='auto_stories',
-                        on_click=handle_open_reading_desk
-                    ).props('outline color=teal').classes('w-full')
-
                 # Add new join button
                 ui.separator().classes('my-2')
 
