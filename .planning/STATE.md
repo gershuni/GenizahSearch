@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 10 of 13 (Desktop PGP Core)
-Plan: 2 of 2
-Status: Complete
-Last activity: 2026-02-08 -- Completed Phase 10
+Phase: 11 of 13 (Virtual Reading Desk)
+Plan: 0 of TBD (replanning)
+Status: Replanning -- first attempt reverted after user feedback
+Last activity: 2026-02-08 -- Reverted Phase 11 execution, replanning
 
 Progress: [███████░░░░░░░░░░░░░] 50% (7/14 plans)
 
@@ -76,9 +76,27 @@ Recent decisions affecting current work:
 
 - Recto/verso section headers stripped during parsing (v1 tech debt)
 
+### Phase 11 Replan Context (CRITICAL -- read before replanning)
+
+First attempt (reverted commit 7230bd3) created a separate /reading-desk page (web) and ReadingDeskDialog (desktop). User rejected this approach during verification:
+
+**Bugs found:**
+- Web: Only showed one black image box, no text, no multiple manuscripts
+- Web: Add by shelfmark broken
+- Desktop: Didn't fetch PGP joins, only showed one manuscript
+
+**Architecture pivot (user direction):**
+- Do NOT create a separate page/dialog for reading desk
+- ENHANCE the existing "View All Fragments" inline view in the Browse tab (both apps)
+- Add ability to add more manuscripts by search/shelfmark to the existing joined view
+- Add ability to add from personal lists
+- Desktop: integrate with existing lists panel in browse tab (direct "add to view")
+- The reading desk IS the browse tab's multi-fragment view, enhanced with add/remove
+- Keep shared ReadingDeskEntry/ReadingDeskState model concept for data containers
+
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed Phase 10 (Desktop PGP Core)
+Stopped at: Reverted Phase 11, needs replanning with new approach
 Resume file: None
-Notes: Phase 10 complete. Both Browse tab and ResultDialog display PGP transcriptions with grouped version selectors. Next: Phase 11 (Virtual Reading Desk).
+Notes: Phase 11 first attempt reverted. User wants enhanced browse tab approach, not separate pages/dialogs. Run /gsd:plan-phase 11 to replan.
