@@ -27,7 +27,7 @@ Full PGP feature set in web app.
 - [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
 - [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [x] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
-- [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
+- [x] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
 - [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
 - [ ] **Phase 13: Transcription Search** - Index transcriptions in Tantivy with filter controls
 
@@ -99,8 +99,8 @@ Plans:
 - [x] 11-09-PLAN.md -- UAT gap closure: Web state management (language switch + navigation stale state)
 - [x] 11-10-PLAN.md -- UAT gap closure: Web Add from List individual selection
 - [x] 11-11-PLAN.md -- UAT gap closure: Desktop scroll area lifecycle and sync signal management
-- [ ] 11-12-PLAN.md -- UAT v2 gap closure: Web timer RuntimeError, Light Mode background, language switch guard, word wrap min-width
-- [ ] 11-13-PLAN.md -- UAT v2 gap closure: Desktop navigation guard for Add to View, splitter sizes for Add from List
+- [x] 11-12-PLAN.md -- UAT v2 gap closure: Web timer RuntimeError, Light Mode background, language switch guard, word wrap min-width
+- [x] 11-13-PLAN.md -- UAT v2 gap closure: Desktop navigation guard for Add to View, splitter sizes for Add from List
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -143,10 +143,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 11/13 | UAT v2 gap closure | - |
+| 11. Virtual Reading Desk | v5.6.0 | 13/13 | Complete | 2026-02-08 |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 UAT v2 gap closure -- 2 new plans for 7 remaining issues)*
+*Last updated: 2026-02-08 (Phase 11 complete -- all 13 plans executed, 12/12 must-haves verified)*

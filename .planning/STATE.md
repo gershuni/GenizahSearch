@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 11 of 13 (Virtual Reading Desk) -- COMPLETE (all 13 plans done)
-Plan: 13 of 13 (all plans complete)
-Status: Phase complete -- all UAT gaps closed (web + desktop)
-Last activity: 2026-02-08 -- Completed 11-13-PLAN.md (desktop UAT gap closure)
+Phase: 11 of 13 (Virtual Reading Desk) -- COMPLETE (verified 12/12)
+Plan: 13 of 13 (all plans complete, verified by gsd-verifier)
+Status: Phase complete -- verified, all UAT gaps closed, ready for Phase 12
+Last activity: 2026-02-08 -- Phase 11 verified after UAT v2 gap closure (12/12 must-haves)
 
 Progress: [████████████████████] 77% (20/26 plans across phases 8-13)
 
@@ -81,64 +81,14 @@ Recent decisions affecting current work:
 
 - Recto/verso section headers stripped during parsing (v1 tech debt)
 
-### Phase 11 Replan Context (CRITICAL -- read before replanning)
+### Phase 11 Notes (Complete)
 
-**Two prior attempts reverted.** Key lessons from each:
-
-**Attempt 1** (reverted 7230bd3): Separate /reading-desk page (web) + ReadingDeskDialog (desktop). Rejected -- user wants enhancement of existing browse tab, not new pages/dialogs.
-
-**Attempt 2** (reverted 8012e03): Enhanced existing browse tab joined view with add/remove. Closer but still wrong UX:
-
-**User feedback on attempt 2 (web):**
-- Image controls missing rotate -- must reuse EXISTING image controls (zoom/rotate per image)
-- No text version selector per fragment (PGP edition/translation chooser)
-- Fragment titles should be links to view that fragment individually (exit joined view, navigate there)
-- "Add by sys_id" is redundant -- remove it, shelfmark is enough
-- Need proper "Add from personal list" dialog (not just a button)
-- Header above "Document #..." is irrelevant in All Fragments view (relates to only one fragment)
-- Switching language exits the view -- must preserve view state
-- No entry point to add manuscripts if no join link exists -- need standalone entry point
-
-**User feedback on attempt 2 (desktop):**
-- "Reading Desk" button in nav bar is not discoverable enough
-- Entry point should be "Add to View" button near the main shelfmark/Go field
-- Lists should have hoverable "+" (add to view) icons on each item
-- View MUST show images alongside text in BOTH panes -- synchronized scrolling
-- Each image in front of each text, scrollable, lazy loaded, correlated side-by-side
-
-**THE KEY ARCHITECTURAL INSIGHT (v3 vision):**
-- BOTH panes (image viewer + text area) become scrollable multi-manuscript views
-- All manuscripts' images stacked in the image pane (with lazy loading, zoom/rotate per image)
-- All manuscripts' texts stacked in the text pane (with per-fragment version selector)
-- **SYNCHRONIZED SCROLLING**: When you scroll past a fragment boundary in one pane, the other pane auto-scrolls to the matching fragment header
-- Version selector and metadata update to reflect the currently-visible fragment
-- This applies to BOTH web and desktop apps
-
-**Entry points (both apps):**
-- "Add to View" button near Go/shelfmark field -- starts reading desk with that manuscript
-- "+" icons on list items -- adds to reading desk without navigating
-- Joins "View All" -- existing entry point, enters reading desk with all joined fragments
-- Shelfmark input in toolbar to add more while in reading desk mode
-
-### Phase 11 Verification Issues (from 11-05 human testing)
-
-**Web:**
-- W1: Add from List dialog shows list names only, not manuscripts inside
-- W2: "Back to Page View" button invisible in Light Mode
-- W3: Fragment count badge invisible in Dark Mode
-- W4: Language switch loses reading desk state
-- W5: Missing word wrap in reading desk text pane
-
-**Desktop:**
-- D1: Scroll sync broken — scrolling text pane only moves images pane
-- D2: Toolbar "Add" button confusing/redundant UX
-- D4: "Add to View" button should be right after Go button
-
-**Out of scope (Phase 12):** D3: PGP joins not visible in desktop
+Phase 11 required 3 iterations of gap closure (13 total plans). Key lessons preserved in MEMORY.md.
+D3 (PGP joins not visible in desktop) deferred to Phase 12.
 
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 11-13-PLAN.md (desktop UAT gap closure)
+Stopped at: Phase 11 complete and verified (gap closure execution + re-verification)
 Resume file: None
-Notes: Phase 11 fully complete. All 13 plans done. All UAT v2 gaps closed (web + desktop). Ready for Phase 12.
+Notes: Phase 11 fully verified. 13 plans executed (5 original + 2 gap closure + 4 UAT v1 + 2 UAT v2). Verification passed 12/12 must-haves. Ready for Phase 12: Desktop PGP Discovery.
