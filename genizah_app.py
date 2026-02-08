@@ -5829,11 +5829,11 @@ class GenizahGUI(QMainWindow):
             connected = self.joins_mgr.get_connected_fragments(shelfmark)
 
         if not connected or connected.get('total_fragments', 0) <= 1:
-            # Check PGP multi-fragment joins as fallback
-            try:
-                from shared.document_service import get_document_for_fragment, get_fragments_for_document
-                pgp_doc = get_document_for_fragment(self.current_browse_sid)
-                if pgp_doc:
+            # Check PGP multi-fragment joins as fallback (use cached data to avoid sync Supabase calls on UI thread)
+            pgp_doc = getattr(self, '_browse_pgp_doc', {})
+            if pgp_doc:
+                try:
+                    from shared.document_service import get_fragments_for_document
                     pgp_frags = get_fragments_for_document(pgp_doc.get('pgpid'))
                     # Filter to multi-fragment documents (>1 fragment)
                     if pgp_frags and len(pgp_frags) > 1:
@@ -5850,9 +5850,12 @@ class GenizahGUI(QMainWindow):
                                 continue  # Skip current manuscript
                             action = self.joins_menu.addAction(f"[PGP] {frag_shelf}")
                             action.triggered.connect(lambda checked, sh=frag_shelf: self._navigate_to_joined_fragment(sh))
+                        self.joins_menu.addSeparator()
+                        open_rd = self.joins_menu.addAction(tr("Open in Reading Desk"))
+                        open_rd.triggered.connect(self._browse_open_pgp_joins_in_reading_desk)
                         return
-            except Exception as e:
-                logger.debug("PGP joins dropdown fallback error: %s", e)
+                except Exception as e:
+                    logger.debug("PGP joins dropdown fallback error: %s", e)
 
             # No user or PGP joins
             action = self.joins_menu.addAction(tr("No joined fragments"))
@@ -7379,6 +7382,9 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
 
+        # Check for comments and corrections FIRST (resets PGP state and version combo)
+        self._check_document_community_status()
+
         # Build enrichment extended info (KTI/Oxford/Cambridge)
         marc = meta.get('marc', {})
         part_id_for_ext = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
@@ -7394,22 +7400,13 @@ class GenizahGUI(QMainWindow):
         )
         self._browse_enriched_html = enriched_html
 
-        # Combine with PGP if already loaded
-        pgp_html = ""
-        if self._browse_pgp_doc:
-            pgp_html = self._build_pgp_extended_info_html(self._browse_pgp_doc) or ""
-
-        combined = enriched_html + pgp_html
-        if combined.strip():
-            full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
+        if enriched_html.strip():
+            full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{enriched_html}</div>"
             self.txt_b_extended_info.setHtml(full_html)
             self.btn_b_ext_info.setVisible(True)
 
-        # Update joins dropdown menu
+        # Update joins dropdown menu (PGP joins will be added when PGP worker completes)
         self._update_joins_dropdown()
-
-        # Check for comments and corrections to update UI
-        self._check_document_community_status()
 
         # Start PGP source fetch (runs in background, populates combo when done)
         # Disconnect old worker signals first to prevent stale results
@@ -7424,8 +7421,11 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
 
-        # 4. Trigger Page Load to show text (IMPORTANT)
-        self.browse_load_page()
+        # 4. Trigger Page Load to show text (skip if already rendered by arrow navigation)
+        if getattr(self, '_browse_nav_rendered', False):
+            self._browse_nav_rendered = False
+        else:
+            self.browse_load_page()
 
     def _on_browse_pgp_loaded(self, sys_id, sources, pgp_doc):
         """Handle PGP sources loaded from background thread."""
@@ -7453,6 +7453,9 @@ class GenizahGUI(QMainWindow):
             self.btn_b_ext_info.setVisible(False)
             self.btn_b_ext_info.setChecked(False)
             self.txt_b_extended_info.setVisible(False)
+
+        # Refresh joins dropdown now that PGP data is available
+        self._update_joins_dropdown()
 
         if not sources:
             return
@@ -8115,6 +8118,33 @@ class GenizahGUI(QMainWindow):
             pass
 
         self._browse_enter_reading_desk(fragments_info, pgpid=pgpid)
+
+    def _browse_open_pgp_joins_in_reading_desk(self):
+        """Open PGP multi-fragment joined document in reading desk."""
+        pgp_doc = getattr(self, '_browse_pgp_doc', {})
+        if not pgp_doc:
+            return
+
+        try:
+            from shared.document_service import get_fragments_for_document
+            pgp_frags = get_fragments_for_document(pgp_doc.get('pgpid'))
+            if not pgp_frags or len(pgp_frags) <= 1:
+                return
+
+            fragments_info = []
+            for idx, frag in enumerate(pgp_frags):
+                frag_sid = frag.get('sys_id', '')
+                if frag_sid:
+                    fragments_info.append({
+                        'sys_id': frag_sid,
+                        'shelfmark': frag.get('shelfmark', frag_sid),
+                        'sequence_order': idx
+                    })
+
+            if fragments_info:
+                self._browse_enter_reading_desk(fragments_info, pgpid=pgp_doc.get('pgpid'))
+        except Exception as e:
+            logger.debug("Failed to open PGP joins in reading desk: %s", e)
 
     def _browse_rd_render(self):
         """Render reading desk: stacked texts in text pane, stacked images in viewer pane.
@@ -16946,6 +16976,8 @@ class GenizahGUI(QMainWindow):
             self._update_part_state_for_sid(new_sid)
             # Render page FIRST so text is ready before community status stores it
             self.browse_render_page(page_data)
+            # Flag: page already rendered, skip browse_load_page in enriched callback
+            self._browse_nav_rendered = True
             # Kick off metadata enrichment for new manuscript
             cached_meta = self.meta_mgr.nli_cache.get(new_sid)
             if cached_meta:
