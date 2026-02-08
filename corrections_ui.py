@@ -3487,6 +3487,86 @@ class JoinsDialog(QDialog):
         completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         line_edit.setCompleter(completer)
 
+    def _get_pgp_joins(self):
+        """Get PGP multi-fragment joins for the current document, if any.
+
+        Returns:
+            tuple: (pgp_fragment_shelfmarks, pgp_joins, pgp_fragment_details) where
+                   pgp_fragment_shelfmarks is a list of shelfmark strings,
+                   pgp_joins is a list of join dicts, and
+                   pgp_fragment_details is a list of {shelfmark, document_id} dicts.
+                   Returns ([], [], []) if no PGP joins exist.
+        """
+        try:
+            from shared.document_service import get_document_for_fragment, get_fragments_for_document
+
+            # Look up PGP document for this fragment
+            pgp_doc = get_document_for_fragment(self.document_id)
+            if not pgp_doc:
+                return [], [], []
+
+            pgpid = pgp_doc.get('pgpid')
+            if not pgpid:
+                return [], [], []
+
+            # Get all fragments for this PGP document
+            pgp_fragments = get_fragments_for_document(pgpid)
+
+            # Only include if there are MORE THAN 1 unique sys_ids
+            # (filters out single-fragment PGP documents - no false "Related Fragments")
+            unique_sys_ids = set()
+            for pf in pgp_fragments:
+                sid = pf.get('sys_id')
+                if sid:
+                    unique_sys_ids.add(sid)
+
+            if len(unique_sys_ids) <= 1:
+                return [], [], []
+
+            # Extract plain shelfmark for comparison
+            plain_shelfmark = self.shelfmark
+            if plain_shelfmark and ' | ' in plain_shelfmark:
+                plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+            current_shelfmark_upper = plain_shelfmark.upper() if plain_shelfmark else ''
+
+            pgp_fragment_shelfmarks = []
+            pgp_joins = []
+            pgp_fragment_details = []
+
+            for pf in pgp_fragments:
+                pf_shelfmark = pf.get('shelfmark', '')
+                pf_sys_id = pf.get('sys_id', '')
+
+                if not pf_shelfmark:
+                    continue
+
+                pgp_fragment_shelfmarks.append(pf_shelfmark)
+                pgp_fragment_details.append({
+                    'shelfmark': pf_shelfmark,
+                    'document_id': pf_sys_id
+                })
+
+                # Skip current shelfmark for join entries (don't create self-join)
+                if pf_shelfmark.upper() == current_shelfmark_upper:
+                    continue
+
+                pgp_joins.append({
+                    'id': None,  # Not user-created, prevents delete
+                    'fragment_a': plain_shelfmark or '',
+                    'fragment_b': pf_shelfmark,
+                    'relationship_type': 'same_composition',
+                    'source': 'PGP',
+                    'created_by_username': '',
+                    'created_at': '',
+                    'notes': f'PGP Document #{pgpid}',
+                    'document_id_b': pf_sys_id  # For navigation
+                })
+
+            return pgp_fragment_shelfmarks, pgp_joins, pgp_fragment_details
+        except Exception as e:
+            print(f"Error getting PGP joins: {e}")
+            return [], [], []
+
     def load_joins(self, force_fresh: bool = False):
         """Load connected fragments - from cache if available, else API
 
@@ -3527,7 +3607,12 @@ class JoinsDialog(QDialog):
             if cached and (cached.get('total_joins', 0) > 0 or cached.get('total_fragments', 0) > 1):
                 self._display_cached_joins(cached)
             else:
-                self.cluster_info.setText(tr("No joins found (offline)"))
+                # No user joins in cache - still check PGP joins (requires Supabase, not user server)
+                pgp_frags, pgp_joins, pgp_details = self._get_pgp_joins()
+                if pgp_joins:
+                    self._display_pgp_only_joins(pgp_frags, pgp_joins, pgp_details)
+                else:
+                    self.cluster_info.setText(tr("No joins found (offline)"))
             return
 
         # Server is available
@@ -3545,7 +3630,12 @@ class JoinsDialog(QDialog):
             self.connected_data = self.client.get_connected_fragments(plain_shelfmark or self.shelfmark)
 
         if not self.connected_data:
-            self.cluster_info.setText(tr("No joins found"))
+            # No user joins from API - still check PGP joins
+            pgp_frags, pgp_joins, pgp_details = self._get_pgp_joins()
+            if pgp_joins:
+                self._display_pgp_only_joins(pgp_frags, pgp_joins, pgp_details)
+            else:
+                self.cluster_info.setText(tr("No joins found"))
             return
 
         # Update local cache with fetched data
@@ -3623,6 +3713,193 @@ class JoinsDialog(QDialog):
 
         # Save the updated cache
         self.joins_mgr.save()
+
+    def _display_pgp_only_joins(self, pgp_frags, pgp_joins, pgp_details):
+        """Display PGP-only joins when no user joins exist."""
+        # Extract plain shelfmark for comparison
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        total_frags = len(set(pgp_frags))
+        total_joins = len(pgp_joins)
+        self.cluster_info.setText(
+            tr("{} fragments in cluster, {} joins (PGP)").format(total_frags, total_joins)
+        )
+
+        # Build shelfmark -> document_id map from PGP details
+        shelfmark_to_docid = {}
+        for pd in pgp_details:
+            shelf = pd.get('shelfmark', '')
+            doc_id = pd.get('document_id')
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        # Build fallback map from csv_bank
+        shelf_to_sys = {}
+        if self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
+            for sys_id, meta in self.meta_mgr.csv_bank.items():
+                shelf = meta.get('shelfmark', '')
+                if shelf:
+                    shelf_to_sys[self._normalize_shelfmark(shelf)] = sys_id
+
+        # Populate fragments list (deduplicated)
+        seen_upper = set()
+        for frag in pgp_frags:
+            if frag.upper() in seen_upper:
+                continue
+            seen_upper.add(frag.upper())
+
+            title = ""
+            doc_id = shelfmark_to_docid.get(frag.upper())
+            if not doc_id and self.meta_mgr:
+                norm_frag = self._normalize_shelfmark(frag)
+                doc_id = shelf_to_sys.get(norm_frag)
+            if doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(doc_id)
+                    if title and len(title) > 35:
+                        title = title[:35] + "..."
+                except:
+                    pass
+
+            display_text = f"{frag} - {title}" if title else frag
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, frag)
+            if plain_shelfmark and frag.upper() == plain_shelfmark.upper():
+                item.setForeground(QColor('#27ae60'))
+                item.setText(f"{display_text} ({tr('current')})")
+            self.fragments_list.addItem(item)
+
+        # Populate joins table with PGP joins
+        self._add_pgp_join_rows(pgp_joins, plain_shelfmark)
+        self.table.resizeColumnsToContents()
+
+    def _add_pgp_join_rows(self, pgp_joins, plain_shelfmark):
+        """Add PGP join rows to the joins table with green PGP source styling."""
+        for join in pgp_joins:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            frag_a = join.get('fragment_a', '')
+            frag_b = join.get('fragment_b', '')
+
+            self.table.setItem(row, 0, QTableWidgetItem(frag_a))
+            self.table.setItem(row, 1, QTableWidgetItem(frag_b))
+
+            rel_type = join.get('relationship_type')
+            rel_display = {
+                'physical_join': tr('Physical join'),
+                'same_composition': tr('Same composition')
+            }.get(rel_type, rel_type or tr('Unknown'))
+            self.table.setItem(row, 2, QTableWidgetItem(rel_display))
+
+            # PGP source label with green color
+            source_item = QTableWidgetItem(join.get('source', 'PGP'))
+            source_item.setForeground(QColor('#27ae60'))
+            self.table.setItem(row, 3, source_item)
+
+            self.table.setItem(row, 4, QTableWidgetItem(join.get('created_by_username', '')))
+
+            date_str = safe_date_str(join.get('created_at'))
+            self.table.setItem(row, 5, QTableWidgetItem(date_str))
+
+            # Store None as join ID (prevents deletion)
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, None)
+
+            # Highlight direct joins (PGP joins always involve current shelfmark)
+            is_direct = (frag_a.upper() == plain_shelfmark.upper() or
+                         frag_b.upper() == plain_shelfmark.upper()) if plain_shelfmark else False
+            if is_direct:
+                palette = self.palette()
+                is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+                highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
+                for col in range(6):
+                    item = self.table.item(row, col)
+                    if item:
+                        item.setBackground(highlight_color)
+
+    def _merge_pgp_joins_into_display(self, existing_fragments_upper):
+        """Merge PGP joins into an already-populated display.
+
+        Args:
+            existing_fragments_upper: Set of uppercased shelfmark strings already in fragments list
+
+        Modifies the fragments list and joins table in-place, adding PGP joins.
+        Returns the count of PGP joins added.
+        """
+        pgp_frags, pgp_joins, pgp_details = self._get_pgp_joins()
+        if not pgp_joins:
+            return 0
+
+        # Extract plain shelfmark
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        # Build shelfmark -> document_id map
+        shelfmark_to_docid = {}
+        for pd in pgp_details:
+            shelf = pd.get('shelfmark', '')
+            doc_id = pd.get('document_id')
+            if shelf and doc_id:
+                shelfmark_to_docid[shelf.upper()] = doc_id
+
+        # Build fallback map from csv_bank
+        shelf_to_sys = {}
+        if self.meta_mgr and hasattr(self.meta_mgr, 'csv_bank'):
+            for sys_id, meta in self.meta_mgr.csv_bank.items():
+                shelf = meta.get('shelfmark', '')
+                if shelf:
+                    shelf_to_sys[self._normalize_shelfmark(shelf)] = sys_id
+
+        # Add new PGP fragments not already displayed (deduplicate)
+        for frag in pgp_frags:
+            if frag.upper() in existing_fragments_upper:
+                continue
+            existing_fragments_upper.add(frag.upper())
+
+            title = ""
+            doc_id = shelfmark_to_docid.get(frag.upper())
+            if not doc_id and self.meta_mgr:
+                norm_frag = self._normalize_shelfmark(frag)
+                doc_id = shelf_to_sys.get(norm_frag)
+            if doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(doc_id)
+                    if title and len(title) > 35:
+                        title = title[:35] + "..."
+                except:
+                    pass
+
+            display_text = f"{frag} - {title}" if title else frag
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, frag)
+            if plain_shelfmark and frag.upper() == plain_shelfmark.upper():
+                item.setForeground(QColor('#27ae60'))
+                item.setText(f"{display_text} ({tr('current')})")
+            self.fragments_list.addItem(item)
+
+        # Deduplicate PGP joins against existing user joins in the table
+        existing_pairs = set()
+        for r in range(self.table.rowCount()):
+            fa = self.table.item(r, 0).text().upper() if self.table.item(r, 0) else ''
+            fb = self.table.item(r, 1).text().upper() if self.table.item(r, 1) else ''
+            if fa and fb:
+                existing_pairs.add((fa, fb))
+                existing_pairs.add((fb, fa))
+
+        deduped_pgp_joins = []
+        for pj in pgp_joins:
+            pair = (pj.get('fragment_a', '').upper(), pj.get('fragment_b', '').upper())
+            if pair not in existing_pairs:
+                deduped_pgp_joins.append(pj)
+                existing_pairs.add(pair)
+                existing_pairs.add((pair[1], pair[0]))
+
+        # Add PGP join rows
+        self._add_pgp_join_rows(deduped_pgp_joins, plain_shelfmark)
+        return len(deduped_pgp_joins)
 
     def _display_cached_joins(self, cached: dict):
         """Display joins from the local cache."""
@@ -3726,6 +4003,16 @@ class JoinsDialog(QDialog):
                     if item:
                         item.setBackground(highlight_color)
 
+        # Merge PGP joins into display
+        existing_frags_upper = set(f.upper() for f in fragments)
+        pgp_count = self._merge_pgp_joins_into_display(existing_frags_upper)
+        if pgp_count > 0:
+            new_total_joins = total_joins + pgp_count
+            new_total_frags = self.fragments_list.count()
+            self.cluster_info.setText(
+                tr("{} fragments in cluster, {} joins").format(new_total_frags, new_total_joins)
+            )
+
         self.table.resizeColumnsToContents()
 
     def _display_connected_data(self, data):
@@ -3825,6 +4112,16 @@ class JoinsDialog(QDialog):
                     item = self.table.item(row, col)
                     if item:
                         item.setBackground(highlight_color)
+
+        # Merge PGP joins into display
+        existing_frags_upper = set(f.upper() for f in data.fragments)
+        pgp_count = self._merge_pgp_joins_into_display(existing_frags_upper)
+        if pgp_count > 0:
+            new_total_joins = total_joins + pgp_count
+            new_total_frags = self.fragments_list.count()
+            self.cluster_info.setText(
+                tr("{} fragments in cluster, {} joins").format(new_total_frags, new_total_joins)
+            )
 
         self.table.resizeColumnsToContents()
 
@@ -3960,19 +4257,25 @@ class JoinsDialog(QDialog):
         if is_admin and selected:
             # Get selected row
             row = selected[0].row()
-            frag_a = self.table.item(row, 0).text() if self.table.item(row, 0) else ''
-            frag_b = self.table.item(row, 1).text() if self.table.item(row, 1) else ''
+            join_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) if self.table.item(row, 0) else None
 
-            # Extract plain shelfmark for comparison
-            plain_shelfmark = self.shelfmark
-            if plain_shelfmark and ' | ' in plain_shelfmark:
-                plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+            # PGP joins have None as join ID - cannot be deleted
+            if join_id is None:
+                can_delete = False
+            else:
+                frag_a = self.table.item(row, 0).text() if self.table.item(row, 0) else ''
+                frag_b = self.table.item(row, 1).text() if self.table.item(row, 1) else ''
 
-            # Only allow delete if this join DIRECTLY involves the current shelfmark
-            if plain_shelfmark:
-                is_direct = (frag_a.upper() == plain_shelfmark.upper() or
-                             frag_b.upper() == plain_shelfmark.upper())
-                can_delete = is_direct
+                # Extract plain shelfmark for comparison
+                plain_shelfmark = self.shelfmark
+                if plain_shelfmark and ' | ' in plain_shelfmark:
+                    plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+                # Only allow delete if this join DIRECTLY involves the current shelfmark
+                if plain_shelfmark:
+                    is_direct = (frag_a.upper() == plain_shelfmark.upper() or
+                                 frag_b.upper() == plain_shelfmark.upper())
+                    can_delete = is_direct
 
         self.btn_delete.setEnabled(can_delete)
 
