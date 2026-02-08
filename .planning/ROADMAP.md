@@ -111,12 +111,14 @@ Plans:
   2. Search results show a green indicator column for manuscripts that have PGP transcriptions available
   3. User can search by PGP tag either by clicking a tag in the metadata panel or by entering a tag in a dedicated search mode
   4. Related Fragments dialog shows PGP-sourced joins (multi-fragment documents) alongside existing user-created joins
-**Plans:** 3 plans
+**Plans:** 5 plans (3 original + 2 gap closure)
 
 Plans:
 - [x] 12-01-PLAN.md -- PGP metadata in Extended Info (Browse tab + ResultDialog) with clickable tag navigation
 - [x] 12-02-PLAN.md -- PGP badges, filter toggle, and tag search (both web and desktop apps)
 - [x] 12-03-PLAN.md -- PGP joins integration in desktop Related Fragments dialog
+- [x] 12-04-PLAN.md -- Gap closure: Tag search navigation, browse state, ResultDialog crash, Hebrew snippets
+- [x] 12-05-PLAN.md -- Gap closure: Web filters toggle, PGP joins in dropdowns, Hebrew i18n, Browse enrichment
 
 ### Phase 13: Transcription Search
 **Goal**: Users can search within PGP and user-corrected transcriptions via Tantivy, with filter controls to scope results
@@ -144,9 +146,9 @@ Plans:
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 11. Virtual Reading Desk | v5.6.0 | 13/13 | Needs review (1 feature) | 2026-02-08 |
-| 12. Desktop PGP Discovery | v5.6.0 | 3/3 | Complete | 2026-02-08 |
+| 12. Desktop PGP Discovery | v5.6.0 | 5/5 | Complete | 2026-02-08 |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 12 complete -- 3 plans executed in parallel, verified 13/13)*
+*Last updated: 2026-02-08 (Phase 12 gap closure -- 2 additional plans, re-verified 17/17)*
