@@ -5088,6 +5088,9 @@ class GenizahGUI(QMainWindow):
         version_data = self.browse_version_combo.currentData()
         if not version_data:
             return
+        # Skip non-selectable header items
+        if version_data.get('source') == 'header':
+            return
 
         self._browse_load_version(version_data)
 
@@ -5098,16 +5101,46 @@ class GenizahGUI(QMainWindow):
 
         source = version_data.get('source')
         version_id = version_data.get('version_id')
+        source_id = version_data.get('source_id')
 
         # Check cache first
-        cache_key = f"{source}_{version_id}" if version_id else source
+        if source in ('pgp_edition', 'pgp_translation'):
+            cache_key = f"pgp_{source_id}" if source_id else source
+        else:
+            cache_key = f"{source}_{version_id}" if version_id else source
+
         if cache_key in self._browse_versions_cache:
             content = self._browse_versions_cache[cache_key]
-            self._browse_display_version_text(content)
+            if source == 'pgp_translation':
+                language = version_data.get('language', '')
+                is_rtl = language != 'English'
+                self._browse_display_pgp_text(content, is_rtl=is_rtl)
+            elif source == 'pgp_edition':
+                self._browse_display_pgp_text(content, is_rtl=True)
+            else:
+                self._browse_display_version_text(content)
             return
 
-        if source == "original":
-            # Show original V0.8 text
+        if source == "pgp_edition":
+            # PGP edition content is stored directly in version_data
+            content = version_data.get('content', '')
+            if content:
+                if source_id:
+                    self._browse_versions_cache[f"pgp_{source_id}"] = content
+                self._browse_display_pgp_text(content, is_rtl=True)
+        elif source == "pgp_translation":
+            # PGP translation content is stored directly in version_data
+            content = version_data.get('content', '')
+            language = version_data.get('language', '')
+            if content:
+                if source_id:
+                    self._browse_versions_cache[f"pgp_{source_id}"] = content
+                # English translations are LTR, everything else RTL
+                is_rtl = language != 'English'
+                self._browse_display_pgp_text(content, is_rtl=is_rtl)
+        elif source == "original":
+            # Show original V0.8 text and restore RTL direction
+            self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             if hasattr(self, 'browse_original_page_text') and self.browse_original_page_text:
                 self._browse_display_version_text(self.browse_original_page_text)
         elif source == "correction":
@@ -5117,6 +5150,8 @@ class GenizahGUI(QMainWindow):
                 correction_id = version_data.get('correction_id')
                 cache_key = f"correction_{correction_id}"
                 self._browse_versions_cache[cache_key] = content
+                # Restore RTL for corrections (Hebrew text)
+                self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                 self._browse_display_version_text(content)
             else:
                 if hasattr(self, 'browse_original_page_text'):
@@ -5247,8 +5282,10 @@ class GenizahGUI(QMainWindow):
         original_text = self.browse_text.toPlainText()
         self.browse_original_page_text = original_text
 
-        # Reset version cache and combo for new document
+        # Reset version cache, PGP state, and combo for new document
         self._browse_versions_cache = {'original': original_text}
+        self._browse_pgp_sources = []
+        self._browse_pgp_doc = {}
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.clear()
         self.browse_version_combo.addItem("V0.8", {"source": "original"})
@@ -6528,6 +6565,10 @@ class GenizahGUI(QMainWindow):
         community_bar.addWidget(self.browse_version_combo)
         # Version data cache for current document
         self._browse_versions_cache = {}
+        # PGP source state for current document
+        self._browse_pgp_sources = []
+        self._browse_pgp_doc = {}
+        self._browse_pgp_worker = None
 
         community_bar.addWidget(QLabel(" | "))
 
@@ -6889,8 +6930,86 @@ class GenizahGUI(QMainWindow):
         # Check for comments and corrections to update UI
         self._check_document_community_status()
 
+        # Start PGP source fetch (runs in background, populates combo when done)
+        self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
+        self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
+        self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
+        self._browse_pgp_worker.start()
+
         # 4. Trigger Page Load to show text (IMPORTANT)
         self.browse_load_page()
+
+    def _on_browse_pgp_loaded(self, sys_id, sources, pgp_doc):
+        """Handle PGP sources loaded from background thread."""
+        # Stale-request guard: user may have navigated to a different manuscript
+        if sys_id != self.current_browse_sid:
+            return
+
+        # Store PGP data for later use (page changes, ResultDialog)
+        self._browse_pgp_sources = sources
+        self._browse_pgp_doc = pgp_doc
+
+        if not sources:
+            return
+
+        # Save existing corrections/versions from the combo before rebuilding
+        saved_corrections = []
+        for i in range(self.browse_version_combo.count()):
+            data = self.browse_version_combo.itemData(i)
+            if data and data.get('source') not in ('original', 'header', None):
+                saved_corrections.append((self.browse_version_combo.itemText(i), data))
+
+        # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
+        has_pgp = self._populate_pgp_combo(self.browse_version_combo, sources, pgp_doc)
+
+        if has_pgp:
+            # Re-add saved corrections/versions after V0.8
+            if saved_corrections:
+                self.browse_version_combo.blockSignals(True)
+                self.browse_version_combo.insertSeparator(self.browse_version_combo.count())
+                for label, data in saved_corrections:
+                    self.browse_version_combo.addItem(label, data)
+                self.browse_version_combo.blockSignals(False)
+
+            # Store original V0.8 text if not already stored
+            if not hasattr(self, 'browse_original_page_text') or not self.browse_original_page_text:
+                self.browse_original_page_text = self.browse_text.toPlainText()
+
+            # Auto-select first PGP edition and display it
+            edition_data = self._auto_select_pgp_edition(self.browse_version_combo)
+            if edition_data:
+                content = edition_data.get('content', '')
+                if content:
+                    self._browse_display_pgp_text(content, is_rtl=True)
+
+            self.browse_version_combo.setEnabled(True)
+
+    def _on_browse_pgp_error(self, sys_id, error_message):
+        """Handle PGP source fetch error -- silently fall back to existing behavior."""
+        logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
+
+    def _browse_display_pgp_text(self, text, is_rtl=True):
+        """Display PGP edition/translation text with proper directionality."""
+        if not text:
+            return
+        direction = 'rtl' if is_rtl else 'ltr'
+        layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
+        self.browse_text.setLayoutDirection(layout_dir)
+        browse_html_text = text.replace('\n', '<br>')
+        self.browse_text.setHtml(f"<div dir='{direction}'>{browse_html_text}</div>")
+        apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
+
+    def _browse_refresh_pgp_for_page(self):
+        """Re-fetch PGP sources for current page (called on page change within same manuscript)."""
+        if not hasattr(self, '_browse_pgp_sources') or not self._browse_pgp_sources:
+            return  # No PGP data was loaded for this manuscript
+        if not self.current_browse_sid:
+            return
+        # Start a new PGP worker for the current page
+        self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
+        self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
+        self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
+        self._browse_pgp_worker.start()
 
     def _on_browse_link_clicked(self, url):
         """Handle clicks on internal links in browse text (View All mode)."""
@@ -6940,6 +7059,8 @@ class GenizahGUI(QMainWindow):
 
         if page_data:
             self.browse_render_page(page_data)
+            # Re-fetch PGP sources for the new page (recto/verso may differ)
+            self._browse_refresh_pgp_for_page()
 
     def toggle_browse_image(self):
         visible = self.btn_b_toggle_img.isChecked()
@@ -15200,7 +15321,8 @@ class GenizahGUI(QMainWindow):
             return
 
         new_sid = page_data.get('sys_id', self.current_browse_sid)
-        if new_sid != self.current_browse_sid:
+        is_new_manuscript = new_sid != self.current_browse_sid
+        if is_new_manuscript:
             self.current_browse_sid = new_sid
             self.browse_sys_input.setText(new_sid)
             shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
@@ -15219,6 +15341,10 @@ class GenizahGUI(QMainWindow):
                 self.enrich_browse_worker.start()
 
         self.browse_render_page(page_data)
+
+        # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
+        if not is_new_manuscript:
+            self._browse_refresh_pgp_for_page()
     
     def browse_render_page(self, pd):
         if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:
