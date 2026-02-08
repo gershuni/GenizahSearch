@@ -537,8 +537,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                 # Filters Panel (initially hidden)
                 filters_visible = {'value': False}
                 filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
-                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); display: none;'
+                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
                 )
+                filters_panel.set_visibility(False)
                 with filters_panel:
                     with ui.row().classes('w-full gap-2 items-center'):
                         ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
@@ -729,10 +730,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
     def toggle_filters():
         """Toggle visibility of filters panel."""
         filters_visible['value'] = not filters_visible['value']
-        if filters_visible['value']:
-            filters_panel.style('background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);')
-        else:
-            filters_panel.style('background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); display: none;')
+        filters_panel.set_visibility(filters_visible['value'])
 
     def apply_filters():
         """Apply filters to results."""
