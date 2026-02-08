@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk)
-Plan: 1 of 5 (web dual-pane reading desk complete)
-Status: In progress -- Plan 11-01 complete, 4 remaining
-Last activity: 2026-02-08 -- Completed 11-01-PLAN.md (shared model + web dual-pane reading desk)
+Plan: 2 of 5 (web entry points and management complete)
+Status: In progress -- Plans 11-01 and 11-02 complete, 3 remaining
+Last activity: 2026-02-08 -- Completed 11-02-PLAN.md (web entry points + dynamic management)
 
-Progress: [████████░░░░░░░░░░░░] 57% (8/14 plans)
+Progress: [█████████░░░░░░░░░░░] 64% (9/14 plans)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [████████░░░░░░░░░░░░] 57% (8/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8 (v5.6.0)
+- Total plans completed: 9 (v5.6.0)
 - Average duration: ~7 min
-- Total execution time: ~52 min
+- Total execution time: ~60 min
 
 **By Phase:**
 
@@ -36,7 +36,7 @@ Progress: [████████░░░░░░░░░░░░] 57% (8/
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
-| 11. Virtual Reading Desk | 1/5 | ~4 min | ~4 min |
+| 11. Virtual Reading Desk | 2/5 | ~12 min | ~6 min |
 
 *Updated after each plan completion*
 
@@ -55,6 +55,8 @@ Recent decisions affecting current work:
 - DEC-10-02-01: Replace insertSeparator with disabled text dividers for visibility
 - DEC-11-01-01: Per-image JS state (rdViewers) for responsiveness
 - DEC-11-01-02: IntersectionObserver for sync scrolling (not scroll events)
+- DEC-11-02-01: Persist reading desk state to app.storage.user for language-switch preservation
+- DEC-11-02-02: Header shows 'Document #X' for join-context, 'Reading Desk' for standalone entry
 
 ### Data State
 
@@ -112,7 +114,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-08 10:59 UTC
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-02-08 11:11 UTC
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
-Notes: Plan 11-01 complete (shared model + web dual-pane reading desk). Next: 11-02 (desktop entry points) or 11-03 (web entry points). Wave 1 complete for web track.
+Notes: Plan 11-02 complete (web entry points + dynamic management). Next: 11-03 (desktop dual-pane) or 11-04 (desktop entry points). Web track (plans 01+02) complete.
