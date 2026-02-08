@@ -1662,7 +1662,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: load_page()).classes('mt-4')
                 return
 
-            if not state.current_page:
+            if not state.current_page and not state.view_joined:
                 # Show welcome/search prompt
                 with ui.column().classes('w-full items-center py-16'):
                     ui.icon('auto_stories', size='6rem').classes('text-green-400')
@@ -2419,7 +2419,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 # Header bar
                 with ui.card().classes('w-full mb-2').style(
-                    'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                    'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important;'
                 ):
                     with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-3'):
@@ -2607,7 +2607,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ''', sanitize=False)
 
                     # === RIGHT PANE: Text Stack ===
-                    with ui.card().style('flex: 1 1 auto; min-height: 70vh; display: flex; flex-direction: column;'):
+                    with ui.card().style('flex: 1 1 auto; min-width: 0; min-height: 70vh; display: flex; flex-direction: column;'):
                         ui.label(tr('Transcriptions')).classes('text-sm font-semibold p-2 border-b').style(
                             'color: var(--text-secondary);'
                         )
@@ -2771,7 +2771,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
 
                                     # Text content container (replaceable by version selector)
-                                    tc = ui.column().classes('w-full px-3 py-2')
+                                    tc = ui.column().classes('w-full px-3 py-2').style('min-width: 0;')
                                     text_containers[pg_idx] = tc
 
                                     with tc:
@@ -3232,7 +3232,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             )
 
                     # === RIGHT PANEL: Transcription ===
-                    text_panel_flex = 'flex: 1 1 auto;' if has_image else 'flex: 1 1 100%;'
+                    text_panel_flex = 'flex: 1 1 auto; min-width: 0;' if has_image else 'flex: 1 1 100%; min-width: 0;'
                     
                     # Style based on edit mode
                     panel_style = f'{text_panel_flex} min-height: 60vh; display: flex; flex-direction: column;'
