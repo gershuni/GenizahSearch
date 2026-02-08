@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 12 of 13 (Desktop PGP Discovery)
-Plan: 3 of 3 (12-01 and 12-03 complete, 12-02 pending)
-Status: In progress
-Last activity: 2026-02-08 -- Completed 12-03-PLAN.md (PGP joins in JoinsDialog)
+Phase: 12 of 13 (Desktop PGP Discovery) -- COMPLETE
+Plan: 3 of 3 (all plans complete)
+Status: Phase complete
+Last activity: 2026-02-08 -- Completed 12-02-PLAN.md (Search Result Indicators + Tag Search + Filter)
 
-Progress: [█████████████████░░░] 85% (22/26 plans across phases 8-13)
+Progress: [██████████████████░░] 88% (23/26 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [█████████████████░░░] 85% (22
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22 (v5.6.0)
+- Total plans completed: 23 (v5.6.0)
 - Average duration: ~5 min
-- Total execution time: ~117 min
+- Total execution time: ~126 min
 
 **By Phase:**
 
@@ -37,7 +37,7 @@ Progress: [█████████████████░░░] 85% (22
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
 | 11. Virtual Reading Desk | 13/13 | ~67 min | ~5 min |
-| 12. Desktop PGP Discovery | 2/3 | ~13 min | ~6.5 min |
+| 12. Desktop PGP Discovery | 3/3 | ~22 min | ~7 min |
 
 *Updated after each plan completion*
 
@@ -69,6 +69,10 @@ Recent decisions affecting current work:
 - DEC-12-01-01: PGP section uses green left border (#27ae60) distinct from Oxford blue (#3498db)
 - DEC-12-01-02: Tag clicks use exact search as interim; _pending_tag_search flag for Plan 12-02
 - DEC-12-01-03: Three-case race condition handling in ResultDialog (enriched first, PGP first, PGP-only)
+- DEC-12-02-01: PGP badge column (COL_PGP=9) added after SRC column, 40px fixed width
+- DEC-12-02-02: PGP controls on separate row3 in desktop to avoid crowding row2
+- DEC-12-02-03: Web PGP text badge styled like library badge (success-100/700 colors)
+- DEC-12-02-04: Tag search results converted to search result format for table display
 - DEC-12-03-01: Synchronous PGP join lookup in JoinsDialog (2 fast queries, acceptable latency)
 - DEC-12-03-02: Null join ID convention for PGP joins (prevents deletion)
 
@@ -92,9 +96,16 @@ Recent decisions affecting current work:
 Phase 11 required 3 iterations of gap closure (13 total plans). Key lessons preserved in MEMORY.md.
 D3 (PGP joins not visible in desktop) deferred to Phase 12 -- RESOLVED in 12-03.
 
+### Phase 12 Notes (Complete)
+
+Phase 12 completed all 3 plans:
+- 12-01: PGP info in desktop browse/results with tag display and link styling
+- 12-02: PGP badges, filters, and tag search in both apps
+- 12-03: PGP joins in desktop JoinsDialog
+
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 12-03-PLAN.md (PGP joins in JoinsDialog)
+Stopped at: Completed 12-02-PLAN.md (Search Result Indicators + Tag Search + Filter)
 Resume file: None
-Notes: Plan 12-03 complete. PGP multi-fragment joins now visible in desktop JoinsDialog. D3 item resolved. Plan 12-02 still pending (Search Result Indicators + Tag Search + Filter).
+Notes: Phase 12 complete (all 3 plans). Ready for Phase 13: Transcription Search.
