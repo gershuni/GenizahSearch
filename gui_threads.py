@@ -528,6 +528,59 @@ class PGPSourceWorker(QThread):
             self.error_signal.emit(self.sys_id, str(e))
 
 
+class PGPBadgeWorker(QThread):
+    """Batch check which sys_ids have PGP transcriptions for badge display."""
+    finished = pyqtSignal(set)
+
+    def __init__(self, sys_ids: list, parent=None):
+        super().__init__(parent)
+        self.sys_ids = sys_ids
+
+    def run(self):
+        try:
+            from shared.document_service import get_sys_ids_with_transcriptions
+            result = get_sys_ids_with_transcriptions(self.sys_ids)
+            self.finished.emit(result)
+        except Exception as e:
+            print(f"PGPBadgeWorker error: {e}")
+            self.finished.emit(set())
+
+
+class PGPTagsWorker(QThread):
+    """Fetch all distinct PGP tags for dropdown population."""
+    finished = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self):
+        try:
+            from shared.document_service import get_all_distinct_tags
+            result = get_all_distinct_tags()
+            self.finished.emit(result)
+        except Exception as e:
+            print(f"PGPTagsWorker error: {e}")
+            self.finished.emit([])
+
+
+class PGPTagSearchWorker(QThread):
+    """Search for fragments by PGP tag."""
+    finished = pyqtSignal(str, list)
+
+    def __init__(self, tag: str, parent=None):
+        super().__init__(parent)
+        self.tag = tag
+
+    def run(self):
+        try:
+            from shared.document_service import get_fragments_by_tag
+            result = get_fragments_by_tag(self.tag)
+            self.finished.emit(self.tag, result)
+        except Exception as e:
+            print(f"PGPTagSearchWorker error: {e}")
+            self.finished.emit(self.tag, [])
+
+
 class ReadingDeskWorker(QThread):
     """Batch load PGP sources for multiple fragments for the reading desk.
 

@@ -505,3 +505,20 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error searching by tag '{tag}': {e}")
         return []
+
+
+def get_all_distinct_tags() -> List[str]:
+    """Get all distinct PGP tags across all documents, sorted alphabetically."""
+    try:
+        client = get_client()
+        response = client.table('documents').select('tags').not_.is_('tags', 'null').execute()
+        all_tags = set()
+        for row in (response.data or []):
+            tags = row.get('tags', [])
+            if tags:
+                for tag in tags:
+                    all_tags.add(tag)
+        return sorted(all_tags)
+    except Exception as e:
+        print(f"Error getting distinct tags: {e}")
+        return []

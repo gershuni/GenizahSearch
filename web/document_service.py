@@ -19,4 +19,5 @@ from shared.document_service import (
     get_translations_for_document,
     get_sys_ids_with_transcriptions,
     get_fragments_by_tag,
+    get_all_distinct_tags,
 )
