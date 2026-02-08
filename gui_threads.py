@@ -526,3 +526,36 @@ class PGPSourceWorker(QThread):
             self.finished_signal.emit(self.sys_id, page_sources, pgp_doc_dict)
         except Exception as e:
             self.error_signal.emit(self.sys_id, str(e))
+
+
+class ReadingDeskWorker(QThread):
+    """Batch load PGP sources for multiple fragments for the reading desk.
+
+    Fetches all PGP sources and document metadata for a list of sys_ids
+    in a background thread, preventing UI freeze when entering reading desk mode.
+    """
+    finished = pyqtSignal(list)  # list of (sys_id, sources, pgp_doc)
+    error = pyqtSignal(str)
+
+    def __init__(self, sys_ids: list, parent=None):
+        super().__init__(parent)
+        self.sys_ids = sys_ids
+
+    def run(self):
+        try:
+            from shared.document_service import (
+                get_all_sources_for_fragment,
+                get_document_for_fragment,
+            )
+            results = []
+            for sys_id in self.sys_ids:
+                try:
+                    sources = get_all_sources_for_fragment(sys_id) or []
+                    pgp_doc = get_document_for_fragment(sys_id)
+                    results.append((sys_id, sources, pgp_doc or {}))
+                except Exception as e:
+                    print(f"ReadingDeskWorker: error loading {sys_id}: {e}")
+                    results.append((sys_id, [], {}))
+            self.finished.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
