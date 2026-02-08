@@ -12819,7 +12819,15 @@ class GenizahGUI(QMainWindow):
             library_code = self.meta_mgr.get_library_for_id(sid) if self.meta_mgr else ''
             desc = r.get('description', '') or ''
             doc_type = r.get('document_type', '') or ''
-            snippet = f"{doc_type}: {desc[:120]}..." if desc else doc_type
+            transcription = r.get('transcription', '') or ''
+            if transcription:
+                # Use first ~150 chars of transcription as snippet (Hebrew text)
+                clean_text = transcription.replace('\n', ' ').replace('\r', ' ').strip()
+                snippet = clean_text[:150] + ('...' if len(clean_text) > 150 else '')
+            elif desc:
+                snippet = f"{doc_type}: {desc[:120]}..."
+            else:
+                snippet = doc_type
             formatted.append({
                 'display': {
                     'id': sid,

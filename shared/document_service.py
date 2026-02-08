@@ -461,7 +461,7 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
         tag: Tag string to search for (e.g., "communal", "marriage")
 
     Returns:
-        List of dicts with sys_id, shelfmark, document_type, description, pgpid.
+        List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
         Returns empty list if not found or on error.
     """
     if not tag:
@@ -472,7 +472,7 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
 
         # Step 1: Find documents with this tag (GIN-indexed JSONB @> query)
         doc_response = client.table('documents').select(
-            'pgpid, shelfmark_combined, document_type, description'
+            'pgpid, shelfmark_combined, document_type, description, transcription'
         ).filter('tags', 'cs', json.dumps([tag])).execute()
 
         if not doc_response.data:
@@ -498,6 +498,7 @@ def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
                 'document_type': doc.get('document_type', ''),
                 'description': doc.get('description', ''),
                 'pgpid': frag['document_id'],
+                'transcription': doc.get('transcription', ''),
             })
 
         return results
