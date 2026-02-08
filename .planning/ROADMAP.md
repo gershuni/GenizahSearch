@@ -87,7 +87,9 @@ Plans:
   4. The reading desk feature works in both the web app and the desktop app with equivalent functionality
 **Plans:** 2 plans
 
-Plans: TBD (replanning -- first attempt reverted, new approach: enhance existing View All Fragments in browse tab)
+Plans:
+- [ ] 11-01-PLAN.md -- Shared ReadingDeskModel + web browse tab joined view enhancement (add/remove/lists)
+- [ ] 11-02-PLAN.md -- Desktop browse tab reading desk mode with add/remove/lists + human verification
 
 ### Phase 12: Desktop PGP Discovery
 **Goal**: Desktop users can discover PGP content through metadata panels, search indicators, tag search, and fragment join relationships
@@ -130,10 +132,10 @@ Plans:
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 11. Virtual Reading Desk | v5.6.0 | 0/TBD | Replanning | - |
+| 11. Virtual Reading Desk | v5.6.0 | 0/2 | Planned | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
 | 13. Transcription Search | v5.6.0 | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (Phase 11 replanning -- first attempt reverted)*
+*Last updated: 2026-02-08 (Phase 11 replanned -- 2 plans, enhance existing browse tabs)*
