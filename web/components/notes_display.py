@@ -413,6 +413,12 @@ def create_notes_button(
             except Exception as e:
                 pass  # Silently ignore errors in background check
 
-        ui.timer(0.1, check_comments, once=True)
+        def _safe_check():
+            try:
+                check_comments()
+            except RuntimeError:
+                pass  # Parent element was deleted (NiceGUI timer lifecycle)
+
+        ui.timer(0.1, _safe_check, once=True)
 
     return container

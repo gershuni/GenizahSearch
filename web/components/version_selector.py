@@ -182,7 +182,13 @@ def create_version_selector(
             else:
                 version_label.text = 'V0.8'
 
-        ui.timer(0.1, load_and_apply_latest, once=True)
+        def _safe_load():
+            try:
+                load_and_apply_latest()
+            except RuntimeError:
+                pass  # Parent element was deleted (NiceGUI timer lifecycle)
+
+        ui.timer(0.1, _safe_load, once=True)
 
         with ui.button(icon='history').props(f'flat dense size={size}').tooltip(tr('Version History')) as btn:
             menu = ui.menu()

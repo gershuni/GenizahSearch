@@ -288,7 +288,13 @@ def create_joins_button(
     button_ref['btn'] = btn
 
     # Load count in background
-    ui.timer(0.1, load_count, once=True)
+    def _safe_load_count():
+        try:
+            load_count()
+        except RuntimeError:
+            pass  # Parent element was deleted (NiceGUI timer lifecycle)
+
+    ui.timer(0.1, _safe_load_count, once=True)
 
     return btn
 
