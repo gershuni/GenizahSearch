@@ -1054,6 +1054,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             })
         state.reading_desk_entries = entries
         state.reading_desk_selected_sources = {}
+        _persist_reading_desk_state()
         update_content()
 
     def exit_joined_view():
@@ -2200,6 +2201,129 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.shelfmark_query = target_sm
                     search_shelfmark()
 
+                def remove_from_desk(sys_id_to_remove):
+                    """Remove a fragment from the reading desk by sys_id."""
+                    state.reading_desk_entries = [
+                        e for e in state.reading_desk_entries
+                        if e.get('sys_id') != sys_id_to_remove
+                    ]
+                    if not state.reading_desk_entries:
+                        # All removed -- exit reading desk
+                        exit_joined_view()
+                        return
+                    _persist_reading_desk_state()
+                    update_content()
+
+                def toolbar_add_by_shelfmark(shelfmark_text):
+                    """Add a manuscript to the reading desk by shelfmark search."""
+                    if not shelfmark_text or not shelfmark_text.strip():
+                        return
+                    query = shelfmark_text.strip()
+                    try:
+                        results, exact_match = service.search_by_shelfmark(query, limit=5)
+                        if not results:
+                            ui.notify(f'{tr("No manuscript found")}: {query}', type='warning')
+                            return
+                        # Use first/exact match
+                        result = results[0]
+                        found_sid = result.sys_id
+                        found_sm = result.shelfmark or query
+                        _add_sys_id_to_reading_desk(found_sid, found_sm)
+                    except Exception as e:
+                        ui.notify(f'{tr("Error")}: {str(e)}', type='negative')
+
+                def show_add_from_list_dialog():
+                    """Show dialog to add manuscripts from personal lists to the reading desk."""
+                    from web.state import state as app_state
+                    lists_mgr = app_state.lists_mgr
+                    if not lists_mgr:
+                        ui.notify(tr('Lists not available'), type='warning')
+                        return
+
+                    with ui.dialog() as dlg, ui.card().classes('p-0 min-w-[400px] max-w-[500px]'):
+                        # Header
+                        with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                            'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
+                        ):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.icon('playlist_add').classes('text-white text-xl')
+                                ui.label(tr('Add from List')).classes('text-lg font-bold text-white')
+                            ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+
+                        # Content: list of user's lists
+                        with ui.column().classes('w-full p-4 gap-2'):
+                            all_lists = lists_mgr.get_all_lists(include_recent=False)
+                            if not all_lists:
+                                with ui.column().classes('items-center py-6'):
+                                    ui.icon('list_alt', size='3rem').classes('text-gray-300')
+                                    ui.label(tr('No lists found')).classes('text-gray-500')
+                            else:
+                                for lst in all_lists:
+                                    list_id = lst.get('id', '')
+                                    list_name = lst.get('name', lst.get('name_en', list_id))
+                                    list_color = lst.get('color', '#FFD700')
+
+                                    def make_add_list_handler(lid=list_id, lname=list_name, dialog_ref=dlg):
+                                        def add_list_items():
+                                            items = lists_mgr.get_items_in_list_sync(lid)
+                                            if not items:
+                                                ui.notify(f'{lname}: {tr("No items")}', type='info')
+                                                return
+                                            added_count = 0
+                                            existing_sids = {e.get('sys_id') for e in state.reading_desk_entries}
+                                            for item in items:
+                                                item_sid = item.get('sys_id', '')
+                                                if not item_sid or item_sid in existing_sids:
+                                                    continue
+                                                # Resolve shelfmark
+                                                item_sm = item.get('shelfmark') or item.get('shelfmark_override', '')
+                                                if not item_sm and app_state.meta_mgr:
+                                                    try:
+                                                        item_sm, _ = app_state.meta_mgr.get_meta_for_id(item_sid)
+                                                    except Exception:
+                                                        pass
+                                                if not item_sm:
+                                                    item_sm = item_sid
+                                                # Load full data for the entry
+                                                from shared.document_service import get_all_sources_for_fragment as ld_src, get_document_for_fragment as ld_doc
+                                                pages = service.get_full_manuscript(item_sid)
+                                                sources = []
+                                                pgp_doc_data = None
+                                                try:
+                                                    sources = ld_src(item_sid) or []
+                                                    pgp_doc_data = ld_doc(item_sid)
+                                                except Exception:
+                                                    pass
+                                                state.reading_desk_entries.append({
+                                                    'sys_id': item_sid,
+                                                    'shelfmark': item_sm,
+                                                    'pages': pages or [],
+                                                    'sources': sources,
+                                                    'pgp_doc': pgp_doc_data or {}
+                                                })
+                                                existing_sids.add(item_sid)
+                                                added_count += 1
+                                            if added_count > 0:
+                                                _persist_reading_desk_state()
+                                                update_content()
+                                                ui.notify(f'{added_count} {tr("manuscripts added")}', type='positive')
+                                            else:
+                                                ui.notify(tr('All items already in Reading Desk'), type='info')
+                                            dialog_ref.close()
+                                        return add_list_items
+
+                                    with ui.card().classes(
+                                        'w-full p-3 cursor-pointer hover:bg-gray-50'
+                                    ).style(
+                                        'border: 1px solid var(--border-subtle, #e5e7eb);'
+                                    ).on('click', make_add_list_handler()):
+                                        with ui.row().classes('items-center gap-3 w-full'):
+                                            ui.icon('circle').style(f'color: {list_color}; font-size: 0.8rem;')
+                                            ui.label(list_name).classes('font-medium flex-1')
+                                            ui.icon('add').classes('text-green-600')
+
+                    dlg.open()
+
                 # Header bar
                 with ui.card().classes('w-full mb-2').style(
                     'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
@@ -2207,9 +2331,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-3'):
                             ui.icon('auto_stories').classes('text-white text-xl')
-                            header_txt = tr('Reading Desk')
                             if state.joined_pgpid:
-                                header_txt = f'{tr("Reading Desk")} — #{state.joined_pgpid}'
+                                header_txt = f'{tr("Document")} #{state.joined_pgpid}'
+                            else:
+                                header_txt = tr('Reading Desk')
                             ui.label(header_txt).classes('text-lg font-bold text-white')
                             ui.badge(
                                 f'{len(state.reading_desk_entries)} {tr("fragments")}',
@@ -2221,6 +2346,43 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             icon='arrow_forward' if is_rtl() else 'arrow_back',
                             on_click=exit_joined_view
                         ).props('flat dense text-color=white')
+
+                # === Reading Desk Toolbar ===
+                with ui.card().classes('w-full mb-2 p-2').style(
+                    'background: var(--bg-tertiary, #f3f4f6); border: 1px solid var(--border-light, #e5e7eb);'
+                ):
+                    with ui.row().classes('w-full items-center gap-3'):
+                        # Shelfmark input for adding manuscripts
+                        rd_shelfmark_input = ui.input(
+                            placeholder=tr('Add by shelfmark...'),
+                        ).props('dense outlined clearable color=green').classes('flex-1').style('max-width: 300px;')
+
+                        def rd_toolbar_add():
+                            toolbar_add_by_shelfmark(rd_shelfmark_input.value)
+                            rd_shelfmark_input.value = ''
+
+                        rd_shelfmark_input.on('keydown.enter', rd_toolbar_add)
+
+                        ui.button(
+                            tr('Add'), icon='add',
+                            on_click=rd_toolbar_add
+                        ).props('dense color=green')
+
+                        # Separator
+                        ui.separator().props('vertical').classes('h-6')
+
+                        # Add from List button
+                        ui.button(
+                            tr('Add from List'), icon='playlist_add',
+                            on_click=show_add_from_list_dialog
+                        ).props('flat dense color=green')
+
+                        ui.element('div').classes('flex-grow')
+
+                        # Fragment count
+                        ui.label(
+                            f'{len(state.reading_desk_entries)} {tr("fragments")}'
+                        ).classes('text-sm').style('color: var(--text-secondary);')
 
                 # Two-panel flex row (same pattern as single-page view)
                 with ui.element('div').classes('reading-desk-panels').style(
@@ -2245,8 +2407,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 # Fragment header (clickable link to navigate)
                                 with ui.element('div').props(f'id="rd-img-frag-{frag_idx}"').classes('reading-desk-fragment'):
-                                    with ui.row().classes('items-center gap-2 p-2').style(
-                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px; cursor: pointer;'
+                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
                                     ):
                                         ui.icon('description').classes('text-green-600')
 
@@ -2258,6 +2420,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ).style('color: var(--text-primary);').on('click', make_nav_handler())
                                         if is_current_frag:
                                             ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                        ui.element('div').classes('flex-grow')
+
+                                        def make_remove_img(sid=frag_sid):
+                                            return lambda: remove_from_desk(sid)
+
+                                        ui.button(
+                                            icon='close', on_click=make_remove_img()
+                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
                                 # Oxford detection
                                 frag_sm_lower = frag_sm.lower()
@@ -2362,8 +2532,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 # Fragment header (clickable link)
                                 with ui.element('div').props(f'id="rd-text-frag-{frag_idx}"').classes('reading-desk-fragment'):
-                                    with ui.row().classes('items-center gap-2 p-2').style(
-                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px; cursor: pointer;'
+                                    with ui.row().classes('items-center gap-2 p-2 w-full').style(
+                                        'background: var(--bg-tertiary, #f3f4f6); border-radius: 4px;'
                                     ):
                                         ui.icon('description').classes('text-green-600')
 
@@ -2375,6 +2545,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ).style('color: var(--text-primary);').on('click', make_nav_handler_text())
                                         if is_current_frag:
                                             ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
+                                        ui.element('div').classes('flex-grow')
+
+                                        def make_remove_text(sid=frag_sid):
+                                            return lambda: remove_from_desk(sid)
+
+                                        ui.button(
+                                            icon='close', on_click=make_remove_text()
+                                        ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
                                 # Per-fragment version selector
                                 # Build source options for dropdown
