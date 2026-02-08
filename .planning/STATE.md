@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 12 of 13 (Desktop PGP Discovery) -- GAP CLOSURE
-Plan: 4 of 5 (gap closure plans)
-Status: In progress
-Last activity: 2026-02-08 -- Completed 12-04-PLAN.md (Tag Search Gap Closure)
+Phase: 12 of 13 (Desktop PGP Discovery) -- COMPLETE
+Plan: 5 of 5 (all plans including gap closure complete)
+Status: Phase complete
+Last activity: 2026-02-08 -- Completed 12-05-PLAN.md (Filters, Joins, i18n, Enrichment Gap Closure)
 
-Progress: [██████████████████░░] 89% (24/27 plans across phases 8-13)
+Progress: [███████████████████░] 93% (25/27 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [██████████████████░░] 89% (24
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 24 (v5.6.0)
+- Total plans completed: 25 (v5.6.0)
 - Average duration: ~5 min
-- Total execution time: ~130 min
+- Total execution time: ~134 min
 
 **By Phase:**
 
@@ -37,7 +37,7 @@ Progress: [██████████████████░░] 89% (24
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
 | 11. Virtual Reading Desk | 13/13 | ~67 min | ~5 min |
-| 12. Desktop PGP Discovery | 4/5 | ~26 min | ~6.5 min |
+| 12. Desktop PGP Discovery | 5/5 | ~30 min | ~6 min |
 
 *Updated after each plan completion*
 
@@ -98,15 +98,16 @@ D3 (PGP joins not visible in desktop) deferred to Phase 12 -- RESOLVED in 12-03.
 
 ### Phase 12 Notes (Complete)
 
-Phase 12 completed 3 original plans + gap closure:
+Phase 12 completed 3 original plans + 2 gap closure plans:
 - 12-01: PGP info in desktop browse/results with tag display and link styling
 - 12-02: PGP badges, filters, and tag search in both apps
 - 12-03: PGP joins in desktop JoinsDialog
 - 12-04: Tag search gap closure (navigation, browse state, ResultDialog crash, Hebrew snippets)
+- 12-05: Web filters toggle, PGP joins in dropdowns, Hebrew i18n, Browse enrichment data
 
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 12-04-PLAN.md (Tag Search Gap Closure)
+Stopped at: Completed 12-05-PLAN.md (Filters, Joins, i18n, Enrichment Gap Closure)
 Resume file: None
-Notes: Phase 12 gap closure in progress. 12-04 complete, 12-05 remaining.
+Notes: Phase 12 fully complete (all 5 plans). Ready for Phase 13: Transcription Search.
