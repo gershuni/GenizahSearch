@@ -6934,9 +6934,19 @@ class GenizahGUI(QMainWindow):
             self.browse_lists_panel.setVisible(True)
             self.browse_refresh_lists_panel()
             sizes = self.browse_lists_panel_sizes
+            rd_active = self.browse_reading_desk_active and self._browse_rd_image_scroll is not None
             if not sizes:
                 total = sum(self.browse_splitter.sizes()) or 1000
-                sizes = [max(250, int(total * 0.25)), max(350, int(total * 0.45)), max(350, int(total * 0.30))]
+                if rd_active:
+                    # 4-widget layout: lists, text, (hidden viewer), image_scroll
+                    sizes = [max(200, int(total * 0.20)), max(300, int(total * 0.35)), 0, max(300, int(total * 0.45))]
+                else:
+                    # 3-widget layout: lists, text, viewer
+                    sizes = [max(250, int(total * 0.25)), max(350, int(total * 0.45)), max(350, int(total * 0.30))]
+            elif rd_active and len(sizes) == 3:
+                # Cached sizes from normal mode -- need to expand to 4 elements
+                total = sum(sizes) or 1000
+                sizes = [sizes[0], max(300, int(total * 0.35)), 0, max(300, int(total * 0.45))]
             self.browse_splitter.setSizes(sizes)
         else:
             self.browse_lists_panel_sizes = self.browse_splitter.sizes()
