@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 10 of 13 (Desktop PGP Core)
-Plan: 2 of 2
-Status: Complete
-Last activity: 2026-02-08 -- Completed Phase 10
+Phase: 11 of 13 (Virtual Reading Desk)
+Plan: 1 of 2
+Status: In progress
+Last activity: 2026-02-08 -- Completed 11-01-PLAN.md
 
-Progress: [███████░░░░░░░░░░░░░] 50% (7/14 plans)
+Progress: [████████░░░░░░░░░░░░] 57% (8/14 plans)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [███████░░░░░░░░░░░░░] 50% (7/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (v5.6.0)
+- Total plans completed: 8 (v5.6.0)
 - Average duration: ~7 min
-- Total execution time: ~48 min
+- Total execution time: ~52 min
 
 **By Phase:**
 
@@ -36,6 +36,7 @@ Progress: [███████░░░░░░░░░░░░░] 50% (7/
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
+| 11. Virtual Reading Desk | 1/2 | ~4 min | ~4 min |
 
 *Updated after each plan completion*
 
@@ -60,6 +61,7 @@ Recent decisions affecting current work:
 - DEC-10-02-01: Replace insertSeparator with disabled text dividers for visibility
 - DEC-10-02-02: Disconnect old PGP worker signals before creating new workers
 - DEC-10-02-03: Exclude PGP sources from corrections filter during combo rebuild
+- DEC-11-01-01: Use teal color scheme for reading desk to distinguish from browse (green)
 
 ### Data State
 
@@ -70,7 +72,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Multi-fragment document view: add image controls for each image (user feedback during Phase 8 verification, relevant to Phase 11)
+- Multi-fragment document view: add image controls for each image -- DONE (Phase 11-01 adds per-image zoom/rotate controls)
 
 ### Blockers/Concerns
 
@@ -79,6 +81,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed Phase 10 (Desktop PGP Core)
+Stopped at: Completed 11-01-PLAN.md (Web Reading Desk)
 Resume file: None
-Notes: Phase 10 complete. Both Browse tab and ResultDialog display PGP transcriptions with grouped version selectors. Next: Phase 11 (Virtual Reading Desk).
+Notes: Web reading desk page created with shared model, three entry points (pgpid, sys_ids, list_id), per-image zoom/rotate, version selector integration. Next: 11-02 (Desktop Reading Desk).
