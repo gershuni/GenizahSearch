@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 9 of 13 (Data Import)
-Plan: 1 of 2
-Status: In progress
-Last activity: 2026-02-08 -- Completed 09-01-PLAN.md
+Phase: 10 of 13 (Desktop PGP Core)
+Plan: 0 of 2
+Status: Phase 9 complete, Phase 10 not started
+Last activity: 2026-02-08 -- Completed 09-02-PLAN.md (Phase 9 complete)
 
-Progress: [███░░░░░░░░░░░░░░░░░] 21% (3/14 plans)
+Progress: [████░░░░░░░░░░░░░░░░] 29% (4/14 plans)
 
 ## Milestone History
 
@@ -25,16 +25,16 @@ Progress: [███░░░░░░░░░░░░░░░░░] 21% (3/
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3 (v5.6.0)
-- Average duration: ~4 min
-- Total execution time: ~12 min
+- Total plans completed: 4 (v5.6.0)
+- Average duration: ~5 min
+- Total execution time: ~19 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
-| 9. Data Import | 1/2 | ~7 min | ~7 min |
+| 9. Data Import | 2/2 | ~14 min | ~7 min |
 
 *Updated after each plan completion*
 
@@ -52,6 +52,14 @@ Recent decisions affecting current work:
 - DEC-08-02-01: Fixed pre-existing mock chain bug in test (Rule 1 auto-fix)
 - DEC-09-01-01: Excluded 177 footnotes with empty doc_relation (NOT NULL constraint)
 - DEC-09-01-02: Footnote dedup removes 1,442 duplicates (24,383 -> 22,764 valid)
+- DEC-09-02-01: Filter orphan pgpids before footnote/fragment upsert (28 footnote + 6 fragment pgpids reference deleted PGP documents)
+
+### Data State
+
+- documents table: 35,839 records (all PGP documents with full metadata)
+- document_sources: 9,364 records (7,664 editions + 1,696 translations)
+- document_footnotes: 22,757 records (bibliography/scholarship)
+- document_fragments: 36,155 records (with collection/library/URL metadata)
 
 ### Pending Todos
 
@@ -64,6 +72,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 09-01-PLAN.md
+Stopped at: Completed 09-02-PLAN.md (Phase 9 complete)
 Resume file: None
-Notes: Schema migrations and import script created. Next: 09-02 (execute import with migrations + script)
+Notes: Full PGP data import complete. All 35,839 documents with metadata, footnotes, and fragment links in Supabase. Next: Phase 10 (Desktop PGP Core)

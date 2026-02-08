@@ -25,7 +25,7 @@ Full PGP feature set in web app.
 **Phase Numbering:** Continues from v1 milestone (Phase 7). Integer phases 8-13.
 
 - [x] **Phase 8: Foundation** - Extract shared service layer from web-only module
-- [ ] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
+- [x] **Phase 9: Data Import** - Import remaining ~34K PGP documents to Supabase
 - [ ] **Phase 10: Desktop PGP Core** - Transcription display and version selector in desktop app
 - [ ] **Phase 11: Virtual Reading Desk** - Multi-manuscript viewer for both web and desktop
 - [ ] **Phase 12: Desktop PGP Discovery** - Metadata, search indicators, tag search, and joins in desktop app
@@ -60,7 +60,7 @@ Plans:
 
 Plans:
 - [x] 09-01-PLAN.md -- Schema migrations and comprehensive import script
-- [ ] 09-02-PLAN.md -- Execute import and verify data integrity
+- [x] 09-02-PLAN.md -- Execute import and verify data integrity
 
 ### Phase 10: Desktop PGP Core
 **Goal**: Desktop users can view PGP transcriptions in the manuscript viewer and switch between scholars' editions and translations
@@ -131,7 +131,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 8. Foundation | v5.6.0 | 2/2 | Complete | 2026-02-08 |
-| 9. Data Import | v5.6.0 | 1/2 | In progress | - |
+| 9. Data Import | v5.6.0 | 2/2 | Complete | 2026-02-08 |
 | 10. Desktop PGP Core | v5.6.0 | 0/2 | Not started | - |
 | 11. Virtual Reading Desk | v5.6.0 | 0/3 | Not started | - |
 | 12. Desktop PGP Discovery | v5.6.0 | 0/3 | Not started | - |
@@ -139,4 +139,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-07*
-*Last updated: 2026-02-08 (09-01 complete)*
+*Last updated: 2026-02-08 (Phase 9 complete)*
