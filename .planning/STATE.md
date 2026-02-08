@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 ## Current Position
 
 Phase: 11 of 13 (Virtual Reading Desk) -- UAT gap closure in progress
-Plan: 9 of 11 (7 original + 4 UAT gap closure plans; 08-11 complete, 09-10 remain)
-Status: In progress -- UAT gap closure plans 09-10 remain
-Last activity: 2026-02-08 -- Completed 11-11-PLAN.md (desktop scroll area lifecycle + sync scrolling)
+Plan: 10 of 11 (7 original + 4 UAT gap closure plans; 08-11 complete, 10 remains)
+Status: In progress -- UAT gap closure plan 10 remains
+Last activity: 2026-02-08 -- Completed 11-09-PLAN.md (language switch + navigation state fix)
 
-Progress: [████████████████░░░░] 94% (16/17 plans across phases 8-13)
+Progress: [█████████████████░░░] 95% (17/18 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [████████████████░░░░] 94% (16
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15 (v5.6.0)
+- Total plans completed: 16 (v5.6.0)
 - Average duration: ~6 min
-- Total execution time: ~90 min
+- Total execution time: ~93 min
 
 **By Phase:**
 
@@ -36,7 +36,7 @@ Progress: [████████████████░░░░] 94% (16
 | 8. Foundation | 2/2 | ~5 min | ~2.5 min |
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
-| 11. Virtual Reading Desk | 9/11 | ~53 min | ~6 min |
+| 11. Virtual Reading Desk | 10/11 | ~56 min | ~6 min |
 
 *Updated after each plan completion*
 
@@ -63,6 +63,8 @@ Recent decisions affecting current work:
 - DEC-11-08-01: Inline !important for non-buttons, Quasar text-color prop for buttons (Light Mode fix)
 - DEC-11-11-01: Create QScrollArea once at reading desk entry, repopulate container on re-render
 - DEC-11-11-02: Targeted disconnect(handler) instead of blanket disconnect() for scroll sync
+- DEC-11-09-01: Persist language to app.storage.user, restore in create_layout()
+- DEC-11-09-02: Set comparison of sys_ids for language-switch vs cross-page navigation detection
 
 ### Data State
 
@@ -137,6 +139,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 11-11-PLAN.md
+Stopped at: Completed 11-09-PLAN.md
 Resume file: None
-Notes: UAT gap closure plan 11 complete (desktop scroll area lifecycle + sync scrolling). Plans 09-10 remain.
+Notes: UAT gap closure plan 09 complete (language switch + navigation state fix). Plan 10 remains.
