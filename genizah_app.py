@@ -6580,14 +6580,15 @@ class GenizahGUI(QMainWindow):
         row1.addSpacing(10)
         row1.addWidget(QLabel(tr("FL:"))); row1.addWidget(self.browse_fl_input)
         row1.addWidget(self.btn_browse_go)
-        row1.addWidget(self.btn_find_parallels)
 
-        # Add to View button for reading desk
+        # Add to View button for reading desk (immediately after Go for discoverability)
         self.btn_b_add_to_view = QPushButton(tr("Add to View"))
         self.btn_b_add_to_view.setToolTip(tr("Add current manuscript to Reading Desk"))
         self.btn_b_add_to_view.setEnabled(False)
         self.btn_b_add_to_view.clicked.connect(self._browse_add_to_view)
         row1.addWidget(self.btn_b_add_to_view)
+
+        row1.addWidget(self.btn_find_parallels)
 
         # Add to List button for browse tab
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
@@ -6829,7 +6830,7 @@ class GenizahGUI(QMainWindow):
         self.browse_rd_shelf_input.returnPressed.connect(self._browse_rd_add_by_shelfmark)
         rd_toolbar_layout.addWidget(self.browse_rd_shelf_input)
 
-        btn_rd_add = QPushButton(tr("Add"))
+        btn_rd_add = QPushButton(tr("Add to Desk"))
         btn_rd_add.setStyleSheet(
             "background-color: #40916c; color: white; padding: 3px 10px; border-radius: 3px;"
         )
@@ -7753,7 +7754,13 @@ class GenizahGUI(QMainWindow):
 
         # Create or recreate the image scroll area
         if self._browse_rd_image_scroll is not None:
+            # Disconnect old scroll bar signals before destroying
+            try:
+                self._browse_rd_image_scroll.verticalScrollBar().valueChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass
             self._browse_rd_image_scroll.setVisible(False)
+            self._browse_rd_image_scroll.setParent(None)
             self._browse_rd_image_scroll.deleteLater()
 
         self._browse_rd_image_scroll = QScrollArea()
@@ -7879,6 +7886,8 @@ class GenizahGUI(QMainWindow):
 
         # Set up synchronized scrolling between text and image panes
         self._browse_rd_setup_sync_scroll()
+        # Re-establish sync after images finish loading (scroll maximums change)
+        QTimer.singleShot(500, self._browse_rd_setup_sync_scroll)
 
     def _browse_rd_setup_sync_scroll(self):
         """Set up proportional scroll synchronization between text and image panes."""
@@ -7887,6 +7896,16 @@ class GenizahGUI(QMainWindow):
 
         text_bar = self.browse_text.verticalScrollBar()
         image_bar = self._browse_rd_image_scroll.verticalScrollBar()
+
+        # Disconnect any existing valueChanged connections to prevent accumulation
+        try:
+            text_bar.valueChanged.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            image_bar.valueChanged.disconnect()
+        except (TypeError, RuntimeError):
+            pass
 
         def sync_text_to_image(value):
             if self._browse_rd_syncing:
