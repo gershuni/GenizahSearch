@@ -2763,6 +2763,30 @@ class ResultDialog(QDialog):
             logger.debug("Final connected result: fragments=%s", connected.get('fragments', []) if connected else 'None')
 
         if not connected or connected.get('total_fragments', 0) <= 1:
+            # Check PGP multi-fragment joins as fallback
+            try:
+                from shared.document_service import get_document_for_fragment, get_fragments_for_document
+                pgp_doc = get_document_for_fragment(self.current_sys_id)
+                if pgp_doc:
+                    pgp_frags = get_fragments_for_document(pgp_doc.get('pgpid'))
+                    if pgp_frags and len(pgp_frags) > 1:
+                        self.btn_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+                        header_action = self.rd_joins_menu.addAction(
+                            tr("{} connected fragments").format(len(pgp_frags)) + " [PGP]"
+                        )
+                        header_action.setEnabled(False)
+                        self.rd_joins_menu.addSeparator()
+                        for frag in pgp_frags:
+                            frag_sid = frag.get('sys_id', '')
+                            frag_shelf = frag.get('shelfmark', frag_sid)
+                            if frag_sid == self.current_sys_id:
+                                continue
+                            action = self.rd_joins_menu.addAction(f"[PGP] {frag_shelf}")
+                            action.triggered.connect(lambda checked, sh=frag_shelf: self._rd_navigate_to_joined_fragment(sh))
+                        return
+            except Exception as e:
+                logger.debug("PGP joins RD dropdown fallback error: %s", e)
+
             action = self.rd_joins_menu.addAction(tr("No joined fragments"))
             action.setEnabled(False)
             self.btn_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
@@ -5509,6 +5533,7 @@ class GenizahGUI(QMainWindow):
         self._browse_versions_cache = {'original': original_text}
         self._browse_pgp_sources = []
         self._browse_pgp_doc = {}
+        self._browse_enriched_html = ''
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.clear()
         self.browse_version_combo.addItem("V0.8", {"source": "original"})
@@ -5803,7 +5828,32 @@ class GenizahGUI(QMainWindow):
             connected = self.joins_mgr.get_connected_fragments(shelfmark)
 
         if not connected or connected.get('total_fragments', 0) <= 1:
-            # No joins - add info action
+            # Check PGP multi-fragment joins as fallback
+            try:
+                from shared.document_service import get_document_for_fragment, get_fragments_for_document
+                pgp_doc = get_document_for_fragment(self.current_browse_sid)
+                if pgp_doc:
+                    pgp_frags = get_fragments_for_document(pgp_doc.get('pgpid'))
+                    # Filter to multi-fragment documents (>1 fragment)
+                    if pgp_frags and len(pgp_frags) > 1:
+                        self.btn_b_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+                        header_action = self.joins_menu.addAction(
+                            tr("{} connected fragments").format(len(pgp_frags)) + " [PGP]"
+                        )
+                        header_action.setEnabled(False)
+                        self.joins_menu.addSeparator()
+                        for frag in pgp_frags:
+                            frag_sid = frag.get('sys_id', '')
+                            frag_shelf = frag.get('shelfmark', frag_sid)
+                            if frag_sid == self.current_browse_sid:
+                                continue  # Skip current manuscript
+                            action = self.joins_menu.addAction(f"[PGP] {frag_shelf}")
+                            action.triggered.connect(lambda checked, sh=frag_shelf: self._navigate_to_joined_fragment(sh))
+                        return
+            except Exception as e:
+                logger.debug("PGP joins dropdown fallback error: %s", e)
+
+            # No user or PGP joins
             action = self.joins_menu.addAction(tr("No joined fragments"))
             action.setEnabled(False)
             self.btn_b_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
@@ -6856,6 +6906,7 @@ class GenizahGUI(QMainWindow):
         # PGP source state for current document
         self._browse_pgp_sources = []
         self._browse_pgp_doc = {}
+        self._browse_enriched_html = ''
         self._browse_pgp_worker = None
 
         community_bar.addWidget(QLabel(" | "))
@@ -7327,6 +7378,32 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
 
+        # Build enrichment extended info (KTI/Oxford/Cambridge)
+        marc = meta.get('marc', {})
+        part_id_for_ext = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
+        part_meta_ext = self.meta_mgr.get_part_metadata(part_id_for_ext) if part_id_for_ext else None
+        external_meta = meta.get('external_meta', {})
+
+        palette = self.txt_b_extended_info.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+
+        enriched_html = self._build_browse_enriched_html(
+            marc, part_id_for_ext, part_meta_ext, external_meta, text_color, base_color
+        )
+        self._browse_enriched_html = enriched_html
+
+        # Combine with PGP if already loaded
+        pgp_html = ""
+        if self._browse_pgp_doc:
+            pgp_html = self._build_pgp_extended_info_html(self._browse_pgp_doc) or ""
+
+        combined = enriched_html + pgp_html
+        if combined.strip():
+            full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
+            self.txt_b_extended_info.setHtml(full_html)
+            self.btn_b_ext_info.setVisible(True)
+
         # Update joins dropdown menu
         self._update_joins_dropdown()
 
@@ -7359,10 +7436,17 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_sources = sources
         self._browse_pgp_doc = pgp_doc
 
-        # Update extended info panel with PGP metadata
-        pgp_html = self._build_pgp_extended_info_html(pgp_doc)
-        if pgp_html:
-            self.txt_b_extended_info.setHtml(pgp_html)
+        # Update extended info panel with PGP metadata combined with enrichment
+        pgp_html = self._build_pgp_extended_info_html(pgp_doc) or ''
+        enriched_html = getattr(self, '_browse_enriched_html', '') or ''
+
+        combined = enriched_html + pgp_html
+        if combined.strip():
+            palette = self.txt_b_extended_info.palette()
+            text_color = palette.color(QPalette.ColorRole.Text).name()
+            base_color = palette.color(QPalette.ColorRole.Base).name()
+            full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
+            self.txt_b_extended_info.setHtml(full_html)
             self.btn_b_ext_info.setVisible(True)
         else:
             self.btn_b_ext_info.setVisible(False)
@@ -7464,6 +7548,129 @@ class GenizahGUI(QMainWindow):
 
         pgp_html += "</div>"
         return pgp_html
+
+    def _build_browse_enriched_html(self, marc, part_id, part_meta, external_meta, text_color, base_color):
+        """Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
+
+        Mirrors the enrichment HTML builder in ResultDialog.on_enriched_data_loaded.
+
+        Args:
+            marc: dict from MARC metadata
+            part_id: Oxford part ID (if applicable)
+            part_meta: Oxford part metadata dict
+            external_meta: External metadata dict (Cambridge, etc.)
+            text_color: CSS text color
+            base_color: CSS background color
+
+        Returns:
+            HTML string for enrichment section, or empty string.
+        """
+        if not marc and not part_meta and not external_meta:
+            return ""
+
+        part_bg = QColor(base_color).lighter(115).name()
+
+        kti_html = ""
+        date_val = marc.get('date')
+        if date_val:
+            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions')
+        phys = marc.get('physical_desc') or marc.get('physical_description')
+        if dims or phys:
+            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        eng_title = marc.get('english_title')
+        if eng_title:
+            kti_html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+
+        subjects = marc.get('subjects', [])
+        if subjects:
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+
+        notes = marc.get('notes', [])
+        if notes:
+            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for n in notes:
+                kti_html += f"<li>{n}</li>"
+            kti_html += "</ul></p>"
+
+        people = marc.get('people', [])
+        if people:
+            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+
+        bib = marc.get('bibliography', [])
+        if bib:
+            kti_html += f"<p><b>{tr('Bibliography')}:</b><ul>"
+            for b in bib:
+                kti_html += f"<li>{b}</li>"
+            kti_html += "</ul></p>"
+
+        external_html = ""
+        if part_meta:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id) if hasattr(self.meta_mgr, 'codico_mgr') else part_id
+            external_html += (
+                f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; "
+                "margin-bottom: 10px; border-left: 3px solid #3498db; text-align: left;' dir='ltr'>"
+            )
+            external_html += f"<p><b>{tr('Codicological Part')}:</b> {part_display}</p>"
+
+            folio_range = part_meta.get('folio_range', [])
+            if len(folio_range) == 2:
+                if folio_range[0] == folio_range[1]:
+                    external_html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
+                else:
+                    external_html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+
+            part_title = part_meta.get('title', '')
+            if part_title:
+                external_html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+
+            part_contents = part_meta.get('contents', '')
+            if part_contents:
+                external_html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+
+            external_html += "</div>"
+
+        if external_meta:
+            external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
+            for k, v in external_meta.items():
+                external_html += f"<li><b>{k}:</b> {v}</li>"
+            external_html += "</ul></div>"
+
+        is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        dir_attr = "rtl" if is_rtl else "ltr"
+        header_align = "right" if is_rtl else "left"
+        kti_header = tr("Ktiv Info")
+        if part_id:
+            external_header = tr("Oxford Info")
+        else:
+            external_header = tr("Cambridge Info")
+
+        html = ""
+        if external_html:
+            if is_rtl:
+                first_title, first_html = kti_header, kti_html
+                second_title, second_html = external_header, external_html
+            else:
+                first_title, first_html = external_header, external_html
+                second_title, second_html = kti_header, kti_html
+
+            html += (
+                f"<table style='width:100%; border-collapse:collapse;' dir='{dir_attr}'>"
+                f"<tr>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{first_title}</th>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{second_title}</th>"
+                f"</tr>"
+                f"<tr>"
+                f"<td style='vertical-align:top; padding:6px;'>{first_html}</td>"
+                f"<td style='vertical-align:top; padding:6px;'>{second_html}</td>"
+                f"</tr></table>"
+            )
+        elif kti_html:
+            html += kti_html
+
+        return html
 
     def _browse_toggle_extended_info(self, checked):
         """Toggle browse tab extended info panel visibility."""
