@@ -3583,7 +3583,8 @@ class ResultDialog(QDialog):
                 # Tag search results: get full text by sys_id from display dict
                 sid = data.get('display', {}).get('id', '')
                 if sid and self.searcher:
-                    data['full_text'] = self.searcher.get_full_manuscript(sid) or data.get('text', '')
+                    pages = self.searcher.get_full_manuscript(sid)
+                    data['full_text'] = '\n'.join(pages) if pages else data.get('text', '')
                 else:
                     data['full_text'] = data.get('text', '')
         self.data = data
