@@ -5350,7 +5350,8 @@ class GenizahGUI(QMainWindow):
 
         # === Translations Group ===
         if translations:
-            combo.insertSeparator(combo.count())
+            combo.addItem("─────────────", {"source": "header"})
+            combo.model().item(combo.count() - 1).setEnabled(False)
             combo.addItem("-- Translations --", {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
 
@@ -5367,8 +5368,9 @@ class GenizahGUI(QMainWindow):
                     "source_id": trans.get('id')
                 })
 
-        # === Separator before HTR ===
-        combo.insertSeparator(combo.count())
+        # === Visual divider before HTR ===
+        combo.addItem("─────────────", {"source": "header"})
+        combo.model().item(combo.count() - 1).setEnabled(False)
 
         # === HTR V0.8 (always present) ===
         combo.addItem("V0.8", {"source": "original"})
