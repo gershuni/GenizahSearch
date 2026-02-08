@@ -697,9 +697,6 @@ class BrowseState:
         self.view_joined: bool = False
         self.joined_fragments_info: list = []  # [{shelfmark, sys_id}]
         self.joined_pgpid: Optional[int] = None
-        # Reading desk entries (enhanced joined view with loaded page data)
-        self.reading_desk_entries: List[Dict] = []
-        # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header}]}
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -1026,21 +1023,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.view_all = False
         state.joined_fragments_info = fragments_info
         state.joined_pgpid = pgpid
-
-        # Populate reading desk entries with loaded page data
-        entries = []
-        for frag_info in fragments_info:
-            frag_sid = frag_info.get('document_id', '')
-            frag_sm = frag_info.get('shelfmark', '')
-            if not frag_sid:
-                continue
-            pages = service.get_full_manuscript(frag_sid)
-            entries.append({
-                'sys_id': frag_sid,
-                'shelfmark': frag_sm,
-                'pages': pages or []
-            })
-        state.reading_desk_entries = entries
         update_content()
 
     def exit_joined_view():
@@ -1048,126 +1030,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.view_joined = False
         state.joined_fragments_info = []
         state.joined_pgpid = None
-        state.reading_desk_entries = []
         update_content()
-
-    def add_to_joined_view_by_shelfmark(shelfmark_text: str):
-        """Add a manuscript to the joined view by shelfmark search."""
-        if not shelfmark_text or not shelfmark_text.strip():
-            ui.notify(tr('Enter a shelfmark'), type='warning')
-            return
-
-        # Search for the shelfmark
-        results, exact_match = service.search_by_shelfmark(shelfmark_text.strip(), limit=5)
-        if not results:
-            ui.notify(tr('No manuscript found') + f": '{shelfmark_text}'", type='warning')
-            return
-
-        # Use first/exact match
-        result = results[0]
-        new_sys_id = result.sys_id
-        new_shelfmark = result.shelfmark or shelfmark_text
-
-        # Check for duplicates
-        existing_ids = {e.get('sys_id') for e in state.reading_desk_entries}
-        if new_sys_id in existing_ids:
-            ui.notify(tr('Already in view'), type='info')
-            return
-
-        # Load pages
-        pages = service.get_full_manuscript(new_sys_id)
-        entry = {'sys_id': new_sys_id, 'shelfmark': new_shelfmark, 'pages': pages or []}
-        state.reading_desk_entries.append(entry)
-        state.joined_fragments_info.append({'shelfmark': new_shelfmark, 'document_id': new_sys_id})
-        update_content()
-
-    def add_to_joined_view_by_sysid(sys_id_text: str):
-        """Add a manuscript to the joined view by sys_id."""
-        if not sys_id_text or not sys_id_text.strip():
-            ui.notify(tr('Enter a system ID'), type='warning')
-            return
-
-        new_sys_id = sys_id_text.strip()
-
-        # Check for duplicates
-        existing_ids = {e.get('sys_id') for e in state.reading_desk_entries}
-        if new_sys_id in existing_ids:
-            ui.notify(tr('Already in view'), type='info')
-            return
-
-        # Resolve shelfmark from metadata
-        from web.state import state as app_state
-        new_shelfmark = new_sys_id
-        if app_state.meta_mgr:
-            try:
-                sm, _ = app_state.meta_mgr.get_meta_for_id(new_sys_id)
-                if sm:
-                    new_shelfmark = sm
-            except Exception:
-                pass
-
-        # Load pages
-        pages = service.get_full_manuscript(new_sys_id)
-        if not pages:
-            ui.notify(tr('No manuscript found') + f": '{new_sys_id}'", type='warning')
-            return
-
-        entry = {'sys_id': new_sys_id, 'shelfmark': new_shelfmark, 'pages': pages or []}
-        state.reading_desk_entries.append(entry)
-        state.joined_fragments_info.append({'shelfmark': new_shelfmark, 'document_id': new_sys_id})
-        update_content()
-
-    def add_from_list_to_joined_view(list_id: str):
-        """Add all manuscripts from a personal list to the joined view."""
-        from web.state import state as app_state
-        if not app_state.lists_mgr:
-            return
-
-        items = app_state.lists_mgr.get_items_in_list_sync(list_id)
-        if not items:
-            ui.notify(tr('No items in this list'), type='info')
-            return
-
-        existing_ids = {e.get('sys_id') for e in state.reading_desk_entries}
-        added = 0
-
-        for item in items:
-            item_sys_id = item.get('sys_id', '')
-            if not item_sys_id or item_sys_id in existing_ids:
-                continue
-
-            # Resolve shelfmark
-            item_shelfmark = item.get('shelfmark') or item.get('shelfmark_override', '')
-            if not item_shelfmark and app_state.meta_mgr:
-                try:
-                    item_shelfmark, _ = app_state.meta_mgr.get_meta_for_id(item_sys_id)
-                except Exception:
-                    pass
-            if not item_shelfmark:
-                item_shelfmark = item_sys_id
-
-            pages = service.get_full_manuscript(item_sys_id)
-            state.reading_desk_entries.append({
-                'sys_id': item_sys_id, 'shelfmark': item_shelfmark, 'pages': pages or []
-            })
-            state.joined_fragments_info.append({'shelfmark': item_shelfmark, 'document_id': item_sys_id})
-            existing_ids.add(item_sys_id)
-            added += 1
-
-        if added > 0:
-            ui.notify(f'{added} {tr("manuscripts added")}', type='positive')
-            update_content()
-
-    def remove_from_joined_view(sys_id_to_remove: str):
-        """Remove a manuscript from the joined view."""
-        state.reading_desk_entries = [e for e in state.reading_desk_entries if e.get('sys_id') != sys_id_to_remove]
-        state.joined_fragments_info = [f for f in state.joined_fragments_info if f.get('document_id') != sys_id_to_remove]
-
-        if not state.reading_desk_entries:
-            # No entries left, exit joined view
-            exit_joined_view()
-        else:
-            update_content()
 
     def search_for_parallels():
         """Navigate to parallels page with current text."""
@@ -2183,23 +2046,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             else:
                                 ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
             elif state.view_joined:
-                # === Enhanced Joined Fragments View (Reading Desk) ===
-                # Show all reading desk entries with images + text, add/remove toolbar
+                # === Joined Fragments View ===
+                # Show all joined fragments stacked: each with [Image | Text] per page
                 from web.document_service import get_transcription_for_document
-                current_shelfmark_upper = (page.shelfmark or '').upper() if page else ''
+                current_shelfmark_upper = (page.shelfmark or '').upper()
 
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
-                    # Header bar (green gradient)
+                    # Header
                     with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
                         'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
                     ):
                         with ui.row().classes('items-center gap-2'):
                             ui.icon('auto_stories').classes('text-white text-xl')
-                            header_txt = tr('Reading Desk')
+                            header_txt = tr('All Fragments')
                             if state.joined_pgpid:
                                 header_txt = f'{tr("Document")} #{state.joined_pgpid}'
                             ui.label(header_txt).classes('text-lg font-bold text-white')
-                            ui.badge(f'{len(state.reading_desk_entries)} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
+                            ui.badge(f'{len(state.joined_fragments_info)} {tr("fragments")}', color='white').props('outline dense').classes('text-xs text-white')
 
                         ui.button(
                             tr('Back to Page View'),
@@ -2207,181 +2070,85 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=exit_joined_view
                         ).props('flat dense text-color=white')
 
-                    # Toolbar row (add by shelfmark, add from list)
-                    with ui.row().classes('w-full items-end gap-3 p-3 border-b').style('background: #f0fdf4;'):
-                        # Add by shelfmark
-                        with ui.row().classes('items-end gap-1'):
-                            shelfmark_input = ui.input(
-                                label=tr('Add by shelfmark'),
-                                placeholder='T-S 12.123'
-                            ).props('dense outlined').classes('w-48')
-                            ui.button(
-                                icon='add',
-                                on_click=lambda: add_to_joined_view_by_shelfmark(shelfmark_input.value)
-                            ).props('dense color=green size=sm').tooltip(tr('Add manuscript'))
-
-                        # Add by sys_id
-                        with ui.row().classes('items-end gap-1'):
-                            sysid_input = ui.input(
-                                label=tr('Add by ID'),
-                                placeholder='sys_id'
-                            ).props('dense outlined').classes('w-36')
-                            ui.button(
-                                icon='add',
-                                on_click=lambda: add_to_joined_view_by_sysid(sysid_input.value)
-                            ).props('dense color=green size=sm').tooltip(tr('Add by system ID'))
-
-                        # Add from list button
-                        from web.state import state as app_state_rd
-                        if app_state_rd.lists_mgr and GlobalAuthState.is_logged_in():
-                            def show_list_picker():
-                                """Show a dialog to pick a list to add from."""
-                                picker_dlg = ui.dialog()
-                                with picker_dlg, ui.card().classes('w-[400px] p-0'):
-                                    with ui.row().classes('w-full items-center justify-between p-3 border-b').style(
-                                        'background: linear-gradient(135deg, #15803d 0%, #166534 100%);'
-                                    ):
-                                        ui.label(tr('Add from List')).classes('text-base font-bold text-white')
-                                        ui.button(icon='close', on_click=picker_dlg.close).props('flat round size=sm text-color=white')
-
-                                    with ui.column().classes('w-full p-3 gap-2'):
-                                        from web.state import state as app_state_lp
-                                        lists = app_state_lp.lists_mgr.data.get('lists', {}) if app_state_lp.lists_mgr else {}
-                                        if lists:
-                                            with ui.scroll_area().classes('w-full').style('max-height: 300px;'):
-                                                for list_id_val, list_data in lists.items():
-                                                    list_name = list_data.get('name', list_id_val)
-                                                    color = list_data.get('color', '#999')
-
-                                                    def make_add_from(lid=list_id_val, dlg=picker_dlg):
-                                                        def do_add():
-                                                            dlg.close()
-                                                            add_from_list_to_joined_view(lid)
-                                                        return do_add
-
-                                                    with ui.card().classes('w-full p-2 cursor-pointer hover:bg-green-50 border').on('click', make_add_from()):
-                                                        with ui.row().classes('items-center gap-2'):
-                                                            ui.icon('circle').style(f'color: {color}; font-size: 0.8rem;')
-                                                            ui.label(list_name).classes('font-medium text-sm')
-                                        else:
-                                            ui.label(tr('No lists found')).classes('text-gray-500 text-sm p-4')
-
-                                picker_dlg.open()
-
-                            ui.button(
-                                tr('Add from List'),
-                                icon='playlist_add',
-                                on_click=show_list_picker
-                            ).props('dense outline color=green size=sm')
-
-                    # Scrollable content with all fragment entries
-                    with ui.scroll_area().classes('w-full').style('height: 70vh; padding: 16px;'):
+                    # Scrollable content with all fragments
+                    with ui.scroll_area().classes('w-full').style('height: 75vh; padding: 16px;'):
                         with ui.column().classes('w-full gap-4'):
-                            for entry_idx, entry in enumerate(state.reading_desk_entries):
-                                entry_sm = entry.get('shelfmark', '')
-                                entry_sid = entry.get('sys_id', '')
-                                if not entry_sid:
+                            for frag_idx, frag_info in enumerate(state.joined_fragments_info):
+                                frag_sm = frag_info.get('shelfmark', '')
+                                frag_sid = frag_info.get('document_id', '')
+                                if not frag_sid:
                                     continue
 
-                                is_current_frag = entry_sm.upper() == current_shelfmark_upper
+                                is_current_frag = frag_sm.upper() == current_shelfmark_upper
 
                                 # Fragment separator
-                                if entry_idx > 0:
+                                if frag_idx > 0:
                                     ui.separator().classes('my-2')
 
-                                # Fragment header with remove button
-                                with ui.row().classes('w-full items-center justify-between mb-2'):
-                                    with ui.row().classes('items-center gap-2'):
-                                        ui.icon('description').classes('text-green-600')
-                                        ui.label(entry_sm).classes('font-bold text-base').style('color: var(--text-primary);')
-                                        if is_current_frag:
-                                            ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
-
-                                    # Remove button
-                                    def make_remove_handler(sid=entry_sid):
-                                        return lambda: remove_from_joined_view(sid)
-                                    ui.button(
-                                        icon='close',
-                                        on_click=make_remove_handler()
-                                    ).props('flat dense round size=sm color=red').tooltip(tr('Remove from view'))
+                                # Fragment header
+                                with ui.row().classes('items-center gap-2 mb-2'):
+                                    ui.icon('description').classes('text-green-600')
+                                    ui.label(frag_sm).classes('font-bold text-base').style('color: var(--text-primary);')
+                                    if is_current_frag:
+                                        ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
 
                                 # Oxford detection for image endpoint
-                                entry_sm_lower = entry_sm.lower()
-                                entry_is_oxford = entry_sm_lower.startswith('ms heb') or entry_sm_lower.startswith('ms. heb')
+                                frag_sm_lower = frag_sm.lower()
+                                frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
 
-                                # Use pre-loaded pages from reading desk entries
-                                frag_pages = entry.get('pages', [])
+                                # Load pages for this fragment
+                                frag_pages = service.get_full_manuscript(frag_sid)
 
                                 if not frag_pages:
-                                    # No page data at all, create placeholder pages for image display
+                                    # No text data, just show images
                                     frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': ''}),
                                                   type('P', (), {'p_num': 2, 'text': '', 'full_header': ''})]
 
                                 # Show each page as [Image | Text] row
                                 for pg in frag_pages:
-                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else (pg.get('p_num', 1) if isinstance(pg, dict) else 1)
+                                    pg_num = pg.p_num if hasattr(pg, 'p_num') else 1
                                     pg_idx = max(0, pg_num - 1)
-                                    pg_text = pg.text if hasattr(pg, 'text') else (pg.get('text', '') if isinstance(pg, dict) else '')
+                                    pg_text = pg.text if hasattr(pg, 'text') else ''
                                     pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
 
                                     # Image URL
-                                    if entry_is_oxford:
-                                        frag_img_url = f'/api/oxford_image/{entry_sid}?page={pg_idx}'
+                                    if frag_is_oxford:
+                                        frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
                                     else:
-                                        frag_img_url = f'/api/nli_image_by_sysid/{entry_sid}?page={pg_idx}'
+                                        frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
                                     # Page label
-                                    ui.label(f'{entry_sm} \u2014 {pg_label}').classes('text-xs font-medium text-gray-500 mt-1')
+                                    ui.label(f'{frag_sm} — {pg_label}').classes('text-xs font-medium text-gray-500 mt-1')
 
                                     # Side-by-side: [Image | Text]
                                     with ui.element('div').style(
                                         'display: flex; flex-direction: row; gap: 12px; width: 100%; min-height: 300px;'
                                     ):
-                                        # Image panel with zoom handle via manuscriptViewer pattern
-                                        safe_sid = entry_sid.replace("'", "\\'")
-                                        is_ox_js = 'true' if entry_is_oxford else 'false'
-                                        img_elem_id = f'rd_img_{entry_sid}_{pg_idx}'
+                                        # Image panel
+                                        safe_sid = frag_sid.replace("'", "\\'")
+                                        is_ox_js = 'true' if frag_is_oxford else 'false'
                                         with ui.element('div').style(
-                                            'flex: 0 0 50%; background: #1a1a1a; border-radius: 8px; overflow: hidden; position: relative; min-height: 300px;'
+                                            'flex: 0 0 50%; background: #1a1a1a; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 300px;'
                                         ):
-                                            # Zoom controls overlay
-                                            with ui.element('div').style(
-                                                'position: absolute; top: 8px; right: 8px; z-index: 10; display: flex; gap: 4px;'
-                                            ):
-                                                ui.html(f'''
-                                                    <button onclick="var img=document.getElementById('{img_elem_id}'); if(img) {{ var s=parseFloat(img.dataset.zoom||1); s=Math.min(s+0.25,4); img.dataset.zoom=s; img.style.transform='scale('+s+')'; }}"
-                                                        style="background: rgba(255,255,255,0.85); border: none; border-radius: 4px; width: 28px; height: 28px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">+</button>
-                                                    <button onclick="var img=document.getElementById('{img_elem_id}'); if(img) {{ var s=parseFloat(img.dataset.zoom||1); s=Math.max(s-0.25,0.25); img.dataset.zoom=s; img.style.transform='scale('+s+')'; }}"
-                                                        style="background: rgba(255,255,255,0.85); border: none; border-radius: 4px; width: 28px; height: 28px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">-</button>
-                                                    <button onclick="var img=document.getElementById('{img_elem_id}'); if(img) {{ img.dataset.zoom=1; img.style.transform='scale(1)'; }}"
-                                                        style="background: rgba(255,255,255,0.85); border: none; border-radius: 4px; width: 28px; height: 28px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center;">1:1</button>
-                                                ''', sanitize=False)
-
-                                            # Image with overflow for zoom
-                                            with ui.element('div').style(
-                                                'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: auto;'
-                                            ):
-                                                ui.html(f'''
-                                                    <img id="{img_elem_id}"
-                                                         src="{frag_img_url}"
-                                                         data-zoom="1"
-                                                         style="max-height: 400px; max-width: 100%; object-fit: contain; transition: transform 0.2s ease;"
-                                                         loading="lazy"
-                                                         onerror="
-                                                             if ({is_ox_js}) {{
-                                                                 this.style.display='none';
+                                            ui.html(f'''
+                                                <img src="{frag_img_url}"
+                                                     style="max-height: 400px; max-width: 100%; object-fit: contain;"
+                                                     loading="lazy"
+                                                     onerror="
+                                                         if ({is_ox_js}) {{
+                                                             this.style.display='none';
+                                                         }} else {{
+                                                             var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
+                                                             if (this.src.indexOf('oxford_image')===-1) {{
+                                                                 this.onerror=function(){{ this.style.display='none'; }};
+                                                                 this.src=ox;
                                                              }} else {{
-                                                                 var ox='/api/oxford_image/{safe_sid}?page={pg_idx}';
-                                                                 if (this.src.indexOf('oxford_image')===-1) {{
-                                                                     this.onerror=function(){{ this.style.display='none'; }};
-                                                                     this.src=ox;
-                                                                 }} else {{
-                                                                     this.style.display='none';
-                                                                 }}
+                                                                 this.style.display='none';
                                                              }}
-                                                         "
-                                                    />
-                                                ''', sanitize=False)
+                                                         }}
+                                                     "
+                                                />
+                                            ''', sanitize=False)
 
                                         # Text panel
                                         with ui.element('div').style(
