@@ -97,8 +97,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VIEW-02 | Phase 11 | Pending |
 | VIEW-03 | Phase 11 | Pending |
 | VIEW-04 | Phase 11 | Pending |
-| DATA-01 | Phase 9 | Pending |
-| DATA-02 | Phase 9 | Pending |
+| DATA-01 | Phase 9 | Complete |
+| DATA-02 | Phase 9 | Complete |
 
 **Coverage:**
 - v5.6.0 requirements: 19 total
@@ -107,4 +107,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-07*
-*Last updated: 2026-02-08 after Phase 8 completion*
+*Last updated: 2026-02-08 after Phase 9 completion*
