@@ -5789,6 +5789,8 @@ class GenizahGUI(QMainWindow):
         self.joins_menu.addSeparator()
         view_all = self.joins_menu.addAction(tr("View all joins..."))
         view_all.triggered.connect(self._browse_view_joins)
+        view_desk = self.joins_menu.addAction(tr("Open in Reading Desk"))
+        view_desk.triggered.connect(lambda: self._browse_open_joins_in_reading_desk())
 
     def _on_joins_menu_show(self):
         """Called when joins menu is about to show - trigger sync and update."""
@@ -5806,6 +5808,66 @@ class GenizahGUI(QMainWindow):
         self.browse_shelf_input.setText(shelfmark)
         self._set_last_browse_field("shelf")
         self.browse_load()
+
+    def _browse_open_joins_in_reading_desk(self):
+        """Open all joined fragments in reading desk mode."""
+        if not self.current_browse_sid:
+            return
+
+        document_id = self.current_browse_sid
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(document_id)
+            except Exception:
+                pass
+
+        # Get connected fragments from JoinsManager
+        connected = None
+        if self.joins_mgr:
+            connected = self.joins_mgr.get_connected_fragments_by_id(document_id)
+            if not connected or connected.get('total_fragments', 0) <= 1:
+                if shelfmark:
+                    connected = self.joins_mgr.get_connected_fragments(shelfmark)
+
+        # Build fragments_info list
+        fragments_info = []
+        fragment_details = connected.get('fragment_details', []) if connected else []
+
+        if fragment_details:
+            for fd in fragment_details:
+                fd_shelf = fd.get('shelfmark', '') if isinstance(fd, dict) else getattr(fd, 'shelfmark', '')
+                fd_docid = fd.get('document_id') if isinstance(fd, dict) else getattr(fd, 'document_id', None)
+                if fd_docid:
+                    fragments_info.append({
+                        'shelfmark': fd_shelf,
+                        'document_id': fd_docid
+                    })
+
+        # If no fragment_details, at minimum include the current document
+        if not fragments_info:
+            fragments_info = [{'shelfmark': shelfmark or document_id, 'document_id': document_id}]
+
+        # Also check PGP joins via document_service
+        pgpid = None
+        try:
+            from shared.document_service import get_document_for_fragment, get_fragments_for_document
+            pgp_doc = get_document_for_fragment(document_id)
+            if pgp_doc:
+                pgpid = pgp_doc.get('pgpid')
+                if pgpid:
+                    pgp_fragments = get_fragments_for_document(pgpid)
+                    existing_sids = {f.get('document_id', '') for f in fragments_info}
+                    for pf in pgp_fragments:
+                        pf_sid = pf.get('sys_id', '')
+                        pf_sm = pf.get('shelfmark', '')
+                        if pf_sid and pf_sid not in existing_sids:
+                            fragments_info.append({'shelfmark': pf_sm, 'document_id': pf_sid})
+                            existing_sids.add(pf_sid)
+        except Exception as e:
+            print(f"Error fetching PGP joins for reading desk: {e}")
+
+        self._browse_enter_reading_desk(fragments_info=fragments_info, pgpid=pgpid)
 
     # === Search Results Context Menu ===
 
@@ -6672,6 +6734,14 @@ class GenizahGUI(QMainWindow):
         nav_bar.addWidget(self.btn_b_save)
         nav_bar.addWidget(self.btn_b_toggle_img)
 
+        # Reading Desk toggle button
+        self.btn_b_reading_desk = QPushButton(tr("Reading Desk"))
+        self.btn_b_reading_desk.setToolTip(tr("View multiple manuscripts together"))
+        self.btn_b_reading_desk.setCheckable(True)
+        self.btn_b_reading_desk.setEnabled(False)
+        self.btn_b_reading_desk.clicked.connect(self._browse_toggle_reading_desk)
+        nav_bar.addWidget(self.btn_b_reading_desk)
+
         nav_bar.addStretch()
         text_layout.addLayout(nav_bar)
 
@@ -6794,6 +6864,55 @@ class GenizahGUI(QMainWindow):
         browse_find_row.addWidget(self.browse_find_input)
         text_layout.addLayout(browse_find_row)
 
+        # Reading desk toolbar (hidden by default)
+        self.browse_rd_toolbar = QWidget()
+        self.browse_rd_toolbar.setStyleSheet("background-color: #2d6a4f; border-radius: 5px; padding: 4px;")
+        rd_toolbar_layout = QHBoxLayout(self.browse_rd_toolbar)
+        rd_toolbar_layout.setContentsMargins(8, 4, 8, 4)
+
+        rd_label = QLabel(f"<b style='color: white;'>{tr('Reading Desk')}</b>")
+        rd_toolbar_layout.addWidget(rd_label)
+
+        self.browse_rd_count_lbl = QLabel("")
+        self.browse_rd_count_lbl.setStyleSheet("color: #a7f3d0;")
+        rd_toolbar_layout.addWidget(self.browse_rd_count_lbl)
+
+        rd_toolbar_layout.addSpacing(20)
+
+        # Add by shelfmark
+        rd_add_label = QLabel(f"<span style='color: white;'>{tr('Add shelfmark:')}</span>")
+        rd_toolbar_layout.addWidget(rd_add_label)
+
+        self.browse_rd_shelf_input = QLineEdit()
+        self.browse_rd_shelf_input.setPlaceholderText(tr("Enter shelfmark..."))
+        self.browse_rd_shelf_input.setFixedWidth(200)
+        self.browse_rd_shelf_input.returnPressed.connect(self._browse_rd_add_by_shelfmark)
+        rd_toolbar_layout.addWidget(self.browse_rd_shelf_input)
+
+        self.btn_rd_add = QPushButton(tr("Add"))
+        self.btn_rd_add.setStyleSheet("background-color: #40916c; color: white; padding: 4px 12px; border-radius: 3px;")
+        self.btn_rd_add.clicked.connect(self._browse_rd_add_by_shelfmark)
+        rd_toolbar_layout.addWidget(self.btn_rd_add)
+
+        rd_toolbar_layout.addSpacing(10)
+
+        # Add from lists button (opens the existing lists panel)
+        self.btn_rd_add_from_list = QPushButton(tr("Add from List"))
+        self.btn_rd_add_from_list.setStyleSheet("background-color: #40916c; color: white; padding: 4px 12px; border-radius: 3px;")
+        self.btn_rd_add_from_list.clicked.connect(self._browse_rd_add_from_list)
+        rd_toolbar_layout.addWidget(self.btn_rd_add_from_list)
+
+        rd_toolbar_layout.addStretch()
+
+        # Exit reading desk
+        self.btn_rd_exit = QPushButton(tr("Exit Reading Desk"))
+        self.btn_rd_exit.setStyleSheet("background-color: #e63946; color: white; padding: 4px 12px; border-radius: 3px;")
+        self.btn_rd_exit.clicked.connect(self._browse_exit_reading_desk)
+        rd_toolbar_layout.addWidget(self.btn_rd_exit)
+
+        self.browse_rd_toolbar.hide()
+        text_layout.addWidget(self.browse_rd_toolbar)
+
         # Text display/edit widget
         self.browse_text = QTextEdit()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -6801,6 +6920,9 @@ class GenizahGUI(QMainWindow):
         self.browse_text.setReadOnly(True)  # Start in read-only mode
         self.browse_edit_mode = False
         self.browse_original_text = ""
+        # Enable link click handling for custom genizah:// URLs
+        self.browse_text.viewport().installEventFilter(self)
+        self.browse_text.setMouseTracking(True)
         text_layout.addWidget(self.browse_text)
         
         # Right: Image Viewer
@@ -6822,6 +6944,11 @@ class GenizahGUI(QMainWindow):
         self.browse_side_panel = QTextBrowser()
         self.browse_lists_panel_sizes = None
         self.browse_current_list_id = None
+
+        # Reading desk mode state
+        self.browse_reading_desk_active = False
+        self.browse_reading_desk_entries = []  # list of dicts: {sys_id, shelfmark, pages}
+        self.browse_reading_desk_pgpid = None  # PGP document ID if opened from joins
 
         return panel
 
@@ -6932,13 +7059,43 @@ class GenizahGUI(QMainWindow):
             self.browse_list_items.addItem(list_item)
 
     def browse_on_list_item_clicked(self, item):
-        """Open a list item in the browse tab using FL/Image ID lookup."""
+        """Open a list item in the browse tab using FL/Image ID lookup.
+        If reading desk mode is active, add to desk instead of navigating."""
         item_id = item.data(Qt.ItemDataRole.UserRole)
         if not item_id or not self.lists_mgr:
             return
 
         entry = self.lists_mgr.get_item(item_id)
         if not entry:
+            return
+
+        # If reading desk is active, add to desk instead of navigating
+        if self.browse_reading_desk_active:
+            sys_id = entry.get('sys_id', '')
+            if not sys_id:
+                return
+
+            # Check duplicate
+            existing_ids = {e['sys_id'] for e in self.browse_reading_desk_entries}
+            if sys_id in existing_ids:
+                return
+
+            shelfmark = None
+            if self.meta_mgr:
+                try:
+                    shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                except Exception:
+                    pass
+            if not shelfmark:
+                shelfmark = entry.get('shelfmark') or entry.get('shelfmark_override') or sys_id
+
+            pages = self.searcher.get_full_manuscript(sys_id)
+            self.browse_reading_desk_entries.append({
+                'sys_id': sys_id,
+                'shelfmark': shelfmark,
+                'pages': pages or []
+            })
+            self._browse_rd_render()
             return
 
         fl_id = entry.get('fl_id')
@@ -6953,11 +7110,11 @@ class GenizahGUI(QMainWindow):
 
         if target_fl:
             clean_fl = str(target_fl).replace('FL', '').strip()
-            
+
             self.browse_fl_input.setText(clean_fl)
-            self._set_last_browse_field("fl") 
+            self._set_last_browse_field("fl")
             self.browse_load()
-            
+
         elif sys_id:
             self.browse_sys_input.setText(str(sys_id))
             self._set_last_browse_field("sys")
@@ -7043,6 +7200,7 @@ class GenizahGUI(QMainWindow):
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
+        self.btn_b_reading_desk.setEnabled(True)
         # Enable community buttons
         self.btn_b_edit.setEnabled(True)
         self.btn_b_comment.setEnabled(True)
@@ -7155,9 +7313,34 @@ class GenizahGUI(QMainWindow):
 
     def _on_browse_link_clicked(self, url):
         """Handle clicks on internal links in browse text (View All mode)."""
-        url_str = url.toString()
-        if url_str.startswith("genizah://load/"):
-            # Extract system ID from URL
+        self._on_browse_link_clicked_str(url.toString())
+
+    def _on_browse_link_clicked_str(self, url_str):
+        """Handle clicks on internal links in browse text by URL string."""
+        if url_str.startswith("genizah://rd-load/"):
+            # Reading desk: load this fragment's images in the viewer
+            sid = url_str.replace("genizah://rd-load/", "")
+            if sid and self.meta_mgr:
+                self.current_browse_sid = sid
+                # Update shelfmark display
+                shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+                if shelf and shelf != "Unknown":
+                    self.browse_shelf_input.setText(shelf)
+                self.browse_sys_input.setText(sid)
+                # Trigger image loading via enrichment
+                self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+                self.enrich_browse_worker.finished_signal.connect(self._on_rd_enriched_loaded)
+                self.enrich_browse_worker.start()
+                # Re-render to update "current" badge
+                if self.browse_reading_desk_active:
+                    self._browse_rd_render()
+        elif url_str.startswith("genizah://rd-remove/"):
+            # Reading desk: remove this fragment
+            sid = url_str.replace("genizah://rd-remove/", "")
+            if sid:
+                self._browse_rd_remove_entry(sid)
+        elif url_str.startswith("genizah://load/"):
+            # View All mode: navigate to specific folio
             sid = url_str.replace("genizah://load/", "")
             if sid:
                 # Exit View All mode
@@ -7177,6 +7360,252 @@ class GenizahGUI(QMainWindow):
                     self.browse_shelf_input.setText(shelf)
                 self._set_last_browse_field("sys")
                 self.browse_load()
+
+    def _on_rd_enriched_loaded(self, sid, meta):
+        """Handle enriched metadata loaded for a reading desk fragment."""
+        if not meta:
+            return
+        if sid not in self.meta_mgr.nli_cache:
+            return
+        # Load images in viewer
+        shelf = meta.get('shelfmark')
+        folio_num = _get_folio_number_from_shelfmark(shelf)
+        idx = _get_initial_image_index(meta, folio_num if folio_num is not None else 1)
+        self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
+        self.browse_viewer.setVisible(self.btn_b_toggle_img.isChecked())
+
+    # --- Reading Desk Methods ---
+
+    def _browse_toggle_reading_desk(self, checked):
+        """Toggle reading desk mode on/off."""
+        if checked:
+            self._browse_enter_reading_desk()
+        else:
+            self._browse_exit_reading_desk()
+
+    def _browse_enter_reading_desk(self, fragments_info=None, pgpid=None):
+        """Enter reading desk mode with optional initial fragments.
+
+        Args:
+            fragments_info: list of dicts [{shelfmark, document_id}] from joins
+            pgpid: PGP document ID if opened from PGP joins
+        """
+        self.browse_reading_desk_active = True
+        self.browse_reading_desk_pgpid = pgpid
+        self.browse_rd_toolbar.show()
+        self.btn_b_reading_desk.setChecked(True)
+
+        # Disable single-page navigation while in reading desk
+        self.btn_b_prev.setEnabled(False)
+        self.btn_b_next.setEnabled(False)
+        self.combo_browse_page.setEnabled(False)
+        self.btn_b_all.setEnabled(False)
+
+        if fragments_info:
+            # Populate from provided fragments
+            entries = []
+            for frag in fragments_info:
+                frag_sid = frag.get('document_id', '')
+                frag_sm = frag.get('shelfmark', '')
+                if not frag_sid:
+                    continue
+                pages = self.searcher.get_full_manuscript(frag_sid)
+                entries.append({
+                    'sys_id': frag_sid,
+                    'shelfmark': frag_sm,
+                    'pages': pages or []
+                })
+            self.browse_reading_desk_entries = entries
+        elif self.current_browse_sid:
+            # Start with current manuscript
+            shelfmark = None
+            if self.meta_mgr:
+                try:
+                    shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+                except Exception:
+                    pass
+            pages = self.searcher.get_full_manuscript(self.current_browse_sid)
+            self.browse_reading_desk_entries = [{
+                'sys_id': self.current_browse_sid,
+                'shelfmark': shelfmark or self.current_browse_sid,
+                'pages': pages or []
+            }]
+
+        self._browse_rd_render()
+
+    def _browse_exit_reading_desk(self):
+        """Exit reading desk mode and return to normal browse."""
+        self.browse_reading_desk_active = False
+        self.browse_reading_desk_entries = []
+        self.browse_reading_desk_pgpid = None
+        self.browse_rd_toolbar.hide()
+        self.btn_b_reading_desk.setChecked(False)
+
+        # Re-enable single-page navigation
+        self.btn_b_prev.setEnabled(True)
+        self.btn_b_next.setEnabled(True)
+        self.combo_browse_page.setEnabled(True)
+        self.btn_b_all.setEnabled(True)
+
+        # Reload current page
+        if self.current_browse_sid:
+            self.browse_load_page()
+
+    def _browse_rd_add_by_shelfmark(self):
+        """Add a manuscript to the reading desk by shelfmark search."""
+        text = self.browse_rd_shelf_input.text().strip()
+        if not text:
+            return
+
+        # Check for duplicate
+        existing_ids = {e['sys_id'] for e in self.browse_reading_desk_entries}
+
+        # Use MetadataManager.resolve_system_by_shelfmark for lookup
+        shelf_res = self.meta_mgr.resolve_system_by_shelfmark(text)
+        sys_id = shelf_res.get('sys_id')
+        shelfmark = shelf_res.get('selected_shelfmark') or text
+
+        if not sys_id:
+            options = shelf_res.get('options', [])
+            if options:
+                if len(options) == 1:
+                    sys_id = options[0]['sys_id']
+                    shelfmark = options[0]['shelfmark']
+                else:
+                    # Let user pick from multiple matches
+                    display_options = [f"{opt['shelfmark']}" + (f" | {opt.get('title', '')}" if opt.get('title') else "") for opt in options[:10]]
+                    choice, ok = QInputDialog.getItem(
+                        self, tr("Select Manuscript"), tr("Multiple matches found:"), display_options, 0, False
+                    )
+                    if not ok:
+                        return
+                    idx = display_options.index(choice) if choice in display_options else 0
+                    sys_id = options[idx]['sys_id']
+                    shelfmark = options[idx]['shelfmark']
+
+        if not sys_id:
+            QMessageBox.information(self, tr("Not Found"), tr("No manuscript found for") + f": '{text}'")
+            return
+
+        if sys_id in existing_ids:
+            QMessageBox.information(self, tr("Already Added"), tr("This manuscript is already in the reading desk."))
+            return
+
+        pages = self.searcher.get_full_manuscript(sys_id)
+        self.browse_reading_desk_entries.append({
+            'sys_id': sys_id,
+            'shelfmark': shelfmark,
+            'pages': pages or []
+        })
+
+        self.browse_rd_shelf_input.clear()
+        self._browse_rd_render()
+
+    def _browse_rd_add_from_list(self):
+        """Show the lists panel so user can click items to add to desk."""
+        if not self.browse_lists_panel.isVisible():
+            self.browse_set_lists_panel_visible(True)
+
+    def _browse_rd_remove_entry(self, sys_id):
+        """Remove a manuscript from the reading desk."""
+        self.browse_reading_desk_entries = [
+            e for e in self.browse_reading_desk_entries if e['sys_id'] != sys_id
+        ]
+        if not self.browse_reading_desk_entries:
+            self._browse_exit_reading_desk()
+        else:
+            self._browse_rd_render()
+
+    def _browse_rd_render(self):
+        """Render all reading desk entries as HTML in the browse text widget."""
+        entries = self.browse_reading_desk_entries
+        count = len(entries)
+
+        # Update count label
+        self.browse_rd_count_lbl.setText(f"({count} {tr('manuscripts')})")
+
+        if not entries:
+            self.browse_text.setHtml(f"<div style='color: #666; padding: 20px;'>{tr('No manuscripts in reading desk. Add by shelfmark above or from your lists.')}</div>")
+            return
+
+        html_parts = []
+
+        # Optional: PGP document header
+        if self.browse_reading_desk_pgpid:
+            html_parts.append(f"""
+            <div style='background-color: #1b4332; color: white; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;'>
+                <b>{tr('PGP Document')} #{self.browse_reading_desk_pgpid}</b>
+                <span style='margin-left: 10px; color: #a7f3d0;'>{count} {tr('fragments')}</span>
+            </div>
+            """)
+
+        for entry_idx, entry in enumerate(entries):
+            sid = entry['sys_id']
+            sm = entry['shelfmark']
+            pages = entry.get('pages', [])
+
+            # Fragment separator with shelfmark header and remove link
+            is_current = (sid == self.current_browse_sid)
+            bg_color = '#d4edda' if is_current else '#e8f5e9'
+            current_badge = f" <span style='color: #155724; font-size: 0.8em;'>({tr('Current')})</span>" if is_current else ""
+
+            html_parts.append(f"""
+            <div style='background-color: {bg_color}; padding: 8px 12px; margin-top: {16 if entry_idx > 0 else 0}px; border: 1px solid #c3e6cb; border-radius: 4px;'>
+                <a href='genizah://rd-load/{sid}' style='color: #155724; text-decoration: none; font-weight: bold; font-size: 1.1em;'>
+                    {sm}
+                </a>
+                {current_badge}
+                <a href='genizah://rd-remove/{sid}' style='color: #e63946; text-decoration: none; float: right; font-weight: bold;' title='{tr("Remove")}'>X</a>
+            </div>
+            """)
+
+            if not pages:
+                html_parts.append(f"<div style='color: #999; padding: 8px;'><i>{tr('No text available')}</i></div>")
+                continue
+
+            for p in pages:
+                p_num = p.get('p_num', 1)
+                p_text = p.get('text', '')
+                fl_id = p.get('fl_id', '')
+
+                # Page separator
+                page_label = tr("Recto") if p_num == 1 else tr("Verso") if p_num == 2 else f"{tr('Page')} {p_num}"
+                fl_suffix = f" (FL: {fl_id})" if fl_id else ""
+
+                html_parts.append(f"""
+                <div style='background-color: #f0f0f0; color: #555; padding: 4px 8px; margin-top: 8px; border-bottom: 1px solid #ddd; font-size: 0.85em;'>
+                    <a href='genizah://rd-load/{sid}' style='color: #2980b9; text-decoration: none;'>{sm} -- {page_label}</a>
+                    <span style='font-size: 0.8em; color: #999;'>{fl_suffix}</span>
+                </div>
+                """)
+
+                if p_text:
+                    content = p_text.replace("\n", "<br>")
+                    html_parts.append(f"<div dir='rtl' style='padding: 8px 4px; line-height: 1.8;'>{content}</div>")
+                else:
+                    html_parts.append(f"<div style='color: #999; padding: 8px;'><i>{tr('No text available')}</i></div>")
+
+        # Full PGP transcription at bottom
+        if self.browse_reading_desk_pgpid:
+            try:
+                from shared.document_service import get_transcription_for_document
+                full_text = get_transcription_for_document(self.browse_reading_desk_pgpid)
+                if full_text:
+                    full_text_html = full_text.replace("\n", "<br>")
+                    html_parts.append(f"""
+                    <hr style='margin: 20px 0;'>
+                    <div style='background-color: #e3f2fd; padding: 8px 12px; border-radius: 4px; margin-bottom: 8px;'>
+                        <b>{tr('Full PGP Transcription')}</b>
+                        <span style='color: #1565c0; font-size: 0.8em; margin-left: 8px;'>PGP</span>
+                    </div>
+                    <div dir='rtl' style='padding: 8px; line-height: 1.8; font-family: SBL Hebrew, serif;'>{full_text_html}</div>
+                    """)
+            except Exception as e:
+                print(f"Error loading PGP transcription: {e}")
+
+        self.browse_text.setHtml("".join(html_parts))
+
+    # --- End Reading Desk Methods ---
 
     def toggle_browse_view_all(self, checked):
         if checked:
@@ -11903,6 +12332,21 @@ class GenizahGUI(QMainWindow):
             w.set_buttons_visible(True)
 
     def eventFilter(self, source, event):
+        # Handle link clicks in browse_text (QTextEdit viewport)
+        if hasattr(self, 'browse_text') and source == self.browse_text.viewport():
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                pos = event.pos()
+                anchor = self.browse_text.anchorAt(pos)
+                if anchor and anchor.startswith("genizah://"):
+                    self._on_browse_link_clicked_str(anchor)
+                    return True
+            elif event.type() == QEvent.Type.MouseMove:
+                pos = event.pos()
+                anchor = self.browse_text.anchorAt(pos)
+                if anchor and anchor.startswith("genizah://"):
+                    self.browse_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    self.browse_text.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         if source == self.results_table and event.type() == QEvent.Type.Leave:
             if self.hovered_row != -1:
                 w = self.results_table.cellWidget(self.hovered_row, self.COL_ACTIONS)
@@ -15512,6 +15956,7 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_save.setEnabled(True)
         self.btn_b_all.setEnabled(True)
+        self.btn_b_reading_desk.setEnabled(True)
         if self.current_browse_sid:
             self.btn_b_catalog.setEnabled(True)
 
