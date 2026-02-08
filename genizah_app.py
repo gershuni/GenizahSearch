@@ -54,7 +54,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -2495,6 +2495,8 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setMaximumHeight(200)
         # Use standard palette (transparent background allowed) to support dark mode
         self.txt_extended_info.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
+        self.txt_extended_info.setOpenLinks(False)
+        self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
         meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
 
@@ -3216,6 +3218,25 @@ class ResultDialog(QDialog):
         self._rd_pgp_sources = sources
         self._rd_pgp_doc = pgp_doc
 
+        # Handle PGP extended info display:
+        # Case 1: Enriched data already built HTML -> append PGP section
+        # Case 2: Enriched data ran but had nothing (early return) -> build PGP-only
+        # Case 3: Enriched data hasn't arrived yet -> PGP included when it runs
+        if pgp_doc:
+            if getattr(self, '_rd_enriched_data_loaded', False):
+                self._rd_update_extended_info_with_pgp()
+            elif not self.btn_ext_info.isVisible():
+                parent_win = self.parent()
+                if parent_win and hasattr(parent_win, '_build_pgp_extended_info_html'):
+                    pal = self.txt_extended_info.palette()
+                    tc = pal.color(QPalette.ColorRole.Text).name()
+                    bc = pal.color(QPalette.ColorRole.Base).name()
+                    ph = parent_win._build_pgp_extended_info_html(pgp_doc, palette=pal)
+                    if ph:
+                        h = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>{ph}</div>"
+                        self.txt_extended_info.setHtml(h)
+                        self.btn_ext_info.setVisible(True)
+
         if not sources:
             return
 
@@ -3253,6 +3274,36 @@ class ResultDialog(QDialog):
     def _on_rd_pgp_error(self, sys_id, error_msg):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
+
+    def _rd_update_extended_info_with_pgp(self):
+        """Append PGP metadata to existing extended info HTML (race condition handler).
+
+        Called when PGP data arrives after on_enriched_data_loaded() already built
+        the extended info HTML. Rebuilds the HTML with PGP section appended.
+        """
+        pgp_doc = getattr(self, '_rd_pgp_doc', None)
+        if not pgp_doc:
+            return
+        parent = self.parent()
+        if not parent or not hasattr(parent, '_build_pgp_extended_info_html'):
+            return
+        palette = self.txt_extended_info.palette()
+        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette)
+        if not pgp_html:
+            return
+        # Append PGP section to existing HTML content
+        current_html = self.txt_extended_info.toHtml()
+        # Insert PGP HTML before the final closing </div> of the wrapper
+        # The wrapper div is: <div style='font-family:Arial; ...'>...</div>
+        # We inject the PGP section before the last </div>
+        close_idx = current_html.rfind('</div>')
+        if close_idx >= 0:
+            updated_html = current_html[:close_idx] + pgp_html + current_html[close_idx:]
+            self.txt_extended_info.setHtml(updated_html)
+        else:
+            # Fallback: just append
+            self.txt_extended_info.setHtml(current_html + pgp_html)
+        self.btn_ext_info.setVisible(True)
 
     def _rd_toggle_edit_mode(self):
         """Toggle edit mode in ResultDialog."""
@@ -3721,6 +3772,10 @@ class ResultDialog(QDialog):
         self._rd_load_versions()
 
         # Start PGP source fetch for this page (runs in background)
+        # Reset PGP and enriched data flags for new result
+        self._rd_pgp_doc = None
+        self._rd_pgp_sources = []
+        self._rd_enriched_data_loaded = False
         parent = self.parent()
         if parent:
             # Disconnect old worker signals first to prevent stale results
@@ -3787,6 +3842,17 @@ class ResultDialog(QDialog):
         self.extended_info_visible = checked
         self.txt_extended_info.setVisible(checked)
         self.btn_ext_info.setText(tr("Hide Extended Info") if checked else tr("Show Extended Info"))
+
+    def _on_rd_ext_link_clicked(self, url):
+        """Handle clicks on links in ResultDialog extended info."""
+        url_str = url.toString()
+        if url_str.startswith('tag:'):
+            tag = url_str[4:]
+            parent = self.parent()
+            if parent and hasattr(parent, '_search_by_pgp_tag'):
+                parent._search_by_pgp_tag(tag)
+        elif url_str.startswith('http'):
+            QDesktopServices.openUrl(url)
 
     def toggle_external_viewer(self, checked):
         self.external_pane.setVisible(checked)
@@ -3863,7 +3929,8 @@ class ResultDialog(QDialog):
         marc = meta.get('marc', {})
 
         external_meta = meta.get('external_meta', {})
-        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta:
+        has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
+        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
             self.btn_ext_info.setVisible(False)
             return
 
@@ -3971,9 +4038,20 @@ class ResultDialog(QDialog):
         else:
             html += kti_html
 
+        # Append PGP metadata section if available
+        pgp_doc = getattr(self, '_rd_pgp_doc', None)
+        if pgp_doc:
+            parent = self.parent()
+            if parent and hasattr(parent, '_build_pgp_extended_info_html'):
+                pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette)
+                if pgp_html:
+                    html += pgp_html
+
         html += "</div>"
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
+        # Store flag so PGP late-arrival handler knows enriched data was processed
+        self._rd_enriched_data_loaded = True
 
         _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
         shelf = meta.get('shelfmark')
@@ -4288,6 +4366,12 @@ class GenizahGUI(QMainWindow):
         self.filter_enabled_sources = set()  # set of enabled source refs
         self.results_filters = {}
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
+        self._pgp_transcription_sys_ids = set()
+        self._pgp_filter_active = False
+        self._pgp_badge_worker = None
+        self._pgp_tags_worker = None
+        self._pgp_tag_search_worker = None
+        self._pgp_tags = []
         self.comp_filters = {}
         self.group_thread = None
         self.is_searching = False
@@ -6134,15 +6218,16 @@ class GenizahGUI(QMainWindow):
         self.COL_TITLE = 6
         self.COL_SNIPPET = 7
         self.COL_SRC = 8
+        self.COL_PGP = 9
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(9)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(10)
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP")])
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (5)
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
-            non_sortable_cols=[0, 1, self.COL_IMG],
+            non_sortable_cols=[0, 1, self.COL_IMG, self.COL_PGP],
             filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
@@ -6157,7 +6242,9 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_SYS_ID, 135)
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
         self.results_table.setColumnWidth(self.COL_LIBRARY, 90)  # Library column
+        self.results_table.setColumnWidth(self.COL_PGP, 40)  # PGP badge column
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
