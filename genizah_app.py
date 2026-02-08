@@ -6912,6 +6912,8 @@ class GenizahGUI(QMainWindow):
         self._browse_rd_image_widgets = []  # list of (sys_id, ZoomableScrollArea, ImageLoaderThread)
         self._browse_rd_image_scroll = None  # QScrollArea for stacked images
         self._browse_rd_syncing = False  # prevents infinite scroll sync loop
+        self._rd_text_sync_handler = None  # stored ref for targeted disconnect
+        self._rd_image_sync_handler = None  # stored ref for targeted disconnect
 
         return panel
 
@@ -7370,6 +7372,13 @@ class GenizahGUI(QMainWindow):
         # Show reading desk toolbar
         self.browse_rd_toolbar.show()
 
+        # Create image scroll area ONCE (will be repopulated on each render)
+        if self._browse_rd_image_scroll is None:
+            self._browse_rd_image_scroll = QScrollArea()
+            self._browse_rd_image_scroll.setWidgetResizable(True)
+            self._browse_rd_image_scroll.setStyleSheet("background: #1a1a2e;")
+            self.browse_splitter.addWidget(self._browse_rd_image_scroll)
+
         # Initial render with V0.8 text
         self._browse_rd_render()
 
@@ -7749,24 +7758,18 @@ class GenizahGUI(QMainWindow):
         """Render stacked images in the viewer pane (right side of browse splitter)."""
         state = self.browse_reading_desk_state
 
-        # Hide normal viewer, create scrollable stacked image area
+        # Hide normal viewer
         self.browse_viewer.setVisible(False)
 
-        # Create or recreate the image scroll area
-        if self._browse_rd_image_scroll is not None:
-            # Disconnect old scroll bar signals before destroying
-            try:
-                self._browse_rd_image_scroll.verticalScrollBar().valueChanged.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._browse_rd_image_scroll.setVisible(False)
-            self._browse_rd_image_scroll.setParent(None)
-            self._browse_rd_image_scroll.deleteLater()
+        # Ensure scroll area exists (created in _browse_enter_reading_desk)
+        if self._browse_rd_image_scroll is None:
+            return
 
-        self._browse_rd_image_scroll = QScrollArea()
-        self._browse_rd_image_scroll.setWidgetResizable(True)
-        self._browse_rd_image_scroll.setStyleSheet("background: #1a1a2e;")
+        # Disconnect existing sync handlers before re-render
+        self._browse_rd_disconnect_sync()
 
+        # Clear existing content by replacing the container widget
+        # QScrollArea.setWidget() with a new widget causes the old one to be cleaned up
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
@@ -7879,9 +7882,6 @@ class GenizahGUI(QMainWindow):
 
         container_layout.addStretch()
         self._browse_rd_image_scroll.setWidget(container)
-
-        # Add to splitter at viewer position (index 2)
-        self.browse_splitter.addWidget(self._browse_rd_image_scroll)
         self._browse_rd_image_scroll.setVisible(True)
 
         # Set up synchronized scrolling between text and image panes
@@ -7939,12 +7939,9 @@ class GenizahGUI(QMainWindow):
     def _browse_rd_restore_normal_view(self):
         """Hide reading desk image scroll and restore normal viewer."""
         if self._browse_rd_image_scroll is not None:
-            # Disconnect scroll sync
-            try:
-                self.browse_text.verticalScrollBar().valueChanged.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._browse_rd_image_scroll.setVisible(False)
+            self._browse_rd_disconnect_sync()
+            # Remove from splitter and destroy
+            self._browse_rd_image_scroll.setParent(None)
             self._browse_rd_image_scroll.deleteLater()
             self._browse_rd_image_scroll = None
 
