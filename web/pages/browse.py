@@ -2234,8 +2234,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         found_sid = result.sys_id
                         found_sm = result.shelfmark or query
                         _add_sys_id_to_reading_desk(found_sid, found_sm)
+                    except RuntimeError:
+                        # Stale slot reference after UI rebuild -- silently ignore
+                        pass
                     except Exception as e:
-                        ui.notify(f'{tr("Error")}: {str(e)}', type='negative')
+                        try:
+                            ui.notify(f'{tr("Error")}: {str(e)}', type='negative')
+                        except RuntimeError:
+                            pass
 
                 def show_add_from_list_dialog():
                     """Show dialog to add manuscripts from personal lists to the reading desk."""
@@ -2725,7 +2731,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.label(f'{pg_label}').classes('text-xs font-medium text-gray-500 mt-2 ml-2')
 
                                     # Text content container (replaceable by version selector)
-                                    tc = ui.column().classes('w-full px-3 py-2').style('overflow: hidden;')
+                                    tc = ui.column().classes('w-full px-3 py-2')
                                     text_containers[pg_idx] = tc
 
                                     with tc:
@@ -3263,7 +3269,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             else:
                                                 ui.label(text).style(
                                                     'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
+                                                    'overflow-wrap: break-word; word-break: break-word;'
                                                 )
                                         else:
                                             with ui.column().classes('items-center justify-center h-full'):
