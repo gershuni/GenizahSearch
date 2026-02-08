@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 11 of 13 (Virtual Reading Desk) -- COMPLETE (verified 12/12)
-Plan: 13 of 13 (all plans complete, verified by gsd-verifier)
-Status: Phase complete -- verified, all UAT gaps closed, ready for Phase 12
-Last activity: 2026-02-08 -- Phase 11 verified after UAT v2 gap closure (12/12 must-haves)
+Phase: 12 of 13 (Desktop PGP Discovery)
+Plan: 1 of 3
+Status: In progress
+Last activity: 2026-02-08 -- Completed 12-01-PLAN.md (PGP Extended Info)
 
-Progress: [████████████████████] 77% (20/26 plans across phases 8-13)
+Progress: [█████████████████████] 81% (21/26 plans across phases 8-13)
 
 ## Milestone History
 
@@ -25,9 +25,9 @@ Progress: [████████████████████] 77% (20
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 19 (v5.6.0)
+- Total plans completed: 21 (v5.6.0)
 - Average duration: ~5 min
-- Total execution time: ~104 min
+- Total execution time: ~112 min
 
 **By Phase:**
 
@@ -37,6 +37,7 @@ Progress: [████████████████████] 77% (20
 | 9. Data Import | 2/2 | ~14 min | ~7 min |
 | 10. Desktop PGP Core | 2/2 | ~22 min | ~11 min |
 | 11. Virtual Reading Desk | 13/13 | ~67 min | ~5 min |
+| 12. Desktop PGP Discovery | 1/3 | ~8 min | ~8 min |
 
 *Updated after each plan completion*
 
@@ -65,6 +66,9 @@ Recent decisions affecting current work:
 - DEC-11-11-02: Targeted disconnect(handler) instead of blanket disconnect() for scroll sync
 - DEC-11-09-01: Persist language to app.storage.user, restore in create_layout()
 - DEC-11-09-02: Set comparison of sys_ids for language-switch vs cross-page navigation detection
+- DEC-12-01-01: PGP section uses green left border (#27ae60) distinct from Oxford blue (#3498db)
+- DEC-12-01-02: Tag clicks use exact search as interim; _pending_tag_search flag for Plan 12-02
+- DEC-12-01-03: Three-case race condition handling in ResultDialog (enriched first, PGP first, PGP-only)
 
 ### Data State
 
@@ -89,6 +93,6 @@ D3 (PGP joins not visible in desktop) deferred to Phase 12.
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Phase 11 complete and verified (gap closure execution + re-verification)
+Stopped at: Completed 12-01-PLAN.md (PGP Extended Info in Browse + ResultDialog)
 Resume file: None
-Notes: Phase 11 fully verified. 13 plans executed (5 original + 2 gap closure + 4 UAT v1 + 2 UAT v2). Verification passed 12/12 must-haves. Ready for Phase 12: Desktop PGP Discovery.
+Notes: Plan 12-01 complete. PGP metadata section added to both Browse tab and ResultDialog extended info. Tag click navigation to Search tab wired. Ready for Plan 12-02 (Search Result Indicators + Tag Search + Filter).
