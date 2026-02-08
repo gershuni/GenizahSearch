@@ -13057,15 +13057,28 @@ class GenizahGUI(QMainWindow):
             library_code = self.meta_mgr.get_library_for_id(sid) if self.meta_mgr else ''
             desc = r.get('description', '') or ''
             doc_type = r.get('document_type', '') or ''
-            transcription = r.get('transcription', '') or ''
-            if transcription:
-                # Use first ~150 chars of transcription as snippet (Hebrew text)
-                clean_text = transcription.replace('\n', ' ').replace('\r', ' ').strip()
-                snippet = clean_text[:150] + ('...' if len(clean_text) > 150 else '')
-            elif desc:
-                snippet = f"{doc_type}: {desc[:120]}..."
-            else:
-                snippet = doc_type
+            # Try per-fragment text from Tantivy index (unique per fragment, Hebrew)
+            snippet = ''
+            if self.searcher:
+                try:
+                    pages = self.searcher.get_full_manuscript(sid)
+                    if pages:
+                        first_text = pages[0].get('text', '') if isinstance(pages[0], dict) else str(pages[0])
+                        if first_text:
+                            clean_text = first_text.replace('\n', ' ').replace('\r', ' ').strip()
+                            snippet = clean_text[:150] + ('...' if len(clean_text) > 150 else '')
+                except Exception:
+                    pass
+            if not snippet:
+                # Fall back to PGP transcription
+                transcription = r.get('transcription', '') or ''
+                if transcription:
+                    clean_text = transcription.replace('\n', ' ').replace('\r', ' ').strip()
+                    snippet = clean_text[:150] + ('...' if len(clean_text) > 150 else '')
+                elif desc:
+                    snippet = f"{doc_type}: {desc[:120]}..."
+                else:
+                    snippet = doc_type
             formatted.append({
                 'display': {
                     'id': sid,

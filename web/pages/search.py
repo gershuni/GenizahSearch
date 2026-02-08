@@ -1575,6 +1575,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
 
             # Fetch PGP transcription data for Advanced View
             pgp_transcription = None
+            pgp_metadata = None
             all_sources = None
             if sys_id:
                 try:
@@ -1594,6 +1595,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                     pgp_doc = get_document_for_fragment(sys_id, current_p_num)
                     if pgp_doc:
                         pgpid = pgp_doc.get('pgpid')
+                        pgp_metadata = {
+                            'document_type': pgp_doc.get('document_type'),
+                            'tags': pgp_doc.get('tags', []),
+                            'description': pgp_doc.get('description'),
+                            'languages_primary': pgp_doc.get('languages_primary'),
+                            'languages_secondary': pgp_doc.get('languages_secondary'),
+                            'inferred_date_display': pgp_doc.get('inferred_date_display'),
+                            'doc_date_standard': pgp_doc.get('doc_date_standard'),
+                            'doc_date_original': pgp_doc.get('doc_date_original'),
+                            'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
+                            'pgp_url': pgp_doc.get('pgp_url'),
+                            'pgpid': pgpid,
+                        }
                         doc_relation = pgp_doc.get('doc_relation', '')
                         is_edition = 'Edition' in doc_relation or not doc_relation
                         page_content = get_section_for_page(pgp_doc['transcription'], current_p_num) if pgp_doc.get('transcription') else None
@@ -1829,6 +1843,57 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                             ):
                                 ui.icon('tag').classes('text-sm')
                                 ui.label(f"#{adv_state.current_result_idx + 1}").classes('text-sm font-medium')
+
+                # === PGP Metadata Section ===
+                if pgp_metadata:
+                    with ui.card().classes('w-full p-4').style('border-radius: 12px; border-left: 3px solid #27ae60;'):
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h4(tr('Princeton Geniza Project'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            if pgp_metadata.get('pgp_url'):
+                                ui.link('', pgp_metadata['pgp_url'], new_tab=True).props(
+                                    'icon=open_in_new flat dense round size=xs'
+                                ).style('color: var(--primary-600);').tooltip(tr('View on PGP'))
+
+                        with ui.row().classes('gap-6 flex-wrap'):
+                            # Document Type + Languages
+                            doc_type = pgp_metadata.get('document_type')
+                            lang_primary = pgp_metadata.get('languages_primary')
+                            if doc_type or lang_primary:
+                                with ui.column().classes('gap-1'):
+                                    ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
+                                    create_translatable_text(' \u00b7 '.join(type_parts), container_style='color: var(--text-primary);')
+
+                            # Dates
+                            inferred_display = pgp_metadata.get('inferred_date_display')
+                            doc_date_standard = pgp_metadata.get('doc_date_standard')
+                            doc_date_original = pgp_metadata.get('doc_date_original')
+                            if inferred_display or doc_date_standard or doc_date_original:
+                                with ui.column().classes('gap-1'):
+                                    ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    primary_date = inferred_display or doc_date_standard
+                                    if primary_date:
+                                        ui.label(primary_date).classes('text-sm').style('color: var(--text-primary);')
+                                    if doc_date_original and doc_date_original != primary_date:
+                                        ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+
+                        # Tags
+                        tags = pgp_metadata.get('tags', [])
+                        if tags:
+                            with ui.column().classes('gap-1 mt-2'):
+                                ui.label(tr('Tags')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                with ui.row().classes('gap-1 flex-wrap'):
+                                    for tag in tags:
+                                        ui.badge(tag, color='green').props('outline clickable').classes(
+                                            'text-xs cursor-pointer'
+                                        ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
+
+                        # Description
+                        description = (pgp_metadata.get('description') or '').strip()
+                        if description:
+                            with ui.column().classes('gap-1 mt-2'):
+                                ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
                 # === Page Navigation Bar ===
                 if total_pages > 1:
