@@ -1044,7 +1044,7 @@ class CheckBoxHeader(QHeaderView):
     """Custom HeaderView that draws a checkbox in the first section."""
     toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None, non_sortable_cols=None, filter_columns=None, filter_callback=None, star_columns=None, star_callback=None):
+    def __init__(self, parent=None, non_sortable_cols=None, filter_columns=None, filter_callback=None, star_columns=None, star_callback=None, desc_first_cols=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.isChecked = False
         self.setSectionsClickable(True)
@@ -1055,6 +1055,7 @@ class CheckBoxHeader(QHeaderView):
         self.star_columns = set(star_columns or [])
         self.star_callback = star_callback
         self.star_states = {}
+        self.desc_first_cols = set(desc_first_cols or [])
 
     def get_checkbox_rect(self, rect):
         box_size = 20
@@ -1134,6 +1135,11 @@ class CheckBoxHeader(QHeaderView):
 
         elif idx in self.non_sortable_cols:
             return # Prevent sort
+
+        # For desc-first columns: if not currently sorted on this column,
+        # pre-set indicator to ascending so the toggle goes to descending
+        if idx in self.desc_first_cols and self.sortIndicatorSection() != idx:
+            self.setSortIndicator(idx, Qt.SortOrder.AscendingOrder)
 
         super().mousePressEvent(event)
 
@@ -6328,7 +6334,8 @@ class GenizahGUI(QMainWindow):
             filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
-            star_callback=self.toggle_list_filter
+            star_callback=self.toggle_list_filter,
+            desc_first_cols=[self.COL_PGP]
         )
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
