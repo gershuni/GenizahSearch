@@ -53,7 +53,7 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 **Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, CORE-06, CORE-07, CORE-08, XAPP-02
 **Success Criteria** (what must be TRUE):
   1. `parse_responsa_query("#(שלום/שלומות) עולם*")` returns a list of `ResponsaComponent` objects with correct words, prefixes, and wildcard flags
-  2. `expand_grammatical_prefixes("שלום")` returns ~10 Hebrew prefix forms (ושלום, השלום, בשלום, ...)
+  2. `expand_grammatical_prefixes("שלום")` returns ~25 Hebrew prefix forms including single-letter (ושלום, השלום, בשלום, ...) and compound (והשלום, כשלום, ...)
   3. `expand_judeo_arabic("כלמה")` returns 8-14 forms including אלכלמה, ואלכלמה, sun letter assimilation where applicable
   4. `build_tantivy_query()` with Responsa components produces OR groups with ^5 boosting on exact terms
   5. `build_regex_pattern()` with wildcard components produces `\S*` suffix/prefix patterns and `\s*` per-char flexible spacing on original terms
@@ -80,7 +80,11 @@ Plans:
   7. In PGP Tags mode, all Responsa checkboxes are hidden (not disabled)
   8. Desktop checkboxes reset to defaults on app startup
   9. SearchThread receives `responsa_options` parameter without breaking existing callers
-**Plans:** TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 15-01-PLAN.md -- Web UI: Responsa checkboxes, mode interaction, URL state, explosion warning, expanded term count, core expanded count addition
+- [ ] 15-02-PLAN.md -- Desktop UI: SearchThread extension, Responsa checkboxes, mode interaction, warning display, expanded term count
 
 ### Phase 16: Tabular Query Builder
 **Goal**: Users can visually construct Responsa queries using a tabular interface with 2-3 component columns, which generates syntax text inserted into the search field
