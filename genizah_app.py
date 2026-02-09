@@ -6114,8 +6114,22 @@ class GenizahGUI(QMainWindow):
         self.btn_ai.clicked.connect(self.open_ai)
         self.btn_ai.setEnabled(False)
 
-        row1.addWidget(QLabel(tr("Query:")))
+        # PGP Tag selector (hidden by default, shown when PGP Tags mode selected)
+        self.tag_search_combo = QComboBox()
+        self.tag_search_combo.setEditable(True)
+        self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.tag_search_combo.setPlaceholderText(tr("Select a tag..."))
+        self.tag_search_combo.addItem("")  # empty placeholder item
+        completer = self.tag_search_combo.completer()
+        if completer:
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
+        self.tag_search_combo.setVisible(False)
+
+        self.query_label = QLabel(tr("Query:"))
+        row1.addWidget(self.query_label)
         row1.addWidget(self.query_input)
+        row1.addWidget(self.tag_search_combo)
         row1.addWidget(self.btn_search)
         row1.addWidget(self.btn_ai)
 
@@ -6123,7 +6137,8 @@ class GenizahGUI(QMainWindow):
         row2 = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)")])
+        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
+        self.MODE_PGP_TAGS = 6  # Index of PGP Tags mode
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
@@ -6131,6 +6146,7 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(3, tr("Regex: Use AI Assistant for complex patterns"))
         self.mode_combo.setItemData(4, tr("Search in Title metadata"))
         self.mode_combo.setItemData(5, tr("Search in Shelfmark metadata"))
+        self.mode_combo.setItemData(6, tr("Search by topic tags from the Princeton Geniza Project"))
         self.mode_combo.currentIndexChanged.connect(self._on_search_mode_changed)
 
         # Variant controls container (visible only in Variants mode)
@@ -6267,30 +6283,6 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
 
-        # PGP Tag Search — directly on row2
-        self.tag_search_combo = QComboBox()
-        self.tag_search_combo.setEditable(True)
-        self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.tag_search_combo.setFixedWidth(220)
-        self.tag_search_combo.setPlaceholderText(tr("Search by tag..."))
-        self.tag_search_combo.addItem("")  # empty placeholder item
-        completer = self.tag_search_combo.completer()
-        if completer:
-            completer.setFilterMode(Qt.MatchFlag.MatchContains)
-
-        self.btn_tag_search = QPushButton(tr("Search Tag"))
-        self.btn_tag_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        self.btn_tag_search.setFixedWidth(90)
-        self.btn_tag_search.clicked.connect(self._execute_tag_search)
-        self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
-
-        self.lbl_pgp_tags = QLabel(tr("Princeton Geniza Project (PGP) tags:"))
-        self.lbl_pgp_tags.setStyleSheet("color: #27ae60; font-weight: bold;")
-
-        row2.addSpacing(15)
-        row2.addWidget(self.lbl_pgp_tags)
-        row2.addWidget(self.tag_search_combo)
-        row2.addWidget(self.btn_tag_search)
         row2.addStretch()
         row2.addWidget(btn_help)
 
@@ -12325,13 +12317,20 @@ class GenizahGUI(QMainWindow):
                 self.variant_slider_widget.setVisible(use_slider)
 
     def _on_search_mode_changed(self, index):
-        """Show/hide variant controls based on selected mode."""
-        # Index 1 = Variants mode
+        """Show/hide variant controls and swap query/tag input based on selected mode."""
         is_variants = (index == 1)
+        is_pgp_tags = (index == self.MODE_PGP_TAGS)
+
         if hasattr(self, 'variant_controls_container'):
-            self.variant_controls_container.setVisible(is_variants)
+            self.variant_controls_container.setVisible(is_variants and not is_pgp_tags)
         if is_variants:
             self._update_variant_count_preview()
+
+        # Swap between query input and tag selector
+        if hasattr(self, 'tag_search_combo'):
+            self.query_input.setVisible(not is_pgp_tags)
+            self.tag_search_combo.setVisible(is_pgp_tags)
+            self.query_label.setText(tr("Tag:") if is_pgp_tags else tr("Query:"))
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -12619,6 +12618,10 @@ class GenizahGUI(QMainWindow):
         self.update_lab_ui_state(checked)
 
     def toggle_search(self):
+        # PGP Tags mode — execute tag search instead of text search
+        if self.mode_combo.currentIndex() == self.MODE_PGP_TAGS:
+            self._execute_tag_search()
+            return
         if not self.searcher: return
         if self.is_searching: self.stop_search()
         else: self.start_search()
@@ -13090,6 +13093,8 @@ class GenizahGUI(QMainWindow):
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
         self.tabs.setCurrentWidget(self.search_tab)
+        # Switch to PGP Tags mode
+        self.mode_combo.setCurrentIndex(self.MODE_PGP_TAGS)
         if hasattr(self, 'tag_search_combo'):
             self.tag_search_combo.setCurrentText(tag)
         self._execute_tag_search()
