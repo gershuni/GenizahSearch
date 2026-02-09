@@ -3,8 +3,10 @@ Tests for Responsa core functions: data model, parser, expansion, and explosion 
 
 Tests cover:
 - ResponsaComponent dataclass
-- parse_responsa_query() parser
+- parse_responsa_query() parser (including #suffix, %plene/defective)
 - expand_grammatical_prefixes() Hebrew prefix expansion
+- expand_grammatical_suffixes() Hebrew suffix expansion
+- expand_plene_defective() plene/defective spelling variants
 - expand_judeo_arabic() Judeo-Arabic definite article expansion
 - _apply_explosion_guard() combinatorial explosion guard
 """
@@ -16,9 +18,12 @@ from genizah_core import (
     ResponsaComponent,
     parse_responsa_query,
     expand_grammatical_prefixes,
+    expand_grammatical_suffixes,
     expand_judeo_arabic,
+    expand_plene_defective,
     _apply_explosion_guard,
     GRAMMATICAL_PREFIXES,
+    GRAMMATICAL_SUFFIXES,
     Config,
 )
 
@@ -35,6 +40,8 @@ class TestResponsaComponent:
         comp = ResponsaComponent(words=["שלום"])
         assert comp.words == ["שלום"]
         assert comp.grammatical_prefixes is False
+        assert comp.grammatical_suffixes is False
+        assert comp.plene_defective is False
         assert comp.wildcard is None
         assert comp.wildcard_pattern is None
         assert comp.inline_pattern is None
@@ -43,6 +50,16 @@ class TestResponsaComponent:
         """Component can be marked for grammatical prefix expansion."""
         comp = ResponsaComponent(words=["שלום"], grammatical_prefixes=True)
         assert comp.grammatical_prefixes is True
+
+    def test_with_grammatical_suffixes(self):
+        """Component can be marked for grammatical suffix expansion."""
+        comp = ResponsaComponent(words=["שלום"], grammatical_suffixes=True)
+        assert comp.grammatical_suffixes is True
+
+    def test_with_plene_defective(self):
+        """Component can be marked for plene/defective spelling."""
+        comp = ResponsaComponent(words=["שלום"], plene_defective=True)
+        assert comp.plene_defective is True
 
     def test_with_wildcard(self):
         """Component can have a wildcard type."""
@@ -61,6 +78,18 @@ class TestResponsaComponent:
             inline_pattern="אירו(ס/ש)ין"
         )
         assert comp.inline_pattern == "אירו(ס/ש)ין"
+
+    def test_all_flags_combined(self):
+        """Component can have prefixes + suffixes + plene simultaneously."""
+        comp = ResponsaComponent(
+            words=["שלום"],
+            grammatical_prefixes=True,
+            grammatical_suffixes=True,
+            plene_defective=True,
+        )
+        assert comp.grammatical_prefixes is True
+        assert comp.grammatical_suffixes is True
+        assert comp.plene_defective is True
 
 
 # ============================================================================
@@ -81,6 +110,8 @@ class TestParseResponsaQuery:
         assert len(result) == 1
         assert result[0].words == ["שלום"]
         assert result[0].grammatical_prefixes is False
+        assert result[0].grammatical_suffixes is False
+        assert result[0].plene_defective is False
         assert result[0].wildcard is None
 
     def test_suffix_wildcard(self):
@@ -110,6 +141,56 @@ class TestParseResponsaQuery:
         assert len(result) == 1
         assert result[0].words == ["שלום"]
         assert result[0].grammatical_prefixes is True
+        assert result[0].grammatical_suffixes is False
+
+    def test_grammatical_suffix_hash(self):
+        """Trailing hash = grammatical suffixes flag."""
+        result = parse_responsa_query("שלום#")
+        assert len(result) == 1
+        assert result[0].words == ["שלום"]
+        assert result[0].grammatical_prefixes is False
+        assert result[0].grammatical_suffixes is True
+
+    def test_both_prefix_and_suffix_hash(self):
+        """#word# = both prefix and suffix expansion."""
+        result = parse_responsa_query("#שלום#")
+        assert len(result) == 1
+        assert result[0].words == ["שלום"]
+        assert result[0].grammatical_prefixes is True
+        assert result[0].grammatical_suffixes is True
+
+    def test_plene_defective_percent(self):
+        """%word = plene/defective spelling variants."""
+        result = parse_responsa_query("%שלום")
+        assert len(result) == 1
+        assert result[0].words == ["שלום"]
+        assert result[0].plene_defective is True
+        assert result[0].grammatical_prefixes is False
+
+    def test_percent_with_prefix_hash(self):
+        """%#word = plene/defective + prefix expansion."""
+        result = parse_responsa_query("%#שלום")
+        assert len(result) == 1
+        assert result[0].words == ["שלום"]
+        assert result[0].plene_defective is True
+        assert result[0].grammatical_prefixes is True
+
+    def test_percent_with_both_hashes(self):
+        """%#word# = plene/defective + prefix + suffix expansion."""
+        result = parse_responsa_query("%#שלום#")
+        assert len(result) == 1
+        assert result[0].words == ["שלום"]
+        assert result[0].plene_defective is True
+        assert result[0].grammatical_prefixes is True
+        assert result[0].grammatical_suffixes is True
+
+    def test_prefix_hash_with_suffix_wildcard(self):
+        """#word* = prefix expansion + suffix wildcard."""
+        result = parse_responsa_query("#שלו*")
+        assert len(result) == 1
+        assert result[0].words == ["שלו"]
+        assert result[0].grammatical_prefixes is True
+        assert result[0].wildcard == "suffix"
 
     def test_or_group(self):
         """Parenthesized slash-separated group = OR alternatives."""
@@ -128,10 +209,8 @@ class TestParseResponsaQuery:
         """Multiple space-separated tokens become separate components."""
         result = parse_responsa_query("#(שלום/שלומות) עולם*")
         assert len(result) == 2
-        # First: OR group with hash
         assert result[0].words == ["שלום", "שלומות"]
         assert result[0].grammatical_prefixes is True
-        # Second: suffix wildcard
         assert result[1].words == ["עולם"]
         assert result[1].wildcard == "suffix"
 
@@ -159,6 +238,18 @@ class TestParseResponsaQuery:
         assert len(result) == 1
         assert result[0].words == ["א", "ב", "ג"]
 
+    def test_mixed_operators_in_query(self):
+        """Complex query with different operator types on each component."""
+        result = parse_responsa_query("#שלום# %עולם תורה*")
+        assert len(result) == 3
+        # First: prefix + suffix
+        assert result[0].grammatical_prefixes is True
+        assert result[0].grammatical_suffixes is True
+        # Second: plene/defective
+        assert result[1].plene_defective is True
+        # Third: wildcard suffix
+        assert result[2].wildcard == "suffix"
+
 
 # ============================================================================
 # expand_grammatical_prefixes
@@ -171,7 +262,6 @@ class TestExpandGrammaticalPrefixes:
         """Expanding a word returns ~25 forms with Hebrew prefixes."""
         forms = expand_grammatical_prefixes("שלום")
         assert isinstance(forms, list)
-        # Should have approximately 25 forms (one per prefix)
         assert len(forms) >= 20
         assert len(forms) <= 30
 
@@ -208,6 +298,145 @@ class TestExpandGrammaticalPrefixes:
         assert 'וה' in GRAMMATICAL_PREFIXES
         assert 'כש' in GRAMMATICAL_PREFIXES
         assert len(GRAMMATICAL_PREFIXES) >= 20
+
+
+# ============================================================================
+# expand_grammatical_suffixes
+# ============================================================================
+
+class TestExpandGrammaticalSuffixes:
+    """Tests for expand_grammatical_suffixes().
+
+    Note: The suffix function does direct concatenation — the user provides
+    the stem, not the complete word. E.g., user types "שלומ#" (stem) to get
+    שלומים, שלומות, etc. This is how Bar-Ilan Responsa works.
+    """
+
+    def test_basic_expansion(self):
+        """Expanding a stem returns ~25 forms with Hebrew suffixes."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert isinstance(forms, list)
+        assert len(forms) >= 20
+        assert len(forms) <= 30
+
+    def test_contains_bare_word(self):
+        """Result includes the original stem (no suffix)."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert "שלומ" in forms
+
+    def test_contains_plural_suffixes(self):
+        """Result includes plural forms."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert "שלומים" in forms
+        assert "שלומות" in forms
+
+    def test_contains_feminine_suffix(self):
+        """Result includes feminine marker."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert "שלומה" in forms
+
+    def test_contains_possessive_suffixes(self):
+        """Result includes possessive suffixes."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert "שלומי" in forms   # my
+        assert "שלומך" in forms   # your
+        assert "שלומו" in forms   # his
+        assert "שלומנו" in forms  # our
+        assert "שלומכם" in forms  # your (m.pl.)
+
+    def test_contains_plural_possessive_suffixes(self):
+        """Result includes possessive suffixes used on plural forms."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert "שלומיו" in forms   # his (on plurals)
+        assert "שלומיה" in forms   # her (on plurals)
+        assert "שלומיהם" in forms  # their (m.pl., on plurals)
+        assert "שלומיהן" in forms  # their (f.pl., on plurals)
+
+    def test_no_duplicates(self):
+        """No duplicate forms in the result."""
+        forms = expand_grammatical_suffixes("שלומ")
+        assert len(forms) == len(set(forms)), "Found duplicates in expanded forms"
+
+    def test_grammatical_suffixes_constant(self):
+        """GRAMMATICAL_SUFFIXES constant has expected entries."""
+        assert '' in GRAMMATICAL_SUFFIXES
+        assert 'ה' in GRAMMATICAL_SUFFIXES
+        assert 'ים' in GRAMMATICAL_SUFFIXES
+        assert 'ות' in GRAMMATICAL_SUFFIXES
+        assert 'יהם' in GRAMMATICAL_SUFFIXES
+        assert len(GRAMMATICAL_SUFFIXES) >= 20
+
+
+# ============================================================================
+# expand_plene_defective
+# ============================================================================
+
+class TestExpandPleneDefective:
+    """Tests for expand_plene_defective()."""
+
+    def test_includes_original(self):
+        """Result always includes the original word."""
+        forms = expand_plene_defective("שלום")
+        assert "שלום" in forms
+
+    def test_removal_vav(self):
+        """Removes interior vav: שלום -> שלם."""
+        forms = expand_plene_defective("שלום")
+        assert "שלם" in forms
+
+    def test_removal_yod(self):
+        """Removes interior yod: בית -> בת."""
+        forms = expand_plene_defective("בית")
+        assert "בת" in forms
+
+    def test_addition_vav(self):
+        """Adds vav in plausible positions: שלם -> includes שלום."""
+        forms = expand_plene_defective("שלם")
+        assert "שלום" in forms  # vav after lamed
+
+    def test_addition_yod(self):
+        """Adds yod in plausible positions."""
+        forms = expand_plene_defective("בת")
+        assert "בית" in forms  # yod after bet
+
+    def test_no_duplicates(self):
+        """No duplicate forms in the result."""
+        forms = expand_plene_defective("שלום")
+        assert len(forms) == len(set(forms)), "Found duplicates"
+
+    def test_short_word(self):
+        """Single-character word returns just itself."""
+        forms = expand_plene_defective("א")
+        assert forms == ["א"]
+
+    def test_two_char_word(self):
+        """Two-character word with no interior matres returns itself + additions."""
+        forms = expand_plene_defective("בת")
+        assert "בת" in forms
+        # Should have addition variants (insert between ב and ת)
+        assert "בית" in forms or "בות" in forms
+
+    def test_word_without_matres(self):
+        """Word without any ו/י still gets addition variants."""
+        forms = expand_plene_defective("שלם")
+        assert len(forms) > 1  # Should have additions
+
+    def test_does_not_remove_first_or_last(self):
+        """Does not remove ו/י at first or last position."""
+        # ויקרא - vav is first, should not be removed
+        forms = expand_plene_defective("ויקרא")
+        # The original should be there
+        assert "ויקרא" in forms
+        # 'יקרא' should NOT be there (would remove first char)
+        assert "יקרא" not in forms
+
+    def test_no_insert_after_mater(self):
+        """Does not insert ו/י after an existing mater lectionis."""
+        forms = expand_plene_defective("שלום")
+        # Should not insert after the existing ו (position 3)
+        # since word[2] = 'ו' which is a mater
+        assert "שלוום" not in forms
+        assert "שלוים" not in forms
 
 
 # ============================================================================
@@ -299,7 +528,6 @@ class TestApplyExplosionGuard:
 
     def test_under_limit_preserves_all(self):
         """Under MAX_EXPANDED_TERMS: all options preserved, no warning."""
-        # 2 plain components, each expanding to ~5 variants = 10 total
         components = [
             ResponsaComponent(words=["שלום"]),
             ResponsaComponent(words=["עולם"]),
@@ -318,23 +546,20 @@ class TestApplyExplosionGuard:
 
     def test_over_limit_downgrades_variants(self):
         """Over limit: first cascade step = downgrade variant mode to 'variants' (basic)."""
-        # Many components with hash prefixes + large variant counts
         components = [
             ResponsaComponent(words=["שלום"], grammatical_prefixes=True),
             ResponsaComponent(words=["עולם"], grammatical_prefixes=True),
             ResponsaComponent(words=["תורה"], grammatical_prefixes=True),
         ]
-        # 3 components * 25 prefixes * 100 variants each = 7500 >> 500
         var_mgr = self._make_mock_var_mgr(variants_per_term=100)
         expanded, warning, actual_options = _apply_explosion_guard(
             components,
             variants_on=True,
             ja_on=True,
             var_mgr=var_mgr,
-            variant_mode='variants_maximum'  # 150 pairs
+            variant_mode='variants_maximum'
         )
         assert warning is not None
-        # Should have downgraded something
 
     def test_over_limit_disables_variants(self):
         """If downgrading variants is not enough, disable variants entirely."""
@@ -345,7 +570,6 @@ class TestApplyExplosionGuard:
             ResponsaComponent(words=["שמש"], grammatical_prefixes=True),
             ResponsaComponent(words=["ירח"], grammatical_prefixes=True),
         ]
-        # 5 components * 25 prefixes * 50 variants = 6250
         var_mgr = self._make_mock_var_mgr(variants_per_term=50)
         expanded, warning, actual_options = _apply_explosion_guard(
             components,
@@ -358,8 +582,6 @@ class TestApplyExplosionGuard:
 
     def test_over_limit_disables_ja(self):
         """If disabling variants is not enough, disable JA."""
-        # 20 words * 24 prefixes * 8 JA forms = 3840 >> 500
-        # After disabling JA: 20 * 24 = 480 <= 500
         words = [f"word{i}" for i in range(20)]
         components = [
             ResponsaComponent(words=words, grammatical_prefixes=True),
@@ -376,7 +598,6 @@ class TestApplyExplosionGuard:
 
     def test_still_over_raises_error(self):
         """If all downgrades exhausted and still over limit, raise ValueError."""
-        # Absurdly large OR group that can't fit even without any expansions
         words = [f"word{i}" for i in range(600)]
         components = [
             ResponsaComponent(words=words, grammatical_prefixes=True),
@@ -395,3 +616,41 @@ class TestApplyExplosionGuard:
         """MAX_EXPANDED_TERMS = 500 is in Config class."""
         assert hasattr(Config, 'MAX_EXPANDED_TERMS')
         assert Config.MAX_EXPANDED_TERMS == 500
+
+    def test_suffixes_counted_in_explosion_guard(self):
+        """Suffix expansion is counted when estimating explosion.
+
+        1 word * 24 prefixes * 25 suffixes * 5 variants = 3000 >> 500.
+        After disabling variants: 1 * 24 * 25 = 600 > 500 still.
+        So this should raise ValueError since even without variants/JA it exceeds 500.
+        """
+        components = [
+            ResponsaComponent(words=["שלום"], grammatical_prefixes=True, grammatical_suffixes=True),
+        ]
+        var_mgr = self._make_mock_var_mgr(variants_per_term=5)
+        with pytest.raises(ValueError, match="500|limit"):
+            _apply_explosion_guard(
+                components,
+                variants_on=True,
+                ja_on=False,
+                var_mgr=var_mgr,
+                variant_mode='variants'
+            )
+
+    def test_suffixes_with_manageable_count(self):
+        """Suffix expansion only (no prefixes) stays under limit without cascading."""
+        # 1 word * 25 suffixes = 25, well under 500
+        components = [
+            ResponsaComponent(words=["שלום"], grammatical_suffixes=True),
+        ]
+        var_mgr = self._make_mock_var_mgr(variants_per_term=5)
+        expanded, warning, actual_options = _apply_explosion_guard(
+            components,
+            variants_on=True,
+            ja_on=False,
+            var_mgr=var_mgr,
+            variant_mode='variants'
+        )
+        # 25 suffixes * 5 variants = 125, under 500
+        assert warning is None
+        assert actual_options['variants_on'] is True

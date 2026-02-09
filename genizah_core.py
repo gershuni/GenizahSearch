@@ -82,6 +82,35 @@ GRAMMATICAL_PREFIXES = [
     'כש', 'כשה', 'מה', 'בש', 'לכ',                          # misc combos
 ]
 
+# Hebrew grammatical suffixes for # suffix expansion (~25 entries)
+GRAMMATICAL_SUFFIXES = [
+    '',      # bare word (no suffix)
+    'ה',     # feminine singular
+    'ת',     # feminine construct / verbal
+    'ים',    # masculine plural
+    'ות',    # feminine plural
+    'י',     # 1st person singular possessive / construct
+    'ך',     # 2nd person masculine singular possessive
+    'ו',     # 3rd person masculine singular possessive
+    'נו',    # 1st person plural possessive
+    'כם',    # 2nd person masculine plural possessive
+    'כן',    # 2nd person feminine plural possessive
+    'ם',     # 3rd person masculine plural possessive (short)
+    'ן',     # 3rd person feminine plural possessive (short)
+    'הם',    # 3rd person masculine plural possessive (long)
+    'הן',    # 3rd person feminine plural possessive (long)
+    'ני',    # 1st person singular emphatic
+    'הו',    # 3rd person masculine singular (variant)
+    'יו',    # 3rd person masculine singular (on plurals)
+    'יה',    # 3rd person feminine singular (on plurals)
+    'ינו',   # 1st person plural (on plurals)
+    'יך',    # 2nd person masculine singular (on plurals)
+    'יכם',   # 2nd person masculine plural (on plurals)
+    'יכן',   # 2nd person feminine plural (on plurals)
+    'יהם',   # 3rd person masculine plural (on plurals)
+    'יהן',   # 3rd person feminine plural (on plurals)
+]
+
 
 def strip_nikud(text: str) -> str:
     """Remove Hebrew vowel marks (nikud) and cantillation marks from text.
@@ -4157,10 +4186,14 @@ class ResponsaComponent:
 
     Each component represents one logical search element:
     - A plain word, an OR group of words, a wildcard pattern, or an inline alternation.
-    - The grammatical_prefixes flag indicates that Hebrew prefix expansion (#) is requested.
+    - The grammatical_prefixes flag indicates that Hebrew prefix expansion (leading #) is requested.
+    - The grammatical_suffixes flag indicates that Hebrew suffix expansion (trailing #) is requested.
+    - The plene_defective flag indicates that plene/defective spelling variants (%) are requested.
     """
     words: List[str]
     grammatical_prefixes: bool = False
+    grammatical_suffixes: bool = False
+    plene_defective: bool = False
     wildcard: Optional[str] = None          # None, 'suffix', 'prefix', 'pattern'
     wildcard_pattern: Optional[str] = None  # raw pattern for character patterns like *a*b*c*
     inline_pattern: Optional[str] = None    # for inline alternations like word(a/b)word
@@ -4175,6 +4208,10 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
     - Prefix wildcard: "*נדר" -> wildcard='prefix'
     - Character pattern: "*פ*ט*ר*פ*" -> wildcard='pattern'
     - Grammatical prefixes: "#שלום" -> grammatical_prefixes=True
+    - Grammatical suffixes: "שלום#" -> grammatical_suffixes=True
+    - Both prefix+suffix: "#שלום#" -> grammatical_prefixes=True, grammatical_suffixes=True
+    - Plene/defective: "%שלום" -> plene_defective=True
+    - Combined: "%#שלום#" -> plene_defective + prefixes + suffixes
     - OR groups: "(עץ/אילן)" -> words=['עץ', 'אילן']
     - Hash + OR: "#(שלום/שלומות)" -> OR group with grammatical_prefixes=True
     - Inline alternation: "אירו(ס/ש)ין" -> inline_pattern set
@@ -4238,35 +4275,57 @@ def _tokenize_responsa_query(query: str) -> List[str]:
 def _parse_single_token(token: str) -> ResponsaComponent:
     """Parse a single Responsa query token into a ResponsaComponent.
 
-    Handles: #, *, (a/b) OR groups, inline (a/b) alternations.
+    Handles: # (prefix/suffix), %, *, (a/b) OR groups, inline (a/b) alternations.
+
+    Operator positions:
+    - Leading %: plene/defective spelling variants
+    - Leading #: grammatical prefix expansion
+    - Trailing #: grammatical suffix expansion
+    - Leading *: prefix wildcard (any chars before)
+    - Trailing *: suffix wildcard (any chars after)
+    - Combinable: %#word#, #word*, etc.
     """
     original = token
 
-    # Check for leading #
-    has_hash = token.startswith('#')
-    if has_hash:
+    # Strip leading % for plene/defective
+    has_percent = token.startswith('%')
+    if has_percent:
         token = token[1:]
 
+    # Check for leading #
+    has_leading_hash = token.startswith('#')
+    if has_leading_hash:
+        token = token[1:]
+
+    # Check for trailing # (suffix expansion)
+    # But only if token doesn't end with * (which takes precedence for trailing position)
+    has_trailing_hash = False
+    if token.endswith('#') and not token.endswith('*'):
+        has_trailing_hash = True
+        token = token[:-1]
+
     # Check for OR group: token is entirely "(word1/word2/...)" possibly with trailing *
-    # Pure OR group: starts with ( and the ) is at the end (or end-1 for trailing *)
     if token.startswith('(') and ')' in token:
         close_idx = token.rindex(')')
         inner = token[1:close_idx]
         after = token[close_idx + 1:]
 
-        # Check if this is a pure OR group (nothing before the opening paren)
-        # or an inline alternation (text before/after the parens)
         if '/' in inner:
-            # Pure OR group: "(word1/word2)"
             words = [w.strip() for w in inner.split('/') if w.strip()]
 
             wildcard = None
             if after == '*':
                 wildcard = 'suffix'
+            # Check for trailing # after OR group close
+            trailing_hash_or = has_trailing_hash
+            if after == '#':
+                trailing_hash_or = True
 
             return ResponsaComponent(
                 words=words,
-                grammatical_prefixes=has_hash,
+                grammatical_prefixes=has_leading_hash,
+                grammatical_suffixes=trailing_hash_or,
+                plene_defective=has_percent,
                 wildcard=wildcard,
             )
 
@@ -4277,8 +4336,10 @@ def _parse_single_token(token: str) -> ResponsaComponent:
         inner = token[paren_open + 1:paren_close]
         if '/' in inner:
             return ResponsaComponent(
-                words=[original if has_hash else token],
-                grammatical_prefixes=has_hash,
+                words=[token],
+                grammatical_prefixes=has_leading_hash,
+                grammatical_suffixes=has_trailing_hash,
+                plene_defective=has_percent,
                 inline_pattern=token,
             )
 
@@ -4288,41 +4349,42 @@ def _parse_single_token(token: str) -> ResponsaComponent:
     stripped = token
 
     if '*' in token:
-        # Count asterisks to determine pattern type
         asterisk_count = token.count('*')
 
         if asterisk_count >= 3:
-            # Character pattern: *פ*ט*ר*פ* (multiple interspersed asterisks)
             wildcard = 'pattern'
             wildcard_pattern = token
             return ResponsaComponent(
                 words=[token],
-                grammatical_prefixes=has_hash,
+                grammatical_prefixes=has_leading_hash,
+                grammatical_suffixes=has_trailing_hash,
+                plene_defective=has_percent,
                 wildcard=wildcard,
                 wildcard_pattern=wildcard_pattern,
             )
         elif token.endswith('*') and not token.startswith('*'):
-            # Suffix wildcard: שלום*
             wildcard = 'suffix'
             stripped = token.rstrip('*')
         elif token.startswith('*') and not token.endswith('*'):
-            # Prefix wildcard: *נדר
             wildcard = 'prefix'
             stripped = token.lstrip('*')
         elif token.startswith('*') and token.endswith('*') and asterisk_count == 2:
-            # Also a character pattern (e.g., *word*)
             wildcard = 'pattern'
             wildcard_pattern = token
             return ResponsaComponent(
                 words=[token],
-                grammatical_prefixes=has_hash,
+                grammatical_prefixes=has_leading_hash,
+                grammatical_suffixes=has_trailing_hash,
+                plene_defective=has_percent,
                 wildcard=wildcard,
                 wildcard_pattern=wildcard_pattern,
             )
 
     return ResponsaComponent(
         words=[stripped],
-        grammatical_prefixes=has_hash,
+        grammatical_prefixes=has_leading_hash,
+        grammatical_suffixes=has_trailing_hash,
+        plene_defective=has_percent,
         wildcard=wildcard,
     )
 
@@ -4391,6 +4453,75 @@ def expand_judeo_arabic(word: str) -> List[str]:
     return result
 
 
+def expand_grammatical_suffixes(word: str) -> List[str]:
+    """Expand a Hebrew word with all grammatical suffix combinations.
+
+    Uses the GRAMMATICAL_SUFFIXES constant to generate ~25 forms by
+    appending each suffix to the given word.
+
+    Args:
+        word: Base Hebrew word (without any suffix)
+
+    Returns:
+        List of unique suffixed forms (including the bare word)
+    """
+    seen = set()
+    result = []
+    for suffix in GRAMMATICAL_SUFFIXES:
+        form = word + suffix
+        if form not in seen:
+            seen.add(form)
+            result.append(form)
+    return result
+
+
+def expand_plene_defective(word: str) -> List[str]:
+    """Generate plene/defective spelling variants of a Hebrew word.
+
+    Both directions:
+    - Removal (plene→defective): remove each interior ו or י one at a time
+    - Addition (defective→plene): insert ו or י after each consonant position
+
+    Interior = not the first or last character of the word.
+    Only single-letter changes are made per variant (not combinatorial).
+
+    Args:
+        word: Hebrew word to generate spelling variants for
+
+    Returns:
+        List of unique spelling variants (always includes the original word)
+    """
+    if len(word) < 2:
+        return [word]
+
+    seen = {word}
+    result = [word]
+
+    matres = {'ו', 'י'}
+
+    # Removal: remove each interior ו/י one at a time
+    for i in range(1, len(word) - 1):
+        if word[i] in matres:
+            variant = word[:i] + word[i + 1:]
+            if variant not in seen:
+                seen.add(variant)
+                result.append(variant)
+
+    # Addition: insert ו or י after each consonant in interior positions
+    # We insert between positions 1..len-1 (after first char, before last char)
+    for i in range(1, len(word)):
+        # Only insert after a consonant (not after an existing mater lectionis)
+        # and not immediately before an existing mater lectionis (avoids וו, יי, וי, יו)
+        if word[i - 1] not in matres and word[i] not in matres:
+            for m in matres:
+                variant = word[:i] + m + word[i:]
+                if variant not in seen:
+                    seen.add(variant)
+                    result.append(variant)
+
+    return result
+
+
 def _count_expanded_terms(components: List[ResponsaComponent],
                           variants_on: bool, ja_on: bool,
                           var_mgr, variant_mode: str) -> int:
@@ -4420,6 +4551,14 @@ def _count_expanded_terms(components: List[ResponsaComponent],
             word_count = len(base_words) * len(GRAMMATICAL_PREFIXES)
         else:
             word_count = len(base_words)
+
+        # If grammatical suffixes are on, each form gets ~25 suffix forms
+        if comp.grammatical_suffixes:
+            word_count *= len(GRAMMATICAL_SUFFIXES)
+
+        # If plene/defective is on, estimate ~5 variants per form
+        if comp.plene_defective:
+            word_count *= 5
 
         # If JA expansion is on, each form becomes 8 JA forms
         if ja_on:
