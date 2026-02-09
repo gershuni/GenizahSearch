@@ -6324,7 +6324,7 @@ class GenizahGUI(QMainWindow):
         # Disable sort for Checkbox (0), Actions (1), and Image (5)
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
-            non_sortable_cols=[0, 1, self.COL_IMG, self.COL_PGP],
+            non_sortable_cols=[0, 1, self.COL_IMG],
             filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
