@@ -35,7 +35,8 @@ class SafeRotatingFileHandler(RotatingFileHandler):
                 pass  # Silently continue without rotation
             else:
                 raise
-from typing import Mapping
+from typing import Mapping, List, Optional
+from dataclasses import dataclass, field
 from functools import lru_cache
 import itertools
 import json
@@ -70,6 +71,17 @@ STANDARD_HEBREW_DIST = {
 
 # Hebrew nikud (vowel marks) Unicode range: U+0591-U+05C7 (excluding letters U+05D0-U+05EA)
 NIKUD_PATTERN = re.compile(r'[\u0591-\u05CF]')
+
+# --- Responsa Search Constants ---
+# Hebrew grammatical prefixes for # expansion (~25 entries)
+GRAMMATICAL_PREFIXES = [
+    '',     # bare word
+    'ו', 'ה', 'ב', 'כ', 'ל', 'מ', 'ש',                     # single
+    'וה', 'וב', 'וכ', 'ול', 'ומ', 'וש',                     # vav + prefix
+    'שה', 'שב', 'שכ', 'של', 'שמ',                           # shin + prefix
+    'כש', 'כשה', 'מה', 'בש', 'לכ',                          # misc combos
+]
+
 
 def strip_nikud(text: str) -> str:
     """Remove Hebrew vowel marks (nikud) and cantillation marks from text.
@@ -1705,6 +1717,7 @@ class Config:
     VARIANT_GEN_LIMIT = 8000
     REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
+    MAX_EXPANDED_TERMS = 500
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     HTTP_HEADERS = {"User-Agent": USER_AGENT}
@@ -4132,6 +4145,397 @@ class Indexer:
             self._add_continuous_document(writer, chunk_pages, scope=scope, unique_id=uid)
 
         return len(chunks)
+
+
+# ==============================================================================
+#  RESPONSA QUERY COMPONENTS
+# ==============================================================================
+
+@dataclass
+class ResponsaComponent:
+    """Structured representation of a single token in a parsed Responsa query.
+
+    Each component represents one logical search element:
+    - A plain word, an OR group of words, a wildcard pattern, or an inline alternation.
+    - The grammatical_prefixes flag indicates that Hebrew prefix expansion (#) is requested.
+    """
+    words: List[str]
+    grammatical_prefixes: bool = False
+    wildcard: Optional[str] = None          # None, 'suffix', 'prefix', 'pattern'
+    wildcard_pattern: Optional[str] = None  # raw pattern for character patterns like *a*b*c*
+    inline_pattern: Optional[str] = None    # for inline alternations like word(a/b)word
+
+
+def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
+    """Parse a Responsa-style query string into a list of ResponsaComponent objects.
+
+    Supported syntax:
+    - Plain words: "שלום" -> single component
+    - Suffix wildcard: "שלום*" -> wildcard='suffix'
+    - Prefix wildcard: "*נדר" -> wildcard='prefix'
+    - Character pattern: "*פ*ט*ר*פ*" -> wildcard='pattern'
+    - Grammatical prefixes: "#שלום" -> grammatical_prefixes=True
+    - OR groups: "(עץ/אילן)" -> words=['עץ', 'אילן']
+    - Hash + OR: "#(שלום/שלומות)" -> OR group with grammatical_prefixes=True
+    - Inline alternation: "אירו(ס/ש)ין" -> inline_pattern set
+    - Multiple components separated by whitespace
+
+    Args:
+        query_str: Raw query string from user input
+
+    Returns:
+        List of ResponsaComponent objects (empty list for empty/whitespace input)
+    """
+    if not query_str or not query_str.strip():
+        return []
+
+    # Tokenize: split by whitespace, but keep parenthesized groups with adjacent text
+    # together. We use a regex that captures tokens respecting parentheses.
+    # A token is either:
+    #   - A sequence that may start with # and contain a parenthesized group
+    #   - A plain word (possibly with * wildcards)
+    tokens = _tokenize_responsa_query(query_str.strip())
+
+    components = []
+    for token in tokens:
+        if not token:
+            continue
+        components.append(_parse_single_token(token))
+
+    return components
+
+
+def _tokenize_responsa_query(query: str) -> List[str]:
+    """Split a Responsa query into tokens, respecting parentheses as grouping.
+
+    Splits on whitespace but treats anything inside parentheses (and adjacent
+    characters) as part of the same token.
+    """
+    tokens = []
+    current = []
+    paren_depth = 0
+
+    for ch in query:
+        if ch == '(':
+            paren_depth += 1
+            current.append(ch)
+        elif ch == ')':
+            paren_depth = max(0, paren_depth - 1)
+            current.append(ch)
+        elif ch in (' ', '\t', '\n', '\r') and paren_depth == 0:
+            if current:
+                tokens.append(''.join(current))
+                current = []
+        else:
+            current.append(ch)
+
+    if current:
+        tokens.append(''.join(current))
+
+    return tokens
+
+
+def _parse_single_token(token: str) -> ResponsaComponent:
+    """Parse a single Responsa query token into a ResponsaComponent.
+
+    Handles: #, *, (a/b) OR groups, inline (a/b) alternations.
+    """
+    original = token
+
+    # Check for leading #
+    has_hash = token.startswith('#')
+    if has_hash:
+        token = token[1:]
+
+    # Check for OR group: token is entirely "(word1/word2/...)" possibly with trailing *
+    # Pure OR group: starts with ( and the ) is at the end (or end-1 for trailing *)
+    if token.startswith('(') and ')' in token:
+        close_idx = token.rindex(')')
+        inner = token[1:close_idx]
+        after = token[close_idx + 1:]
+
+        # Check if this is a pure OR group (nothing before the opening paren)
+        # or an inline alternation (text before/after the parens)
+        if '/' in inner:
+            # Pure OR group: "(word1/word2)"
+            words = [w.strip() for w in inner.split('/') if w.strip()]
+
+            wildcard = None
+            if after == '*':
+                wildcard = 'suffix'
+
+            return ResponsaComponent(
+                words=words,
+                grammatical_prefixes=has_hash,
+                wildcard=wildcard,
+            )
+
+    # Check for inline alternation: text(a/b)text  (parentheses not at start)
+    if '(' in token and ')' in token and not token.startswith('('):
+        paren_open = token.index('(')
+        paren_close = token.index(')')
+        inner = token[paren_open + 1:paren_close]
+        if '/' in inner:
+            return ResponsaComponent(
+                words=[original if has_hash else token],
+                grammatical_prefixes=has_hash,
+                inline_pattern=token,
+            )
+
+    # Wildcard detection
+    wildcard = None
+    wildcard_pattern = None
+    stripped = token
+
+    if '*' in token:
+        # Count asterisks to determine pattern type
+        asterisk_count = token.count('*')
+
+        if asterisk_count >= 3:
+            # Character pattern: *פ*ט*ר*פ* (multiple interspersed asterisks)
+            wildcard = 'pattern'
+            wildcard_pattern = token
+            return ResponsaComponent(
+                words=[token],
+                grammatical_prefixes=has_hash,
+                wildcard=wildcard,
+                wildcard_pattern=wildcard_pattern,
+            )
+        elif token.endswith('*') and not token.startswith('*'):
+            # Suffix wildcard: שלום*
+            wildcard = 'suffix'
+            stripped = token.rstrip('*')
+        elif token.startswith('*') and not token.endswith('*'):
+            # Prefix wildcard: *נדר
+            wildcard = 'prefix'
+            stripped = token.lstrip('*')
+        elif token.startswith('*') and token.endswith('*') and asterisk_count == 2:
+            # Also a character pattern (e.g., *word*)
+            wildcard = 'pattern'
+            wildcard_pattern = token
+            return ResponsaComponent(
+                words=[token],
+                grammatical_prefixes=has_hash,
+                wildcard=wildcard,
+                wildcard_pattern=wildcard_pattern,
+            )
+
+    return ResponsaComponent(
+        words=[stripped],
+        grammatical_prefixes=has_hash,
+        wildcard=wildcard,
+    )
+
+
+def expand_grammatical_prefixes(word: str) -> List[str]:
+    """Expand a Hebrew word with all grammatical prefix combinations.
+
+    Uses the GRAMMATICAL_PREFIXES constant to generate ~25 forms by
+    prepending each prefix to the given word.
+
+    Args:
+        word: Base Hebrew word (without any prefix)
+
+    Returns:
+        List of unique prefixed forms (including the bare word)
+    """
+    seen = set()
+    result = []
+    for prefix in GRAMMATICAL_PREFIXES:
+        form = prefix + word
+        if form not in seen:
+            seen.add(form)
+            result.append(form)
+    return result
+
+
+def expand_judeo_arabic(word: str) -> List[str]:
+    """Expand a Judeo-Arabic word with definite article and preposition forms.
+
+    Simplified model: the definite article is ALWAYS 'אל' regardless of the
+    first letter (no sun letter assimilation). Every word gets exactly 8 forms:
+      1. base word
+      2. אל + word (definite article)
+      3. ואל + word (wa + definite article)
+      4. באל + word (bi + definite article)
+      5. פאל + word (fa + definite article)
+      6. כאל + word (ka + definite article)
+      7. לאל + word (la + definite article)
+      8. לל + word (lil- contraction: li + al-)
+
+    Args:
+        word: Base Judeo-Arabic word in Hebrew script
+
+    Returns:
+        List of 8 unique forms
+    """
+    forms = [
+        word,                 # bare word
+        'אל' + word,         # al- (definite article)
+        'ואל' + word,        # wa-al-
+        'באל' + word,        # bi-al-
+        'פאל' + word,        # fa-al-
+        'כאל' + word,        # ka-al-
+        'לאל' + word,        # la-al-
+        'לל' + word,         # lil- (li + al- contraction)
+    ]
+
+    # Deduplicate while preserving order (e.g., if word starts with ל,
+    # 'אל' + 'לword' = 'אללword' which is unique, but edge cases may occur)
+    seen = set()
+    result = []
+    for form in forms:
+        if form not in seen:
+            seen.add(form)
+            result.append(form)
+    return result
+
+
+def _count_expanded_terms(components: List[ResponsaComponent],
+                          variants_on: bool, ja_on: bool,
+                          var_mgr, variant_mode: str) -> int:
+    """Estimate the total number of expanded terms for a set of Responsa components.
+
+    This counts without fully materializing the expansion, used by the explosion
+    guard to check limits before committing to a particular expansion level.
+
+    Args:
+        components: List of ResponsaComponent objects
+        variants_on: Whether spelling variants are enabled
+        ja_on: Whether Judeo-Arabic expansion is enabled
+        var_mgr: VariantManager instance (or mock)
+        variant_mode: Variant mode string ('variants', 'variants_extended', 'variants_maximum')
+
+    Returns:
+        Estimated total number of search terms that would be generated
+    """
+    total = 0
+
+    for comp in components:
+        # Start with the base words count
+        base_words = comp.words
+
+        # If grammatical prefixes are on, each word becomes ~25 forms
+        if comp.grammatical_prefixes:
+            word_count = len(base_words) * len(GRAMMATICAL_PREFIXES)
+        else:
+            word_count = len(base_words)
+
+        # If JA expansion is on, each form becomes 8 JA forms
+        if ja_on:
+            word_count *= 8
+
+        # If variants are on, each form gets variant expansions
+        if variants_on and var_mgr is not None:
+            # Estimate variant count from the first word as representative
+            sample_word = base_words[0] if base_words else "sample"
+            try:
+                sample_variants = var_mgr.get_variants(sample_word, variant_mode)
+                variant_multiplier = max(1, len(sample_variants))
+            except Exception:
+                variant_multiplier = 1
+            word_count *= variant_multiplier
+
+        total += word_count
+
+    return total
+
+
+def _apply_explosion_guard(
+    components: List[ResponsaComponent],
+    variants_on: bool,
+    ja_on: bool,
+    var_mgr,
+    variant_mode: str,
+) -> tuple:
+    """Apply the explosion guard to prevent combinatorial blowup in Responsa queries.
+
+    Checks the estimated total expanded terms against MAX_EXPANDED_TERMS (500)
+    and progressively downgrades options until the query fits:
+
+    Cascade order:
+      1. Downgrade variant mode to 'variants' (basic, 30 pairs)
+      2. Disable variants entirely
+      3. Disable Judeo-Arabic expansion
+      4. If still over limit, raise ValueError
+
+    Args:
+        components: List of ResponsaComponent objects from parse_responsa_query
+        variants_on: Whether spelling variants are enabled
+        ja_on: Whether Judeo-Arabic expansion is enabled
+        var_mgr: VariantManager instance (or mock) for counting variant expansions
+        variant_mode: Current variant mode string
+
+    Returns:
+        Tuple of (components, warning_message, actual_options_dict)
+        - components: The original components (unchanged)
+        - warning_message: str describing what was downgraded, or None if no changes
+        - actual_options: dict with keys 'variants_on', 'ja_on', 'variant_mode'
+          reflecting the actual options after any downgrades
+
+    Raises:
+        ValueError: If the query exceeds MAX_EXPANDED_TERMS even after all downgrades
+    """
+    limit = Config.MAX_EXPANDED_TERMS
+    warnings = []
+
+    current_variants_on = variants_on
+    current_ja_on = ja_on
+    current_variant_mode = variant_mode
+
+    # Check initial count
+    count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+
+    if count <= limit:
+        return components, None, {
+            'variants_on': current_variants_on,
+            'ja_on': current_ja_on,
+            'variant_mode': current_variant_mode,
+        }
+
+    # Cascade 1: Downgrade variant mode to basic ('variants')
+    if current_variants_on and current_variant_mode != 'variants':
+        current_variant_mode = 'variants'
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Variant mode downgraded to basic (30 pairs)")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 2: Disable variants entirely
+    if current_variants_on:
+        current_variants_on = False
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Spelling variants disabled")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 3: Disable Judeo-Arabic expansion
+    if current_ja_on:
+        current_ja_on = False
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Judeo-Arabic expansion disabled")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 4: Still over limit -- nothing left to downgrade
+    raise ValueError(
+        f"Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+        f"Please simplify your query by using fewer OR-group alternatives or "
+        f"removing the # (grammatical prefixes) modifier from some terms."
+    )
+
 
 # ==============================================================================
 #  SEARCH ENGINE

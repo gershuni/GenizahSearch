@@ -19,7 +19,6 @@ from genizah_core import (
     expand_judeo_arabic,
     _apply_explosion_guard,
     GRAMMATICAL_PREFIXES,
-    SUN_LETTERS,
     Config,
 )
 
@@ -216,10 +215,15 @@ class TestExpandGrammaticalPrefixes:
 # ============================================================================
 
 class TestExpandJudeoArabic:
-    """Tests for expand_judeo_arabic()."""
+    """Tests for expand_judeo_arabic().
 
-    def test_moon_letter_word(self):
-        """Moon letter word (כ) gets 8 forms: base + al- + 5 prep+al- + ll."""
+    Judeo-Arabic expansion uses a SIMPLIFIED model: the definite article
+    is ALWAYS 'אל' regardless of the first letter (no sun letter assimilation).
+    Every word gets exactly 8 forms.
+    """
+
+    def test_basic_word(self):
+        """Any word gets 8 forms: base + al- + 5 prep+al- + ll."""
         forms = expand_judeo_arabic("כלמה")
         assert len(forms) == 8
         assert "כלמה" in forms
@@ -231,11 +235,10 @@ class TestExpandJudeoArabic:
         assert "לאלכלמה" in forms
         assert "ללכלמה" in forms
 
-    def test_sun_letter_word(self):
-        """Sun letter word (ש) gets 14 forms: 8 base + 6 assimilated."""
+    def test_shin_word_no_assimilation(self):
+        """Shin-initial word gets same 8 forms (no sun letter assimilation)."""
         forms = expand_judeo_arabic("שוא")
-        assert len(forms) == 14
-        # Base forms (same as moon)
+        assert len(forms) == 8
         assert "שוא" in forms
         assert "אלשוא" in forms
         assert "ואלשוא" in forms
@@ -244,20 +247,10 @@ class TestExpandJudeoArabic:
         assert "כאלשוא" in forms
         assert "לאלשוא" in forms
         assert "ללשוא" in forms
-        # Assimilated forms (sun letter doubling)
-        assert "אששוא" in forms
-        assert "ואששוא" in forms
-        assert "באששוא" in forms
-        assert "פאששוא" in forms
-        assert "כאששוא" in forms
-        assert "לאששוא" in forms
 
-    def test_lamed_sun_letter_no_duplicates(self):
-        """Lamed as sun letter: assimilated form = regular form, so 8 unique forms."""
+    def test_lamed_word(self):
+        """Lamed-initial word: al- + lamed = אללסאן (8 forms)."""
         forms = expand_judeo_arabic("לסאן")
-        # For lamed: assimilated = א + ל + לסאן = אללסאן
-        # Regular = אל + לסאן = אללסאן (same!)
-        # So no extra forms, total = 8
         assert len(forms) == 8
         assert "לסאן" in forms
         assert "אללסאן" in forms
@@ -265,28 +258,28 @@ class TestExpandJudeoArabic:
         assert "באללסאן" in forms
 
     def test_no_duplicates(self):
-        """No duplicate forms for any word type."""
-        for word in ["כלמה", "שוא", "לסאן", "תורה"]:
+        """No duplicate forms for any word."""
+        for word in ["כלמה", "שוא", "לסאן", "תורה", "דאר"]:
             forms = expand_judeo_arabic(word)
             assert len(forms) == len(set(forms)), f"Duplicates found for '{word}'"
 
-    def test_sun_letters_constant(self):
-        """SUN_LETTERS contains expected letters."""
-        expected = set('תדרזסשצטלנ')
-        assert SUN_LETTERS == expected
+    def test_all_words_get_eight_forms(self):
+        """Every word gets exactly 8 forms regardless of first letter."""
+        for word in ["כלמה", "שוא", "תורה", "דאר", "נהר", "רוח"]:
+            forms = expand_judeo_arabic(word)
+            assert len(forms) == 8, f"Expected 8 forms for '{word}', got {len(forms)}"
 
-    def test_tav_sun_letter(self):
-        """Tav is a sun letter: assimilated forms generated."""
+    def test_tav_word_no_assimilation(self):
+        """Tav-initial word gets 8 forms (no assimilation)."""
         forms = expand_judeo_arabic("תורה")
-        assert "אתתורה" in forms  # assimilated: א + ת + תורה
-        assert "ואתתורה" in forms
-        assert len(forms) == 14  # sun letter = 14 forms
+        assert "אלתורה" in forms  # NOT אתתורה
+        assert len(forms) == 8
 
-    def test_dalet_sun_letter(self):
-        """Dalet is a sun letter."""
+    def test_dalet_word_no_assimilation(self):
+        """Dalet-initial word gets 8 forms (no assimilation)."""
         forms = expand_judeo_arabic("דאר")
-        assert "אדדאר" in forms
-        assert len(forms) == 14
+        assert "אלדאר" in forms  # NOT אדדאר
+        assert len(forms) == 8
 
 
 # ============================================================================
@@ -365,12 +358,12 @@ class TestApplyExplosionGuard:
 
     def test_over_limit_disables_ja(self):
         """If disabling variants is not enough, disable JA."""
-        # Extremely large expansion scenario: many OR-group words with hash + JA
-        words = [f"word{i}" for i in range(50)]
+        # 20 words * 24 prefixes * 8 JA forms = 3840 >> 500
+        # After disabling JA: 20 * 24 = 480 <= 500
+        words = [f"word{i}" for i in range(20)]
         components = [
             ResponsaComponent(words=words, grammatical_prefixes=True),
         ]
-        # 50 words * 25 prefixes * 14 JA forms = 17,500 >> 500
         var_mgr = self._make_mock_var_mgr(variants_per_term=5)
         expanded, warning, actual_options = _apply_explosion_guard(
             components,
