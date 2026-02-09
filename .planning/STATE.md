@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 ## Current Position
 
-Phase: 14 of 17 (Responsa Core Engine) -- IN PROGRESS
-Plan: 1 of 2 complete
-Status: **Plan 14-01 complete, ready for Plan 14-02**
-Last activity: 2026-02-09 -- Plan 14-01 (Responsa Core Functions) complete
+Phase: 14 of 17 (Responsa Core Engine) -- COMPLETE
+Plan: 2 of 2 complete
+Status: **Phase 14 complete, ready for Phase 15 (Search UI)**
+Last activity: 2026-02-09 -- Plan 14-02 (Responsa Pipeline Integration) complete
 
-Progress: [##__________________] 12% (1/8 plans across phases 14-17)
+Progress: [####________________] 25% (2/8 plans across phases 14-17)
 
 ## Milestone History
 
@@ -49,6 +49,9 @@ Recent decisions affecting current work:
 - Desktop: checkbox defaults on startup, no persistence
 - URL: text + checkbox states only, no tabular state
 - Highlighting: existing regex match mechanism sufficient
+- Expansion order: plene/defective -> prefixes -> suffixes -> JA -> variants
+- Component dict keys: tantivy_terms, regex_terms, original_words, wildcard, wildcard_pattern, flex_patterns, inline_pattern
+- responsa_options dict: {responsa_mode, variants, ja, flex_spacing, bidirectional, variant_mode}
 
 ### Data State
 
@@ -76,6 +79,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 14-01-PLAN.md (Responsa Core Functions)
+Stopped at: Completed 14-02-PLAN.md (Responsa Pipeline Integration) -- Phase 14 complete
 Resume file: None
-Notes: Plan 14-01 complete. ResponsaComponent dataclass + 4 pure functions implemented with TDD. JA simplified to 8 forms (no sun letter assimilation). Next: execute Plan 14-02 to wire functions into search pipeline.
+Notes: Phase 14 complete. All Responsa core engine functions implemented and wired into the two-phase search pipeline. 99 tests passing. Next: Phase 15 (Search UI) to add web/desktop checkboxes.
