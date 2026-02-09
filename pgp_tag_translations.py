@@ -6,6 +6,18 @@ the original English tag (which is used for search).
 
 The CATEGORIZED_TAGS structure defines both the category grouping and
 the display order for tag dropdowns. Categories have English and Hebrew names.
+
+*** TO EDIT CATEGORY ASSIGNMENTS: ***
+Edit the CATEGORIZED_TAGS list below. Each entry is:
+    ("English Category Name", "Hebrew Category Name", [
+        ("english_tag", "hebrew_translation"),
+        ...
+    ])
+- To move a tag: cut it from one category's list and paste into another.
+- To add a new tag: add a ("english_tag", "hebrew_translation") tuple.
+- Tags can appear in multiple categories (will show under each).
+- Tags not in any category auto-appear under "Other" at the bottom.
+- The PGP_TAG_TRANSLATIONS dict is auto-built from this structure.
 """
 
 from typing import List, Tuple, Optional
@@ -25,6 +37,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("draft", "טיוטה"),
         ("Fatimid decree", "צו פטימי"),
         ("Formulary", "נוסחאי"),
+        ("idbara", "אדבארה (צרור מכתבים)"),
         ("informal note", "פתקה"),
         ("internal memorandum", "תזכיר פנימי"),
         ("ledger", "פנקס"),
@@ -44,7 +57,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("testimony", "עדות"),
     ]),
 
-    # --- הלכה ומשפט / Law & Society ---
+    # --- הלכה וחברה / Law & Society ---
     ("Law & Society", "הלכה וחברה", [
         ("betrothal", "אירוסין"),
         ("captives", "שבויים"),
@@ -62,6 +75,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("get shihrur", "גט שחרור"),
         ("heqdesh", "הקדש"),
         ("hikr", "חִכְּר (חכירה)"),
+        ("Jariya", "ג'אריה (שפחה)"),
         ("Karaite-Rabbanite marriage", "נישואי קראים-רבנים"),
         ("ketubba", "כתובה"),
         ("kosher", "כשרות"),
@@ -77,6 +91,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("real estate", "מקרקעין"),
         ("Shehita", "שחיטה"),
         ("slave", "עבד/שפחה"),
+        ("taqawi", "תקאווי"),
         ("tax", "מס"),
         ("waqf", "וקף (הקדש)"),
     ]),
@@ -112,9 +127,10 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("physician", "רופא"),
         ("physicians", "רופאים"),
         ("prescription", "מרשם"),
+        ("tadhkira", "תד'כירה"),
     ]),
 
-    # --- מסחר ומשלוחים / Trade & Travel ---
+    # --- מסחר ונסיעות / Trade & Travel ---
     ("Trade & Travel", "מסחר ונסיעות", [
         ("book trade", "סחר ספרים"),
         ("Byzantine merchants", "סוחרים ביזנטים"),
@@ -141,17 +157,16 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("ib-addenda", "תוספות לספר הודו"),
         ("ib-partial translation-eng", "ספר הודו - תרגום חלקי לאנגלית"),
         ("ib-untranslated-eng", "ספר הודו - ללא תרגום לאנגלית"),
-        ("Ibn Yiju", "אבן יג'ו"),
-        ("India", "הודו"),
         ("India Book unedited", "ספר הודו (טיוטה לא ערוכה)"),
-        ("Maldives", "האיים המלדיביים"),
     ]),
 
     # --- שלטון ופוליטיקה / State & Politics ---
     ("State & Politics", "שלטון ופוליטיקה", [
+        ("al-Ustul", "אלאסטול (הצי)"),
         ("Amir", "אמיר"),
         ("Arabic crusades", "מסעי הצלב (מקורות ערביים)"),
         ("arabic military report", "דיווח צבאי בערבית"),
+        ("Byzantines", "ביזנטים"),
         ("Crusades", "מסעי הצלב"),
         ("DIMME", "ד'ימה (בני חסות)"),
         ("Diwan al-Abwab", "דיוואן אל-אבואב"),
@@ -159,6 +174,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("isfahsalar", "אספהסלאר (מפקד צבאי)"),
         ("jihad", "ג'יהאד"),
         ("State", "המדינה/הממשל"),
+        ("titulature", "תארים"),
         ("war", "מלחמה"),
     ]),
 
@@ -188,6 +204,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("mint", "מטבעה"),
         ("oil", "שמן"),
         ("porcelain", "חרסינה"),
+        ("sini", "סיני"),
         ("syrup", "סירופ/שראב"),
         ("thanks", "תודה"),
         ("vessels", "כלים"),
@@ -246,6 +263,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("red and black border", "מסגרת אדומה ושחורה"),
         ("ruling board", "לוח שרטוט"),
         ("Trial of the pen", "ניסוי קולמוס"),
+        ("water lily", "נימפאה"),
         ("writing materials", "חומרי כתיבה"),
     ]),
 
@@ -271,9 +289,11 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("Akhmim", "אחמים"),
         ("Alexandria", "אלכסנדריה"),
         ("Damascus", "דמשק"),
+        ("India", "הודו"),
         ("Istanbul", "איסטנבול"),
         ("Jerusalem", "ירושלים"),
         ("khaybar", "ח'יבר"),
+        ("Maldives", "האיים המלדיביים"),
         ("Qus", "קוץ (Qus)"),
         ("Sicily", "סיציליה"),
         ("Spain", "ספרד"),
@@ -286,9 +306,9 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("Abu l-Hasan b. Wahb", "אבו אל-חסן בן והב"),
         ("Abu Sahl Levi", "אבו סהל לוי"),
         ("Abun b. Sedaqa", "עבון בן צדקה"),
+        ("al-Razi", "אל-ראזי"),
         ("Arus b. Yosef", "ערוס בן יוסף"),
         ("baldwin", "בלדווין"),
-        ("Byzantines", "ביזנטים"),
         ("David b. Daniel", "דוד בן דניאל"),
         ("Efrayim b. Shemarya", "אפרים בן שמריה"),
         ("Eli b. Ezekiel", "עלי בן יחזקאל"),
@@ -296,6 +316,7 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("Eliyyahu b. Zekharia", "אליהו בן זכריה"),
         ("Halfon b. Menashshe", "חלפון בן מנשה"),
         ("Ibn al-Taffal", "אבן אל-טפאל"),
+        ("Ibn Yiju", "אבן יג'ו"),
         ("Judge Eliyyahu", "אליהו הדיין"),
         ("Maimonides", "הרמב\"ם"),
         ("Maimonides autograph", "אוטוגרף של הרמב\"ם"),
@@ -306,7 +327,6 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("Moshe b. Levi ha-Levi", "משה בן לוי הלוי"),
         ("Moshe b. Levi literary", "משה בן לוי (ספרותי)"),
         ("Nahray B. Nissim", "נהראי בן נסים"),
-        ("al-Razi", "אל-ראזי"),
         ("Saladin", "צלאח אל-דין"),
         ("Sar Shalom", "שר שלום"),
         ("Shelomo b. Eliyyahu", "שלמה בן אליהו"),
@@ -314,20 +334,12 @@ CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ("Yedutun ha-Levi", "ידותון הלוי"),
     ]),
 
-    # --- שונות / Other ---
-    ("Other", "שונות", [
-        ("al-Ustul", "אלאסטול (הצי)"),
+    # --- תגים פנימיים / Editorial ---
+    ("Editorial", "תגים פנימיים", [
         ("cmp", "cmp"),
-        ("idbara", "אדבארה (צרור מכתבים)"),
-        ("Jariya", "ג'אריה (שפחה)"),
-        ("sini", "סיני"),
-        ("tadhkira", "תד'כירה"),
-        ("taqawi", "תקאווי"),
-        ("titulature", "תארים"),
         ("to edit", "לעריכה"),
         ("to examine", "לבדיקה"),
         ("unedited 11th c", "המאה ה-11 (טרם נערך)"),
-        ("water lily", "נימפאה"),
     ]),
 ]
 
