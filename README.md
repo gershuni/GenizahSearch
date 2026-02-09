@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.4
+# Genizah Search Pro 5.6
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,7 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.4?
+## What's New in Version 5.6?
 
 ### Cross-Paragraph Search
 
@@ -103,7 +103,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.4.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.6.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -137,17 +137,17 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.4 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.6 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.3 כוללת **חיפוש חוצה-פסקאות**, **סנכרון ענן**, ושיפורים רבים בממשק.
+גרסה 5.6 כוללת **שילוב נתוני PGP**, **שולחן קריאה וירטואלי**, **חיפוש תגיות**, ושיפורים רבים בממשק.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.4?
+## מה חדש בגרסה 5.6?
 
 ### חיפוש חוצה-פסקאות
 
@@ -242,7 +242,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.4.1_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.6.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 

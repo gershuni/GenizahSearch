@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-04 (sidebar mobile fix, connection stability improvements)
+> **Last Updated:** 2026-02-09 (v5.6.0 milestone closed, PGP tag translations & categorized dropdowns)
 > **Status:** Active working document
 
 ---
@@ -196,6 +196,16 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-09 | Closed v5.6.0 milestone — version bump to 5.6.0, updated CHANGELOG.md and STATE.md | Claude |
+| 2026-02-09 | Created `pgp_tag_translations.py` — 251 PGP tags with curated Hebrew translations in 16 categories | Claude |
+| 2026-02-09 | Added categorized tag dropdowns with category headers in both web and desktop apps | Claude |
+| 2026-02-09 | Language-aware tag display: Hebrew UI shows "עברית (English)", English UI shows English only | Claude |
+| 2026-02-09 | Fixed desktop PGP Tags mode layout — hides row1, shows tag combo in row2 after Mode | Claude |
+| 2026-02-09 | Fixed web [object Object] in tag dropdown — switched to NiceGUI native dict format | Claude |
+| 2026-02-09 | Corrected ~12 tag category misassignments (e.g., Ibn Yiju moved from India Book to People) | Claude |
+| 2026-02-09 | PGP Tags search mode added to Mode dropdown in both apps | Claude |
+| 2026-02-09 | PGP column sorting, simplified PGP controls, user-friendly labels | Claude |
+| 2026-02-09 | Reverted Phase 13 (Transcription Search) — index build too slow for desktop | Claude |
 | 2026-02-04 | Improved connection indicator UX - yellow pulsing dot for loading, no alarming text messages | Claude |
 | 2026-02-04 | Fixed sidebar opening on mobile - now closes by default on screens < 768px | Claude |
 | 2026-02-04 | Improved connection stability - added continuous heartbeat monitoring and reconnect_timeout | Claude |

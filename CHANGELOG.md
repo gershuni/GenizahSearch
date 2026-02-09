@@ -4,6 +4,49 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.6.0] - 2026-02-09
+
+### Milestone: Desktop Parity & PGP Integration
+
+Full integration of Princeton Geniza Project (PGP) data across both web and desktop apps.
+
+#### PGP Data (Phases 8-9)
+- Imported 35,839 PGP documents with full metadata, 9,364 sources, 22,757 footnotes, 36,155 fragment links
+- Shared document_service.py for Supabase access from both apps
+
+#### Desktop PGP Core (Phase 10)
+- PGP transcriptions and metadata in desktop Browse and Result dialogs
+- Per-source directionality (editions RTL, English translations LTR)
+
+#### Virtual Reading Desk (Phase 11)
+- Multi-manuscript synchronized viewer in both web and desktop apps
+- Stacked images + stacked texts with fragment-level sync scrolling
+- Per-fragment version selector, zoom/rotate controls, lazy loading
+
+#### Desktop PGP Discovery (Phase 12)
+- PGP badges and tag display in search results
+- PGP column sorting (click to show PGP-linked manuscripts first)
+- PGP joins visible in desktop JoinsDialog
+- Tag-based search as a search mode in both apps
+
+#### PGP Tag Search UX
+- "PGP Tags" as a search mode in the Mode dropdown (both apps)
+- Desktop: hides query row, shows tag combo in Mode row
+- Web: tag select replaces query input when PGP Tags mode selected
+- Tag click navigation from result dialogs and browse pages
+- 251 PGP tags with curated Hebrew translations and category grouping
+- 16 categories: Document Types, Law & Society, Medicine, Trade, India Book, etc.
+- Language-aware display: Hebrew UI shows "עברית (English)", English UI shows English only
+- Category headers as visual separators in tag dropdowns
+
+#### Phase 13 Deferred
+- Transcription Search (full-text search in PGP transcriptions) was implemented but reverted
+- Reason: Tantivy index build too slow for desktop distribution
+- Will revisit with server-side index architecture in a future milestone
+- Full documentation preserved in docs/archive/PHASE_13_TRANSCRIPTION_SEARCH_DEFERRED.md
+
+---
+
 ## [5.5.0] - 2026-02-04
 
 ### New Feature: In-App Software Updates

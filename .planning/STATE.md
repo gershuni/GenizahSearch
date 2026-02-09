@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** Users can view and search PGP's human-curated transcriptions alongside manuscript images -- in both web and desktop apps
-**Current focus:** v5.6.0 Desktop Parity & Transcription Search
+**Current focus:** None (between milestones)
 
 ## Current Position
 
 Phase: 12 of 12 (Desktop PGP Discovery) -- COMPLETE
 Plan: 5 of 5 (all plans including gap closure complete)
-Status: Milestone complete (Phase 13 deferred)
-Last activity: 2026-02-09 -- Phase 13 (Transcription Search) reverted and deferred
+Status: **SHIPPED** as v5.6.0 (git tag v5.6.0)
+Last activity: 2026-02-09 -- v5.6.0 milestone closed and tagged
 
 Progress: [████████████████████] 100% (25/25 plans across phases 8-12)
 
@@ -24,6 +24,11 @@ Phase 13 (Transcription Search) was fully implemented (3 plans + 9 bugfixes, 25 
 **Note:** Lab index (fingerprints) also needs PGP when this is re-implemented.
 
 ## Milestone History
+
+- **v5.6.0 Desktop Parity & PGP Integration** -- Shipped 2026-02-09 (git tag v5.6.0)
+  - 5 phases (8-12), 25 plans, ~134 min execution
+  - Phase 13 (Transcription Search) deferred — index build too slow for desktop
+  - See: .planning/ROADMAP.md
 
 - **v1 External Data Integration** -- Shipped 2026-02-07 (git tag v5.5.0)
   - 9 phases, 18 plans, 173 min execution
@@ -115,6 +120,6 @@ Phase 12 completed 3 original plans + 2 gap closure plans:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Reverted Phase 13, milestone v5.6.0 complete (phases 8-12)
+Stopped at: v5.6.0 shipped and tagged
 Resume file: None
-Notes: Phase 13 reverted and deferred. v5.6.0 covers phases 8-12 (desktop parity). Transcription search deferred to future milestone with server-side index architecture.
+Notes: Milestone v5.6.0 shipped. Phases 8-12 complete. Phase 13 (Transcription Search) deferred to future milestone with server-side index architecture. Post-milestone additions: PGP tag Hebrew translations (pgp_tag_translations.py), categorized tag dropdowns, PGP Tags search mode.
