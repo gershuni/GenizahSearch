@@ -6245,9 +6245,9 @@ class GenizahGUI(QMainWindow):
 
         # Search params container (Gap, Exclude, settings, Lab, Deep) — hidden in PGP Tags mode
         self.search_params_container = QWidget()
+        self.search_params_container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         params_layout = QHBoxLayout(self.search_params_container)
         params_layout.setContentsMargins(0, 0, 0, 0)
-        params_layout.setSpacing(4)
 
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
