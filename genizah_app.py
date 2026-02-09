@@ -6099,13 +6099,15 @@ class GenizahGUI(QMainWindow):
         top_layout = QVBoxLayout(top_container)
         top_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Row 1: Query & Search Buttons
-        row1 = QHBoxLayout()
+        # Row 1: Query & Search Buttons (wrapped in container for PGP Tags mode hide)
+        self.search_row1_container = QWidget()
+        row1 = QHBoxLayout(self.search_row1_container)
+        row1.setContentsMargins(0, 0, 0, 0)
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._update_variant_count_preview)
-        
+
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
         self.btn_search.setEnabled(False)
@@ -6115,22 +6117,9 @@ class GenizahGUI(QMainWindow):
         self.btn_ai.clicked.connect(self.open_ai)
         self.btn_ai.setEnabled(False)
 
-        # PGP Tag selector (hidden by default, shown when PGP Tags mode selected)
-        self.tag_search_combo = QComboBox()
-        self.tag_search_combo.setEditable(True)
-        self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.tag_search_combo.setPlaceholderText(tr("Select a tag..."))
-        self.tag_search_combo.addItem("")  # empty placeholder item
-        completer = self.tag_search_combo.completer()
-        if completer:
-            completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
-        self.tag_search_combo.setVisible(False)
-
         self.query_label = QLabel(tr("Query:"))
         row1.addWidget(self.query_label)
         row1.addWidget(self.query_input)
-        row1.addWidget(self.tag_search_combo)
         row1.addWidget(self.btn_search)
         row1.addWidget(self.btn_ai)
 
@@ -6241,6 +6230,25 @@ class GenizahGUI(QMainWindow):
 
         self.variant_controls_container.setVisible(False)  # Hidden by default (Exact mode)
 
+        # PGP Tag selector (hidden by default, shown in row2 when PGP Tags mode selected)
+        self.tag_search_combo = QComboBox()
+        self.tag_search_combo.setEditable(True)
+        self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.tag_search_combo.setPlaceholderText(tr("Select a tag..."))
+        self.tag_search_combo.setFixedWidth(300)
+        self.tag_search_combo.addItem("")  # empty placeholder item
+        completer = self.tag_search_combo.completer()
+        if completer:
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
+        self.tag_search_combo.setVisible(False)
+
+        # Search params container (Gap, Exclude, settings, Lab, Deep) — hidden in PGP Tags mode
+        self.search_params_container = QWidget()
+        params_layout = QHBoxLayout(self.search_params_container)
+        params_layout.setContentsMargins(0, 0, 0, 0)
+        params_layout.setSpacing(4)
+
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
 
@@ -6267,6 +6275,14 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
         self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
+        params_layout.addWidget(QLabel(tr("Gap:")))
+        params_layout.addWidget(self.gap_input)
+        params_layout.addWidget(QLabel(tr("Exclude:")))
+        params_layout.addWidget(self.exclude_input)
+        params_layout.addWidget(self.btn_search_settings)
+        params_layout.addWidget(self.btn_lab_mode_toggle)
+        params_layout.addWidget(self.chk_lab_deep)
+
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
@@ -6275,14 +6291,9 @@ class GenizahGUI(QMainWindow):
 
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
+        row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
-        row2.addWidget(QLabel(tr("Gap:")))
-        row2.addWidget(self.gap_input)
-        row2.addWidget(QLabel(tr("Exclude:")))
-        row2.addWidget(self.exclude_input)
-        row2.addWidget(self.btn_search_settings)
-        row2.addWidget(self.btn_lab_mode_toggle)
-        row2.addWidget(self.chk_lab_deep)
+        row2.addWidget(self.search_params_container)
 
         row2.addStretch()
         row2.addWidget(btn_help)
@@ -6292,7 +6303,7 @@ class GenizahGUI(QMainWindow):
         self._pgp_tags_worker.finished.connect(self._on_pgp_tags_loaded)
         self._pgp_tags_worker.start()
 
-        top_layout.addLayout(row1)
+        top_layout.addWidget(self.search_row1_container)
         top_layout.addLayout(row2)
         layout.addWidget(top_container)
 
@@ -12327,12 +12338,14 @@ class GenizahGUI(QMainWindow):
         if is_variants:
             self._update_variant_count_preview()
 
-        # Swap between query input and tag selector
+        # PGP Tags mode: hide row1 entirely, show tag combo in row2, hide search params
         if hasattr(self, 'tag_search_combo'):
-            self.query_input.setVisible(not is_pgp_tags)
+            # Row1: hide entire query row (input, Search button, AI button)
+            self.search_row1_container.setVisible(not is_pgp_tags)
+            # Row2: show tag combo after Mode dropdown
             self.tag_search_combo.setVisible(is_pgp_tags)
-            self.query_label.setText(tr("Tag:") if is_pgp_tags else tr("Query:"))
-            self.btn_ai.setVisible(not is_pgp_tags)
+            # Row2: hide search params (Gap, Exclude, settings, Lab, Deep) in tag mode
+            self.search_params_container.setVisible(not is_pgp_tags)
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
