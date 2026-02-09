@@ -6261,12 +6261,8 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.btn_search_settings)
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
-        row2.addStretch()
-        row2.addWidget(btn_help)
 
-        # Row 3: PGP Discovery Controls
-        row3 = QHBoxLayout()
-
+        # PGP Discovery Controls (on same row)
         self.chk_pgp_filter = QCheckBox(tr("PGP Only"))
         self.chk_pgp_filter.setToolTip(tr("Show only manuscripts with PGP transcriptions"))
         self.chk_pgp_filter.setStyleSheet("color: #27ae60; font-weight: bold;")
@@ -6288,12 +6284,13 @@ class GenizahGUI(QMainWindow):
         self.btn_tag_search.clicked.connect(self._execute_tag_search)
         self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
 
-        row3.addWidget(self.chk_pgp_filter)
-        row3.addSpacing(20)
-        row3.addWidget(QLabel(tr("PGP Tag:")))
-        row3.addWidget(self.tag_search_combo)
-        row3.addWidget(self.btn_tag_search)
-        row3.addStretch()
+        row2.addSpacing(15)
+        row2.addWidget(self.chk_pgp_filter)
+        row2.addWidget(QLabel(tr("PGP Tag:")))
+        row2.addWidget(self.tag_search_combo)
+        row2.addWidget(self.btn_tag_search)
+        row2.addStretch()
+        row2.addWidget(btn_help)
 
         # Lazily load PGP tags in background
         self._pgp_tags_worker = PGPTagsWorker()
@@ -6302,7 +6299,6 @@ class GenizahGUI(QMainWindow):
 
         top_layout.addLayout(row1)
         top_layout.addLayout(row2)
-        top_layout.addLayout(row3)
         layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
