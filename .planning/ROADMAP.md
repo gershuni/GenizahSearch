@@ -40,8 +40,8 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 
 **Phase Numbering:** Continues from v5.6.0 milestone (Phase 12). Phases 14-17.
 
-- [ ] **Phase 14: Responsa Core Engine** - Parse Responsa syntax, expand prefixes/JA, integrate with Tantivy and Regex
-- [ ] **Phase 15: Search UI (Both Apps)** - Checkboxes, mode switching, wiring to core engine
+- [x] **Phase 14: Responsa Core Engine** - Parse Responsa syntax, expand prefixes/JA, integrate with Tantivy and Regex (completed 2026-02-09)
+- [x] **Phase 15: Search UI (Both Apps)** - Checkboxes, mode switching, wiring to core engine (completed 2026-02-09)
 - [ ] **Phase 16: Tabular Query Builder** - Expansion panel (web) and QDialog (desktop) for visual query construction
 - [ ] **Phase 17: Integration Testing & Polish** - Cross-app verification, edge cases, performance testing
 
@@ -63,8 +63,8 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 **Plans:** 2 plans
 
 Plans:
-- [ ] 14-01-PLAN.md -- TDD: ResponsaComponent dataclass, parser, prefix expansion, JA expansion, explosion guard
-- [ ] 14-02-PLAN.md -- TDD: Wire Responsa components into build_tantivy_query, build_regex_pattern, parse_query_syntax, execute_search
+- [x] 14-01-PLAN.md -- TDD: ResponsaComponent dataclass, parser, prefix expansion, JA expansion, explosion guard
+- [x] 14-02-PLAN.md -- TDD: Wire Responsa components into build_tantivy_query, build_regex_pattern, parse_query_syntax, execute_search
 
 ### Phase 15: Search UI (Both Apps)
 **Goal**: Both web and desktop apps have Responsa checkboxes that control search behavior, with proper mode interaction and state management
@@ -83,8 +83,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 15-01-PLAN.md -- Web UI: Responsa checkboxes, mode interaction, URL state, explosion warning, expanded term count, core expanded count addition
-- [ ] 15-02-PLAN.md -- Desktop UI: SearchThread extension, Responsa checkboxes, mode interaction, warning display, expanded term count
+- [x] 15-01-PLAN.md -- Web UI: Responsa checkboxes, mode interaction, URL state, explosion warning, expanded term count, core expanded count addition
+- [x] 15-02-PLAN.md -- Desktop UI: SearchThread extension, Responsa checkboxes, mode interaction, warning display, expanded term count
 
 ### Phase 16: Tabular Query Builder
 **Goal**: Users can visually construct Responsa queries using a tabular interface with 2-3 component columns, which generates syntax text inserted into the search field
@@ -116,8 +116,8 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 14. Responsa Core Engine | v5.7.0 | 0/2 | Not started | - |
-| 15. Search UI (Both Apps) | v5.7.0 | 0/? | Not started | - |
+| 14. Responsa Core Engine | v5.7.0 | 2/2 | Complete | 2026-02-09 |
+| 15. Search UI (Both Apps) | v5.7.0 | 2/2 | Complete | 2026-02-09 |
 | 16. Tabular Query Builder | v5.7.0 | 0/? | Not started | - |
 | 17. Integration Testing & Polish | v5.7.0 | 0/? | Not started | - |
 
