@@ -2403,8 +2403,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
             fl_id=None
         )
 
-    # Handle tag search
+    # Handle tag search — switch UI to PGP Tags mode and show the selected tag
     if initial_tag:
+        mode_select.value = 'pgp_tags'
+        query_column.set_visibility(False)
+        tag_column.set_visibility(True)
+        tag_select.value = initial_tag
         async def load_tag_in_viewer(result):
             """Load a tag search result into the viewer pane with page text."""
             sys_id = result.get('sys_id', '')
