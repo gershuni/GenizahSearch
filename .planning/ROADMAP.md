@@ -60,7 +60,11 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
   6. Bidirectional gap produces `(forward)|(backward)` regex alternation
   7. When expanded terms exceed 500, downgrade cascade fires (variants->basic->off->JA off->error) and returns a warning message
   8. When Responsa mode is ON, `parse_query_syntax()` prefix shortcuts are bypassed -- query goes to `parse_responsa_query()` instead
-**Plans:** TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 14-01-PLAN.md -- TDD: ResponsaComponent dataclass, parser, prefix expansion, JA expansion, explosion guard
+- [ ] 14-02-PLAN.md -- TDD: Wire Responsa components into build_tantivy_query, build_regex_pattern, parse_query_syntax, execute_search
 
 ### Phase 15: Search UI (Both Apps)
 **Goal**: Both web and desktop apps have Responsa checkboxes that control search behavior, with proper mode interaction and state management
@@ -108,7 +112,7 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 14. Responsa Core Engine | v5.7.0 | 0/? | Not started | - |
+| 14. Responsa Core Engine | v5.7.0 | 0/2 | Not started | - |
 | 15. Search UI (Both Apps) | v5.7.0 | 0/? | Not started | - |
 | 16. Tabular Query Builder | v5.7.0 | 0/? | Not started | - |
 | 17. Integration Testing & Polish | v5.7.0 | 0/? | Not started | - |
