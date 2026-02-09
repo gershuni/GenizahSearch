@@ -328,11 +328,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         h2(tr('PGP Tags'), classes='text-sm font-medium', style='color: var(--success-600);')
                         tag_select = ui.select(
                             [], with_input=True, value=None
-                        ).classes('w-full text-lg').props(
-                            'outlined dense clearable use-input input-debounce="200"'
-                            ' option-label="label" option-value="value" option-disable="disable"'
-                            ' emit-value map-options'
-                        )
+                        ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"')
                         tag_select.props(f'popup-content-class="max-h-64" label="{tr("Select a tag...")}"')
                     tag_column.set_visibility(False)
 
@@ -343,14 +339,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         tags = await run.io_bound(get_all_distinct_tags)
                         lang = get_language()
                         categorized = get_categorized_tags_for_display(tags, lang)
-                        options = []
+                        # NiceGUI dict format: {value: label} — category headers as visual separators
+                        opts = {}
                         for header, display, en_tag in categorized:
                             if en_tag == "":
-                                # Category header — non-selectable separator
-                                options.append({'label': display, 'value': f'__header_{display}', 'disable': True})
+                                # Visual separator — use unique non-colliding key
+                                opts[f'__sep_{header}'] = display
                             else:
-                                options.append({'label': display, 'value': en_tag})
-                        tag_select.options = options
+                                opts[en_tag] = display
+                        tag_select.options = opts
                         tag_select.update()
                     ui.timer(0.1, load_pgp_tags, once=True)
 
@@ -1064,7 +1061,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
             tag = tag_select.value
-            if tag:
+            if tag and not str(tag).startswith('__sep_'):
                 ui.navigate.to(f'/search?tag={quote(tag)}')
             return
 
