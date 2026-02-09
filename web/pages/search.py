@@ -16,7 +16,7 @@ from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
 from genizah_core import SearchEngine, get_library_display
-from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag
+from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from web.components.translate_button import create_translatable_text
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
@@ -496,6 +496,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                 )
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
+        # === PGP Tag Search Row ===
+        with ui.row().classes('w-full px-6 items-center gap-2'):
+            ui.label(tr('Princeton Geniza Project (PGP) tags:')).classes('text-sm font-bold').style('color: var(--success-600);')
+            tag_select = ui.select(
+                [], with_input=True, value=None,
+                on_change=lambda e: ui.navigate.to(f'/search?tag={quote(e.value)}') if e.value else None
+            ).classes('w-48').props('outlined dense clearable use-input input-debounce="200"').style('color: var(--success-600);')
+            tag_select.props('popup-content-class="max-h-64"')
+            ui.button(tr('Search Tag'), icon='search', on_click=lambda: ui.navigate.to(f'/search?tag={quote(tag_select.value)}') if tag_select.value else None).props(
+                'dense size=sm'
+            ).style('background: var(--success-600); color: white;')
+
+            # Load tags asynchronously
+            async def load_pgp_tags():
+                tags = await run.io_bound(get_all_distinct_tags)
+                tag_select.options = tags
+                tag_select.update()
+            ui.timer(0.1, load_pgp_tags, once=True)
+
         # === Main Content Area (Splitter) ===
         with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
 
@@ -559,11 +578,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         filter_snippet = ui.input(
                             placeholder=tr('Filter by text')
                         ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
-
-                    with ui.row().classes('gap-2 items-center'):
-                        pgp_filter_checkbox = ui.checkbox(tr('PGP Only'), value=False).props('dense')
-                        pgp_filter_checkbox.style('color: var(--success-600);')
-                        ui.label(tr('Show only manuscripts with PGP transcriptions')).classes('text-xs').style('color: var(--text-muted);')
 
                     with ui.row().classes('gap-2'):
                         ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
@@ -742,8 +756,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         shelfmark_filter = (filter_shelfmark.value or '').lower().strip()
         title_filter = (filter_title.value or '').lower().strip()
         snippet_filter = (filter_snippet.value or '').lower().strip()
-        pgp_only = pgp_filter_checkbox.value
-
         for res in search_state.results:
             display = res.get('display', {})
             shelfmark = (display.get('shelfmark', '') or '').lower()
@@ -757,11 +769,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                 continue
             if snippet_filter and snippet_filter not in snippet:
                 continue
-            # PGP filter
-            if pgp_only:
-                sys_id = display.get('id', '')
-                if sys_id not in search_state.transcription_sys_ids:
-                    continue
 
             filtered.append(res)
 
@@ -774,7 +781,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
         filter_shelfmark.value = ''
         filter_title.value = ''
         filter_snippet.value = ''
-        pgp_filter_checkbox.value = False
 
         if search_state.results:
             render_results(search_state.results)
