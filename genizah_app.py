@@ -4404,7 +4404,6 @@ class GenizahGUI(QMainWindow):
         self.results_filters = {}
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
-        self._pgp_filter_active = False
         self._pgp_badge_worker = None
         self._pgp_tags_worker = None
         self._pgp_tag_search_worker = None
@@ -6262,23 +6261,7 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
 
-        # PGP Discovery Controls — toggle button reveals filter + tag search
-        self.btn_pgp_toggle = QPushButton(tr("Princeton Geniza Project (PGP)"))
-        self.btn_pgp_toggle.setCheckable(True)
-        self.btn_pgp_toggle.setStyleSheet("color: #27ae60; font-weight: bold;")
-        self.btn_pgp_toggle.setToolTip(tr("Show filters and tag search from the Princeton Geniza Project"))
-        self.btn_pgp_toggle.toggled.connect(self._on_pgp_panel_toggled)
-
-        # Hidden PGP controls container
-        self.pgp_controls_container = QWidget()
-        pgp_layout = QHBoxLayout(self.pgp_controls_container)
-        pgp_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.chk_pgp_filter = QCheckBox(tr("Scholarly transcriptions only"))
-        self.chk_pgp_filter.setToolTip(tr("Show only manuscripts with scholarly transcriptions from the Princeton Geniza Project"))
-        self.chk_pgp_filter.setStyleSheet("color: #27ae60; font-weight: bold;")
-        self.chk_pgp_filter.toggled.connect(self._on_pgp_filter_toggled)
-
+        # PGP Tag Search — directly on row2
         self.tag_search_combo = QComboBox()
         self.tag_search_combo.setEditable(True)
         self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -6295,16 +6278,13 @@ class GenizahGUI(QMainWindow):
         self.btn_tag_search.clicked.connect(self._execute_tag_search)
         self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
 
-        pgp_layout.addWidget(self.chk_pgp_filter)
-        pgp_layout.addSpacing(10)
-        pgp_layout.addWidget(QLabel(tr("Tag:")))
-        pgp_layout.addWidget(self.tag_search_combo)
-        pgp_layout.addWidget(self.btn_tag_search)
-        self.pgp_controls_container.setVisible(False)
+        self.lbl_pgp_tags = QLabel(tr("Princeton Geniza Project (PGP) tags:"))
+        self.lbl_pgp_tags.setStyleSheet("color: #27ae60; font-weight: bold;")
 
         row2.addSpacing(15)
-        row2.addWidget(self.btn_pgp_toggle)
-        row2.addWidget(self.pgp_controls_container)
+        row2.addWidget(self.lbl_pgp_tags)
+        row2.addWidget(self.tag_search_combo)
+        row2.addWidget(self.btn_tag_search)
         row2.addStretch()
         row2.addWidget(btn_help)
 
@@ -12955,9 +12935,7 @@ class GenizahGUI(QMainWindow):
         # Use cached IDs if available, or empty set (will be populated on first activation via update_cache)
         target_sys_ids = self.list_filter_state.get('cached_ids', set())
 
-        pgp_active = self._pgp_filter_active
-
-        if not self.results_filters and not list_active and not pgp_active:
+        if not self.results_filters and not list_active:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -12989,13 +12967,6 @@ class GenizahGUI(QMainWindow):
                 elif list_mode == 'not_in':
                     if in_list: visible = False
 
-            # C. Check PGP Filter
-            if visible and pgp_active:
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                sys_id = item.text().strip() if item else ""
-                if sys_id not in self._pgp_transcription_sys_ids:
-                    visible = False
-
             self.results_table.setRowHidden(row, not visible)
 
     def _on_pgp_badges_loaded(self, pgp_sys_ids):
@@ -13011,15 +12982,6 @@ class GenizahGUI(QMainWindow):
                     self.results_table.setItem(row, self.COL_PGP, pgp_item)
                 else:
                     self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
-        self._apply_results_table_filters()
-
-    def _on_pgp_panel_toggled(self, checked):
-        """Show/hide PGP filter and tag search controls."""
-        self.pgp_controls_container.setVisible(checked)
-
-    def _on_pgp_filter_toggled(self, checked):
-        """Handle PGP filter checkbox toggle."""
-        self._pgp_filter_active = checked
         self._apply_results_table_filters()
 
     def _on_pgp_tags_loaded(self, tags):
@@ -13121,9 +13083,6 @@ class GenizahGUI(QMainWindow):
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
         self.tabs.setCurrentWidget(self.search_tab)
-        # Ensure PGP panel is open so user sees the tag search
-        if hasattr(self, 'btn_pgp_toggle') and not self.btn_pgp_toggle.isChecked():
-            self.btn_pgp_toggle.setChecked(True)
         if hasattr(self, 'tag_search_combo'):
             self.tag_search_combo.setCurrentText(tag)
         self._execute_tag_search()
