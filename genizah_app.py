@@ -6262,9 +6262,20 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.btn_lab_mode_toggle)
         row2.addWidget(self.chk_lab_deep)
 
-        # PGP Discovery Controls (on same row)
-        self.chk_pgp_filter = QCheckBox(tr("PGP Only"))
-        self.chk_pgp_filter.setToolTip(tr("Show only manuscripts with PGP transcriptions"))
+        # PGP Discovery Controls — toggle button reveals filter + tag search
+        self.btn_pgp_toggle = QPushButton(tr("Princeton Geniza Project (PGP)"))
+        self.btn_pgp_toggle.setCheckable(True)
+        self.btn_pgp_toggle.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self.btn_pgp_toggle.setToolTip(tr("Show filters and tag search from the Princeton Geniza Project"))
+        self.btn_pgp_toggle.toggled.connect(self._on_pgp_panel_toggled)
+
+        # Hidden PGP controls container
+        self.pgp_controls_container = QWidget()
+        pgp_layout = QHBoxLayout(self.pgp_controls_container)
+        pgp_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.chk_pgp_filter = QCheckBox(tr("Scholarly transcriptions only"))
+        self.chk_pgp_filter.setToolTip(tr("Show only manuscripts with scholarly transcriptions from the Princeton Geniza Project"))
         self.chk_pgp_filter.setStyleSheet("color: #27ae60; font-weight: bold;")
         self.chk_pgp_filter.toggled.connect(self._on_pgp_filter_toggled)
 
@@ -6272,7 +6283,7 @@ class GenizahGUI(QMainWindow):
         self.tag_search_combo.setEditable(True)
         self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.tag_search_combo.setFixedWidth(220)
-        self.tag_search_combo.setPlaceholderText(tr("Search by PGP Tag..."))
+        self.tag_search_combo.setPlaceholderText(tr("Search by tag..."))
         self.tag_search_combo.addItem("")  # empty placeholder item
         completer = self.tag_search_combo.completer()
         if completer:
@@ -6284,11 +6295,16 @@ class GenizahGUI(QMainWindow):
         self.btn_tag_search.clicked.connect(self._execute_tag_search)
         self.tag_search_combo.activated.connect(lambda idx: self._execute_tag_search() if idx > 0 else None)
 
+        pgp_layout.addWidget(self.chk_pgp_filter)
+        pgp_layout.addSpacing(10)
+        pgp_layout.addWidget(QLabel(tr("Tag:")))
+        pgp_layout.addWidget(self.tag_search_combo)
+        pgp_layout.addWidget(self.btn_tag_search)
+        self.pgp_controls_container.setVisible(False)
+
         row2.addSpacing(15)
-        row2.addWidget(self.chk_pgp_filter)
-        row2.addWidget(QLabel(tr("PGP Tag:")))
-        row2.addWidget(self.tag_search_combo)
-        row2.addWidget(self.btn_tag_search)
+        row2.addWidget(self.btn_pgp_toggle)
+        row2.addWidget(self.pgp_controls_container)
         row2.addStretch()
         row2.addWidget(btn_help)
 
@@ -6321,6 +6337,8 @@ class GenizahGUI(QMainWindow):
 
         self.results_table = QTableWidget(); self.results_table.setColumnCount(10)
         self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP")])
+        # Tooltip for PGP column header
+        self.results_table.horizontalHeaderItem(self.COL_PGP).setToolTip(tr("Scholarly transcriptions/data available from the Princeton Geniza Project"))
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (5)
@@ -12995,6 +13013,10 @@ class GenizahGUI(QMainWindow):
                     self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
         self._apply_results_table_filters()
 
+    def _on_pgp_panel_toggled(self, checked):
+        """Show/hide PGP filter and tag search controls."""
+        self.pgp_controls_container.setVisible(checked)
+
     def _on_pgp_filter_toggled(self, checked):
         """Handle PGP filter checkbox toggle."""
         self._pgp_filter_active = checked
@@ -13099,6 +13121,9 @@ class GenizahGUI(QMainWindow):
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
         self.tabs.setCurrentWidget(self.search_tab)
+        # Ensure PGP panel is open so user sees the tag search
+        if hasattr(self, 'btn_pgp_toggle') and not self.btn_pgp_toggle.isChecked():
+            self.btn_pgp_toggle.setChecked(True)
         if hasattr(self, 'tag_search_combo'):
             self.tag_search_combo.setCurrentText(tag)
         self._execute_tag_search()
