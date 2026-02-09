@@ -13010,14 +13010,25 @@ class GenizahGUI(QMainWindow):
         self._apply_results_table_filters()
 
     def _on_pgp_tags_loaded(self, tags):
-        """Handle PGP tags worker results - populate tag dropdown with Hebrew translations."""
-        from pgp_tag_translations import translate_tag_display
+        """Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations."""
+        from pgp_tag_translations import get_categorized_tags_for_display
         self._pgp_tags = tags
+        lang = CURRENT_LANG  # 'he' or 'en'
         self.tag_search_combo.blockSignals(True)
         self.tag_search_combo.clear()
         self.tag_search_combo.addItem("", "")  # empty placeholder
-        for tag in tags:
-            self.tag_search_combo.addItem(translate_tag_display(tag), tag)
+        categorized = get_categorized_tags_for_display(tags, lang)
+        for header, display, en_tag in categorized:
+            if en_tag == "":
+                # Category header — non-selectable separator
+                self.tag_search_combo.addItem(display)
+                idx = self.tag_search_combo.count() - 1
+                model = self.tag_search_combo.model()
+                item = model.item(idx)
+                if item:
+                    item.setEnabled(False)
+            else:
+                self.tag_search_combo.addItem(display, en_tag)
         self.tag_search_combo.blockSignals(False)
 
     def _execute_tag_search(self):

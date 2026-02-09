@@ -4,295 +4,340 @@ Hebrew translations for PGP (Princeton Geniza Project) tags.
 Used in both web and desktop apps to display tags in Hebrew alongside
 the original English tag (which is used for search).
 
-Format: English tag -> Hebrew translation
+The CATEGORIZED_TAGS structure defines both the category grouping and
+the display order for tag dropdowns. Categories have English and Hebrew names.
 """
 
-PGP_TAG_TRANSLATIONS = {
-    # === תקופות ===
-    "10th or 11th c": "המאה ה-10 או ה-11",
-    "11th c": "המאה ה-11",
-    "11th or 12th c": "המאה ה-11 או ה-12",
-    "12th c": "המאה ה-12",
-    "13th c": "המאה ה-13",
-    "16th c or later": "המאה ה-16 ואילך",
-    "16th or 17th c": "המאה ה-16 או ה-17",
-    "early modern": "ראשית העת החדשה",
-    "Fatimid": "פטימי",
-    "late Fatimid": "פטימי מאוחר",
-    "Mamluk": "ממלוכי",
-    "ottoman era": "התקופה העות'מאנית",
-    "Qajar": "קאג'ארי",
+from typing import List, Tuple, Optional
 
-    # === ספר הודו ===
-    "IB1": "ספר הודו א",
-    "IB2": "ספר הודו ב",
-    "IB3": "ספר הודו ג",
-    "IB4": "ספר הודו ד",
-    "IB5": "ספר הודו ה",
-    "IB6": "ספר הודו ו",
-    "IB7": "ספר הודו ז",
-    "India": "הודו",
-    "India Book unedited": "ספר הודו (טיוטה לא ערוכה)",
-    "Ibn Yiju": "אבן יג'ו",
-    "ib-addenda": "תוספות לספר הודו",
-    "ib-partial translation-eng": "ספר הודו - תרגום חלקי לאנגלית",
-    "ib-untranslated-eng": "ספר הודו - ללא תרגום לאנגלית",
-    "halfon-addenda": "תוספות לחלפון",
-    "Maldives": "האיים המלדיביים",
 
-    # === אישים ===
-    "Abu Sahl Levi": "אבו סהל לוי",
-    "Abu l-Hasan b. Wahb": "אבו אל-חסן בן והב",
-    "Abun b. Sedaqa": "עבון בן צדקה",
-    "Arus b. Yosef": "ערוס בן יוסף",
-    "David b. Daniel": "דוד בן דניאל",
-    "Efrayim b. Shemarya": "אפרים בן שמריה",
-    "Eli b. Ezekiel": "עלי בן יחזקאל",
-    "Eli b. Hayyim": "עלי בן חיים",
-    "Eliyyahu b. Zekharia": "אליהו בן זכריה",
-    "Halfon b. Menashshe": "חלפון בן מנשה",
-    "Ibn al-Taffal": "אבן אל-טפאל",
-    "Judge Eliyyahu": "אליהו הדיין",
-    "Maimonides": "הרמב\"ם",
-    "Maimonides autograph": "אוטוגרף של הרמב\"ם",
-    "Marduk b. Musa": "מרדוך בן מוסא",
-    "Mevorakh b. Natan": "מבורך בן נתן",
-    "Moshe b. Levi": "משה בן לוי",
-    "Moshe b. Levi (signed)": "משה בן לוי (חתום)",
-    "Moshe b. Levi ha-Levi": "משה בן לוי הלוי",
-    "Moshe b. Levi literary": "משה בן לוי (ספרותי)",
-    "Nahray B. Nissim": "נהראי בן נסים",
-    "Saladin": "צלאח אל-דין",
-    "Sar Shalom": "שר שלום",
-    "Shelomo b. Eliyyahu": "שלמה בן אליהו",
-    "Shemarya b. Elhanan": "שמריה בן אלחנן",
-    "Yedutun ha-Levi": "ידותון הלוי",
-    "al-Razi": "אל-ראזי",
-    "baldwin": "בלדווין",
+# Each category: (english_name, hebrew_name, [(english_tag, hebrew_translation), ...])
+CATEGORIZED_TAGS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
+    # --- סוגי מסמכים / Document Types ---
+    ("Document Types", "סוגי מסמכים", [
+        ("account", "חשבון"),
+        ("addendum", "נספח"),
+        ("Appeal", "פנייה/בקשת סיוע"),
+        ("bill of sale", "שטר מכר"),
+        ("commercial receipt", "קבלה מסחרית"),
+        ("court record", "מעשה בית דין"),
+        ("Decree", "צו שלטוני"),
+        ("draft", "טיוטה"),
+        ("Fatimid decree", "צו פטימי"),
+        ("Formulary", "נוסחאי"),
+        ("informal note", "פתקה"),
+        ("internal memorandum", "תזכיר פנימי"),
+        ("ledger", "פנקס"),
+        ("legal", "משפטי"),
+        ("legal query", "שאלה משפטית"),
+        ("list", "רשימה"),
+        ("LOR", "מכתב המלצה"),
+        ("memorandum", "תזכיר"),
+        ("order", "הזמנה"),
+        ("Petition", "עתירה"),
+        ("register", "פנקס רישום"),
+        ("Report", "דיווח/דו\"ח"),
+        ("rescript", "תשובה שלטונית"),
+        ("Responsum", "תשובה הלכתית"),
+        ("responsa", "שו\"ת"),
+        ("tax receipt", "קבלת מס"),
+        ("testimony", "עדות"),
+    ]),
 
-    # === מקומות ===
-    "Akhmim": "אחמים",
-    "Alexandria": "אלכסנדריה",
-    "Damascus": "דמשק",
-    "Istanbul": "איסטנבול",
-    "Jerusalem": "ירושלים",
-    "Qus": "קוץ (Qus)",
-    "Sicily": "סיציליה",
-    "Spain": "ספרד",
-    "Tyre": "צור",
-    "khaybar": "ח'יבר",
-    "susa": "סוסה",
+    # --- הלכה ומשפט / Law & Society ---
+    ("Law & Society", "הלכה וחברה", [
+        ("betrothal", "אירוסין"),
+        ("captives", "שבויים"),
+        ("charity", "צדקה"),
+        ("circumcision", "מילה"),
+        ("conversion", "גיור"),
+        ("customs", "מכס"),
+        ("debt", "חוב"),
+        ("disability", "מוגבלות"),
+        ("disability: vision", "לקות ראייה"),
+        ("dispute", "סכסוך"),
+        ("divorce", "גירושין"),
+        ("excommunication", "נידוי וחרם"),
+        ("fiscal", "פיסקלי"),
+        ("get shihrur", "גט שחרור"),
+        ("heqdesh", "הקדש"),
+        ("hikr", "חִכְּר (חכירה)"),
+        ("Karaite-Rabbanite marriage", "נישואי קראים-רבנים"),
+        ("ketubba", "כתובה"),
+        ("kosher", "כשרות"),
+        ("Levirate marriage", "ייבום"),
+        ("maks", "מכס (בלתי חוקי)"),
+        ("manumission", "שחרור עבד"),
+        ("marital", "ענייני אישות"),
+        ("marital dispute", "סכסוך אישות"),
+        ("Marriage", "נישואין"),
+        ("Muslim marriage contract", "חוזה נישואין מוסלמי"),
+        ("poverty", "עוני"),
+        ("qodesh", "קודש"),
+        ("real estate", "מקרקעין"),
+        ("Shehita", "שחיטה"),
+        ("slave", "עבד/שפחה"),
+        ("tax", "מס"),
+        ("waqf", "וקף (הקדש)"),
+    ]),
 
-    # === שפות וכתב ===
-    "Arabic": "ערבית",
-    "Arabic script": "כתב ערבי",
-    "Arabic reused": "שימוש משני בערבית",
-    "Judaeo-Persian": "פרסית-יהודית",
-    "Judaeo-Persian literary": "ספרות פרסית-יהודית",
-    "Ladino": "לדינו",
-    "Late JA": "ערבית-יהודית מאוחרת",
-    "Persian": "פרסית",
-    "bialphabetic": "דו-אלפביתי",
+    # --- רפואה ומחלה / Medicine & Illness ---
+    ("Medicine & Illness", "רפואה ומחלה", [
+        ("disability", "מוגבלות"),
+        ("disability: vision", "לקות ראייה"),
+        ("epidemic", "מגפה"),
+        ("epidemic: waba'", "דבר (ובאא)"),
+        ("Illness", "מחלה"),
+        ("illness letter 969-1517", "מכתב מחלה (969–1517)"),
+        ("illness: appeal", "פנייה בענייני מחלה"),
+        ("illness: death", "מחלה ומוות"),
+        ("illness: du'f", "חולשה (דעף)"),
+        ("illness: excuse", "התנצלות עקב מחלה"),
+        ("illness: eye", "מחלות עיניים"),
+        ("illness: gastrointestinal", "מחלות דרכי העיכול"),
+        ("illness: joints", "מחלות מפרקים"),
+        ("illness: letter norms", "מוסכמות כתיבה על מחלות"),
+        ("illness: marad", "מחלה (מרד)"),
+        ("illness: mental effects", "השפעות נפשיות של מחלה"),
+        ("illness: non-naturals", "הלא-טבעיים (מושג רפואי)"),
+        ("illness: pediatric", "רפואת ילדים"),
+        ("illness: poverty", "מחלה ועוני"),
+        ("illness: ramad", "דלקת עיניים (רמד)"),
+        ("illness: rich description", "תיאור מחלה מפורט"),
+        ("Illness: women's", "מחלות נשים"),
+        ("Materia medica", "מטריה מדיקה"),
+        ("medical", "רפואי"),
+        ("medical charity", "צדקה לצרכים רפואיים"),
+        ("medicine", "רפואה"),
+        ("physician", "רופא"),
+        ("physicians", "רופאים"),
+        ("prescription", "מרשם"),
+    ]),
 
-    # === סוגי מסמכים ===
-    "Appeal": "פנייה/בקשת סיוע",
-    "Decree": "צו שלטוני",
-    "Fatimid decree": "צו פטימי",
-    "Formulary": "נוסחאי",
-    "LOR": "מכתב המלצה",
-    "Petition": "עתירה",
-    "Report": "דיווח/דו\"ח",
-    "Responsum": "תשובה הלכתית",
-    "responsa": "שו\"ת",
-    "account": "חשבון",
-    "addendum": "נספח",
-    "bill of sale": "שטר מכר",
-    "commercial receipt": "קבלה מסחרית",
-    "court record": "מעשה בית דין",
-    "draft": "טיוטה",
-    "informal note": "פתקה",
-    "internal memorandum": "תזכיר פנימי",
-    "ketubba": "כתובה",
-    "ledger": "פנקס",
-    "legal": "משפטי",
-    "legal query": "שאלה משפטית",
-    "list": "רשימה",
-    "memorandum": "תזכיר",
-    "order": "הזמנה",
-    "register": "פנקס רישום",
-    "rescript": "תשובה שלטונית",
-    "tax receipt": "קבלת מס",
-    "testimony": "עדות",
+    # --- מסחר ומשלוחים / Trade & Travel ---
+    ("Trade & Travel", "מסחר ונסיעות", [
+        ("book trade", "סחר ספרים"),
+        ("Byzantine merchants", "סוחרים ביזנטים"),
+        ("daman", "דמאן (חכירת מסים)"),
+        ("damin", "דאמין (ערב מס)"),
+        ("funduq", "פונדק/מחסן (Funduq)"),
+        ("movement of ships", "תנועת אוניות"),
+        ("Nile voyage", "הפלגה בנילוס"),
+        ("suftaja", "סופתג'ה (שטר חליפין)"),
+        ("trade", "מסחר"),
+        ("travel", "מסע/נסיעה"),
+    ]),
 
-    # === נישואין ומשפט ===
-    "Marriage": "נישואין",
-    "Karaite-Rabbanite marriage": "נישואי קראים-רבנים",
-    "Muslim marriage contract": "חוזה נישואין מוסלמי",
-    "Levirate marriage": "ייבום",
-    "betrothal": "אירוסין",
-    "marital": "ענייני אישות",
-    "marital dispute": "סכסוך אישות",
-    "divorce": "גירושין",
-    "dispute": "סכסוך",
-    "debt": "חוב",
-    "conversion": "גיור",
-    "excommunication": "נידוי וחרם",
-    "manumission": "שחרור עבד",
-    "get shihrur": "גט שחרור",
-    "slave": "עבד/שפחה",
-    "captives": "שבויים",
-    "Shehita": "שחיטה",
-    "kosher": "כשרות",
-    "circumcision": "מילה",
-    "charity": "צדקה",
-    "poverty": "עוני",
-    "heqdesh": "הקדש",
-    "qodesh": "קודש",
-    "real estate": "מקרקעין",
-    "hikr": "חִכְּר (חכירה)",
-    "waqf": "וקף (הקדש)",
-    "tax": "מס",
-    "customs": "מכס",
-    "maks": "מכס (בלתי חוקי)",
-    "fiscal": "פיסקלי",
+    # --- ספר הודו / India Book ---
+    ("India Book", "ספר הודו", [
+        ("halfon-addenda", "תוספות לחלפון"),
+        ("IB1", "ספר הודו א"),
+        ("IB2", "ספר הודו ב"),
+        ("IB3", "ספר הודו ג"),
+        ("IB4", "ספר הודו ד"),
+        ("IB5", "ספר הודו ה"),
+        ("IB6", "ספר הודו ו"),
+        ("IB7", "ספר הודו ז"),
+        ("ib-addenda", "תוספות לספר הודו"),
+        ("ib-partial translation-eng", "ספר הודו - תרגום חלקי לאנגלית"),
+        ("ib-untranslated-eng", "ספר הודו - ללא תרגום לאנגלית"),
+        ("Ibn Yiju", "אבן יג'ו"),
+        ("India", "הודו"),
+        ("India Book unedited", "ספר הודו (טיוטה לא ערוכה)"),
+        ("Maldives", "האיים המלדיביים"),
+    ]),
 
-    # === רפואה ומחלה ===
-    "Illness": "מחלה",
-    "Illness: women's": "מחלות נשים",
-    "illness letter 969-1517": "מכתב מחלה (969–1517)",
-    "illness: appeal": "פנייה בענייני מחלה",
-    "illness: death": "מחלה ומוות",
-    "illness: du'f": "חולשה (דעף)",
-    "illness: excuse": "התנצלות עקב מחלה",
-    "illness: eye": "מחלות עיניים",
-    "illness: gastrointestinal": "מחלות דרכי העיכול",
-    "illness: joints": "מחלות מפרקים",
-    "illness: letter norms": "מוסכמות כתיבה על מחלות",
-    "illness: marad": "מחלה (מרד)",
-    "illness: mental effects": "השפעות נפשיות של מחלה",
-    "illness: non-naturals": "הלא-טבעיים (מושג רפואי)",
-    "illness: pediatric": "רפואת ילדים",
-    "illness: poverty": "מחלה ועוני",
-    "illness: ramad": "דלקת עיניים (רמד)",
-    "illness: rich description": "תיאור מחלה מפורט",
-    "Materia medica": "מטריה מדיקה",
-    "medical": "רפואי",
-    "medical charity": "צדקה לצרכים רפואיים",
-    "medicine": "רפואה",
-    "physician": "רופא",
-    "physicians": "רופאים",
-    "prescription": "מרשם",
-    "disability": "מוגבלות",
-    "disability: vision": "לקות ראייה",
-    "epidemic": "מגפה",
-    "epidemic: waba'": "דבר (ובאא)",
+    # --- שלטון ופוליטיקה / State & Politics ---
+    ("State & Politics", "שלטון ופוליטיקה", [
+        ("Amir", "אמיר"),
+        ("Arabic crusades", "מסעי הצלב (מקורות ערביים)"),
+        ("arabic military report", "דיווח צבאי בערבית"),
+        ("Crusades", "מסעי הצלב"),
+        ("DIMME", "ד'ימה (בני חסות)"),
+        ("Diwan al-Abwab", "דיוואן אל-אבואב"),
+        ("diwan al-amwal", "דיוואן אל-אמוואל"),
+        ("isfahsalar", "אספהסלאר (מפקד צבאי)"),
+        ("jihad", "ג'יהאד"),
+        ("State", "המדינה/הממשל"),
+        ("war", "מלחמה"),
+    ]),
 
-    # === מסחר ומשלוחים ===
-    "trade": "מסחר",
-    "book trade": "סחר ספרים",
-    "movement of ships": "תנועת אוניות",
-    "Nile voyage": "הפלגה בנילוס",
-    "travel": "מסע/נסיעה",
-    "Byzantine merchants": "סוחרים ביזנטים",
-    "suftaja": "סופתג'ה (שטר חליפין)",
-    "funduq": "פונדק/מחסן (Funduq)",
-    "daman": "דמאן (חכירת מסים)",
-    "damin": "דאמין (ערב מס)",
+    # --- קהילה ומוסדות / Community ---
+    ("Community", "קהילה ומוסדות", [
+        ("clandestine", "חשאי"),
+        ("communal", "קהילתי"),
+        ("donors", "תורמים"),
+        ("Jewish community", "הקהילה היהודית"),
+        ("personal", "אישי"),
+        ("petitioning", "הגשת עתירות"),
+        ("place of prayer", "מקום תפילה"),
+        ("recipients", "נמענים/נתמכים"),
+        ("scribes", "סופרים/מעתיקים"),
+    ]),
 
-    # === מלחמות ופוליטיקה ===
-    "Crusades": "מסעי הצלב",
-    "Arabic crusades": "מסעי הצלב (מקורות ערביים)",
-    "war": "מלחמה",
-    "jihad": "ג'יהאד",
-    "Amir": "אמיר",
-    "State": "המדינה/הממשל",
-    "DIMME": "ד'ימה (בני חסות)",
-    "Diwan al-Abwab": "דיוואן אל-אבואב",
-    "diwan al-amwal": "דיוואן אל-אמוואל",
-    "isfahsalar": "אספהסלאר (מפקד צבאי)",
+    # --- חיי יום-יום / Daily Life ---
+    ("Daily Life", "חיי יום-יום", [
+        ("agriculture", "חקלאות"),
+        ("bread", "לחם"),
+        ("canal", "תעלה"),
+        ("clothing", "לבוש וטקסטיל"),
+        ("food", "מזון"),
+        ("gratitude", "הכרת תודה"),
+        ("humor", "הומור"),
+        ("love", "אהבה"),
+        ("mint", "מטבעה"),
+        ("oil", "שמן"),
+        ("porcelain", "חרסינה"),
+        ("syrup", "סירופ/שראב"),
+        ("thanks", "תודה"),
+        ("vessels", "כלים"),
+    ]),
 
-    # === ספרות ושירה ===
-    "Arabic poetry": "שירה ערבית",
-    "judaeo-arabic poetry": "שירה בערבית-יהודית",
-    "poem": "שיר/פיוט",
-    "popular literature": "ספרות עממית",
-    "literary with documentary value": "טקסט ספרותי בעל ערך תיעודי",
-    "Aleppo codex": "כתר ארם צובא",
-    "arabic bible": "תרגומי מקרא לערבית",
-    "Quran": "קוראן",
+    # --- ספרות ושירה / Literature ---
+    ("Literature", "ספרות ושירה", [
+        ("Aleppo codex", "כתר ארם צובא"),
+        ("arabic bible", "תרגומי מקרא לערבית"),
+        ("Arabic poetry", "שירה ערבית"),
+        ("judaeo-arabic poetry", "שירה בערבית-יהודית"),
+        ("literary with documentary value", "טקסט ספרותי בעל ערך תיעודי"),
+        ("poem", "שיר/פיוט"),
+        ("popular literature", "ספרות עממית"),
+        ("Quran", "קוראן"),
+    ]),
 
-    # === מדע ותורת הנסתר ===
-    "Astronomical": "אסטרונומי",
-    "astronomy": "אסטרונומיה",
-    "alchemy": "אלכימיה",
-    "magic": "מאגיה וכישוף",
-    "occult": "תורת הנסתר",
-    "divination": "ניחוש",
-    "prognostication": "חיזוי",
-    "calendar": "לוח שנה",
-    "numismatic dating": "תיארוך נומיסמטי",
-    "mantiq": "מנטיק (לוגיקה)",
-    "qiyas": "קיאס (היקש)",
-    "tonguetying": "קשירת לשון",
+    # --- מדע ותורת הנסתר / Science & Occult ---
+    ("Science & Occult", "מדע ותורת הנסתר", [
+        ("alchemy", "אלכימיה"),
+        ("Astronomical", "אסטרונומי"),
+        ("astronomy", "אסטרונומיה"),
+        ("calendar", "לוח שנה"),
+        ("divination", "ניחוש"),
+        ("magic", "מאגיה וכישוף"),
+        ("mantiq", "מנטיק (לוגיקה)"),
+        ("numismatic dating", "תיארוך נומיסמטי"),
+        ("occult", "תורת הנסתר"),
+        ("prognostication", "חיזוי"),
+        ("qiyas", "קיאס (היקש)"),
+        ("tonguetying", "קשירת לשון"),
+    ]),
 
-    # === חיי יום-יום ===
-    "food": "מזון",
-    "bread": "לחם",
-    "oil": "שמן",
-    "syrup": "סירופ/שראב",
-    "clothing": "לבוש וטקסטיל",
-    "agriculture": "חקלאות",
-    "canal": "תעלה",
-    "porcelain": "חרסינה",
-    "vessels": "כלים",
-    "mint": "מטבעה",
-    "love": "אהבה",
-    "humor": "הומור",
-    "gratitude": "הכרת תודה",
-    "thanks": "תודה",
+    # --- שפות וכתב / Languages & Script ---
+    ("Languages & Script", "שפות וכתב", [
+        ("Arabic", "ערבית"),
+        ("Arabic reused", "שימוש משני בערבית"),
+        ("Arabic script", "כתב ערבי"),
+        ("bialphabetic", "דו-אלפביתי"),
+        ("Judaeo-Persian", "פרסית-יהודית"),
+        ("Judaeo-Persian literary", "ספרות פרסית-יהודית"),
+        ("Ladino", "לדינו"),
+        ("Late JA", "ערבית-יהודית מאוחרת"),
+        ("Persian", "פרסית"),
+    ]),
 
-    # === קהילה ומוסדות ===
-    "Jewish community": "הקהילה היהודית",
-    "communal": "קהילתי",
-    "donors": "תורמים",
-    "recipients": "נמענים/נתמכים",
-    "place of prayer": "מקום תפילה",
-    "scribes": "סופרים/מעתיקים",
-    "petitioning": "הגשת עתירות",
-    "personal": "אישי",
-    "clandestine": "חשאי",
+    # --- חומרים וקודיקולוגיה / Materials & Codicology ---
+    ("Materials & Codicology", "חומרים וקודיקולוגיה", [
+        ("holes", "חורים"),
+        ("mastara", "מסטרה"),
+        ("micrography", "מיקרוגרפיה"),
+        ("paper", "נייר"),
+        ("parchment", "קלף"),
+        ("pinholes", "חורי סיכה"),
+        ("printed", "דפוס"),
+        ("red and black border", "מסגרת אדומה ושחורה"),
+        ("ruling board", "לוח שרטוט"),
+        ("Trial of the pen", "ניסוי קולמוס"),
+        ("writing materials", "חומרי כתיבה"),
+    ]),
 
-    # === חומרים וקודיקולוגיה ===
-    "paper": "נייר",
-    "parchment": "קלף",
-    "writing materials": "חומרי כתיבה",
-    "micrography": "מיקרוגרפיה",
-    "mastara": "מסטרה",
-    "ruling board": "לוח שרטוט",
-    "holes": "חורים",
-    "pinholes": "חורי סיכה",
-    "red and black border": "מסגרת אדומה ושחורה",
-    "printed": "דפוס",
-    "Trial of the pen": "ניסוי קולמוס",
+    # --- תקופות / Periods ---
+    ("Periods", "תקופות", [
+        ("10th or 11th c", "המאה ה-10 או ה-11"),
+        ("11th c", "המאה ה-11"),
+        ("11th or 12th c", "המאה ה-11 או ה-12"),
+        ("12th c", "המאה ה-12"),
+        ("13th c", "המאה ה-13"),
+        ("16th c or later", "המאה ה-16 ואילך"),
+        ("16th or 17th c", "המאה ה-16 או ה-17"),
+        ("early modern", "ראשית העת החדשה"),
+        ("Fatimid", "פטימי"),
+        ("late Fatimid", "פטימי מאוחר"),
+        ("Mamluk", "ממלוכי"),
+        ("ottoman era", "התקופה העות'מאנית"),
+        ("Qajar", "קאג'ארי"),
+    ]),
 
-    # === תגים פנימיים/עריכה ===
-    "to edit": "לעריכה",
-    "to examine": "לבדיקה",
-    "unedited 11th c": "המאה ה-11 (טרם נערך)",
-    "cmp": "cmp",
-    "sini": "סיני",
+    # --- מקומות / Places ---
+    ("Places", "מקומות", [
+        ("Akhmim", "אחמים"),
+        ("Alexandria", "אלכסנדריה"),
+        ("Damascus", "דמשק"),
+        ("Istanbul", "איסטנבול"),
+        ("Jerusalem", "ירושלים"),
+        ("khaybar", "ח'יבר"),
+        ("Qus", "קוץ (Qus)"),
+        ("Sicily", "סיציליה"),
+        ("Spain", "ספרד"),
+        ("susa", "סוסה"),
+        ("Tyre", "צור"),
+    ]),
 
-    # === שונות ===
-    "Jariya": "ג'אריה (שפחה)",
-    "al-Ustul": "אלאסטול (הצי)",
-    "arabic military report": "דיווח צבאי בערבית",
-    "Byzantines": "ביזנטים",
-    "idbara": "אדבארה (צרור מכתבים)",
-    "tadhkira": "תד'כירה",
-    "taqawi": "תקאווי",
-    "titulature": "תארים",
-    "water lily": "נימפאה",
-}
+    # --- אישים / People ---
+    ("People", "אישים", [
+        ("Abu l-Hasan b. Wahb", "אבו אל-חסן בן והב"),
+        ("Abu Sahl Levi", "אבו סהל לוי"),
+        ("Abun b. Sedaqa", "עבון בן צדקה"),
+        ("Arus b. Yosef", "ערוס בן יוסף"),
+        ("baldwin", "בלדווין"),
+        ("Byzantines", "ביזנטים"),
+        ("David b. Daniel", "דוד בן דניאל"),
+        ("Efrayim b. Shemarya", "אפרים בן שמריה"),
+        ("Eli b. Ezekiel", "עלי בן יחזקאל"),
+        ("Eli b. Hayyim", "עלי בן חיים"),
+        ("Eliyyahu b. Zekharia", "אליהו בן זכריה"),
+        ("Halfon b. Menashshe", "חלפון בן מנשה"),
+        ("Ibn al-Taffal", "אבן אל-טפאל"),
+        ("Judge Eliyyahu", "אליהו הדיין"),
+        ("Maimonides", "הרמב\"ם"),
+        ("Maimonides autograph", "אוטוגרף של הרמב\"ם"),
+        ("Marduk b. Musa", "מרדוך בן מוסא"),
+        ("Mevorakh b. Natan", "מבורך בן נתן"),
+        ("Moshe b. Levi", "משה בן לוי"),
+        ("Moshe b. Levi (signed)", "משה בן לוי (חתום)"),
+        ("Moshe b. Levi ha-Levi", "משה בן לוי הלוי"),
+        ("Moshe b. Levi literary", "משה בן לוי (ספרותי)"),
+        ("Nahray B. Nissim", "נהראי בן נסים"),
+        ("al-Razi", "אל-ראזי"),
+        ("Saladin", "צלאח אל-דין"),
+        ("Sar Shalom", "שר שלום"),
+        ("Shelomo b. Eliyyahu", "שלמה בן אליהו"),
+        ("Shemarya b. Elhanan", "שמריה בן אלחנן"),
+        ("Yedutun ha-Levi", "ידותון הלוי"),
+    ]),
+
+    # --- שונות / Other ---
+    ("Other", "שונות", [
+        ("al-Ustul", "אלאסטול (הצי)"),
+        ("cmp", "cmp"),
+        ("idbara", "אדבארה (צרור מכתבים)"),
+        ("Jariya", "ג'אריה (שפחה)"),
+        ("sini", "סיני"),
+        ("tadhkira", "תד'כירה"),
+        ("taqawi", "תקאווי"),
+        ("titulature", "תארים"),
+        ("to edit", "לעריכה"),
+        ("to examine", "לבדיקה"),
+        ("unedited 11th c", "המאה ה-11 (טרם נערך)"),
+        ("water lily", "נימפאה"),
+    ]),
+]
+
+
+# Build flat lookup dict from categorized structure
+PGP_TAG_TRANSLATIONS = {}
+for _cat_en, _cat_he, _tags in CATEGORIZED_TAGS:
+    for _en, _he in _tags:
+        if _en not in PGP_TAG_TRANSLATIONS:  # first category wins for duplicates
+            PGP_TAG_TRANSLATIONS[_en] = _he
 
 
 def translate_tag(tag: str) -> str:
@@ -300,9 +345,63 @@ def translate_tag(tag: str) -> str:
     return PGP_TAG_TRANSLATIONS.get(tag, tag)
 
 
-def translate_tag_display(tag: str) -> str:
-    """Return display format: 'Hebrew (English)' if translation exists, otherwise just the tag."""
+def translate_tag_display(tag: str, lang: str = 'he') -> str:
+    """Return display text for a tag based on language.
+
+    - Hebrew ('he'): 'עברית (English)'
+    - English ('en'): just the English tag
+    """
+    if lang != 'he':
+        return tag
     he = PGP_TAG_TRANSLATIONS.get(tag)
     if he and he != tag:
         return f"{he} ({tag})"
     return tag
+
+
+def get_categorized_tags_for_display(available_tags: List[str], lang: str = 'he') -> List[Tuple[Optional[str], str, str]]:
+    """Return tags grouped by category for display in dropdowns.
+
+    Only includes tags that exist in available_tags (from the database).
+
+    Args:
+        available_tags: List of English tags available in the database.
+        lang: 'he' for Hebrew display, 'en' for English only.
+
+    Returns:
+        List of (category_header_or_None, display_text, english_tag) tuples.
+        category_header is a string for the first item of each group, None for subsequent items.
+        The header items have english_tag = '' (not selectable).
+    """
+    available_set = set(available_tags)
+    result = []
+
+    for cat_en, cat_he, tags in CATEGORIZED_TAGS:
+        cat_tags = [(en, he) for en, he in tags if en in available_set]
+        if not cat_tags:
+            continue
+
+        # Add category header
+        header = cat_he if lang == 'he' else cat_en
+        result.append((header, f"── {header} ──", ""))
+
+        # Add tags in this category
+        for en, he in cat_tags:
+            display = translate_tag_display(en, lang)
+            result.append((None, display, en))
+
+    # Check for uncategorized tags (in DB but not in any category)
+    categorized = set()
+    for _, _, tags in CATEGORIZED_TAGS:
+        for en, _ in tags:
+            categorized.add(en)
+
+    uncategorized = sorted(t for t in available_tags if t not in categorized)
+    if uncategorized:
+        header = "שונות" if lang == 'he' else "Other"
+        result.append((header, f"── {header} ──", ""))
+        for tag in uncategorized:
+            display = translate_tag_display(tag, lang)
+            result.append((None, display, tag))
+
+    return result

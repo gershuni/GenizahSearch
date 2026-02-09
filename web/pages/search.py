@@ -332,11 +332,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         tag_select.props(f'popup-content-class="max-h-64" label="{tr("Select a tag...")}"')
                     tag_column.set_visibility(False)
 
-                    # Load PGP tags asynchronously with Hebrew translations
+                    # Load PGP tags asynchronously with categorized Hebrew translations
                     async def load_pgp_tags():
-                        from pgp_tag_translations import translate_tag_display
+                        from pgp_tag_translations import get_categorized_tags_for_display
+                        from web.translations import get_language
                         tags = await run.io_bound(get_all_distinct_tags)
-                        tag_select.options = {tag: translate_tag_display(tag) for tag in tags}
+                        lang = get_language()
+                        categorized = get_categorized_tags_for_display(tags, lang)
+                        options = []
+                        for header, display, en_tag in categorized:
+                            if en_tag == "":
+                                # Category header — non-selectable separator
+                                options.append({'label': display, 'value': f'__header_{display}', 'disable': True})
+                            else:
+                                options.append({'label': display, 'value': en_tag})
+                        tag_select.options = options
                         tag_select.update()
                     ui.timer(0.1, load_pgp_tags, once=True)
 
