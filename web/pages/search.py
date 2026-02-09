@@ -25,7 +25,10 @@ import re
 import html
 
 
-def create_search_page(initial_query: str = None, initial_tag: str = None):
+def create_search_page(initial_query: str = None, initial_tag: str = None,
+                       initial_responsa: int = None, initial_variants: int = None,
+                       initial_ja: int = None, initial_flex_spaces: int = None,
+                       initial_bidirectional: int = None):
     """Create the advanced search page."""
 
     # === State Management ===

@@ -1825,7 +1825,12 @@ def dashboard_page():
             home.create_page()
 
 @ui.page('/search')
-def search_page_route(q: str = None, tag: str = None):
+def search_page_route(
+    q: str = None, tag: str = None,
+    responsa: int = None, variants: int = None,
+    ja: int = None, flex_spaces: int = None,
+    bidirectional: int = None
+):
     set_current_page('/search')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1835,7 +1840,12 @@ def search_page_route(q: str = None, tag: str = None):
     content = create_layout()
     with content:
         from web.pages.search import create_search_page
-        create_search_page(initial_query=q, initial_tag=tag)
+        create_search_page(
+            initial_query=q, initial_tag=tag,
+            initial_responsa=responsa, initial_variants=variants,
+            initial_ja=ja, initial_flex_spaces=flex_spaces,
+            initial_bidirectional=bidirectional
+        )
 
 @ui.page('/parallels')
 def parallels_page_route(text: str = None):

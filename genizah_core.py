@@ -5349,6 +5349,9 @@ class SearchEngine:
                     'inline_pattern': comp.inline_pattern,
                 })
 
+            # Calculate total expanded terms for UI display
+            total_expanded = sum(len(cd['tantivy_terms']) for cd in component_dicts)
+
             # e. Build Tantivy query
             t_query_str = self.build_tantivy_query(
                 terms=None, mode=mode,
@@ -5484,6 +5487,10 @@ class SearchEngine:
         # --- Attach Responsa explosion guard warning to first result ---
         if responsa_warning and deduped:
             deduped[0]['responsa_warning'] = responsa_warning
+
+        # --- Attach Responsa expanded term count to first result ---
+        if responsa_options and responsa_options.get('responsa_mode') and deduped:
+            deduped[0]['responsa_expanded_count'] = total_expanded
 
         return deduped
 
