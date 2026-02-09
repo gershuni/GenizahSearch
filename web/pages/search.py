@@ -449,6 +449,70 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).classes('h-10 px-4').style('display: none;').props('outline color=red')
                         stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
+                # === Responsa Controls Row (flat row of checkboxes, no container) ===
+                # Desktop-width: full row visible; Mobile: collapsed behind icon button
+                pre_responsa_mode = {'value': mode_select.value}
+                _updating_mode = {'flag': False}  # Guard against circular triggers
+
+                # Desktop layout - visible on sm and above
+                responsa_row = ui.row().classes('w-full items-center gap-4 px-2 hidden sm:flex')
+                with responsa_row:
+                    # Responsa Mode master toggle
+                    responsa_mode_cb = ui.checkbox(tr('Responsa Mode'))
+                    responsa_mode_cb.tooltip(tr('Enable Responsa-style grammatical expansion for Hebrew search'))
+
+                    # Amber badge shown when Responsa is active (replaces hidden dropdown)
+                    responsa_active_badge = ui.badge(tr('Responsa'), color='amber').props('outline')
+                    responsa_active_badge.set_visibility(False)
+
+                    # Sub-checkboxes (hidden until Responsa Mode is checked)
+                    responsa_variants_cb = ui.checkbox(tr('Variants'))
+                    responsa_variants_cb.tooltip(tr('Include spelling variant pairs'))
+                    responsa_variants_cb.set_visibility(False)
+
+                    responsa_ja_cb = ui.checkbox(tr('Judeo-Arabic'))
+                    responsa_ja_cb.tooltip(tr('Expand with Judeo-Arabic article forms (al-)'))
+                    responsa_ja_cb.set_visibility(False)
+
+                    responsa_flex_cb = ui.checkbox(tr('Flex Spacing'))
+                    responsa_flex_cb.tooltip(tr('Allow flexible spacing between characters (helps with OCR text)'))
+                    responsa_flex_cb.set_visibility(False)
+
+                # Mobile layout - icon button that opens a menu with checkboxes
+                responsa_mobile_row = ui.row().classes('w-full items-center gap-2 px-2 sm:hidden')
+                with responsa_mobile_row:
+                    responsa_mobile_btn = ui.button(icon='tune', on_click=lambda: responsa_mobile_menu.open()).props('flat dense size=sm')
+                    responsa_mobile_btn.tooltip(tr('Responsa Options'))
+                    with ui.menu() as responsa_mobile_menu:
+                        with ui.column().classes('p-3 gap-2'):
+                            ui.label(tr('Responsa Options')).classes('text-sm font-bold').style('color: var(--text-secondary);')
+                            # Mobile checkboxes mirror the desktop ones via binding
+                            responsa_mode_mobile = ui.checkbox(tr('Responsa Mode'))
+                            responsa_variants_mobile = ui.checkbox(tr('Variants'))
+                            responsa_ja_mobile = ui.checkbox(tr('Judeo-Arabic'))
+                            responsa_flex_mobile = ui.checkbox(tr('Flex Spacing'))
+
+                    # Sync mobile to desktop checkboxes
+                    def sync_mobile_to_desktop():
+                        responsa_mode_cb.value = responsa_mode_mobile.value
+                        on_responsa_toggle()
+                    def sync_mobile_variants():
+                        responsa_variants_cb.value = responsa_variants_mobile.value
+                    def sync_mobile_ja():
+                        responsa_ja_cb.value = responsa_ja_mobile.value
+                    def sync_mobile_flex():
+                        responsa_flex_cb.value = responsa_flex_mobile.value
+
+                    responsa_mode_mobile.on_value_change(lambda: sync_mobile_to_desktop())
+                    responsa_variants_mobile.on_value_change(lambda: sync_mobile_variants())
+                    responsa_ja_mobile.on_value_change(lambda: sync_mobile_ja())
+                    responsa_flex_mobile.on_value_change(lambda: sync_mobile_flex())
+
+                # Initially hide Responsa row if not in an eligible mode
+                is_initial_responsa_eligible = saved_mode in ('exact', 'variants', 'variants_extended', 'variants_maximum')
+                responsa_row.set_visibility(is_initial_responsa_eligible)
+                responsa_mobile_row.set_visibility(is_initial_responsa_eligible)
+
                 # Advanced Options Row (inside expanded_panel, collapses with search bar)
                 with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
                     'background: var(--bg-tertiary); border-radius: 12px;'
@@ -473,6 +537,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     placeholder=tr('Words to exclude (space separated)')
                                 ).classes('w-full').props('outlined dense').style('direction: rtl;')
                                 ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
+
+                            # Bidirectional Gap Section (Responsa option in Advanced Options)
+                            with ui.column().classes('gap-3 min-w-64'):
+                                ui.label(tr('Word Order')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                bidirectional_cb = ui.checkbox(tr('Bidirectional Gap'))
+                                bidirectional_cb.tooltip(tr('Search for words in either order'))
+
+            # --- Responsa Mode toggle logic ---
+            def on_responsa_toggle():
+                """Handle Responsa Mode master toggle: show/hide sub-checkboxes, hide/show mode dropdown."""
+                if _updating_mode['flag']:
+                    return
+                _updating_mode['flag'] = True
+                try:
+                    is_on = responsa_mode_cb.value
+                    if is_on:
+                        pre_responsa_mode['value'] = mode_select.value
+                        mode_select.set_visibility(False)
+                        responsa_active_badge.set_visibility(True)
+                    else:
+                        mode_select.set_visibility(True)
+                        responsa_active_badge.set_visibility(False)
+                        mode_select.value = pre_responsa_mode['value']
+                    # Sub-checkboxes visible only when master is ON
+                    responsa_variants_cb.set_visibility(is_on)
+                    responsa_ja_cb.set_visibility(is_on)
+                    responsa_flex_cb.set_visibility(is_on)
+                    # Sync mobile checkboxes
+                    responsa_mode_mobile.value = is_on
+                    responsa_variants_mobile.set_visibility(is_on)
+                    responsa_ja_mobile.set_visibility(is_on)
+                    responsa_flex_mobile.set_visibility(is_on)
+                finally:
+                    _updating_mode['flag'] = False
+
+            responsa_mode_cb.on_value_change(lambda: on_responsa_toggle())
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
             variant_slider_row = None
@@ -519,6 +619,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Toggle between query input and tag select
                 query_column.set_visibility(not is_tags)
                 tag_column.set_visibility(is_tags)
+
+                # --- Responsa row visibility based on mode eligibility ---
+                is_responsa_eligible = mode in ('exact', 'variants', 'variants_extended', 'variants_maximum')
+                responsa_row.set_visibility(is_responsa_eligible)
+                responsa_mobile_row.set_visibility(is_responsa_eligible)
+
+                # If switching to non-eligible mode while Responsa is ON, turn it off
+                if not is_responsa_eligible and responsa_mode_cb.value:
+                    _updating_mode['flag'] = True
+                    try:
+                        responsa_mode_cb.value = False
+                        responsa_active_badge.set_visibility(False)
+                        responsa_variants_cb.set_visibility(False)
+                        responsa_ja_cb.set_visibility(False)
+                        responsa_flex_cb.set_visibility(False)
+                        mode_select.set_visibility(True)
+                        # Sync mobile
+                        responsa_mode_mobile.value = False
+                        responsa_variants_mobile.set_visibility(False)
+                        responsa_ja_mobile.set_visibility(False)
+                        responsa_flex_mobile.set_visibility(False)
+                    finally:
+                        _updating_mode['flag'] = False
 
                 # Save mode to storage (don't persist pgp_tags)
                 if not is_tags:
@@ -1124,6 +1247,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Get NOT filter words
         not_words = not_filter.value.split() if not_filter.value else []
 
+        # Build Responsa options dict from checkbox values
+        responsa_options = None
+        if responsa_mode_cb.value:
+            responsa_options = {
+                'responsa_mode': True,
+                'variants': responsa_variants_cb.value,
+                'ja': responsa_ja_cb.value,
+                'flex_spacing': responsa_flex_cb.value,
+                'bidirectional': bidirectional_cb.value,
+                'variant_mode': pre_responsa_mode['value'],  # Mode active before Responsa
+            }
+
         def run_core_search():
             try:
                 if lab_mode.value:
@@ -1141,7 +1276,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         mode=mode,
                         gap=int(gap_input.value),
                         progress_callback=progress_cb,
-                        exclude_words=not_words
+                        exclude_words=not_words,
+                        responsa_options=responsa_options
                     )
             except Exception as e:
                 print(f"Search Error: {e}")
@@ -1182,8 +1318,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
             results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
         else:
-            # Update count
-            results_count.text = f"{len(results)} {tr('Results')}"
+            # Update count -- include expanded term count for Responsa mode
+            expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+            if expanded_count > 0:
+                results_count.text = f"{len(results)} {tr('Results')} ({tr('searching')} {expanded_count} {tr('expanded terms')})"
+            else:
+                results_count.text = f"{len(results)} {tr('Results')}"
+
+        # --- Responsa explosion guard warning ---
+        if results and results[0].get('responsa_warning'):
+            ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
+
+        # --- URL state persistence (history.replaceState without page reload) ---
+        try:
+            params = f'?q={quote(clean_query)}'
+            tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
+            if tag_value:
+                params += f'&tag={quote(str(tag_value))}'
+            if responsa_mode_cb.value:
+                params += '&responsa=1'
+                if responsa_variants_cb.value: params += '&variants=1'
+                if responsa_ja_cb.value: params += '&ja=1'
+                if responsa_flex_cb.value: params += '&flex_spaces=1'
+                if bidirectional_cb.value: params += '&bidirectional=1'
+            ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
+        except Exception:
+            pass  # URL update is best-effort
 
         # Render results
         render_results(results[:200])
@@ -2417,6 +2577,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             note_default='',  # Empty by default
             fl_id=None
         )
+
+    # --- Restore Responsa checkbox state from URL parameters ---
+    if initial_responsa:
+        responsa_mode_cb.value = True
+        on_responsa_toggle()
+        if initial_variants:
+            responsa_variants_cb.value = True
+        if initial_ja:
+            responsa_ja_cb.value = True
+        if initial_flex_spaces:
+            responsa_flex_cb.value = True
+        if initial_bidirectional:
+            bidirectional_cb.value = True
 
     # Handle tag search — switch UI to PGP Tags mode and show the selected tag
     if initial_tag:
