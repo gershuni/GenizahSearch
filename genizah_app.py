@@ -6120,7 +6120,6 @@ class GenizahGUI(QMainWindow):
         self.tag_search_combo.setEditable(True)
         self.tag_search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.tag_search_combo.setPlaceholderText(tr("Select a tag..."))
-        self.tag_search_combo.setFixedWidth(300)
         self.tag_search_combo.addItem("")  # empty placeholder item
         completer = self.tag_search_combo.completer()
         if completer:
@@ -6136,7 +6135,7 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.btn_ai)
 
         # Row 2: Search Parameters & Lab Mode
-        self.search_row2 = row2 = QHBoxLayout()
+        row2 = QHBoxLayout()
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
@@ -12334,20 +12333,6 @@ class GenizahGUI(QMainWindow):
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.query_label.setText(tr("Tag:") if is_pgp_tags else tr("Query:"))
             self.btn_ai.setVisible(not is_pgp_tags)
-
-        # Hide/show row2 (search parameters) — not needed in PGP Tags mode
-        if hasattr(self, 'search_row2'):
-            for i in range(self.search_row2.count()):
-                item = self.search_row2.itemAt(i)
-                w = item.widget()
-                if w:
-                    if is_pgp_tags:
-                        w.setVisible(False)
-                    else:
-                        # Restore all row2 widgets except variant_controls (managed above)
-                        if w is not self.variant_controls_container:
-                            w.setVisible(True)
-                        # variant_controls_container visibility already set above
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
