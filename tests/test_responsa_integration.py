@@ -11,8 +11,12 @@ Tests cover:
 """
 
 import re
+import sys
+import importlib
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
+
+import genizah_core as _gc_module
 
 from genizah_core import (
     ResponsaComponent,
@@ -25,6 +29,19 @@ from genizah_core import (
     SearchEngine,
     Config,
 )
+
+
+@pytest.fixture(autouse=True)
+def _ensure_genizah_core_module():
+    """Ensure genizah_core is properly loaded in sys.modules.
+
+    test_missing_tantivy.py pops genizah_core from sys.modules which can
+    break module-level patching in subsequent test files. This fixture
+    ensures the correct module object is in sys.modules.
+    """
+    if 'genizah_core' not in sys.modules or sys.modules['genizah_core'] is not _gc_module:
+        sys.modules['genizah_core'] = _gc_module
+    yield
 
 
 # ============================================================================
@@ -654,16 +671,21 @@ class TestExecuteSearchResponsa:
         with patch('genizah_core.parse_responsa_query') as mock_parse, \
              patch('genizah_core.expand_plene_defective') as mock_plene, \
              patch('genizah_core.expand_grammatical_prefixes') as mock_prefix, \
-             patch('genizah_core.expand_grammatical_suffixes') as mock_suffix:
+             patch('genizah_core.expand_grammatical_suffixes') as mock_suffix, \
+             patch('genizah_core._apply_explosion_guard') as mock_guard:
 
-            mock_parse.return_value = [
-                ResponsaComponent(
-                    words=["word"],
-                    plene_defective=True,
-                    grammatical_prefixes=True,
-                    grammatical_suffixes=True,
-                )
-            ]
+            comp = ResponsaComponent(
+                words=["word"],
+                plene_defective=True,
+                grammatical_prefixes=True,
+                grammatical_suffixes=True,
+            )
+            mock_parse.return_value = [comp]
+            # Bypass the explosion guard so expansion proceeds normally
+            mock_guard.return_value = (
+                [comp], None,
+                {'variants_on': False, 'ja_on': False, 'variant_mode': 'exact'}
+            )
 
             def track_plene(w):
                 call_order.append('plene')

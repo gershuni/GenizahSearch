@@ -4677,6 +4677,101 @@ def _apply_explosion_guard(
 
 
 # ==============================================================================
+#  RESPONSA REGEX HELPERS
+# ==============================================================================
+
+def _make_flex_spacing_pattern(term: str) -> str:
+    """Create a flex-spacing regex pattern for a term.
+
+    Inserts \\s* between each character of the term, allowing flexible
+    whitespace between characters (handles OCR/HTR word boundary errors).
+
+    Example: "abc" -> "a\\s*b\\s*c"
+    """
+    if not term:
+        return term
+    chars = [re.escape(ch) for ch in term]
+    return r'\s*'.join(chars)
+
+
+def _build_wildcard_regex(component: dict) -> str:
+    """Build a regex pattern for a component with wildcard type.
+
+    Returns the regex string (NOT compiled) for the wildcard pattern.
+    """
+    wildcard = component.get('wildcard')
+    wildcard_pattern = component.get('wildcard_pattern')
+
+    if wildcard == 'pattern' and wildcard_pattern:
+        # Character pattern: *a*b*c* -> \S*a\S*b\S*c\S*
+        # Split on '*', escape each part, join with \S*
+        parts = wildcard_pattern.split('*')
+        escaped_parts = [re.escape(p) for p in parts]
+        return r'\S*'.join(escaped_parts)
+
+    if wildcard == 'suffix':
+        # Suffix wildcard: term\S*
+        regex_terms = component.get('regex_terms', [])
+        if regex_terms:
+            # Sort by length descending, escape
+            sorted_terms = sorted(set(regex_terms), key=len, reverse=True)
+            escaped = [re.escape(t) + r'\S*' for t in sorted_terms]
+            return f"({'|'.join(escaped)})"
+        return ''
+
+    if wildcard == 'prefix':
+        # Prefix wildcard: \S*term
+        regex_terms = component.get('regex_terms', [])
+        if regex_terms:
+            sorted_terms = sorted(set(regex_terms), key=len, reverse=True)
+            escaped = [r'\S*' + re.escape(t) for t in sorted_terms]
+            return f"({'|'.join(escaped)})"
+        return ''
+
+    return ''
+
+
+def _expand_inline_alternation(pattern_str: str) -> str:
+    """Expand an inline alternation pattern into a regex.
+
+    For inline alternation like "word(a/b)end":
+    - If all alternatives are single chars, use character class: word[ab]end
+    - If any alternative is multi-char, use alternation: word(a|bc)end
+
+    Returns: regex pattern string
+    """
+    if not pattern_str or '(' not in pattern_str:
+        return re.escape(pattern_str) if pattern_str else ''
+
+    result = []
+    i = 0
+    while i < len(pattern_str):
+        if pattern_str[i] == '(':
+            # Find the matching closing paren
+            close = pattern_str.find(')', i)
+            if close == -1:
+                result.append(re.escape(pattern_str[i]))
+                i += 1
+                continue
+            inner = pattern_str[i + 1:close]
+            alternatives = inner.split('/')
+            if all(len(alt) <= 1 for alt in alternatives):
+                # Single char alternatives -> character class
+                escaped_alts = [re.escape(a) for a in alternatives if a]
+                result.append(f"[{''.join(escaped_alts)}]")
+            else:
+                # Multi-char -> alternation group
+                escaped_alts = [re.escape(a) for a in alternatives]
+                result.append(f"({'|'.join(escaped_alts)})")
+            i = close + 1
+        else:
+            result.append(re.escape(pattern_str[i]))
+            i += 1
+
+    return ''.join(result)
+
+
+# ==============================================================================
 #  SEARCH ENGINE
 # ==============================================================================
 class SearchEngine:
@@ -4736,21 +4831,53 @@ class SearchEngine:
 
         return cleaned_map
 
-    def build_tantivy_query(self, terms, mode):
+    def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None):
+        # --- Responsa branch ---
+        if responsa_components is not None:
+            parts = []
+            for comp in responsa_components:
+                tantivy_terms = comp.get('tantivy_terms', [])
+                original_words = set(comp.get('original_words', []))
+                if not tantivy_terms:
+                    continue
+
+                clean_vars = []
+                seen = set()
+                for t in tantivy_terms:
+                    t_clean = t.replace('"', '')
+                    if not t_clean or t_clean in seen:
+                        continue
+                    seen.add(t_clean)
+
+                    if t_clean in original_words:
+                        # Original / exact term gets highest boost
+                        clean_vars.append(f'"{t_clean}"^5')
+                    elif any(len(t_clean) != len(ow) for ow in original_words):
+                        # Different length from any original -> medium boost
+                        clean_vars.append(f'"{t_clean}"^3')
+                    else:
+                        clean_vars.append(f'"{t_clean}"')
+
+                if clean_vars:
+                    parts.append(f'({" OR ".join(clean_vars)})')
+
+            return " AND ".join(parts)
+
+        # --- Existing path (unchanged) ---
         if mode == 'Regex':
             regex_str = terms[0]
             candidates = re.findall(r'[\u0590-\u05FF]{2,}', regex_str)
             if candidates: return " AND ".join(candidates)
-            else: return "*" 
+            else: return "*"
 
         parts = []
         for term in terms:
             if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
                 parts.append(term)
                 continue
-                
+
             if mode == 'fuzzy':
-                if len(term) < 3: parts.append(f'"{term}"') 
+                if len(term) < 3: parts.append(f'"{term}"')
                 elif len(term) < 5: parts.append(f'"{term}"~1')
                 else: parts.append(f'"{term}"~2')
             else:
@@ -4782,10 +4909,86 @@ class SearchEngine:
                             clean_vars.append(f'"{v_clean}"')
 
                 parts.append(f'({" OR ".join(clean_vars)})')
-                
+
         return " AND ".join(parts)
 
-    def build_regex_pattern(self, terms, mode, max_gap):
+    def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None):
+        # --- Responsa branch ---
+        if responsa_components is not None:
+            opts = responsa_options or {}
+            flex_spacing = opts.get('flex_spacing', False)
+            bidirectional = opts.get('bidirectional', False)
+
+            # Build separator
+            if max_gap == 0:
+                if flex_spacing:
+                    # Flex: zero or more non-word chars (allows adjacent/joined words)
+                    sep = r'[^\w\u0590-\u05FF\']*'
+                else:
+                    sep = r'[^\w\u0590-\u05FF\']+'
+            else:
+                sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+
+            parts = []
+            for comp in responsa_components:
+                wildcard = comp.get('wildcard')
+                inline_pattern = comp.get('inline_pattern')
+
+                if inline_pattern:
+                    # Inline alternation: word(a/b)end
+                    part = _expand_inline_alternation(inline_pattern)
+                    parts.append(f"({part})")
+                    continue
+
+                if wildcard == 'pattern':
+                    # Character pattern: *a*b*c*
+                    part = _build_wildcard_regex(comp)
+                    parts.append(f"({part})")
+                    continue
+
+                if wildcard in ('suffix', 'prefix'):
+                    # Wildcard suffix/prefix
+                    part = _build_wildcard_regex(comp)
+                    if part:
+                        parts.append(part)
+                    continue
+
+                # Regular terms: build alternation group
+                regex_terms = comp.get('regex_terms', [])
+                flex_patterns = comp.get('flex_patterns', [])
+
+                all_alternatives = []
+
+                # Add regex terms (sorted by length descending, escaped)
+                unique_terms = sorted(set(regex_terms), key=len, reverse=True)
+                for t in unique_terms:
+                    all_alternatives.append(re.escape(t))
+
+                # Add flex spacing patterns (already regex, NOT escaped)
+                if flex_spacing and flex_patterns:
+                    for fp in flex_patterns:
+                        if fp not in all_alternatives:
+                            all_alternatives.append(fp)
+
+                if all_alternatives:
+                    parts.append(f"({'|'.join(all_alternatives)})")
+
+            if not parts:
+                return None
+
+            if bidirectional and len(parts) >= 2:
+                forward = sep.join(parts)
+                backward = sep.join(reversed(parts))
+                pattern_str = f"({forward})|({backward})"
+            else:
+                pattern_str = sep.join(parts)
+
+            try:
+                return re.compile(pattern_str, re.IGNORECASE)
+            except Exception:
+                return None
+
+        # --- Existing path (unchanged) ---
         if mode == 'Regex':
             try: return re.compile(" ".join(terms), re.IGNORECASE)
             except: return None
@@ -4793,22 +4996,22 @@ class SearchEngine:
         parts = []
         for term in terms:
             regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
-            
+
             # 1. Get variants
             vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT)
-            
+
             # 2. Ensure exact term
             if term not in vars_list:
                 vars_list.append(term)
-            
+
             # 3. Sort by LENGTH (Descending)
-            # This is the correct fix for the visual glitch. 
+            # This is the correct fix for the visual glitch.
             # Favor longer matches before short variants
             unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
-            
+
             # 4. Escape special chars
             escaped = [re.escape(v) for v in unique_vars]
-            
+
             # 5. Simple Group (Removed strict Lookbehind/Lookahead)
             # Allow prefix matches when search term appears inside a word
             parts.append(f"({'|'.join(escaped)})")
@@ -4820,9 +5023,9 @@ class SearchEngine:
             # Gap logic
             sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
 
-        try: 
+        try:
             return re.compile(sep.join(parts), re.IGNORECASE)
-        except: 
+        except:
             return None
 
     def highlight(self, text, regex, for_file=False):
@@ -4973,10 +5176,14 @@ class SearchEngine:
 
         return best_page['text'], best_page['head'], best_page['src'], best_page['uid']
 
-    def parse_query_syntax(self, query):
+    def parse_query_syntax(self, query, responsa_mode=False):
         """
         Parses search syntax prefix from query string.
         Returns (mode, clean_query). If no prefix, returns (None, query).
+
+        When responsa_mode=True, all prefix shortcuts are bypassed and the raw
+        query is returned unchanged. This prevents '#' from being interpreted as
+        Shelfmark when Responsa mode is active.
 
         Prefixes:
         - ??? = variants_maximum (top 150 pairs)
@@ -4988,6 +5195,8 @@ class SearchEngine:
         - $ = Title
         - # = Shelfmark
         """
+        if responsa_mode:
+            return None, query
         if not query: return None, ""
 
         # Check multi-character prefixes first (order matters: longer prefixes first)
@@ -5010,7 +5219,7 @@ class SearchEngine:
 
         return None, query
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None):
         if not self.searcher: return []
 
         # --- Metadata Search Modes ---
@@ -5046,16 +5255,123 @@ class SearchEngine:
             # Sort results by shelfmark using natural sort (like desktop app)
             results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
             return results
-        
-        if mode == 'Regex': terms = [query_str]
-        else: terms = query_str.split()
 
-        t_query_str = self.build_tantivy_query(terms, mode)
-        regex = self.build_regex_pattern(terms, mode, gap)
+        # --- Responsa Pipeline ---
+        responsa_warning = None
+        if responsa_options and responsa_options.get('responsa_mode'):
+            # a. Bypass prefix shortcuts
+            self.parse_query_syntax(query_str, responsa_mode=True)
+
+            # b. Parse Responsa query into components
+            components = parse_responsa_query(query_str)
+            if not components:
+                return []
+
+            # c. Expand each component
+            variants_on = responsa_options.get('variants', False)
+            ja_on = responsa_options.get('ja', False)
+            flex_spacing = responsa_options.get('flex_spacing', False)
+            bidirectional = responsa_options.get('bidirectional', False)
+            variant_mode = responsa_options.get('variant_mode', 'exact')
+
+            # Apply explosion guard (estimates before materializing)
+            _components, guard_warning, actual_opts = _apply_explosion_guard(
+                components,
+                variants_on=variants_on,
+                ja_on=ja_on,
+                var_mgr=self.var_mgr,
+                variant_mode=variant_mode,
+            )
+            if guard_warning:
+                responsa_warning = guard_warning
+                variants_on = actual_opts['variants_on']
+                ja_on = actual_opts['ja_on']
+                variant_mode = actual_opts['variant_mode']
+
+            # d. Build per-component dicts with expanded terms
+            component_dicts = []
+            for comp in components:
+                # Start with component.words
+                expanded_words = list(comp.words)
+
+                # 1. Plene/defective expansion (before prefix/suffix to generate base variants)
+                if comp.plene_defective:
+                    plene_expanded = []
+                    for w in expanded_words:
+                        plene_expanded.extend(expand_plene_defective(w))
+                    expanded_words = list(dict.fromkeys(plene_expanded))  # dedupe preserving order
+
+                # 2. Grammatical prefix expansion
+                if comp.grammatical_prefixes:
+                    prefix_expanded = []
+                    for w in expanded_words:
+                        prefix_expanded.extend(expand_grammatical_prefixes(w))
+                    expanded_words = list(dict.fromkeys(prefix_expanded))
+
+                # 3. Grammatical suffix expansion
+                if comp.grammatical_suffixes:
+                    suffix_expanded = []
+                    for w in expanded_words:
+                        suffix_expanded.extend(expand_grammatical_suffixes(w))
+                    expanded_words = list(dict.fromkeys(suffix_expanded))
+
+                # 4. Judeo-Arabic expansion
+                if ja_on:
+                    ja_expanded = []
+                    for w in expanded_words:
+                        ja_expanded.extend(expand_judeo_arabic(w))
+                    expanded_words = list(dict.fromkeys(ja_expanded))
+
+                # 5. Spelling variants expansion
+                if variants_on and self.var_mgr:
+                    var_expanded = []
+                    for w in expanded_words:
+                        try:
+                            variants = self.var_mgr.get_variants(w, variant_mode, limit=200)
+                            var_expanded.extend(variants)
+                        except Exception:
+                            var_expanded.append(w)
+                    expanded_words = list(dict.fromkeys(var_expanded))
+
+                # Build flex spacing patterns for original words only
+                flex_patterns = []
+                if flex_spacing:
+                    for w in comp.words:
+                        flex_patterns.append(_make_flex_spacing_pattern(w))
+
+                component_dicts.append({
+                    'tantivy_terms': expanded_words,
+                    'regex_terms': expanded_words,
+                    'original_words': comp.words,
+                    'wildcard': comp.wildcard,
+                    'wildcard_pattern': comp.wildcard_pattern,
+                    'flex_patterns': flex_patterns,
+                    'inline_pattern': comp.inline_pattern,
+                })
+
+            # e. Build Tantivy query
+            t_query_str = self.build_tantivy_query(
+                terms=None, mode=mode,
+                responsa_components=component_dicts,
+                responsa_options=responsa_options,
+            )
+            # f. Build regex pattern
+            regex = self.build_regex_pattern(
+                terms=None, mode=mode, max_gap=gap,
+                responsa_components=component_dicts,
+                responsa_options=responsa_options,
+            )
+        else:
+            # --- Existing path (unchanged) ---
+            if mode == 'Regex': terms = [query_str]
+            else: terms = query_str.split()
+
+            t_query_str = self.build_tantivy_query(terms, mode)
+            regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
         # DEBUG: Log query and regex
-        LOGGER.info(f"[DEBUG] Mode: {mode}, Terms: {terms}")
+        LOGGER.info(f"[DEBUG] Mode: {mode}, Query: {query_str[:200]}")
         LOGGER.info(f"[DEBUG] Tantivy query: {t_query_str[:500]}")
         LOGGER.info(f"[DEBUG] Regex pattern: {regex.pattern[:500]}")
 
@@ -5164,6 +5480,11 @@ class SearchEngine:
             deduped = filtered
 
         LOGGER.info(f"[DEBUG] Results after dedup & filtering: {len(deduped)}")
+
+        # --- Attach Responsa explosion guard warning to first result ---
+        if responsa_warning and deduped:
+            deduped[0]['responsa_warning'] = responsa_warning
+
         return deduped
 
     def _deduplicate(self, results):
