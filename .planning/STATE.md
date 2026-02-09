@@ -9,12 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-07)
 
 ## Current Position
 
-Phase: 12 of 13 (Desktop PGP Discovery) -- COMPLETE
+Phase: 12 of 12 (Desktop PGP Discovery) -- COMPLETE
 Plan: 5 of 5 (all plans including gap closure complete)
-Status: Phase complete
-Last activity: 2026-02-08 -- Completed 12-05-PLAN.md (Filters, Joins, i18n, Enrichment Gap Closure)
+Status: Milestone complete (Phase 13 deferred)
+Last activity: 2026-02-09 -- Phase 13 (Transcription Search) reverted and deferred
 
-Progress: [███████████████████░] 93% (25/27 plans across phases 8-13)
+Progress: [████████████████████] 100% (25/25 plans across phases 8-12)
+
+### Phase 13 Deferral
+
+Phase 13 (Transcription Search) was fully implemented (3 plans + 9 bugfixes, 25 commits) but reverted.
+**Reason:** Index build too slow for desktop; will revisit with server-side index build architecture.
+**Documentation:** docs/archive/PHASE_13_TRANSCRIPTION_SEARCH_DEFERRED.md
+**Note:** Lab index (fingerprints) also needs PGP when this is re-implemented.
 
 ## Milestone History
 
@@ -107,7 +114,7 @@ Phase 12 completed 3 original plans + 2 gap closure plans:
 
 ## Session Continuity
 
-Last session: 2026-02-08
-Stopped at: Completed 12-05-PLAN.md (Filters, Joins, i18n, Enrichment Gap Closure)
+Last session: 2026-02-09
+Stopped at: Reverted Phase 13, milestone v5.6.0 complete (phases 8-12)
 Resume file: None
-Notes: Phase 12 fully complete (all 5 plans). Ready for Phase 13: Transcription Search.
+Notes: Phase 13 reverted and deferred. v5.6.0 covers phases 8-12 (desktop parity). Transcription search deferred to future milestone with server-side index architecture.
