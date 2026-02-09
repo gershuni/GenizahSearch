@@ -1,10 +1,12 @@
-# שרטוט שילוב: חיפוש מתקדם בסגנון שו"ת + חיפוש טבלאי
+# Integration Sketch: Advanced Search in Responsa Style + Tabular Search
 
-## תאריך: 2026-02-09
+> Document 6 of 6 in the Responsa Search planning series. This is the most comprehensive document, introducing Option IIb and desktop parallel implementation.
+
+## Date: 2026-02-09
 
 ---
 
-## 0. מצב נוכחי — למידע
+## 0. Current State — For Reference
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -27,9 +29,9 @@
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**אלמנטים קיימים שצריך לשמור:**
-- שדה קלט RTL עם clearable
-- Mode dropdown (Exact/Variants×3/Fuzzy/Regex/Shelfmark/Title)
+**Existing elements that must be preserved:**
+- RTL input field with clearable
+- Mode dropdown (Exact/Variants x3/Fuzzy/Regex/Shelfmark/Title)
 - Gap (0-10)
 - Search/Stop buttons
 - Advanced Options expansion (Lab Mode, Deep Scan, Exclude Words)
@@ -39,11 +41,11 @@
 
 ---
 
-# אפשרות I: "צ'קבוקס לייט"
+# Option I: "Lightweight Checkbox"
 
-> **גישה**: מינימלית — מוסיפים צ'קבוקס שו"ת + צ'קבוקס וריאנטים, בלי לגעת ב-layout
+> **Approach**: Minimal — add a Responsa checkbox + a Variants checkbox, without touching the layout
 
-## שרטוט
+## Sketch
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -63,19 +65,19 @@
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### מה משתנה ב-UI:
-| אלמנט | שינוי |
+### What changes in the UI:
+| Element | Change |
 |--------|-------|
-| **Mode dropdown** | **מוסתר** כשצ'קבוקס שו"ת פעיל. חוזר כשכבוי |
-| **צ'קבוקס "חיפוש שו"ת"** | חדש, בשורה מתחת לשדה הקלט |
-| **צ'קבוקס "וריאנטים"** | חדש, ליד שו"ת |
-| **צ'קבוקס "רווחים גמישים"** | חדש, ליד וריאנטים |
-| **צ'קבוקס "Gap דו-כיווני"** | חדש, ב-Advanced Options |
-| **צ'קבוקס "ערבית יהודית"** | חדש, ב-Advanced Options |
-| **Gap field** | נשאר — עובד עם שו"ת |
-| **Exclude Words** | נשאר — עובד עם שו"ת |
+| **Mode dropdown** | **Hidden** when Responsa checkbox is active. Returns when inactive |
+| **"Responsa Search" checkbox** | New, on a row below the input field |
+| **"Variants" checkbox** | New, next to Responsa |
+| **"Flexible Spaces" checkbox** | New, next to Variants |
+| **"Bidirectional Gap" checkbox** | New, in Advanced Options |
+| **"Judeo-Arabic" checkbox** | New, in Advanced Options |
+| **Gap field** | Remains — works with Responsa |
+| **Exclude Words** | Remains — works with Responsa |
 
-### כשצ'קבוקס שו"ת **כבוי** — הכל חוזר למצב נוכחי:
+### When Responsa checkbox is **off** — everything returns to current state:
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │  ┌──────────────────────────────────────────────┐                                 │
@@ -87,10 +89,10 @@
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### זרימה אלגוריתמית:
+### Algorithmic Flow:
 
 ```
-                                     ☑ שו"ת
+                                     ☑ שו"ת (Responsa)
                                        │
          query_input.value ────────────┤
                                        ▼
@@ -104,10 +106,11 @@
                     ┌──────────────────┤ regex string
                     │                  │
               ☐ וריאנטים?          ☐ JA?
-              │ כן → expand         │ כן → expand אל-
-              │      variant pairs  │      for each word
-              │                     │
-              └──────┬──────────────┘
+              (Variants?)          (Judeo-Arabic?)
+              │ Yes → expand       │ Yes → expand אל- (al-)
+              │      variant pairs │      for each word
+              │                    │
+              └──────┬─────────────┘
                      ▼
               execute_search(
                   query=expanded_regex,
@@ -117,22 +120,22 @@
               )
 ```
 
-### יתרונות / חסרונות:
+### Pros / Cons:
 
-| ✅ יתרונות | ❌ חסרונות |
-|------------|-----------|
-| 0 שינוי ב-layout | Tantivy "עיוור" — mode='Regex' |
-| 3 צ'קבוקסים + הסתרת dropdown | אין תצוגה מקדימה |
-| ~100 שורות קוד | ביצועים ירודים ב-wildcards |
-| אין סיכון ל-regression | אין בסיס לטבלאי |
+| Pros | Cons |
+|------|------|
+| Zero layout changes | Tantivy is "blind" — mode='Regex' |
+| 3 checkboxes + dropdown hiding | No query preview |
+| ~100 lines of code | Poor performance with wildcards |
+| No regression risk | No foundation for tabular interface |
 
 ---
 
-# אפשרות II: "היברידי עם Preview"
+# Option II: "Hybrid with Preview"
 
-> **גישה**: צ'קבוקס + תצוגה מקדימה + Tantivy-aware OR groups + בסיס לטבלאי
+> **Approach**: Checkbox + query preview + Tantivy-aware OR groups + foundation for tabular
 
-## שרטוט — מצב שו"ת פעיל
+## Sketch — Responsa Mode Active
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -156,7 +159,7 @@
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### מצב שו"ת **כבוי** — חזרה לרגיל:
+### Responsa mode **off** — returns to normal:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -165,14 +168,14 @@
 │  └──────────────────────────────────────────────┘          Num: [×1]              │
 │                                                       Gap: [ 0 ]   [🔍 Search]  │
 │  ☐ חיפוש שו"ת                                                                   │
-│                                  ← שאר הצ'קבוקסים מוסתרים כשלא במצב שו"ת       │
+│                                  ← Other checkboxes hidden when not in Responsa mode
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### רכיב חדש: **שורת תצוגה מקדימה (Query Preview)**
+### New Component: **Query Preview Row**
 
 ```
-  ┌ שאילתה מורחבת ───────────────────────────────────────────────┐
+  ┌ שאילתה מורחבת (Expanded Query) ─────────────────────────────┐
   │                                                               │
   │  ╭─────────────────────╮  ←3→  ╭──────────────────╮          │
   │  │ #קוצץ | #עוקר      │       │ עץ* | אילן*      │          │
@@ -185,29 +188,30 @@
   └───────────────────────────────────────────────────────────────┘
 ```
 
-ה-preview **מתעדכן בזמן אמת** (debounced) כשהמשתמש מקליד. לחיצה על ⓘ ליד "18 צורות" מציגה tooltip עם הרשימה המלאה.
+The preview **updates in real time** (debounced) as the user types. Clicking on the info icon next to "18 forms" shows a tooltip with the full list.
 
-### אינטראקציה בין הצ'קבוקסים:
+### Interaction Between Checkboxes:
 
 ```
-  ☑ חיפוש שו"ת                         ☐ חיפוש שו"ת
-  ├── ☐ וריאנטים    (נראה)              └── [Mode dropdown נראה]
-  ├── ☐ רווחים גמישים (נראה)
-  ├── שאילתה מורחבת  (נראה)
-  └── Mode dropdown  (מוסתר)
+  ☑ חיפוש שו"ת (Responsa ON)            ☐ חיפוש שו"ת (Responsa OFF)
+  ├── ☐ וריאנטים    (visible)            └── [Mode dropdown visible]
+  ├── ☐ רווחים גמישים (visible)
+  ├── שאילתה מורחבת  (visible)
+  └── Mode dropdown  (hidden)
 
-  ☑ שו"ת + ☑ וריאנטים:
-  └── Preview מראה: "(קוצץ|כוצץ|קוזץ|וקוצץ|...) ──3── (עץ*|אילן*)"
-      + "52 צורות" (קידומות × וריאנטים)
+  ☑ Responsa + ☑ Variants:
+  └── Preview shows: "(קוצץ|כוצץ|קוזץ|וקוצץ|...) ──3── (עץ*|אילן*)"
+      + "52 forms" (prefixes x variants)
 
-  ☑ שו"ת + ☑ JA:
-  └── Preview מראה: "# מורחב גם עם אל-: (כלמה|אלכלמה|ואלכלמה|באלכלמה|...)"
+  ☑ Responsa + ☑ JA:
+  └── Preview shows: "# expanded with al-: (כלמה|אלכלמה|ואלכלמה|באלכלמה|...)"
+                      (kalima|alkalima|wa-alkalima|ba-alkalima|...)
 
-  ☑ שו"ת + ☑ רווחים:
-  └── Preview מראה: regex עם \s* בין אותיות: "א\s*ל\s*כ\s*ל\s*מ\s*ה"
+  ☑ Responsa + ☑ Spaces:
+  └── Preview shows: regex with \s* between letters: "א\s*ל\s*כ\s*ל\s*מ\s*ה"
 ```
 
-### זרימה אלגוריתמית:
+### Algorithmic Flow:
 
 ```
          query_input.value
@@ -233,28 +237,28 @@
                    ▼
           execute_search()
           ┌──────────────────┐
-          │ Phase 1: Tantivy │  ← OR groups ממוקדים
+          │ Phase 1: Tantivy │  ← focused OR groups
           │ Phase 2: Regex   │  ← wildcard patterns
           └──────────────────┘
 ```
 
-### יתרונות / חסרונות:
+### Pros / Cons:
 
-| ✅ יתרונות | ❌ חסרונות |
-|------------|-----------|
-| Tantivy מודע → candidates ממוקדים | ~300 שורות שינוי |
-| Preview שקוף | שינוי ב-3 פונקציות core |
-| וריאנטים × קידומות משתלבים | עדיין אין ממשק טבלאי |
-| בסיס מוכן לטבלאי (Components) | Wildcard + Tantivy: stems בלבד |
-| JA + spacing כצ'קבוקסים | |
+| Pros | Cons |
+|------|------|
+| Tantivy-aware -> focused candidates | ~300 lines of changes |
+| Transparent preview | Changes in 3 core functions |
+| Variants x prefixes integrate well | Still no tabular interface |
+| Ready foundation for tabular (Components) | Wildcard + Tantivy: stems only |
+| JA + spacing as checkboxes | |
 
 ---
 
-# אפשרות III: "מלא — כולל ממשק טבלאי"
+# Option III: "Full — Including Tabular Interface"
 
-> **גישה**: כמו II + ממשק טבלאי כ-expansion panel מתחת לשדה הראשי
+> **Approach**: Like II + tabular interface as an expansion panel below the main field
 
-## שרטוט — חיפוש ראשי (מקופל)
+## Sketch — Main Search (Collapsed)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -270,45 +274,48 @@
 │  │ (קוצץ|וקוצץ|...|עוקר|ועוקר|...) ──3── (עץ*|אילן*)                        │ │
 │  └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                  │
-│  ▸ חיפוש טבלאי (לחץ לפתיחה)                                                    │
+│  ▸ חיפוש טבלאי (click to open)                                                  │
 │                                                                                  │
 │  ▸ Advanced Options                                                              │
 │                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## שרטוט — ממשק טבלאי (פתוח)
+## Sketch — Tabular Interface (Open)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                  │
 │  ┌──────────────────────────────────────────────┐                                 │
-│  │  (נוצר אוטומטית מהטבלה)                      │    Gap: [ 3 ]   [🔍 Search]   │
+│  │  (auto-generated from table)                  │    Gap: [ 3 ]   [🔍 Search]   │
 │  └──────────────────────────────────────────────┘                                 │
 │                                                                                  │
 │  ☑ חיפוש שו"ת   ☐ וריאנטים   ☐ רווחים גמישים                                   │
 │                                                                                  │
-│  ▾ חיפוש טבלאי                                                                   │
+│  ▾ חיפוש טבלאי (Tabular Search)                                                  │
 │  ┌────────────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                            │   │
-│  │   ┌─ מרכיב 1 ─────────┐         ┌─ מרכיב 2 ─────────┐                    │   │
+│  │   ┌─ מרכיב 1 (Comp 1) ──┐         ┌─ מרכיב 2 (Comp 2) ──┐               │   │
 │  │   │                    │  מרחק   │                    │                    │   │
-│  │   │ [קוצץ            ]│  ┌───┐  │ [עץ              ]│                    │   │
-│  │   │ [עוקר            ]│  │ 3 │  │ [אילן            ]│                    │   │
-│  │   │ [משחית           ]│  └───┘  │ [נטיעה           ]│                    │   │
-│  │   │ [               ]│         │ [               ]│                    │   │
+│  │   │ [קוצץ            ]│ (dist)  │ [עץ              ]│                    │   │
+│  │   │ [עוקר            ]│  ┌───┐  │ [אילן            ]│                    │   │
+│  │   │ [משחית           ]│  │ 3 │  │ [נטיעה           ]│                    │   │
+│  │   │ [               ]│  └───┘  │ [               ]│                    │   │
 │  │   │                    │         │                    │                    │   │
 │  │   │ ☑ קידומות #       │         │ ☐ קידומות #       │   [+ מרכיב]       │   │
+│  │   │  (prefixes)       │         │                    │  (+ component)    │   │
 │  │   │ ☐ וריאנטים       │         │ ☑ סיומות *        │                    │   │
+│  │   │  (variants)       │         │  (suffixes)        │                    │   │
 │  │   │ ☐ JA אל-         │         │ ☐ וריאנטים       │                    │   │
 │  │   │ ☐ שלילה ✕        │         │ ☐ שלילה ✕        │                    │   │
+│  │   │  (negation)       │         │  (negation)        │                    │   │
 │  │   └────────────────────┘         └────────────────────┘                    │   │
 │  │                                                                            │   │
-│  │   ☐ לפי הסדר    ☐ Gap דו-כיווני                                          │   │
+│  │   ☐ לפי הסדר (ordered)    ☐ Gap דו-כיווני (bidirectional)                │   │
 │  │                                                                            │   │
-│  │   שאילתה: #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*                       │   │
+│  │   Query: #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*                        │   │
 │  │                                                                            │   │
-│  │   [  ניקוי  ]                                                              │   │
+│  │   [  ניקוי (Clear)  ]                                                     │   │
 │  └────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                  │
 │  ▸ Advanced Options                                                              │
@@ -316,7 +323,7 @@
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### כפתור "+ מרכיב" — הוספת טור שלישי:
+### "+ Component" button — adding a third column:
 
 ```
    ┌─ מרכיב 1 ──┐       ┌─ מרכיב 2 ──┐       ┌─ מרכיב 3 ──┐
@@ -325,11 +332,11 @@
    │ [         ]│ └──┘ │ [         ]│ └──┘ │ [         ]│
    │ ☑ #  ☐ *  │       │ ☐ #  ☑ *  │       │ ☐ #  ☐ *  │
    │ ☐ var ☐ ✕ │       │ ☐ var ☐ ✕ │       │ ☑ var ☐ ✕ │  [+ מרכיב]
-   └────────────┘       └────────────┘       └────────────┘
-                                                            [× הסר]
+   └────────────┘       └────────────┘       └────────────┘  (+ component)
+                                                            [× הסר (remove)]
 ```
 
-### סנכרון טבלה ↔ שדה טקסט:
+### Table <-> Text Field Synchronization:
 
 ```
   ╔═══════════════════╗         ╔══════════════════════════════╗
@@ -339,13 +346,13 @@
   ║   קוצץ, עוקר     ║         ║                              ║
   ║   ☑ #             ║         ╚══════════════════════════════╝
   ║  Gap: 3           ║
-  ║  Col 2:           ║         כיוון הסנכרון:
-  ║   עץ, אילן       ║         • עריכה בטבלה → עדכון שדה טקסט
-  ║   ☑ *             ║         • עריכה בשדה → עדכון טבלה (parse)
-  ╚═══════════════════╝         • שגיאת פרסור → שדה אדום + tooltip
+  ║  Col 2:           ║         Sync direction:
+  ║   עץ, אילן       ║         • Edit in table → update text field
+  ║   ☑ *             ║         • Edit in field → update table (parse)
+  ╚═══════════════════╝         • Parse error → red field + tooltip
 ```
 
-### זרימה אלגוריתמית:
+### Algorithmic Flow:
 
 ```
      ╭───────────────╮      ╭───────────────╮
@@ -376,23 +383,23 @@
               execute_search()
 ```
 
-### יתרונות / חסרונות:
+### Pros / Cons:
 
-| ✅ יתרונות | ❌ חסרונות |
-|------------|-----------|
-| ממשק טבלאי מלא — מוכר משו"ת | ~700 שורות שינוי |
-| Per-component modifiers | מורכבות סנכרון דו-כיווני |
-| הוספת מרכיבים דינמית | UI כבד — תופס מקום |
-| Tantivy-aware כמו II | שינוי ב-5 פונקציות core |
-| שאילתה שמורה (SearchPlan serializable) | סיכון regression בינוני |
+| Pros | Cons |
+|------|------|
+| Full tabular interface — familiar from Responsa Project | ~700 lines of changes |
+| Per-component modifiers | Bidirectional sync complexity |
+| Dynamic component addition | Heavy UI — takes up space |
+| Tantivy-aware like II | Changes in 5 core functions |
+| Serializable query (SearchPlan) | Medium regression risk |
 
 ---
 
-# אפשרות IIb: "היברידי + טבלה כ-Dialog"
+# Option IIb: "Hybrid + Table as Dialog"
 
-> **וריאנט של II**: הטבלה לא בתוך העמוד אלא נפתחת כ-**dialog** (חלון צף)
+> **Variant of II**: The table is not inline on the page but opens as a **dialog** (floating window)
 
-## שרטוט — כפתור "בונה שאילתות" בשורת החיפוש:
+## Sketch — "Query Builder" button in the search row:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -402,261 +409,276 @@
 │  └──────────────────────────────────────────────┘                                 │
 │                                                                                  │
 │  ☑ חיפוש שו"ת   ☐ וריאנטים   ☐ רווחים גמישים       [📋 בונה שאילתות]           │
-│                                                                                  │
-│  ┌ שאילתה מורחבת ───────────────────────────────────────────────────┐            │
+│                                                        (Query Builder)            │
+│  ┌ שאילתה מורחבת (Expanded Query) ─────────────────────────────────┐            │
 │  │ (קוצץ|וקוצץ|...) ──3── (עץ*|אילן*)                             │            │
 │  └──────────────────────────────────────────────────────────────────┘            │
 │                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## שרטוט — ה-Dialog שנפתח:
+## Sketch — The Dialog That Opens:
 
 ```
   ╔═══════════════════════════════════════════════════════════════════════╗
-  ║  בונה שאילתות                                                  [✕]  ║
+  ║  בונה שאילתות (Query Builder)                                  [✕]  ║
   ╠═════════════════════════════════════════════════════════════════════╣
   ║                                                                     ║
-  ║   ┌─ מרכיב 1 ─────────┐         ┌─ מרכיב 2 ─────────┐            ║
+  ║   ┌─ מרכיב 1 (Comp 1) ──┐         ┌─ מרכיב 2 (Comp 2) ──┐        ║
   ║   │                    │  מרחק   │                    │            ║
-  ║   │ [קוצץ            ]│  ┌───┐  │ [עץ              ]│            ║
-  ║   │ [עוקר            ]│  │ 3 │  │ [אילן            ]│            ║
-  ║   │ [משחית           ]│  └───┘  │ [נטיעה           ]│            ║
-  ║   │ [               ]│         │ [               ]│  [+ מרכיב] ║
-  ║   │                    │         │                    │            ║
+  ║   │ [קוצץ            ]│ (dist)  │ [עץ              ]│            ║
+  ║   │ [עוקר            ]│  ┌───┐  │ [אילן            ]│            ║
+  ║   │ [משחית           ]│  │ 3 │  │ [נטיעה           ]│            ║
+  ║   │ [               ]│  └───┘  │ [               ]│  [+ מרכיב] ║
+  ║   │                    │         │                    │ (+ component)║
   ║   │ ☑ קידומות #       │         │ ☐ קידומות #       │            ║
+  ║   │  (prefixes)        │         │                    │            ║
   ║   │ ☐ וריאנטים       │         │ ☑ סיומות *        │            ║
+  ║   │  (variants)        │         │  (suffixes)        │            ║
   ║   │ ☐ JA אל-         │         │ ☐ וריאנטים       │            ║
   ║   │ ☐ שלילה ✕        │         │ ☐ שלילה ✕        │            ║
+  ║   │  (negation)        │         │  (negation)        │            ║
   ║   └────────────────────┘         └────────────────────┘            ║
   ║                                                                     ║
-  ║   ☐ לפי הסדר    ☐ Gap דו-כיווני    ☐ רווחים גמישים                ║
-  ║                                                                     ║
-  ║   ┌ שאילתה ──────────────────────────────────────────────────┐     ║
-  ║   │ #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*               │     ║
-  ║   └──────────────────────────────────────────────────────────┘     ║
+  ║   ☐ לפי הסדר (ordered)  ☐ Gap דו-כיווני (bidir.)  ☐ רווחים גמישים ║
+  ║                                            (flexible spaces)        ║
+  ║   ┌ שאילתה (Query) ────────────────────────────────────────────┐   ║
+  ║   │ #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*                  │   ║
+  ║   └──────────────────────────────────────────────────────────────┘   ║
   ║                                                                     ║
   ║           [ העבר לחיפוש ]          [ ניקוי ]                        ║
+  ║           (Apply to Search)        (Clear)                          ║
   ║                                                                     ║
   ╚═════════════════════════════════════════════════════════════════════╝
 ```
 
-**"העבר לחיפוש"** סוגר את ה-dialog ומעדכן את שדה הקלט הראשי.
+**"Apply to Search"** closes the dialog and updates the main input field.
 
-### למה dialog?
+### Why a dialog?
 
-| expansion panel (III) | dialog (IIb) |
+| Expansion panel (III) | Dialog (IIb) |
 |-----------------------|-------------|
-| תופס מקום בעמוד | לא דוחף layout |
-| תמיד נראה (אם פתוח) | נפתח רק כשצריך |
-| סנכרון מתמיד | סנכרון חד-פעמי ("העבר") |
-| מסובך ב-mobile | dialog responsive built-in |
-| ≈200 שורות UI | ≈150 שורות UI (NiceGUI dialog) |
+| Takes up page space | Does not push layout |
+| Always visible (if open) | Opens only when needed |
+| Continuous sync | One-time sync ("Apply") |
+| Complicated on mobile | Dialog responsive built-in |
+| ~200 lines of UI | ~150 lines of UI (NiceGUI dialog) |
 
 ---
 
-# השוואה מסכמת — ארבע אפשרויות
+# Summary Comparison — Four Options
 
-## טבלת תכונות
+## Feature Table
 
-| תכונה | I: לייט | II: היברידי | IIb: היברידי+Dialog | III: מלא |
-|--------|---------|-------------|---------------------|----------|
-| צ'קבוקס שו"ת | ✅ | ✅ | ✅ | ✅ |
-| `*` wildcards | ✅ | ✅ | ✅ | ✅ |
-| `#` קידומות | ✅ | ✅ | ✅ | ✅ |
-| `(/)` חלופות | ✅ | ✅ | ✅ | ✅ |
-| צ'קבוקס וריאנטים | ✅ | ✅ | ✅ | ✅ per-comp |
-| צ'קבוקס JA אל- | ✅ | ✅ | ✅ | ✅ per-comp |
-| צ'קבוקס רווחים | ✅ | ✅ | ✅ | ✅ |
-| Query Preview | ❌ | ✅ | ✅ | ✅ |
-| Tantivy-aware | ❌ | ✅ | ✅ | ✅ |
-| Gap דו-כיווני | ✅ (regex) | ✅ | ✅ | ✅ |
-| ממשק טבלאי | ❌ | ❌ | ✅ (dialog) | ✅ (inline) |
-| Per-comp modifiers | ❌ | ❌ | ✅ | ✅ |
-| שלילה per-comp | ❌ | ❌ | ✅ | ✅ |
-| Scope (משפט/פסקה) | ❌ | ❌ | ❌ | ✅ |
+| Feature | I: Lightweight | II: Hybrid | IIb: Hybrid+Dialog | III: Full |
+|---------|---------------|------------|---------------------|----------|
+| Responsa checkbox | Yes | Yes | Yes | Yes |
+| `*` wildcards | Yes | Yes | Yes | Yes |
+| `#` prefixes | Yes | Yes | Yes | Yes |
+| `(/)` alternates | Yes | Yes | Yes | Yes |
+| Variants checkbox | Yes | Yes | Yes | Yes (per-component) |
+| JA al- checkbox | Yes | Yes | Yes | Yes (per-component) |
+| Spaces checkbox | Yes | Yes | Yes | Yes |
+| Query Preview | No | Yes | Yes | Yes |
+| Tantivy-aware | No | Yes | Yes | Yes |
+| Bidirectional Gap | Yes (regex) | Yes | Yes | Yes |
+| Tabular interface | No | No | Yes (dialog) | Yes (inline) |
+| Per-comp modifiers | No | No | Yes | Yes |
+| Per-comp negation | No | No | Yes | Yes |
+| Scope (sentence/paragraph) | No | No | No | Yes |
 
-## טבלת מימוש
+## Implementation Table
 
-| מדד | I: לייט | II: היברידי | IIb: היברידי+Dialog | III: מלא |
-|------|---------|-------------|---------------------|----------|
-| שורות חדשות | ~100 | ~300 | ~450 | ~700 |
-| פונקציות core | 1 (preprocess) | 3 (parse, tantivy, regex) | 3+dialog | 5 |
-| סיכון regression | **אפס** | נמוך | נמוך | בינוני |
-| מורכבות UI | נמוכה | בינונית | בינונית+ | גבוהה |
-| שדרוג עתידי | מוגבל | לכל כיוון | לכל כיוון | כבר שם |
+| Metric | I: Lightweight | II: Hybrid | IIb: Hybrid+Dialog | III: Full |
+|--------|---------------|------------|---------------------|----------|
+| New lines | ~100 | ~300 | ~450 | ~700 |
+| Core functions | 1 (preprocess) | 3 (parse, tantivy, regex) | 3+dialog | 5 |
+| Regression risk | **Zero** | Low | Low | Medium |
+| UI complexity | Low | Medium | Medium+ | High |
+| Future upgradability | Limited | Any direction | Any direction | Already there |
 
 ---
 
-# מיפוי ל-Layout הנוכחי
+# Mapping to Current Layout
 
-## מבנה חזותי — מה נוסף לכל אפשרות:
+## Visual Structure — What is Added per Option:
 
 ```
                  ┌──────────────────────────────────────────┐
-                 │  SEARCH INPUT + MODE + GAP + SEARCH BTN  │  ← קיים
+                 │  SEARCH INPUT + MODE + GAP + SEARCH BTN  │  ← existing
                  │                                          │
- אפשרות I ──►  │  [שורה חדשה] ☑שו"ת ☐וריאנטים ☐רווחים   │  ← חדש
+ Option I ──►   │  [new row] ☑שו"ת ☐וריאנטים ☐רווחים      │  ← new
+                 │           (Responsa)(Variants)(Spaces)    │
                  │                                          │
- אפשרות II ──► │  [שורה חדשה] שאילתה מורחבת (preview)     │  ← חדש
+ Option II ──►  │  [new row] expanded query (preview)       │  ← new
                  │                                          │
- אפשרות IIb ─► │  [כפתור] 📋 בונה שאילתות → dialog        │  ← חדש
+ Option IIb ─►  │  [button] 📋 Query Builder → dialog       │  ← new
                  │                                          │
- אפשרות III ─► │  [expansion] ▸ חיפוש טבלאי               │  ← חדש
-                 │  [פתוח] 3 טורים × 4 שורות + modifiers   │
+ Option III ─►  │  [expansion] ▸ Tabular Search             │  ← new
+                 │  [open] 3 cols × 4 rows + modifiers      │
                  │                                          │
-                 │  ▸ Advanced Options                       │  ← קיים
-                 │  Progress Bar                             │  ← קיים
-                 │  Splitter: Results │ Viewer               │  ← קיים
+                 │  ▸ Advanced Options                       │  ← existing
+                 │  Progress Bar                             │  ← existing
+                 │  Splitter: Results │ Viewer               │  ← existing
                  └──────────────────────────────────────────┘
 ```
 
-## צ'קבוקס שו"ת — Toggle behavior:
+## Responsa Checkbox — Toggle Behavior:
 
 ```
-  ☐ חיפוש שו"ת (כבוי):                    ☑ חיפוש שו"ת (פעיל):
+  ☐ חיפוש שו"ת (off):                    ☑ חיפוש שו"ת (on):
   ┌─────────────────────────┐               ┌─────────────────────────┐
-  │ [שדה קלט         ]     │               │ [שדה קלט         ]     │
+  │ [input field         ]  │               │ [input field         ]  │
   │ Mode: [Exact    ▼]     │               │ Mode: [HIDDEN]         │
-  │       [Variants  ]     │               │ ☐ וריאנטים             │
-  │       [Fuzzy     ]     │               │ ☐ רווחים גמישים        │
-  │       [Regex     ]     │               │ ☐ JA (ב-Advanced)      │
+  │       [Variants  ]     │               │ ☐ וריאנטים (variants)  │
+  │       [Fuzzy     ]     │               │ ☐ רווחים גמישים (flex) │
+  │       [Regex     ]     │               │ ☐ JA (in Advanced)     │
   │       [Shelfmark ]     │               │                         │
-  │       [Title     ]     │               │ preview: (שאילתה...)    │
+  │       [Title     ]     │               │ preview: (query...)     │
   │ Gap: [ 0 ]             │               │ Gap: [ 3 ]             │
   └─────────────────────────┘               └─────────────────────────┘
 ```
 
 ---
 
-# אינטראקציה: ערבית יהודית + רווחים
+# Interaction: Judeo-Arabic + Spaces
 
-## איך הצ'קבוקסים משתלבים ויזואלית:
+## How the Checkboxes Integrate Visually:
 
 ```
   ☑ חיפוש שו"ת   ☐ וריאנטים   ☐ רווחים גמישים
-                                                   ← שורה ראשית, תמיד נראית
+  (Responsa)      (Variants)    (Flexible Spaces)
+                                                   ← main row, always visible
 
   ┌─ Advanced Options ─────────────────────────────────────────┐
   │                                                             │
-  │  ☐ ערבית יהודית (הרחבת אל-)                                │
-  │     └ מוסיף: אלX, ואלX, באלX, פאלX... + הטמעת שמשיות     │
+  │  ☐ ערבית יהודית (הרחבת אל-) (Judeo-Arabic, al- expansion) │
+  │     └ Adds: אלX, ואלX, באלX, פאלX... + solar letter       │
+  │       assimilation                                          │
   │                                                             │
-  │  ☐ Gap דו-כיווני                                           │
-  │     └ חיפוש גם בסדר הפוך: "B ... A" בנוסף ל-"A ... B"    │
+  │  ☐ Gap דו-כיווני (Bidirectional Gap)                       │
+  │     └ Also searches in reverse order: "B ... A"             │
+  │       in addition to "A ... B"                              │
   │                                                             │
   │  ☐ Lab Mode    ☐ Deep Scan    Exclude: [____________]      │
   └─────────────────────────────────────────────────────────────┘
 ```
 
-## דוגמה: כל הצ'קבוקסים פעילים
+## Example: All Checkboxes Active
 
 ```
-  קלט:        #כלמה
-  ☑ שו"ת ☑ וריאנטים ☑ JA ☑ רווחים
+  Input:      #כלמה (kalima — "word")
+  ☑ Responsa ☑ Variants ☑ JA ☑ Spaces
 
   Pipeline:
   ┌────────────┐   ┌──────────────────┐   ┌──────────────────┐   ┌───────────────┐
-  │ # קידומות  │ → │ JA אל- הרחבה    │ → │ וריאנטים         │ → │ רווחים גמישים │
+  │ # prefixes │ → │ JA al- expansion │ → │ Variants         │ → │ Flex spaces   │
   │ כלמה       │   │ כלמה             │   │ כלמה → כלמא     │   │ כ\s*ל\s*מ\s*ה│
   │ וכלמה      │   │ אלכלמה          │   │ אלכלמה→ אלכלמא │   │ (per variant) │
   │ הכלמה      │   │ ואלכלמה         │   │ ...              │   │               │
   │ בכלמה      │   │ באלכלמה         │   │                  │   │               │
   │ ...        │   │ פאלכלמה         │   │                  │   │               │
-  │ (10 צורות) │   │ (× 5 = 50)      │   │ (× 3 = 150)     │   │ (150 patterns)│
+  │ (10 forms) │   │ (× 5 = 50)      │   │ (× 3 = 150)     │   │ (150 patterns)│
   └────────────┘   └──────────────────┘   └──────────────────┘   └───────────────┘
 
   Tantivy:  ("כלמה"^5 OR "וכלמה" OR "אלכלמה" OR "ואלכלמה" OR "כלמא" OR ...)
   Regex:    (כ\s*ל\s*מ\s*ה|ו\s*כ\s*ל\s*מ\s*ה|א\s*ל\s*כ\s*ל\s*מ\s*ה|כ\s*ל\s*מ\s*א|...)
 
-  Cap: MAX_EXPANDED_TERMS = 500 → אם חורגים, מורידים וריאנטים
+  Cap: MAX_EXPANDED_TERMS = 500 → if exceeded, drop variants
 ```
 
 ---
 
-# מצב הצ'קבוקסים — URL state
+# Checkbox State — URL State
 
-כל מצב צריך להישמר ב-URL (לשיתוף) וב-storage (לזכירה):
+All state should be saved in the URL (for sharing) and in storage (for persistence):
 
 ```
 /search?q=%23(קוצץ/עוקר)+(עץ/אילן)*
-        &responsa=1           ← חיפוש שו"ת
-        &variants=1           ← וריאנטים
-        &ja=1                 ← ערבית יהודית
-        &flex_spaces=1        ← רווחים גמישים
+        &responsa=1           ← Responsa search
+        &variants=1           ← Variants
+        &ja=1                 ← Judeo-Arabic
+        &flex_spaces=1        ← Flexible spaces
         &gap=3
-        &bidirectional=1      ← gap דו-כיווני
-        &exclude=מים
+        &bidirectional=1      ← Bidirectional gap
+        &exclude=מים (water)
 ```
 
 ```python
 # Storage keys (app.storage.user):
-'search_responsa_mode': bool       # צ'קבוקס שו"ת
-'search_responsa_variants': bool   # צ'קבוקס וריאנטים
-'search_responsa_ja': bool         # צ'קבוקס JA
-'search_responsa_flex': bool       # צ'קבוקס רווחים
-'search_bidirectional': bool       # צ'קבוקס gap דו-כיווני
+'search_responsa_mode': bool       # Responsa checkbox
+'search_responsa_variants': bool   # Variants checkbox
+'search_responsa_ja': bool         # JA checkbox
+'search_responsa_flex': bool       # Flexible spaces checkbox
+'search_bidirectional': bool       # Bidirectional gap checkbox
 ```
 
 ---
 
-# המלצה
+# Recommendation
 
-## נתיב מדורג: **II → IIb**
+## Phased Path: **II -> IIb**
 
 ```
-Phase 1: אפשרות II (היברידי)
-         ☑ חיפוש שו"ת + ☐ וריאנטים + ☐ JA + ☐ רווחים
+Phase 1: Option II (Hybrid)
+         ☑ Responsa search + ☐ Variants + ☐ JA + ☐ Spaces
          + Query Preview
          + Tantivy-aware OR groups
-         + Gap דו-כיווני
-         ≈ 300 שורות, סיכון נמוך
+         + Bidirectional Gap
+         ≈ 300 lines, low risk
               │
               ▼
-Phase 2: הוספת אפשרות IIb (Dialog)
-         + כפתור "בונה שאילתות" → dialog טבלאי
-         + per-component modifiers
-         + סנכרון חד-כיווני (dialog → שדה)
-         ≈ +150 שורות
+Phase 2: Add Option IIb (Dialog)
+         + "Query Builder" button → tabular dialog
+         + Per-component modifiers
+         + One-way sync (dialog → field)
+         ≈ +150 lines
               │
               ▼
-Phase 3: (אם יש ביקוש)
-         + Scope (משפט/פסקה)
-         + שלילה per-component
-         + שמירת שאילתות
+Phase 3: (if there is demand)
+         + Scope (sentence/paragraph)
+         + Per-component negation
+         + Saved queries
 ```
 
-### למה II → IIb ולא III ישירות:
+### Why II -> IIb and not III directly:
 
-1. **Phase 1 (II)** נותן **80% מהערך** ב-40% מהעבודה — wildcards, קידומות, OR groups, preview, JA, רווחים
-2. **Dialog (IIb)** עדיף על expansion panel (III) כי:
-   - לא דוחף את Results למטה
-   - עובד טוב ב-mobile
-   - סנכרון חד-כיווני פשוט יותר מדו-כיווני
-   - NiceGUI `ui.dialog()` מוכן לשימוש
-3. **III** שמור למצב שבו יש ביקוש אמיתי לממשק טבלאי inline
+1. **Phase 1 (II)** delivers **80% of the value** with 40% of the work — wildcards, prefixes, OR groups, preview, JA, spaces
+2. **Dialog (IIb)** is preferable to an expansion panel (III) because:
+   - Does not push Results down
+   - Works well on mobile
+   - One-way sync is simpler than bidirectional
+   - NiceGUI `ui.dialog()` is ready to use
+3. **III** is reserved for when there is real demand for an inline tabular interface
 
 ---
 
-# נספח: Tooltip עזרה לתחביר שו"ת
+# Appendix: Tooltip Help for Responsa Syntax
 
-כפתור ⓘ ליד הצ'קבוקס פותח עזרה קצרה:
+The info button next to the checkbox opens a short help panel:
 
 ```
 ╔════════════════════════════════════════════════════╗
-║  תחביר חיפוש שו"ת                                 ║
+║  תחביר חיפוש שו"ת (Responsa Search Syntax)        ║
 ╠════════════════════════════════════════════════════╣
 ║                                                    ║
-║  *מילה    = כל מה שנגמר ב...   → *נדר   = הנדר   ║
-║  מילה*    = כל מה שמתחיל ב...  → שלום*  = שלומי  ║
-║  *א*ב*ג*  = אותיות מאפיינות   → *פ*ט*ר*= אפוטרופ║
-║  #מילה    = עם קידומות דקדוקיות → #שלום  = והשלום ║
-║  (א/ב/ג)  = מילים חלופיות      → (עץ/אילן)       ║
-║  א(ס/ש)ב  = חילופי אותיות      → אירו(ס/ש)ין     ║
+║  *word    = ends with...       → *נדר   = הנדר    ║
+║           (suffix match)        (*ndr = ha-neder)  ║
+║  word*    = starts with...     → שלום*  = שלומי   ║
+║           (prefix match)        (shalom* = shlomi) ║
+║  *a*b*c*  = characteristic     → *פ*ט*ר*= אפוטרופ║
+║           letters               (*p*t*r* = apotrop)║
+║  #word    = with grammatical   → #שלום  = והשלום  ║
+║           prefixes              (#shalom = ve-ha-  ║
+║                                  shalom)           ║
+║  (a/b/c)  = alternative words  → (עץ/אילן)        ║
+║                                  (tree/tree)       ║
+║  a(s/sh)b = letter alternation → אירו(ס/ש)ין      ║
+║                                  (erusin/erushin)  ║
 ║                                                    ║
-║  שילוב: #(קוצץ/עוקר) (עץ/אילן)*  gap=3          ║
-║  → כל צורות "קוצץ" או "עוקר" + "עץ..." או "אילן.."║
-║    בטווח של 3 מילים                                ║
+║  Combined: #(קוצץ/עוקר) (עץ/אילן)*  gap=3        ║
+║  (all forms of "cutter"/"uproots" + "tree..."      ║
+║   or "tree..." within 3 words)                     ║
 ║                                                    ║
 ╚════════════════════════════════════════════════════╝
 ```
@@ -664,13 +686,13 @@ Phase 3: (אם יש ביקוש)
 ---
 ---
 
-# חלק ב': שילוב באפליקציית הדסקטופ (PyQt6)
+# Part II: Integration in the Desktop Application (PyQt6)
 
-## מצב נוכחי — `genizah_app.py`
+## Current State — `genizah_app.py`
 
-אפליקציית הדסקטופ בנויה ב-PyQt6 עם מבנה דומה (אך לא זהה) לאפליקציית הווב.
+The desktop application is built with PyQt6 with a similar (but not identical) structure to the web application.
 
-### מבנה חזותי נוכחי — Search Tab
+### Current Visual Structure — Search Tab
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -703,12 +725,12 @@ Phase 3: (אם יש ביקוש)
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### מפת רכיבים קיימים (Row 2):
+### Existing Component Map (Row 2):
 
-| רכיב | Widget | משתנה | קובץ:שורה |
-|-------|--------|-------|-----------|
+| Component | Widget | Variable | File:Line |
+|-----------|--------|----------|-----------|
 | Mode dropdown | `QComboBox` | `self.mode_combo` | `genizah_app.py:5719` |
-| Variant presets | `QPushButton` ×3 | `self.btn_variant_{basic,extended,maximum}` | `:5742-5758` |
+| Variant presets | `QPushButton` x3 | `self.btn_variant_{basic,extended,maximum}` | `:5742-5758` |
 | Variant slider | `QSlider` | `self.variant_slider` | `:5774` |
 | Variant count | `QLabel` | `self.variant_count_label` | `:5795` |
 | Max changes | `QSpinBox` | `self.spin_max_changes` | `:5801` |
@@ -719,7 +741,7 @@ Phase 3: (אם יש ביקוש)
 | Deep Scan | `QCheckBox` | `self.chk_lab_deep` | `:5842` |
 | Help | `QPushButton` | `btn_help` | `:5848` |
 
-### זרימת חיפוש נוכחית:
+### Current Search Flow:
 
 ```
 query_input.returnPressed  OR  btn_search.clicked
@@ -753,11 +775,11 @@ query_input.returnPressed  OR  btn_search.clicked
 
 ---
 
-## שילוב חיפוש שו"ת בדסקטופ — שלוש אפשרויות
+## Integrating Responsa Search in Desktop — Three Options
 
-### אפשרות I: "צ'קבוקס לייט" (דסקטופ)
+### Option I: "Lightweight Checkbox" (Desktop)
 
-**שורה חדשה (Row 3)** מתחת ל-Row 2:
+**New row (Row 3)** below Row 2:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -765,16 +787,17 @@ query_input.returnPressed  OR  btn_search.clicked
 │                                                                                 │
 │  Row 2: [Mode: ▼] [variant controls]  [Gap:][__] [Excl:][____] [⚙][Lab][Deep]│
 │                                                                                 │
-│  Row 3 (חדש):                                                                   │
+│  Row 3 (new):                                                                   │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐│
 │  │ ☑ חיפוש שו"ת  │  ☐ וריאנטים  │  ☐ רווחים גמישים  │  ☐ JA (אל-)  │ [ⓘ]  ││
+│  │ (Responsa)     │  (Variants)  │  (Flex Spaces)     │  (JA al-)    │       ││
 │  └─────────────────────────────────────────────────────────────────────────────┘│
 │                                                                                 │
 │  [Results Table]                                                                │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**התנהגות Toggle:**
+**Toggle Behavior:**
 
 ```
   ☑ חיפוש שו"ת (ON):                      ☐ חיפוש שו"ת (OFF):
@@ -790,10 +813,10 @@ query_input.returnPressed  OR  btn_search.clicked
   └────────────────────────┘                └────────────────────────┘
 ```
 
-**קוד שינויים — `genizah_app.py`:**
+**Code Changes — `genizah_app.py`:**
 
 ```python
-# ב-create_search_tab(), אחרי row2:
+# In create_search_tab(), after row2:
 
 # Row 3: Responsa Mode Controls
 row3 = QHBoxLayout()
@@ -832,7 +855,7 @@ self.btn_responsa_help.setVisible(False)
 
 top_layout.addLayout(row1)
 top_layout.addLayout(row2)
-top_layout.addWidget(self.responsa_row)  # ← חדש
+top_layout.addWidget(self.responsa_row)  # ← new
 ```
 
 **Handler:**
@@ -854,7 +877,7 @@ def _on_responsa_mode_toggled(self, checked):
         self.mode_combo.setToolTip("")
 ```
 
-**שינוי ב-`start_search()`:**
+**Changes in `start_search()`:**
 
 ```python
 def start_search(self):
@@ -885,7 +908,7 @@ def start_search(self):
 
 ---
 
-### אפשרות II: "היברידי עם Preview" (דסקטופ)
+### Option II: "Hybrid with Preview" (Desktop)
 
 **Row 3 + Preview label:**
 
@@ -910,7 +933,7 @@ def start_search(self):
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Preview Widget — `QLabel` עם word wrap:**
+**Preview Widget — `QLabel` with word wrap:**
 
 ```python
 # Preview label (shows expanded query)
@@ -957,10 +980,10 @@ def _update_responsa_preview(self):
         preview = f" ──{gap}── ".join(parts)
         self.responsa_preview.setText(preview)
     except Exception:
-        self.responsa_preview.setText("⚠ שגיאת תחביר")
+        self.responsa_preview.setText("⚠ Syntax error")
 ```
 
-**שינוי ב-`start_search()`** — Tantivy-aware:
+**Changes in `start_search()`** — Tantivy-aware:
 
 ```python
 if hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
@@ -978,7 +1001,7 @@ if hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
     )
 ```
 
-**שינוי ב-`SearchThread`** (`gui_threads.py`):
+**Changes in `SearchThread`** (`gui_threads.py`):
 
 ```python
 class SearchThread(QThread):
@@ -1018,9 +1041,9 @@ class SearchThread(QThread):
 
 ---
 
-### אפשרות III: "מלא עם Dialog טבלאי" (דסקטופ)
+### Option III: "Full with Tabular Dialog" (Desktop)
 
-**כפתור "בונה שאילתות" פותח QDialog:**
+**"Query Builder" button opens a QDialog:**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -1030,44 +1053,49 @@ class SearchThread(QThread):
 │                                                                                 │
 │  Row 3:                                                                         │
 │  │ ☑ חיפוש שו"ת │ ☐ וריאנטים │ ☐ רווחים │ ☐ JA │ [📋 בונה שאילתות] │ [ⓘ]  │
+│  │ (Responsa)    │ (Variants) │ (Spaces) │      │ (Query Builder)    │       │
 │                                                                                 │
 │  Preview:                                                                       │
-│  │ (קוצץ|וקוצץ|...) ──3── (עץ*|אילן*)    [18 צורות]                          │
+│  │ (קוצץ|וקוצץ|...) ──3── (עץ*|אילן*)    [18 forms]                           │
 │                                                                                 │
 │  [Results Table]                                                                │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**QDialog — בונה שאילתות:**
+**QDialog — Query Builder:**
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════╗
 ║  בונה שאילתות — חיפוש טבלאי בסגנון פרויקט השו"ת                          [✕]  ║
+║  (Query Builder — Tabular Search in Responsa Project Style)                      ║
 ╠══════════════════════════════════════════════════════════════════════════════════╣
 ║                                                                                  ║
-║  ┌─── מרכיב 1 ───────────┐             ┌─── מרכיב 2 ───────────┐               ║
+║  ┌─── מרכיב 1 (Comp 1) ────┐             ┌─── מרכיב 2 (Comp 2) ────┐           ║
 ║  │                        │   מרחק     │                        │               ║
-║  │  [קוצץ              ] │  ┌─────┐   │  [עץ                ] │               ║
-║  │  [עוקר              ] │  │  3  │   │  [אילן              ] │               ║
-║  │  [משחית             ] │  └─────┘   │  [נטיעה             ] │   [+ מרכיב]   ║
-║  │  [                  ] │             │  [                  ] │               ║
+║  │  [קוצץ              ] │  (dist)    │  [עץ                ] │               ║
+║  │  [עוקר              ] │  ┌─────┐   │  [אילן              ] │               ║
+║  │  [משחית             ] │  │  3  │   │  [נטיעה             ] │   [+ מרכיב]   ║
+║  │  [                  ] │  └─────┘   │  [                  ] │  (+ component) ║
 ║  │                        │             │                        │               ║
 ║  │  ☑ # קידומות דקדוקיות │             │  ☐ # קידומות דקדוקיות │               ║
+║  │   (gram. prefixes)     │             │                        │               ║
 ║  │  ☐ * סיומות (wildcard)│             │  ☑ * סיומות (wildcard)│               ║
-║  │  ☐ וריאנטים          │             │  ☐ וריאנטים          │               ║
-║  │  ☐ JA אל-            │             │  ☐ שלילה ✕           │               ║
-║  │  ☐ שלילה ✕           │             │                        │               ║
+║  │   (suffix wildcard)    │             │   (suffix wildcard)    │               ║
+║  │  ☐ וריאנטים (variants)│             │  ☐ וריאנטים (variants)│               ║
+║  │  ☐ JA אל-            │             │  ☐ שלילה ✕ (negation) │               ║
+║  │  ☐ שלילה ✕ (negation) │             │                        │               ║
 ║  └────────────────────────┘             └────────────────────────┘               ║
 ║                                                                                  ║
 ║  ───────────────────────────────────────────────────────────────────             ║
 ║                                                                                  ║
-║  ☐ לפי הסדר (ordered)    ☐ Gap דו-כיווני    ☐ רווחים גמישים                    ║
+║  ☐ לפי הסדר (ordered)    ☐ Gap דו-כיווני (bidir.)    ☐ רווחים גמישים (flex)    ║
 ║                                                                                  ║
-║  ┌─ שאילתה מתורגמת ────────────────────────────────────────────────────────┐    ║
-║  │  #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*                              │    ║
-║  └──────────────────────────────────────────────────────────────────────────┘    ║
+║  ┌─ שאילתה מתורגמת (Translated Query) ───────────────────────────────────┐      ║
+║  │  #(קוצץ/עוקר/משחית) [3] (עץ/אילן/נטיעה)*                            │      ║
+║  └──────────────────────────────────────────────────────────────────────────┘      ║
 ║                                                                                  ║
 ║         [  העבר לחיפוש  ]              [  ניקוי  ]              [  ביטול  ]      ║
+║         (Apply to Search)              (Clear)                  (Cancel)          ║
 ║                                                                                  ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -1178,7 +1206,7 @@ class ComponentWidget(QWidget):
         return [inp.text().strip() for inp in self.word_inputs if inp.text().strip()]
 ```
 
-**שימוש ב-Dialog מ-`genizah_app.py`:**
+**Using the Dialog from `genizah_app.py`:**
 
 ```python
 def _open_query_builder(self):
@@ -1194,38 +1222,38 @@ def _open_query_builder(self):
 
 ---
 
-## השוואה: דסקטופ vs. ווב
+## Comparison: Desktop vs. Web
 
-| היבט | Web (NiceGUI) | Desktop (PyQt6) |
-|------|---------------|-----------------|
-| **Checkbox placement** | שורה מתחת לשדה קלט | Row 3 (שורה חדשה) |
-| **Mode toggle** | `ui.select` → `.set_visibility(False)` | `QComboBox` → `.setEnabled(False)` |
+| Aspect | Web (NiceGUI) | Desktop (PyQt6) |
+|--------|---------------|-----------------|
+| **Checkbox placement** | Row below input field | Row 3 (new row) |
+| **Mode toggle** | `ui.select` -> `.set_visibility(False)` | `QComboBox` -> `.setEnabled(False)` |
 | **Preview** | `ui.label` with debounce | `QLabel` with `textChanged` signal |
 | **Tabular UI** | `ui.dialog()` or expansion | `QDialog` with `QHBoxLayout` |
 | **Thread model** | `run.io_bound()` (async) | `QThread` (SearchThread) |
 | **URL state** | URL params (`?responsa=1`) | `QSettings` persistence |
 | **Storage** | `app.storage.user[...]` | `QSettings` / lab_engine.settings |
 
-### Shared Code (ב-`genizah_core.py`):
+### Shared Code (in `genizah_core.py`):
 
 ```
 genizah_core.py
-├── parse_responsa_query(query_str)        ← חדש, shared
-├── expand_grammatical_prefixes(word)      ← חדש, shared
-├── expand_judeo_arabic(word)              ← חדש, shared
+├── parse_responsa_query(query_str)        ← new, shared
+├── expand_grammatical_prefixes(word)      ← new, shared
+├── expand_judeo_arabic(word)              ← new, shared
 ├── build_tantivy_query(terms, mode, ...)  ← modified, shared
 ├── build_regex_pattern(terms, mode, ...)  ← modified, shared
 ├── execute_search(query, mode, ...)       ← modified, mode='responsa' support
-└── execute_responsa_search(query, ...)    ← חדש (or integrated into execute_search)
+└── execute_responsa_search(query, ...)    ← new (or integrated into execute_search)
 ```
 
-**הקוד המשותף** בין Desktop ו-Web **זהה** — כל הלוגיקה ב-`genizah_core.py`. ההבדל הוא **רק ב-UI layer**:
+**The shared code** between Desktop and Web **is identical** — all logic resides in `genizah_core.py`. The difference is **only in the UI layer**:
 - **Web**: `web/pages/search.py` — NiceGUI widgets
 - **Desktop**: `genizah_app.py` — PyQt6 widgets
 
 ---
 
-## תוכנית מימוש מקבילית
+## Parallel Implementation Plan
 
 ```
 Phase 1: Core Engine (genizah_core.py)          ← SHARED
@@ -1237,7 +1265,7 @@ Phase 1: Core Engine (genizah_core.py)          ← SHARED
 └── Add responsa_mode support to execute_search()
 
 Phase 2a: Web UI (web/pages/search.py)
-├── Add checkboxes (שו"ת, variants, JA, flex)
+├── Add checkboxes (Responsa, variants, JA, flex)
 ├── Add query preview
 ├── Toggle mode dropdown
 └── Wire to execute_search(mode='responsa')
@@ -1253,4 +1281,4 @@ Phase 3a: Web Tabular Dialog
 Phase 3b: Desktop Tabular QDialog               ← IN PARALLEL
 ```
 
-**הערה חשובה**: Phase 2a ו-Phase 2b יכולים לרוץ **במקביל** כי שניהם תלויים רק ב-Phase 1 (Core). לאחר שה-core מוכן, שני ה-UIs בלתי תלויים.
+**Important note**: Phase 2a and Phase 2b can run **in parallel** because both depend only on Phase 1 (Core). Once the core is ready, the two UIs are independent of each other.
