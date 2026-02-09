@@ -13010,18 +13010,22 @@ class GenizahGUI(QMainWindow):
         self._apply_results_table_filters()
 
     def _on_pgp_tags_loaded(self, tags):
-        """Handle PGP tags worker results - populate tag dropdown."""
+        """Handle PGP tags worker results - populate tag dropdown with Hebrew translations."""
+        from pgp_tag_translations import translate_tag_display
         self._pgp_tags = tags
         self.tag_search_combo.blockSignals(True)
         self.tag_search_combo.clear()
-        self.tag_search_combo.addItem("")  # empty placeholder
+        self.tag_search_combo.addItem("", "")  # empty placeholder
         for tag in tags:
-            self.tag_search_combo.addItem(tag)
+            self.tag_search_combo.addItem(translate_tag_display(tag), tag)
         self.tag_search_combo.blockSignals(False)
 
     def _execute_tag_search(self):
         """Execute a search by PGP tag from the dropdown."""
-        tag = self.tag_search_combo.currentText().strip()
+        tag = self.tag_search_combo.currentData()
+        if not tag:
+            # Fallback: user may have typed text directly
+            tag = self.tag_search_combo.currentText().strip()
         if not tag:
             return
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
@@ -13111,7 +13115,12 @@ class GenizahGUI(QMainWindow):
         # Switch to PGP Tags mode
         self.mode_combo.setCurrentIndex(self.MODE_PGP_TAGS)
         if hasattr(self, 'tag_search_combo'):
-            self.tag_search_combo.setCurrentText(tag)
+            # Find combo item by English tag stored in userData
+            idx = self.tag_search_combo.findData(tag)
+            if idx >= 0:
+                self.tag_search_combo.setCurrentIndex(idx)
+            else:
+                self.tag_search_combo.setCurrentText(tag)
         self._execute_tag_search()
 
     def _open_comp_filter_dialog(self, column):
