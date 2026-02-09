@@ -3893,6 +3893,7 @@ class ResultDialog(QDialog):
             tag = url_str[4:]
             parent = self.parent()
             if parent and hasattr(parent, '_search_by_pgp_tag'):
+                self.close()
                 parent._search_by_pgp_tag(tag)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
@@ -12331,6 +12332,7 @@ class GenizahGUI(QMainWindow):
             self.query_input.setVisible(not is_pgp_tags)
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.query_label.setText(tr("Tag:") if is_pgp_tags else tr("Query:"))
+            self.btn_ai.setVisible(not is_pgp_tags)
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
