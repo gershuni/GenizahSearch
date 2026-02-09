@@ -1910,6 +1910,8 @@ TRANSLATIONS = {
     "Tag": "תגית",
     "No results for tag": "אין תוצאות לתגית",
     "Searching by tag...": "מחפש לפי תגית...",
+    "PGP Tags": "תגיות PGP",
+    "Select a tag...": "בחר תגית...",
     "Princeton Geniza Project (PGP) tags:": "תגיות פרויקט הגניזה של פרינסטון (PGP):",
     "Scholarly transcriptions/data available from the Princeton Geniza Project": "קיים מידע/תעתיקים מפרויקט הגניזה של פרינסטון",
     "Search Tag": "חפש תגית",

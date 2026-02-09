@@ -296,7 +296,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         mode_val = mode_select.value
                         mode_names = {'exact': '=', 'variants': '?', 'variants_extended': '??',
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
-                                     'Shelfmark': '#', 'Title': '$'}
+                                     'Shelfmark': '#', 'Title': '$', 'pgp_tags': 'PGP'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
                         expanded_panel.style('display: none !important;')
                         collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
@@ -308,10 +308,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                 # Main Search Row
                 with ui.row().classes('w-full items-end gap-4 flex-wrap'):
 
-                    # Search Input (Main)
-                    with ui.column().classes('flex-grow min-w-80 gap-1'):
+                    # Search Input (Main) — swaps between text input and tag select
+                    with ui.column().classes('flex-grow min-w-80 gap-1') as query_column:
                         # Changed to H2 semantic label
-                        h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        query_label = h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         query_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
                             value=initial_query or saved_query
@@ -322,6 +322,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         def save_query():
                             app.storage.user['search_query'] = query_input.value or ''
                         query_input.on('blur', save_query)
+
+                    # Tag Select (for PGP Tags mode) — hidden by default
+                    with ui.column().classes('flex-grow min-w-80 gap-1') as tag_column:
+                        h2(tr('PGP Tags'), classes='text-sm font-medium', style='color: var(--success-600);')
+                        tag_select = ui.select(
+                            [], with_input=True, value=None
+                        ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"')
+                        tag_select.props(f'popup-content-class="max-h-64" label="{tr("Select a tag...")}"')
+                    tag_column.set_visibility(False)
+
+                    # Load PGP tags asynchronously
+                    async def load_pgp_tags():
+                        tags = await run.io_bound(get_all_distinct_tags)
+                        tag_select.options = tags
+                        tag_select.update()
+                    ui.timer(0.1, load_pgp_tags, once=True)
 
                     # Mode Selector - includes variant levels when not using slider
                     with ui.column().classes('gap-1'):
@@ -336,6 +352,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                                 'Regex': tr('Regex') + ' (/)',
                                 'Shelfmark': tr('Shelfmark') + ' (#)',
                                 'Title': tr('Title') + ' ($)',
+                                'pgp_tags': tr('PGP Tags'),
                             }
                         else:
                             # Preset mode: separate variant levels in dropdown
@@ -348,6 +365,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                                 'Regex': tr('Regex') + ' (/)',
                                 'Shelfmark': tr('Shelfmark') + ' (#)',
                                 'Title': tr('Title') + ' ($)',
+                                'pgp_tags': tr('PGP Tags'),
                             }
 
                         mode_select = ui.select(
@@ -471,6 +489,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
             def on_mode_change():
                 mode = mode_select.value
                 is_variants = mode in ('variants', 'variants_extended', 'variants_maximum')
+                is_tags = mode == 'pgp_tags'
 
                 if use_slider:
                     # Slider mode: show/hide slider row
@@ -478,12 +497,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                         variant_slider_row.set_visibility(is_variants)
                 else:
                     # Preset mode: show/hide max changes column, update level based on mode
-                    max_changes_col.set_visibility(is_variants)
+                    max_changes_col.set_visibility(is_variants and not is_tags)
                     if is_variants:
                         set_level(get_level_from_mode(mode))
 
-                # Save mode to storage
-                app.storage.user['search_mode'] = mode
+                # Toggle between query input and tag select
+                query_column.set_visibility(not is_tags)
+                tag_column.set_visibility(is_tags)
+
+                # Save mode to storage (don't persist pgp_tags)
+                if not is_tags:
+                    app.storage.user['search_mode'] = mode
 
             mode_select.on('update:model-value', on_mode_change)
 
@@ -495,25 +519,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
                     progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
                 )
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
-
-        # === PGP Tag Search Row ===
-        with ui.row().classes('w-full px-6 items-center gap-2'):
-            ui.label(tr('Princeton Geniza Project (PGP) tags:')).classes('text-sm font-bold').style('color: var(--success-600);')
-            tag_select = ui.select(
-                [], with_input=True, value=None,
-                on_change=lambda e: ui.navigate.to(f'/search?tag={quote(e.value)}') if e.value else None
-            ).classes('w-48').props('outlined dense clearable use-input input-debounce="200"').style('color: var(--success-600);')
-            tag_select.props('popup-content-class="max-h-64"')
-            ui.button(tr('Search Tag'), icon='search', on_click=lambda: ui.navigate.to(f'/search?tag={quote(tag_select.value)}') if tag_select.value else None).props(
-                'dense size=sm'
-            ).style('background: var(--success-600); color: white;')
-
-            # Load tags asynchronously
-            async def load_pgp_tags():
-                tags = await run.io_bound(get_all_distinct_tags)
-                tag_select.options = tags
-                tag_select.update()
-            ui.timer(0.1, load_pgp_tags, once=True)
 
         # === Main Content Area (Splitter) ===
         with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
@@ -1041,6 +1046,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None):
     search_state.update_timer = ui.timer(0.5, update_progress_ui)
 
     async def execute_search():
+        # Handle PGP tag search mode — navigate to tag results page
+        if mode_select.value == 'pgp_tags':
+            tag = tag_select.value
+            if tag:
+                ui.navigate.to(f'/search?tag={quote(tag)}')
+            return
+
         query = query_input.value.strip() if query_input.value else ""
         if not query:
             return
