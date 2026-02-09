@@ -1,4 +1,4 @@
-# GenizahSearch — Desktop Parity & Transcription Search
+# GenizahSearch — Responsa Search
 
 ## What This Is
 
@@ -6,7 +6,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ## Core Value
 
-**Users can view and search PGP's human-curated transcriptions alongside manuscript images.** The 7,090 PGP documents with 9,364 transcription/translation sources are displayable with proper scholar attribution.
+**Users can search the Genizah corpus using Responsa Project-style syntax and a tabular query builder.** Advanced search features — wildcards, grammatical prefixes, OR alternatives, Judeo-Arabic expansion, and flexible spacing — give researchers fine-grained control over Hebrew and Judeo-Arabic manuscript search, in both web and desktop apps.
 
 ## Requirements
 
@@ -24,103 +24,110 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Search results indicate when PGP transcription available — v1
 - Multi-source selector: switch between scholars' editions and translations — v1
 - Tag-based search from PGP metadata — v1
+- Shared service layer for Supabase access — v5.6.0
+- Desktop PGP feature parity (transcriptions, metadata, joins, tag search, version selector) — v5.6.0
+- Virtual Reading Desk (multi-manuscript viewer in both apps) — v5.6.0
 
 ### Active
 
-- [ ] Shared service layer: reshape and extract document_service from web/ to shared module
-- [ ] Desktop app: PGP transcription display in browse tab (full parity with web)
-- [ ] Desktop app: PGP metadata display (type, tags, dates, descriptions)
-- [ ] Desktop app: Related Fragments / joins display
-- [ ] Desktop app: Tag-based search from PGP metadata
-- [ ] Desktop app: Multi-source version selector (scholars' editions and translations)
-- [ ] Desktop app: PGP transcription indicator in search results
-- [ ] Transcriptions searchable in Tantivy (PGP + user corrections), with filter toggle
-- [ ] Tantivy index rebuild with transcription fields
+- [ ] Responsa syntax parsing: wildcards (`*`), grammatical prefixes (`#`), OR alternatives (`(/)`)
+- [ ] Judeo-Arabic definite article expansion with sun letter assimilation
+- [ ] Flexible spacing (zero-width word boundaries for OCR errors)
+- [ ] Bidirectional gap search (both word orders)
+- [ ] Combinatorial explosion guard with auto-downgrade cascade
+- [ ] Web UI: Responsa checkboxes + tabular query builder (expansion panel)
+- [ ] Desktop UI: Responsa checkboxes + tabular query builder (QDialog)
+- [ ] Both apps produce identical search results for Responsa queries
 
 ### Out of Scope
 
 - PGP people/places integration — complexity too high, defer
 - Map-based geographic browse — requires places.csv + UI work, defer
-- Cambridge IIIF local manifest lookup — optimization, not core feature
-- Full NLI crossreference indexing — 815K records too large, use for joins only
-- Automatic PGP sync from GitHub — manual refresh sufficient for now
-- NLI BifolioWith import — 306K image-level bifolio pairs, defer to v2+
+- Automatic PGP sync from GitHub — manual refresh sufficient
 - Build transcription editor — link to external tools instead
 - Build join detection AI — import from NLI/PGP instead
-- NLI joins import — deferred to v5.7.0 (not blocking desktop parity)
-- Import remaining ~34K PGP documents — deferred to v5.7.0 (metadata only, low priority)
+- Transcription search in Tantivy — deferred (Phase 13 reverted, needs server-side index architecture)
+- NLI joins import — deferred to future milestone
+- Per-component search modes (exact/variants per column) — Option III, defer unless demand
+- Scope search (sentence/paragraph/document) — Option III feature, defer
+- Per-component negation — Option III feature, defer
+- Bidirectional sync between tabular and text field — one-way only (tabular -> text)
+- `\s*` per char on variants/JA expansions — only on original terms
+- Desktop checkbox persistence between sessions — defaults on startup, defer
 
-## Current Milestone: v5.6.0 Desktop Parity & Transcription Search
+## Current Milestone: v5.7.0 Responsa Search
 
-**Goal:** Bring all PGP features to the desktop app via a shared service layer, and make transcriptions (PGP + user) searchable in Tantivy with filter controls.
+**Goal:** Add Responsa Project-style search capabilities to both web and desktop apps — syntax-based advanced search with a tabular query builder, Judeo-Arabic and flexible spacing support, and smart explosion guards.
 
 **Target features:**
-- Shared service layer extracted and reshaped from web/document_service.py
-- Desktop app gains full PGP feature parity with web (transcriptions, metadata, joins, tag search, version selector)
-- Transcriptions indexed in Tantivy with search filter toggle (all content / transcriptions only / exclude transcriptions)
+- Responsa syntax: `*` wildcards, `#` grammatical prefixes, `(/)` OR alternatives
+- Global checkboxes: Responsa Mode, Variants, Judeo-Arabic (al-), Flexible Spacing, Bidirectional Gap
+- Tabular query builder: 2-3 components, one-way sync (tabular -> text field)
+- Web: expansion panel for tabular; Desktop: QDialog for tabular
+- Combinatorial explosion guard with downgrade cascade
 
 ## Context
 
-### Current State (after v1)
+### Current State (after v5.6.0)
 
-**Shipped:** v1 External Data Integration (2026-02-07, git tag v5.5.0)
-- 7,090 PGP documents imported to Supabase (documents, document_fragments, document_sources tables)
-- 9,364 transcription/translation sources with scholar attribution
-- 492 multi-fragment documents with join relationships
-- Web app has full PGP feature set (transcriptions, metadata, joins, tag search)
-- Desktop app has NO PGP features yet — this is the primary gap
+**Shipped:** v5.6.0 Desktop Parity & PGP Integration (2026-02-09, git tag v5.6.0)
+- Desktop has full PGP feature parity with web
+- Virtual Reading Desk in both apps
+- 35,839 PGP documents imported
+- Phase 13 (Transcription Search) deferred
 
 **Architecture:**
-- Web: NiceGUI → Supabase (PGP data) + Tantivy (search index)
-- Desktop: PyQt6 → Supabase (community features) + Tantivy (search index)
+- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index)
+- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index)
 - Shared: genizah_core.py (search engine, metadata, variants)
-- Web-only: web/document_service.py (PGP data access) — needs extraction to shared
+- Shared: shared/document_service.py (PGP data access)
 
 **Codebase:**
-- genizah_app.py: 15,839 lines (desktop)
-- web/pages/browse.py: ~3,178 lines (web browse)
-- web/document_service.py: ~507 lines (PGP service, web-only currently)
-- genizah_core.py: 7,057 lines (shared core)
+- genizah_app.py: ~17,722 lines (desktop)
+- web/pages/search.py: ~3,761 lines (web search)
+- genizah_core.py: ~7,066 lines (shared core)
+- gui_threads.py: SearchThread/LabSearchThread (desktop async)
 
-### Data Sources
+### Search Engine (Two-Phase Architecture)
 
-| Source | Records | Status | Use |
-|--------|---------|--------|-----|
-| PGP transcriptions | 9,364 sources | Imported | Transcription/translation display |
-| PGP documents | 7,090 imported / ~41,000 total | Partial | Metadata + transcriptions |
-| PGP footnotes.csv | ~24,000 | Available | Additional bibliography |
-| NLI crossreference | 815,000 | Available | Join relationships (PartOf: ~424K) |
+The Responsa feature integrates into the existing two-phase search:
+1. **Phase 1 (Tantivy)**: Fast full-text index -> retrieves candidate documents via OR groups
+2. **Phase 2 (Regex)**: Precise pattern matching -> filters, highlights results
+
+Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()` translates syntax into structured components, which feed into `build_tantivy_query()` (OR groups with boosting) and `build_regex_pattern()` (wildcards, alternations).
 
 ### Architectural Principle
 
-**Both apps must be maintained.** New features that touch data access or display should work in both web and desktop apps. The shared service layer pattern (Option C) ensures both apps consume the same Supabase queries without code duplication.
+**Both apps must be maintained.** Responsa search logic lives in `genizah_core.py` (shared). UI is app-specific: web checkboxes + expansion panel, desktop checkboxes + QDialog.
 
 ## Constraints
 
-- **Dual App Maintenance**: All new data features must plan for both web (NiceGUI) and desktop (PyQt6)
-- **Shared Service Layer**: Business logic in shared modules, UI in app-specific code
-- **Data Volume**: PGP 41K docs manageable; NLI 815K too large for full indexing
-- **Schema Evolution**: Tantivy index may need rebuild (affects users)
-- **Backward Compatibility**: Existing features in both apps must continue working
-- **Attribution**: PGP transcriptions must show scholar attribution per their license
-- **Supabase Free Tier**: 500MB database limit
+- **Dual App Maintenance**: All Responsa search features must work in both web and desktop
+- **Shared Core**: All search logic in genizah_core.py -- UI-only code in app-specific files
+- **`#` Prefix Conflict**: When Responsa mode ON, `#` = grammatical prefixes (not Shelfmark). All prefix shortcuts disabled in Responsa mode
+- **Combinatorial Cap**: MAX_EXPANDED_TERMS = 500. Downgrade: variants->basic->off->JA off->error
+- **Flexible Spacing**: `\s*` per char only on original terms, not on variant/JA expansions
+- **Backward Compatibility**: All existing search modes unchanged when Responsa checkbox OFF
+- **PGP Tags Interaction**: Responsa checkboxes hidden when PGP Tags mode active
+- **Desktop Persistence**: Checkbox defaults on startup (no QSettings persistence for now)
+- **URL State**: Web stores text + checkbox states in URL, not tabular state
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| PGP transcriptions as version source | Integrates naturally with existing version selector UX | Good |
-| Document entity for joins only | Avoids complexity for single-fragment majority | Good |
-| Sequential images for joined docs | Simpler UX than tabs, mirrors physical document flow | Good |
-| pgpid as natural PRIMARY KEY | Matches PGP data source, avoids synthetic IDs | Good |
-| Two-pass import (docs then fragments) | Respects FK constraints, clean deduplication | Good |
-| JSONB tags with GIN index | Flexible tag queries without join table | Good |
-| Service layer pattern | Isolates Supabase queries from UI code | Good — needs extraction from web/ |
-| Shared service layer (Option C) | Both apps consume same Supabase functions | Pending — this milestone |
-| NLI joins deferred to v5.7.0 | PartOf relationships add 424K links cheaply, not blocking desktop parity | — Pending |
-| Reshape service API during extraction | Fix TODO, clean up naming, improve API surface while extracting | — Pending |
-| Transcription search with filter toggle | Default=everything, optional filter for transcriptions only or exclude | — Pending |
-| v5.6.0 version tag | Aligns with existing git tag scheme (v5.5.0 → v5.6.0) | — Pending |
+| Option II (Hybrid Integration) for core | Best balance: Tantivy-aware OR groups, foundation for tabular | Recommended |
+| Option IIb (Dialog/Panel) for tabular | Separate mode, one-way sync to text field | Recommended |
+| `#` conflict: Responsa ON = shortcuts OFF | Clear separation, no ambiguity | Confirmed |
+| Downgrade cascade: variants->JA->error | Prevents query explosion while maximizing coverage | Confirmed |
+| Flex spacing: basic + advanced on originals only | Performance-safe, covers most OCR cases | Confirmed |
+| PGP Tags: hide Responsa checkboxes | Separate search paradigm, no interaction needed | Confirmed |
+| Desktop: QDialog for tabular | Avoids Row 2 crowding, follows existing dialog patterns | Confirmed |
+| Web: expansion panel for tabular | Collapsible, doesn't clutter search page | Confirmed |
+| 2-3 components max in tabular | Matches Responsa Project, prevents UI complexity | Confirmed |
+| Highlighting: existing mechanism sufficient | Regex match -> colored span already handles multi-term | Confirmed |
+| URL: text + checkboxes only | Tabular is a builder tool, its state is transient | Confirmed |
+| Desktop: defaults on startup | Persistence deferred, simpler MVP | Confirmed |
 
 ---
-*Last updated: 2026-02-07 after v5.6.0 milestone start*
+*Last updated: 2026-02-09 after v5.7.0 milestone start*

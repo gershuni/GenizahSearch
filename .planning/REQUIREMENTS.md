@@ -1,63 +1,78 @@
-# Requirements: GenizahSearch v5.6.0
+# Requirements: GenizahSearch v5.7.0
 
-**Defined:** 2026-02-07
-**Core Value:** Users can view and search PGP's human-curated transcriptions alongside manuscript images -- in both web and desktop apps
+**Defined:** 2026-02-09
+**Core Value:** Users can search the Genizah corpus using Responsa Project-style syntax and a tabular query builder, in both web and desktop apps
 
-## v5.6.0 Requirements
+## v5.7.0 Requirements
 
-Requirements for Desktop Parity & Transcription Search milestone. Each maps to roadmap phases.
+Requirements for Responsa Search milestone. Each maps to roadmap phases.
 
-### Infrastructure
+### Core Engine
 
-- [x] **INFRA-01**: Shared Supabase client provider accessible by both web and desktop apps
-- [x] **INFRA-02**: Document service extracted from web/ to shared module with reshaped API (fix TODO, clean naming)
-- [x] **INFRA-03**: Web app continues working unchanged via re-export shim after extraction
+- [ ] **CORE-01**: `parse_responsa_query()` parses Responsa syntax (`*` wildcards, `#` prefixes, `(/)` OR, inline alternatives) into structured `ResponsaComponent` list
+- [ ] **CORE-02**: `expand_grammatical_prefixes(word)` expands Hebrew grammatical prefixes (ו,ה,ב,כ,ל,מ,ש) producing ~10 forms per word
+- [ ] **CORE-03**: `expand_judeo_arabic(word)` expands definite article (אל-) with sun letter assimilation and preposition combinations, producing 8-14 forms per word
+- [ ] **CORE-04**: `build_tantivy_query()` supports Responsa components as Tantivy OR groups with boosting (exact terms boosted ^5)
+- [ ] **CORE-05**: `build_regex_pattern()` supports wildcards (`\S*`), alternations, and flexible spacing (`\s*` per char on original terms only)
+- [ ] **CORE-06**: Bidirectional gap via regex alternation `(forward)|(backward)` when checkbox enabled
+- [ ] **CORE-07**: Combinatorial explosion guard: MAX_EXPANDED_TERMS=500, downgrade cascade (variants->basic->off->JA off->error) with user notification
+- [ ] **CORE-08**: When Responsa mode ON, prefix shortcuts (`#`, `?`, `/`, `$`, `~`, `=`) are disabled -- query goes to Responsa parser instead
 
-### Desktop PGP Parity
+### Web UI
 
-- [x] **DESK-01**: User can view PGP transcriptions in desktop manuscript viewer (auto-selected when available)
-- [x] **DESK-02**: User can switch between scholars' editions and translations via grouped version selector with separators
-- [x] **DESK-03**: User can view PGP metadata (document type, tags, dates, description) in collapsible panel
-- [x] **DESK-04**: User can see green indicator in search results for manuscripts with PGP transcriptions
-- [x] **DESK-05**: User can search by PGP tag (new search mode + clickable tags in metadata panel)
-- [x] **DESK-06**: User can see PGP-sourced joins in Related Fragments dialog alongside user joins
+- [ ] **WEB-01**: Checkboxes row: Responsa Mode, Variants, Judeo-Arabic, Flexible Spacing on search page
+- [ ] **WEB-02**: Bidirectional Gap checkbox in Advanced Options section
+- [ ] **WEB-03**: When Responsa checkbox ON, mode dropdown hidden; when OFF, everything works as today
+- [ ] **WEB-04**: Tabular query builder as collapsible expansion panel with 2-3 component columns
+- [ ] **WEB-05**: Tabular generates Responsa syntax text and inserts into search field (one-way sync)
+- [ ] **WEB-06**: URL persistence: `?responsa=1&variants=1&ja=1&flex_spaces=1&bidirectional=1` + query text
+- [ ] **WEB-07**: Responsa checkboxes hidden when PGP Tags mode is active
 
-### Transcription Search
+### Desktop UI
 
-- [ ] **SRCH-01**: PGP transcriptions indexed in Tantivy alongside existing HTR content
-- [ ] **SRCH-02**: User correction transcriptions indexed in Tantivy
-- [ ] **SRCH-03**: User can filter search to all content (default), transcriptions only, or exclude transcriptions
-- [ ] **SRCH-04**: Tantivy index rebuilt with transcription fields using safe temp-then-swap pattern
+- [ ] **DESK-01**: Checkboxes in search tab: Responsa Mode, Variants, Judeo-Arabic, Flexible Spacing
+- [ ] **DESK-02**: Bidirectional Gap checkbox near gap input
+- [ ] **DESK-03**: When Responsa checkbox ON, mode dropdown hidden; when OFF, everything works as today
+- [ ] **DESK-04**: "Query Builder" button opens QDialog with 2-3 component columns
+- [ ] **DESK-05**: QDialog generates Responsa syntax text and inserts into search field (one-way sync)
+- [ ] **DESK-06**: `SearchThread` extended with optional `responsa_options` parameter (backward-compatible)
+- [ ] **DESK-07**: Responsa checkboxes hidden when PGP Tags mode is active
+- [ ] **DESK-08**: Checkbox defaults on startup (no persistence between sessions)
 
-### Virtual Reading Desk
+### Cross-App
 
-- [x] **VIEW-01**: User can view all fragments from a joined document together (images + transcriptions)
-- [x] **VIEW-02**: User can add any manuscript to the reading desk by shelfmark or sys_id
-- [x] **VIEW-03**: User can add manuscripts to the reading desk from personal lists
-- [x] **VIEW-04**: Reading desk works in both web and desktop apps
-
-### Data Import
-
-- [x] **DATA-01**: Import remaining ~34K PGP documents (metadata only, no transcriptions) to Supabase
-- [x] **DATA-02**: Document fragments linked for any multi-fragment documents in the new batch
+- [ ] **XAPP-01**: Both web and desktop apps produce identical search results for the same Responsa query
+- [ ] **XAPP-02**: All Responsa logic lives in genizah_core.py (shared) -- no search logic in UI code
 
 ## Future Requirements
 
-Deferred to v5.7.0 or later. Tracked but not in current roadmap.
+Deferred to v5.8.0 or later. Tracked but not in current roadmap.
 
-### Desktop Polish
+### Option III Features
 
-- **POLISH-01**: Dockable PGP info panel (QDockWidget) for persistent metadata display
-- **POLISH-02**: Keyboard-driven version switching (Ctrl+Shift+P for PGP, etc.)
-- **POLISH-03**: Side-by-side edition comparison with diff highlighting
-- **POLISH-04**: Offline PGP data cache (SQLite local store)
-- **POLISH-05**: Tag cloud / tag browser for discovery
+- **OPT3-01**: Per-component search mode (exact/variants/wildcard per column)
+- **OPT3-02**: Scope search (sentence/paragraph/document)
+- **OPT3-03**: Per-component negation (NOT clause)
+- **OPT3-04**: Bidirectional sync between tabular and text field
 
-### Data Expansion
+### Advanced Spacing
 
-- **EXPAND-01**: NLI joins import (~424K PartOf relationships from crossreference)
-- **EXPAND-02**: NLI BifolioWith import (306K image-level bifolio pairs)
-- **EXPAND-03**: PGP footnotes.csv import (~24K additional bibliography)
+- **SPACE-01**: `\s*` per char applied to variant/JA expansions (currently only originals)
+- **SPACE-02**: Dual-track search with content_nospaces Tantivy field
+- **SPACE-03**: N-gram character-level index for space-agnostic search
+
+### Persistence & Polish
+
+- **PERSIST-01**: Desktop QSettings persistence for Responsa checkbox states
+- **PERSIST-02**: Saved Responsa queries (serialized SearchPlan)
+- **PERSIST-03**: Query history with Responsa metadata
+
+### Deferred from v5.6.0
+
+- **SRCH-01**: PGP transcriptions indexed in Tantivy (Phase 13, reverted)
+- **SRCH-02**: User corrections indexed in Tantivy
+- **SRCH-03**: Search filter toggle (all/transcriptions only/exclude)
+- **EXPAND-01**: NLI joins import (~424K PartOf relationships)
 
 ## Out of Scope
 
@@ -65,14 +80,12 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| PGP people/places integration | Complexity too high, separate milestone |
-| Map-based geographic browse | Requires places.csv + significant UI work |
-| Automatic PGP sync from GitHub | Manual refresh sufficient |
-| Build transcription editor | Link to external tools instead |
-| Build join detection AI | Import from NLI/PGP instead |
-| Full NLI crossreference indexing | 815K records too large for full indexing |
-| NiceGUI reactive patterns in PyQt6 | Anti-pattern: use native Qt signal-slot instead |
-| Separate "PGP mode" in desktop | Anti-pattern: integrate into existing tabs |
+| Transcription search in Tantivy | Deferred from v5.6.0, needs server-side index architecture |
+| PGP people/places integration | Separate milestone |
+| Map-based geographic browse | Separate milestone |
+| Two-way tabular<->text sync | Complexity too high for MVP, one-way sufficient |
+| `##` double-hash syntax | Checkbox approach preferred (doc 5 recommendation) |
+| Query preview line | User explicitly excluded ("no need for expanded query preview every time") |
 
 ## Traceability
 
@@ -80,31 +93,36 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 8 | Complete |
-| INFRA-02 | Phase 8 | Complete |
-| INFRA-03 | Phase 8 | Complete |
-| DESK-01 | Phase 10 | Complete |
-| DESK-02 | Phase 10 | Complete |
-| DESK-03 | Phase 12 | Complete |
-| DESK-04 | Phase 12 | Complete |
-| DESK-05 | Phase 12 | Complete |
-| DESK-06 | Phase 12 | Complete |
-| SRCH-01 | Phase 13 | Pending |
-| SRCH-02 | Phase 13 | Pending |
-| SRCH-03 | Phase 13 | Pending |
-| SRCH-04 | Phase 13 | Pending |
-| VIEW-01 | Phase 11 | Complete |
-| VIEW-02 | Phase 11 | Complete |
-| VIEW-03 | Phase 11 | Complete |
-| VIEW-04 | Phase 11 | Complete |
-| DATA-01 | Phase 9 | Complete |
-| DATA-02 | Phase 9 | Complete |
+| CORE-01 | Phase 14 | Pending |
+| CORE-02 | Phase 14 | Pending |
+| CORE-03 | Phase 14 | Pending |
+| CORE-04 | Phase 14 | Pending |
+| CORE-05 | Phase 14 | Pending |
+| CORE-06 | Phase 14 | Pending |
+| CORE-07 | Phase 14 | Pending |
+| CORE-08 | Phase 14 | Pending |
+| WEB-01 | Phase 15 | Pending |
+| WEB-02 | Phase 15 | Pending |
+| WEB-03 | Phase 15 | Pending |
+| WEB-04 | Phase 16 | Pending |
+| WEB-05 | Phase 16 | Pending |
+| WEB-06 | Phase 15 | Pending |
+| WEB-07 | Phase 15 | Pending |
+| DESK-01 | Phase 15 | Pending |
+| DESK-02 | Phase 15 | Pending |
+| DESK-03 | Phase 15 | Pending |
+| DESK-04 | Phase 16 | Pending |
+| DESK-05 | Phase 16 | Pending |
+| DESK-06 | Phase 15 | Pending |
+| DESK-07 | Phase 15 | Pending |
+| DESK-08 | Phase 15 | Pending |
+| XAPP-01 | Phase 17 | Pending |
+| XAPP-02 | Phase 14 | Pending |
 
 **Coverage:**
-- v5.6.0 requirements: 19 total
-- Mapped to phases: 19
+- v5.7.0 requirements: 25 total
+- Mapped to phases: 25
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-02-07*
-*Last updated: 2026-02-08 after Phase 12 completion*
+*Requirements defined: 2026-02-09*
