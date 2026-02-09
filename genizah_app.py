@@ -6289,14 +6289,62 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
+        # Responsa active label (amber indicator when mode combo is hidden)
+        self.lbl_responsa_active = QLabel(tr("Responsa Mode"))
+        self.lbl_responsa_active.setStyleSheet("color: #f39c12; font-weight: bold;")
+        self.lbl_responsa_active.setVisible(False)
+
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
+        row2.addWidget(self.lbl_responsa_active)
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
 
         row2.addStretch()
         row2.addWidget(btn_help)
+
+        # --- Responsa Controls Row ---
+        self._pre_responsa_mode_idx = 0  # Remembers mode before Responsa was toggled ON
+        self._updating_responsa_mode = False  # Guard against circular triggers
+
+        self.responsa_row = QWidget()
+        responsa_layout = QHBoxLayout(self.responsa_row)
+        responsa_layout.setContentsMargins(0, 2, 0, 2)
+        responsa_layout.setSpacing(12)
+
+        # Responsa Mode master toggle
+        self.chk_responsa_mode = QCheckBox(tr("Responsa Mode"))
+        self.chk_responsa_mode.setToolTip(tr("Enable Responsa-style grammatical expansion for Hebrew search"))
+        self.chk_responsa_mode.toggled.connect(self._on_responsa_mode_toggled)
+        responsa_layout.addWidget(self.chk_responsa_mode)
+
+        # Sub-checkboxes (hidden initially)
+        self.chk_responsa_variants = QCheckBox(tr("Variants"))
+        self.chk_responsa_variants.setToolTip(tr("Include spelling variant pairs"))
+        self.chk_responsa_variants.setVisible(False)
+        responsa_layout.addWidget(self.chk_responsa_variants)
+
+        self.chk_responsa_ja = QCheckBox(tr("Judeo-Arabic"))
+        self.chk_responsa_ja.setToolTip(tr("Expand with Judeo-Arabic article forms (al-)"))
+        self.chk_responsa_ja.setVisible(False)
+        responsa_layout.addWidget(self.chk_responsa_ja)
+
+        self.chk_responsa_flex = QCheckBox(tr("Flex Spacing"))
+        self.chk_responsa_flex.setToolTip(tr("Allow flexible spacing between characters (helps with OCR text)"))
+        self.chk_responsa_flex.setVisible(False)
+        responsa_layout.addWidget(self.chk_responsa_flex)
+
+        # Bidirectional Gap checkbox (near gap area conceptually, in Responsa row)
+        self.chk_bidirectional = QCheckBox(tr("Bidirectional"))
+        self.chk_bidirectional.setToolTip(tr("Search for words in either order"))
+        self.chk_bidirectional.setVisible(False)
+        responsa_layout.addWidget(self.chk_bidirectional)
+
+        responsa_layout.addStretch()
+
+        # Responsa row visible by default in Exact mode (index 0)
+        self.responsa_row.setVisible(True)
 
         # Lazily load PGP tags in background
         self._pgp_tags_worker = PGPTagsWorker()
@@ -6305,6 +6353,7 @@ class GenizahGUI(QMainWindow):
 
         top_layout.addWidget(self.search_row1_container)
         top_layout.addLayout(row2)
+        top_layout.addWidget(self.responsa_row)
         layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
@@ -12328,15 +12377,46 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'variant_slider_widget'):
                 self.variant_slider_widget.setVisible(use_slider)
 
+    def _on_responsa_mode_toggled(self, checked):
+        """Toggle Responsa sub-checkboxes and mode combo visibility."""
+        if self._updating_responsa_mode:
+            return
+        self._updating_responsa_mode = True
+        try:
+            if checked:
+                self._pre_responsa_mode_idx = self.mode_combo.currentIndex()
+                self.mode_combo.setVisible(False)
+                self.lbl_responsa_active.setVisible(True)
+            else:
+                self.mode_combo.setVisible(True)
+                self.lbl_responsa_active.setVisible(False)
+                self.mode_combo.setCurrentIndex(self._pre_responsa_mode_idx)
+            # Sub-checkboxes visible only when master ON
+            self.chk_responsa_variants.setVisible(checked)
+            self.chk_responsa_ja.setVisible(checked)
+            self.chk_responsa_flex.setVisible(checked)
+            self.chk_bidirectional.setVisible(checked)
+        finally:
+            self._updating_responsa_mode = False
+
     def _on_search_mode_changed(self, index):
         """Show/hide variant controls and swap query/tag input based on selected mode."""
+        is_exact = (index == 0)
         is_variants = (index == 1)
         is_pgp_tags = (index == self.MODE_PGP_TAGS)
+        is_responsa_eligible = is_exact or is_variants
 
         if hasattr(self, 'variant_controls_container'):
             self.variant_controls_container.setVisible(is_variants and not is_pgp_tags)
         if is_variants:
             self._update_variant_count_preview()
+
+        # Show/hide Responsa row based on mode eligibility
+        if hasattr(self, 'responsa_row'):
+            self.responsa_row.setVisible(is_responsa_eligible and not is_pgp_tags)
+            # If leaving eligible mode while Responsa is ON, turn it off
+            if not is_responsa_eligible and hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
+                self.chk_responsa_mode.setChecked(False)
 
         # PGP Tags mode: hide row1 entirely, show tag combo in row2, hide search params
         if hasattr(self, 'tag_search_combo'):
@@ -12702,6 +12782,18 @@ class GenizahGUI(QMainWindow):
         self.result_row_by_sys_id = {}
         self.hovered_row = -1
 
+        # Build Responsa options if Responsa Mode is active
+        responsa_options = None
+        if hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
+            responsa_options = {
+                'responsa_mode': True,
+                'variants': self.chk_responsa_variants.isChecked(),
+                'ja': self.chk_responsa_ja.isChecked(),
+                'flex_spacing': self.chk_responsa_flex.isChecked(),
+                'bidirectional': self.chk_bidirectional.isChecked(),
+                'variant_mode': ['exact', 'variants'][self._pre_responsa_mode_idx] if self._pre_responsa_mode_idx <= 1 else 'exact',
+            }
+
         if self.btn_lab_mode_toggle.isChecked():
             if not self.lab_engine:
                 QMessageBox.warning(self, tr("Error"), tr("Lab Engine not initialized."))
@@ -12713,7 +12805,7 @@ class GenizahGUI(QMainWindow):
 
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
@@ -12862,8 +12954,14 @@ class GenizahGUI(QMainWindow):
         self.results_table.setSortingEnabled(True)
         self._apply_results_table_filters()
 
-        # Update Status
-        self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)))
+        # Update Status (include expanded term count for Responsa searches)
+        expanded_count = getattr(self, '_responsa_expanded_count', 0)
+        if expanded_count > 0:
+            self.status_label.setText(tr("Showing {} of {} results (searching {} expanded terms)").format(
+                self.results_loaded, len(self.last_results), expanded_count
+            ))
+        else:
+            self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)))
 
         # Trigger Metadata
         if ids_to_fetch:
@@ -12893,6 +12991,24 @@ class GenizahGUI(QMainWindow):
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
         self._res_map_by_sid = {r['display']['id']: r for r in results}
+
+        # Track Responsa expanded term count for status label
+        self._responsa_expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+
+        # Display explosion guard warning if present
+        if results and results[0].get('responsa_warning'):
+            warning = results[0]['responsa_warning']
+            self.status_label.setText(warning)
+            self.status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
+            def _restore_status():
+                self.status_label.setText(
+                    tr("Showing {} of {} results").format(
+                        min(self.results_loaded, len(self.last_results)),
+                        len(self.last_results)
+                    )
+                )
+                self.status_label.setStyleSheet("")
+            QTimer.singleShot(5000, _restore_status)
 
         for b in self.export_buttons: b.setEnabled(True)
 
