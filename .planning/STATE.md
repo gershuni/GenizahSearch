@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 ## Current Position
 
-Phase: 15 of 17 (Search UI) -- IN PROGRESS
-Plan: 1 of 2 complete
-Status: **Plan 15-01 (Web Responsa Checkboxes) complete, ready for Plan 15-02 (Desktop UI)**
-Last activity: 2026-02-09 -- Plan 15-01 (Web Responsa Checkboxes) complete
+Phase: 15 of 17 (Search UI) -- COMPLETE
+Plan: 2 of 2 complete
+Status: **Phase 15 complete (both web and desktop Responsa checkboxes), ready for Phase 16 (Tabular Builder)**
+Last activity: 2026-02-09 -- Plan 15-02 (Desktop Responsa Checkboxes) complete
 
-Progress: [######______________] 37% (3/8 plans across phases 14-17)
+Progress: [########____________] 50% (4/8 plans across phases 14-17)
 
 ## Milestone History
 
@@ -57,6 +57,10 @@ Recent decisions affecting current work:
 - Amber badge indicator when Responsa mode hides mode dropdown
 - Mobile Responsa controls: icon button with ui.menu popup
 - URL state: history.replaceState with ?responsa=1&variants=1&ja=1&flex_spaces=1&bidirectional=1
+- Desktop Responsa row after row2 in create_search_tab layout
+- Desktop Bidirectional in Responsa row (not near gap input)
+- Desktop amber label indicator matches web pattern
+- Desktop no QSettings persistence for Responsa checkboxes
 
 ### Data State
 
@@ -84,6 +88,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 15-01-PLAN.md (Web Responsa Checkboxes)
+Stopped at: Completed 15-02-PLAN.md (Desktop Responsa Checkboxes)
 Resume file: None
-Notes: Plan 15-01 complete. Web search page has Responsa checkbox row with master toggle, sub-options, mode interaction, URL state persistence, explosion warning display, expanded term count in results header, and mobile responsive layout. 99 tests still passing. Next: Plan 15-02 (Desktop UI) to add equivalent checkboxes to PyQt6 app.
+Notes: Phase 15 complete. Both web (15-01) and desktop (15-02) have Responsa checkbox rows with master toggle, sub-options, mode interaction, explosion warning, and expanded term count. SearchThread extended with backward-compatible responsa_options parameter. 99 tests passing. Next: Phase 16 (Tabular Builder).
