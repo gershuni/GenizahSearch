@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 ## Current Position
 
-Phase: 14 of 17 (Responsa Core Engine) -- NOT STARTED
-Plan: 0 of ? (plans not yet created)
-Status: **Milestone setup complete, ready to plan Phase 14**
-Last activity: 2026-02-09 -- v5.7.0 milestone defined
+Phase: 14 of 17 (Responsa Core Engine) -- IN PROGRESS
+Plan: 1 of 2 complete
+Status: **Plan 14-01 complete, ready for Plan 14-02**
+Last activity: 2026-02-09 -- Plan 14-01 (Responsa Core Functions) complete
 
-Progress: [____________________] 0% (0/? plans across phases 14-17)
+Progress: [##__________________] 12% (1/8 plans across phases 14-17)
 
 ## Milestone History
 
@@ -38,6 +38,7 @@ Progress: [____________________] 0% (0/? plans across phases 14-17)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- Simplified Judeo-Arabic: always 'al' (no sun letter assimilation) -- 8 forms per word
 - Option II (Hybrid Integration) for Responsa core engine
 - Option IIb (Dialog/Panel) for tabular query builder
 - `#` conflict: Responsa ON = prefix shortcuts OFF
@@ -75,6 +76,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: v5.7.0 milestone defined, ready to plan Phase 14
+Stopped at: Completed 14-01-PLAN.md (Responsa Core Functions)
 Resume file: None
-Notes: Milestone v5.7.0 (Responsa Search) defined with 4 phases (14-17), 25 requirements. User confirmed all scope decisions. Next step: `/gsd:plan-phase 14` to create execution plans for the Responsa Core Engine.
+Notes: Plan 14-01 complete. ResponsaComponent dataclass + 4 pure functions implemented with TDD. JA simplified to 8 forms (no sun letter assimilation). Next: execute Plan 14-02 to wire functions into search pipeline.
