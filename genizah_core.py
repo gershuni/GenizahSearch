@@ -4851,6 +4851,7 @@ class SearchEngine:
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None):
         # --- Responsa branch ---
         if responsa_components is not None:
+            flex_spacing = responsa_options.get('flex_spacing', False) if responsa_options else False
             parts = []
             for comp in responsa_components:
                 tantivy_terms = comp.get('tantivy_terms', [])
@@ -4875,8 +4876,22 @@ class SearchEngine:
                     else:
                         clean_vars.append(f'"{t_clean}"')
 
-                if clean_vars:
-                    parts.append(f'({" OR ".join(clean_vars)})')
+                # Flex spacing: add split alternatives so Tantivy finds
+                # documents where a word appears with spaces (e.g., "בן דוד"
+                # for query "בןדוד"). Each split produces an AND pair;
+                # regex phase then verifies adjacency.
+                flex_split_clauses = []
+                if flex_spacing:
+                    for w in comp.get('original_words', []):
+                        if len(w) >= 3:  # only split words with 3+ chars
+                            for i in range(1, len(w)):
+                                left, right = w[:i], w[i:]
+                                if len(left) >= 1 and len(right) >= 1:
+                                    flex_split_clauses.append(f'("{left}" AND "{right}")')
+
+                if clean_vars or flex_split_clauses:
+                    all_alternatives = clean_vars + flex_split_clauses
+                    parts.append(f'({" OR ".join(all_alternatives)})')
 
             return " AND ".join(parts)
 
