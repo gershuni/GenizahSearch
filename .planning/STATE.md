@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 ## Current Position
 
 Phase: 16 of 17 (Tabular Builder)
-Plan: 1 of 3 complete
-Status: **Phase 16 in progress -- Plan 01 (Core Engine Extensions) complete, ready for Plan 02 (Web Builder)**
-Last activity: 2026-02-10 -- 16-01 complete: gap parsing, syntax generation, per-pair regex gaps
+Plan: 3 of 3 complete
+Status: **Phase 16 complete -- All 3 plans done (Core Engine, Web Builder, Desktop Builder)**
+Last activity: 2026-02-10 -- 16-03 complete: desktop TabularQueryBuilderDialog with full UI
 
-Progress: [############________] 64% (7/11 plans across phases 14-17)
+Progress: [##################__] 82% (9/11 plans across phases 14-17)
 
 ## Milestone History
 
@@ -69,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 16]: [N] gap notation for per-pair distances; distance 0 = no bracket token
 - [Phase 16]: Negated words extracted separately, not in syntax string
 - [Phase 16]: generate_tabular_syntax() modifier order: plene -> prefix -> suffix -> wildcard_prefix -> wildcard_suffix
+- [Phase 16]: Desktop builder uses eventFilter for QLineEdit focus tracking (select-and-modify pattern)
+- [Phase 16]: Desktop builder dialog opens fresh each time (no state persistence)
+- [Phase 16]: Desktop uses query_input (not search_input) matching existing codebase naming
 
 ### Data State
 
@@ -101,6 +104,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 16-01-PLAN.md (Core Engine Extensions)
+Stopped at: Completed 16-03-PLAN.md (Desktop Tabular Builder)
 Resume file: None
-Notes: Phase 16 Plan 01 complete. 2 TDD commits: gap parsing, syntax generation, per-pair regex gaps. 124 Responsa tests passing. Next: 16-02 (Web Tabular Builder).
+Notes: Phase 16 complete. All 3 plans done. Desktop TabularQueryBuilderDialog with eventFilter focus tracking, 2-4 components, select-and-modify modifiers, live preview, one-way sync to search. 124 Responsa tests passing. Next: Phase 17 (Integration Testing).
