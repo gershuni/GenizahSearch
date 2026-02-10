@@ -353,6 +353,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     on_mode_change()
                                     break
                         query_input.on('update:model-value', on_query_input_change)
+                        # Fire shortcut detection immediately on space press (avoids
+                        # one-keystroke delay from NiceGUI's batched model-value updates)
+                        query_input.on('keyup.space', on_query_input_change)
 
                         # Save query on change
                         def save_query():

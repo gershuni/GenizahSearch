@@ -4789,7 +4789,7 @@ def _apply_explosion_guard(
     if current_variants_on and current_variant_mode != 'variants':
         current_variant_mode = 'variants'
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Variant mode downgraded to basic (30 pairs)")
+        warnings.append(tr("Variant mode downgraded to basic (30 pairs)"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4801,7 +4801,7 @@ def _apply_explosion_guard(
     if current_variants_on:
         current_variants_on = False
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Spelling variants disabled")
+        warnings.append(tr("Spelling variants disabled"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4813,7 +4813,7 @@ def _apply_explosion_guard(
     if current_ja_on:
         current_ja_on = False
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Judeo-Arabic expansion disabled")
+        warnings.append(tr("Judeo-Arabic expansion disabled"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4827,7 +4827,7 @@ def _apply_explosion_guard(
         for c in components:
             c.plene_defective = False
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Plene/defective expansion disabled")
+        warnings.append(tr("Plene/defective expansion disabled"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4841,7 +4841,7 @@ def _apply_explosion_guard(
         for c in components:
             c.grammatical_suffixes = False
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Grammatical suffix expansion disabled")
+        warnings.append(tr("Grammatical suffix expansion disabled"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4855,7 +4855,7 @@ def _apply_explosion_guard(
         for c in components:
             c.grammatical_prefixes = False
         count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append("Grammatical prefix expansion disabled")
+        warnings.append(tr("Grammatical prefix expansion disabled"))
         if count <= limit:
             return components, '; '.join(warnings), {
                 'variants_on': current_variants_on,
@@ -4865,9 +4865,9 @@ def _apply_explosion_guard(
 
     # Cascade 7: Still over limit -- nothing left to downgrade
     raise ValueError(
-        f"Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
-        f"Please simplify your query by using fewer OR-group alternatives or "
-        f"removing the # (grammatical prefixes) modifier from some terms."
+        tr("Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+           "Please simplify your query by using fewer OR-group alternatives or "
+           "removing the # (grammatical prefixes) modifier from some terms.").format(limit=limit, count=count)
     )
 
 
@@ -5565,6 +5565,21 @@ class SearchEngine:
             # Build per-component dicts with expanded terms
             component_dicts = []
             for comp in positive_components:
+                # Pattern wildcards (*word*): extract stem fragments for Tantivy,
+                # skip the expansion pipeline (asterisks would confuse it).
+                if comp.wildcard == 'pattern' and comp.wildcard_pattern:
+                    stems = [p for p in comp.wildcard_pattern.split('*') if p]
+                    component_dicts.append({
+                        'tantivy_terms': stems,
+                        'regex_terms': stems,
+                        'original_words': comp.words,
+                        'wildcard': comp.wildcard,
+                        'wildcard_pattern': comp.wildcard_pattern,
+                        'flex_patterns': [],
+                        'inline_pattern': comp.inline_pattern,
+                    })
+                    continue
+
                 # Start with component.words
                 expanded_words = list(comp.words)
 

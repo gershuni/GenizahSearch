@@ -2237,6 +2237,8 @@ TRANSLATIONS = {
 
     # --- Tabular Query Builder ---
     "Query Builder": "בונה שאילתות",
+    "Tabular Search": "חיפוש טבלאי",
+    "Search Options": "אפשרויות חיפוש",
     "Word Range": "טווח מילים",
     "Within Document": "בתוך מסמך",
     "Component": "רכיב",
@@ -2257,4 +2259,32 @@ TRANSLATIONS = {
     # --- Query Builder (Desktop) ---
     "Word": "מילה",
     "Open the tabular query builder": "פתח את בונה השאילתות הטבלאי",
+
+    # --- Modifier checkbox labels (builder dialog) ---
+    "Prefixes #_": "קידומות #_",
+    "Suffixes _#": "סיומות _#",
+    "Wildcard *_": "*_ תחילית",
+    "Wildcard _*": "_* סופית",
+    "Plene/Defective %": "מלא/חסר %",
+    "Negation −": "שלילה −",
+    "Grammatical prefixes tooltip": "קידומות דקדוקיות (ו/ה/ב/כ/ל/מ/ש)",
+    "Grammatical suffixes tooltip": "סיומות דקדוקיות",
+    "Words ending with...": "מילים שמסתיימות ב...",
+    "Words starting with...": "מילים שמתחילות ב...",
+    "Plene/defective spelling tooltip": "כתיב מלא/חסר (ו/י)",
+    "Negation tooltip": "שלילה — הוצא מילה זו",
+
+    # --- Explosion guard warnings ---
+    "Variant mode downgraded to basic (30 pairs)": "מצב וריאנטים הורד לרמה בסיסית (30 זוגות)",
+    "Spelling variants disabled": "וריאנטים כתיביים בוטלו",
+    "Judeo-Arabic expansion disabled": "הרחבת ערבית-יהודית בוטלה",
+    "Plene/defective expansion disabled": "הרחבת מלא/חסר בוטלה",
+    "Grammatical suffix expansion disabled": "הרחבת סיומות דקדוקיות בוטלה",
+    "Grammatical prefix expansion disabled": "הרחבת קידומות דקדוקיות בוטלה",
+    "Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+    "Please simplify your query by using fewer OR-group alternatives or "
+    "removing the # (grammatical prefixes) modifier from some terms.":
+        "השאילתא חורגת ממגבלת {limit} מונחים מורחבים (כ-{count} מונחים). "
+        "אנא פשט את השאילתא על ידי הפחתת חלופות בקבוצות OR או "
+        "הסרת הסימן # (קידומות דקדוקיות) ממונחים מסוימים.",
 }
