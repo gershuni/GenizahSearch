@@ -4,6 +4,38 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.6.1] - 2026-02-10
+
+### Bug Fixes — User Authentication & Corrections
+
+#### Web: Singleton Supabase Client Fix
+- **Critical fix**: Web app used a shared singleton Supabase client for all users. When multiple users were logged in, the auth session belonged to whoever signed in last — causing RLS policy failures for all other users' write operations (corrections, comments, discoveries, lists, etc.)
+- Added `get_user_client()` — creates a per-user Supabase client from session tokens stored in NiceGUI's per-user storage
+- All 28+ write functions now use the per-user client; read-only functions remain on the efficient singleton
+- Session tokens are stored during email login and Google OAuth, and refreshed automatically when expired
+
+#### Web: Admin Panel Corrections
+- Fixed admin panel not showing pending corrections — the PostgREST join between `corrections` and `profiles` failed silently because there is no direct FK between the tables (both reference `auth.users` independently). Replaced with separate queries.
+- Fixed admin unable to approve/reject corrections — added RLS policies allowing admins to update/delete corrections, comments, discoveries, and fragment joins from any user
+- Admin write operations now use per-user client instead of singleton
+
+#### Web: Correction Submission UX
+- Fixed "parent element deleted" error after submitting a correction — the async handler's UI slot was destroyed by `update_content()` during the submit flow. Removed all `update_content()` calls from the async handler; all feedback now uses slot-independent `ui.notify()`
+- Added success notification when correction is submitted
+- RLS errors (42501) now show "Session expired — please log out and log back in" instead of raw Supabase error
+
+#### Web: Profile Password Change
+- Fixed password change using singleton client — could silently fail or change wrong user's password. Now uses per-user client.
+
+#### Desktop: Login Error Messages
+- Improved error messages for common login failures:
+  - "Invalid email or password" for wrong credentials
+  - "Email not confirmed" for unverified accounts
+  - "No account found" for non-existent emails
+  - Network-specific errors for connection issues
+
+---
+
 ## [5.6.0] - 2026-02-09
 
 ### Milestone: Desktop Parity & PGP Integration
