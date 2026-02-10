@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 17-integration-testing
 source: 17-01-SUMMARY.md, 17-02-SUMMARY.md
 started: 2026-02-10T16:00:00Z
@@ -112,45 +112,87 @@ skipped: 0
   reason: "User reported: When I write R, space and another character, it changes to Responsa without the other row (sub-options not shown)"
   severity: major
   test: 2
-  artifacts: []
-  missing: []
+  root_cause: "on_query_input_change (search.py:350) sets mode_select.value programmatically but NiceGUI doesn't fire update:model-value event, so on_mode_change() (line 573) never executes and responsa_sub_row visibility is never toggled"
+  artifacts:
+    - path: "web/pages/search.py"
+      issue: "Line 350: mode_select.value = target_mode without calling on_mode_change()"
+  missing:
+    - "Call on_mode_change() after setting mode_select.value in shortcut handler"
+  debug_session: ".planning/debug/responsa-shortcut-suboptions.md"
 
 - truth: "Prefix expansion (#word) returns results without UI freeze"
   status: failed
   reason: "User reported: Search got stuck in animation, Connection lost. 42,213 Tantivy hits, 18,858 after dedup. Core engine works but web UI chokes rendering that many results."
   severity: blocker
   test: 4
-  artifacts: []
-  missing: []
+  root_cause: "app.storage.user['search_results'] = results (search.py:1719) stores ALL 18,858 results with full_text into NiceGUI user storage, which serializes 37-94MB JSON over WebSocket. Also unbounded batch Supabase lookup for 18,858 IDs and missing [:200] limit in apply_filters/clear_filters."
+  artifacts:
+    - path: "web/pages/search.py"
+      issue: "Line 1719: stores unbounded results in app.storage.user"
+    - path: "web/pages/search.py"
+      issue: "Lines 868, 879: apply_filters/clear_filters missing [:200] render limit"
+    - path: "web/pages/search.py"
+      issue: "Lines 1698-1706: unbounded batch transcription lookup for all result IDs"
+  missing:
+    - "Cap app.storage.user results to [:200] and strip full_text"
+    - "Cap get_sys_ids_with_transcriptions to displayed result IDs only"
+    - "Add [:200] limit to apply_filters and clear_filters render calls"
+  debug_session: ".planning/debug/responsa-connection-lost.md"
 
 - truth: "Suffix wildcard (word*) matches words starting with stem regardless of sofit letters"
   status: failed
-  reason: "User reported: Only gives שלום results. Regex שלום\\S* has final ם but text has regular מ in שלומו. Sofit-to-normal conversion not applied before wildcard pattern. Also Tantivy query only has base term, no wildcard support."
+  reason: "User reported: Only gives שלום results. Regex שלום\\S* has final ם but text has regular מ in שלומו. Sofit-to-normal conversion not applied before wildcard pattern."
   severity: major
   test: 7
-  artifacts: []
-  missing: []
+  root_cause: "_build_wildcard_regex() (genizah_core.py:4861-4868) takes regex_terms with sofit letters and builds regex without converting sofit-to-normal. Also build_tantivy_query has no wildcard-aware handling for recall."
+  artifacts:
+    - path: "genizah_core.py"
+      issue: "Lines 4861-4868: _build_wildcard_regex has no sofit conversion"
+    - path: "genizah_core.py"
+      issue: "Lines 4988-5028: build_tantivy_query has no wildcard support"
+  missing:
+    - "Replace trailing sofit in suffix wildcard with [םמ] char class (and leading sofit for prefix wildcard)"
+    - "Add sofit-converted stem to Tantivy query for better recall"
+  debug_session: ".planning/debug/suffix-wildcard-sofit-mismatch.md"
 
 - truth: "Search toolbar remains visible after Responsa search completes"
   status: failed
-  reason: "User reported: Toolbar disappears after Responsa search. Repeatable — happens after search completes, not just from crash. Console shows 'client this element belongs to has been deleted' error."
+  reason: "User reported: Toolbar disappears after Responsa search. Repeatable."
   severity: major
   test: 10
-  artifacts: []
-  missing: []
+  root_cause: "Symptom of connection instability from Gap 2 (large result set WebSocket overload). JS scroll auto-collapse handler (search.py:786-812) sets CSS display:none on expanded_panel; after connection loss/reconnect the CSS state becomes stale."
+  artifacts:
+    - path: "web/pages/search.py"
+      issue: "Lines 786-812: JS scroll collapse handler CSS persists after connection issues"
+  missing:
+    - "Fix Gap 2 (root cause). Toolbar issue resolves when connection stays stable."
+  debug_session: ".planning/debug/responsa-connection-lost.md"
 
 - truth: "Explosion guard cascade-downgrades before erroring, and shows warning in web UI"
   status: failed
-  reason: "User reported: Guard jumps straight to ValueError (6000 terms) instead of cascade-downgrading. Error only in console, not shown in web UI — user sees 0 results. Multiple repeated tracebacks."
+  reason: "User reported: Guard jumps straight to ValueError (6000 terms) instead of cascade-downgrading. Error only in console, not shown in web UI."
   severity: major
   test: 14
-  artifacts: []
-  missing: []
+  root_cause: "Cascade only controls 2 of 5 expansion dimensions (variants, JA) but ignores 3 component-level flags (prefixes 24x, suffixes 25x, plene ~4x). A single #word# = 600 terms exceeds 500 limit. Web UI run_core_search (search.py:1690-1694) swallows ValueError silently, returns empty list."
+  artifacts:
+    - path: "genizah_core.py"
+      issue: "Lines 4732-4825: _apply_explosion_guard missing cascade steps for plene, suffixes, prefixes"
+    - path: "web/pages/search.py"
+      issue: "Lines 1690-1694: run_core_search swallows ValueError, shows 0 results"
+  missing:
+    - "Add cascade steps 4-6: disable plene_defective, then suffixes, then prefixes"
+    - "Surface ValueError in web UI via ui.notify instead of silent empty results"
+  debug_session: ".planning/debug/explosion-guard-cascade.md"
 
 - truth: "Desktop tabular query builder uses RTL layout matching web version"
   status: failed
   reason: "User reported: Works but should be RTL even in English, just like the web"
   severity: minor
   test: 17
-  artifacts: []
-  missing: []
+  root_cause: "genizah_app.py:4367-4368 sets RTL only when CURRENT_LANG == 'he', but web version sets RTL unconditionally. Same at line 4503-4504 for preview label."
+  artifacts:
+    - path: "genizah_app.py"
+      issue: "Lines 4367-4368, 4503-4504: conditional RTL check should be unconditional"
+  missing:
+    - "Remove if CURRENT_LANG == 'he' condition, always set RightToLeft"
+  debug_session: ".planning/debug/desktop-tabular-rtl.md"
