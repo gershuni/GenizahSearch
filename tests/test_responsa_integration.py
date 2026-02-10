@@ -21,6 +21,7 @@ import genizah_core as _gc_module
 from genizah_core import (
     ResponsaComponent,
     parse_responsa_query,
+    extract_per_pair_gaps,
     expand_grammatical_prefixes,
     expand_grammatical_suffixes,
     expand_plene_defective,
@@ -717,3 +718,174 @@ class TestExecuteSearchResponsa:
             first_suffix = call_order.index('suffix') if 'suffix' in call_order else 999
             assert first_plene < first_prefix, "plene should be expanded before prefixes"
             assert first_prefix < first_suffix, "prefixes should be expanded before suffixes"
+
+
+# ============================================================================
+# Per-pair gap regex building
+# ============================================================================
+
+class TestPerPairGapRegex:
+    """Tests for per_pair_gaps parameter in build_regex_pattern and execute_search."""
+
+    def test_per_pair_gaps_different_distances(self):
+        """build_regex_pattern with 3 components and per_pair_gaps=[2, 5] produces
+        regex where the separator between parts 0-1 allows 2 words and between
+        parts 1-2 allows 5 words."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={},
+            per_pair_gaps=[2, 5],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # The pattern should contain {0,2} for first pair and {0,5} for second pair
+        assert '{0,2}' in pattern
+        assert '{0,5}' in pattern
+
+    def test_per_pair_gaps_none_falls_back_to_max_gap(self):
+        """per_pair_gaps=[None, 3] with max_gap=1 -> first pair uses gap 1, second uses 3."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={},
+            per_pair_gaps=[None, 3],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # First pair: None -> falls back to max_gap=1 -> {0,1}
+        assert '{0,1}' in pattern
+        # Second pair: 3 -> {0,3}
+        assert '{0,3}' in pattern
+
+    def test_per_pair_gaps_bidirectional_reverses_gaps(self):
+        """per_pair_gaps=[2, 5] with bidirectional=True -> backward regex has gaps reversed."""
+        engine = _make_search_engine()
+        components = [
+            {
+                'regex_terms': ['A'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['A'],
+            },
+            {
+                'regex_terms': ['B'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['B'],
+            },
+            {
+                'regex_terms': ['C'],
+                'wildcard': None,
+                'wildcard_pattern': None,
+                'flex_patterns': [],
+                'inline_pattern': None,
+                'original_words': ['C'],
+            },
+        ]
+        result = engine.build_regex_pattern(
+            terms=None, mode='exact', max_gap=1,
+            responsa_components=components,
+            responsa_options={'bidirectional': True},
+            per_pair_gaps=[2, 5],
+        )
+        assert result is not None
+        pattern = result.pattern
+        # Should have alternation (forward|backward)
+        assert '|' in pattern
+        # Forward: A...{0,2}...B...{0,5}...C
+        # Backward: C...{0,5}...B...{0,2}...A  (gaps reversed)
+        # Both {0,2} and {0,5} should appear in the pattern (used in both directions)
+        assert '{0,2}' in pattern
+        assert '{0,5}' in pattern
+
+    def test_execute_search_passes_per_pair_gaps(self):
+        """Query '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd' through execute_search with
+        responsa_options -> verify regex pattern contains per-pair gap separators."""
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.index.parse_query = MagicMock(return_value=MagicMock())
+
+        mock_search_result = MagicMock()
+        mock_search_result.hits = []
+        engine.searcher.search = MagicMock(return_value=mock_search_result)
+
+        with patch.object(engine, 'build_regex_pattern', wraps=engine.build_regex_pattern) as mock_build_regex:
+            engine.execute_search(
+                '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd', 'exact', 1,
+                responsa_options={
+                    'responsa_mode': True, 'variants': False, 'ja': False,
+                    'flex_spacing': False, 'bidirectional': False,
+                    'variant_mode': 'exact'
+                }
+            )
+
+            # build_regex_pattern should have been called with per_pair_gaps
+            mock_build_regex.assert_called_once()
+            call_kwargs = mock_build_regex.call_args
+            # Check that per_pair_gaps was passed (either as kwarg or in args)
+            if call_kwargs.kwargs:
+                assert 'per_pair_gaps' in call_kwargs.kwargs
+                assert call_kwargs.kwargs['per_pair_gaps'] == [3]
+            else:
+                # Positional args: check the last one
+                assert [3] in call_kwargs.args

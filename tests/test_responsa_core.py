@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 from genizah_core import (
     ResponsaComponent,
     parse_responsa_query,
+    extract_per_pair_gaps,
+    generate_tabular_syntax,
     expand_grammatical_prefixes,
     expand_grammatical_suffixes,
     expand_judeo_arabic,
@@ -654,3 +656,208 @@ class TestApplyExplosionGuard:
         # 25 suffixes * 5 variants = 125, under 500
         assert warning is None
         assert actual_options['variants_on'] is True
+
+
+# ============================================================================
+# Gap notation: extract_per_pair_gaps + parse_responsa_query skips [N]
+# ============================================================================
+
+class TestGapNotation:
+    """Tests for [N] gap notation parsing via extract_per_pair_gaps()."""
+
+    def test_gap_token_parsed(self):
+        """parse_responsa_query('#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd*') returns 2 components. extract_per_pair_gaps returns [3]."""
+        components = parse_responsa_query("#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd*")
+        assert len(components) == 2
+        gaps = extract_per_pair_gaps("#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd*")
+        assert gaps == [3]
+
+    def test_multiple_gap_tokens(self):
+        """'#word1 [3] word2 [5] word3' -> gaps = [3, 5]."""
+        gaps = extract_per_pair_gaps("#word1 [3] word2 [5] word3")
+        assert gaps == [3, 5]
+
+    def test_no_gap_tokens_returns_none_list(self):
+        """'#word1 word2' -> gaps = [None] (no gap token, use global gap)."""
+        gaps = extract_per_pair_gaps("#word1 word2")
+        assert gaps == [None]
+
+    def test_mixed_gap_and_no_gap(self):
+        """'word1 [2] word2 word3' -> gaps = [2, None]."""
+        gaps = extract_per_pair_gaps("word1 [2] word2 word3")
+        assert gaps == [2, None]
+
+    def test_gap_zero(self):
+        """'word1 [0] word2' -> gaps = [0]."""
+        gaps = extract_per_pair_gaps("word1 [0] word2")
+        assert gaps == [0]
+
+    def test_gap_does_not_become_component(self):
+        """'#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd' -> exactly 2 components (not 3)."""
+        components = parse_responsa_query("#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd")
+        assert len(components) == 2
+
+
+# ============================================================================
+# generate_tabular_syntax
+# ============================================================================
+
+class TestGenerateTabularSyntax:
+    """Tests for generate_tabular_syntax() — converting builder state to syntax."""
+
+    def test_basic_two_components(self):
+        """Two components each with one word, distance 3 -> 'word1 [3] word2'."""
+        components = [
+            {'words': [{'text': 'word1', 'mods': {}}]},
+            {'words': [{'text': 'word2', 'mods': {}}]},
+        ]
+        syntax, negated = generate_tabular_syntax(components, [3])
+        assert syntax == "word1 [3] word2"
+        assert negated == []
+
+    def test_prefix_modifier(self):
+        """Word with prefix=True -> '#word'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'prefix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '#word' in syntax
+
+    def test_suffix_modifier(self):
+        """Word with suffix=True -> 'word#'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'suffix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert 'word#' in syntax
+
+    def test_both_prefix_suffix(self):
+        """Word with both prefix and suffix -> '#word#'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'prefix': True, 'suffix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '#word#' in syntax
+
+    def test_wildcard_suffix(self):
+        """Word with wildcard_suffix=True -> 'word*'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'wildcard_suffix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert 'word*' in syntax
+
+    def test_wildcard_prefix(self):
+        """Word with wildcard_prefix=True -> '*word'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'wildcard_prefix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '*word' in syntax
+
+    def test_plene(self):
+        """Word with plene=True -> '%word'."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'plene': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '%word' in syntax
+
+    def test_combined_plene_prefix(self):
+        """Plene + prefix -> '#%word' (plene applied first, then prefix wraps)."""
+        components = [
+            {'words': [{'text': 'word', 'mods': {'plene': True, 'prefix': True}}]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '#%word' in syntax
+
+    def test_or_alternatives(self):
+        """Component with 2 words -> '(word1/word2)'."""
+        components = [
+            {'words': [
+                {'text': 'word1', 'mods': {}},
+                {'text': 'word2', 'mods': {}},
+            ]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '(word1/word2)' in syntax
+
+    def test_or_with_modifiers(self):
+        """Component with #word1 and word2* -> '(#word1/word2*)'."""
+        components = [
+            {'words': [
+                {'text': 'word1', 'mods': {'prefix': True}},
+                {'text': 'word2', 'mods': {'wildcard_suffix': True}},
+            ]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        assert '(#word1/word2*)' in syntax
+
+    def test_empty_words_skipped(self):
+        """Component with one word and one empty string -> just the single word, no parens."""
+        components = [
+            {'words': [
+                {'text': 'word1', 'mods': {}},
+                {'text': '', 'mods': {}},
+            ]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [1])
+        # Should NOT have parentheses since only one valid word
+        assert '(' not in syntax
+        assert 'word1' in syntax
+
+    def test_all_empty_component_skipped(self):
+        """Component with all empty words -> skipped entirely."""
+        components = [
+            {'words': [{'text': '', 'mods': {}}, {'text': '', 'mods': {}}]},
+            {'words': [{'text': 'word', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [0])
+        assert syntax.strip() == 'word'
+
+    def test_within_document_no_gaps(self):
+        """Scope 'within_document' -> no [N] tokens in output."""
+        components = [
+            {'words': [{'text': 'word1', 'mods': {}}]},
+            {'words': [{'text': 'word2', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [5], scope='within_document')
+        assert '[' not in syntax
+        assert ']' not in syntax
+        assert 'word1' in syntax
+        assert 'word2' in syntax
+
+    def test_negated_words_extracted(self):
+        """Word with negation=True -> word NOT in syntax string, but in returned negated_words."""
+        components = [
+            {'words': [
+                {'text': 'good', 'mods': {}},
+                {'text': 'bad', 'mods': {'negation': True}},
+            ]},
+            {'words': [{'text': 'other', 'mods': {}}]},
+        ]
+        syntax, negated = generate_tabular_syntax(components, [1])
+        assert 'bad' not in syntax
+        assert 'bad' in negated
+        assert 'good' in syntax
+
+    def test_distance_zero_no_bracket(self):
+        """Distance 0 between components -> no [0] token (just space)."""
+        components = [
+            {'words': [{'text': 'word1', 'mods': {}}]},
+            {'words': [{'text': 'word2', 'mods': {}}]},
+        ]
+        syntax, _ = generate_tabular_syntax(components, [0])
+        assert '[0]' not in syntax
+        assert 'word1' in syntax
+        assert 'word2' in syntax
