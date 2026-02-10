@@ -12684,7 +12684,9 @@ class GenizahGUI(QMainWindow):
         if not query: return
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
-        mode_override, clean_query = self.searcher.parse_query_syntax(query)
+        # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
+        is_responsa = (self.mode_combo.currentIndex() == self.MODE_RESPONSA)
+        mode_override, clean_query = self.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
         if mode_override:
             # Map mode string back to combo index

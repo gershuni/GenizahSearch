@@ -1115,8 +1115,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
 
         # Parse syntax shortcuts (Delegated to Core)
+        # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
         clean_query = query
-        mode_override, parsed_query = state.searcher.parse_query_syntax(query)
+        is_responsa = (mode_select.value == 'responsa')
+        mode_override, parsed_query = state.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
         if mode_override:
             mode = mode_override
