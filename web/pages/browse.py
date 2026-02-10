@@ -1425,31 +1425,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('No changes to submit'), type='warning')
             return
 
-        # Show loading in panel instead of notification
-        state.edit_loading = True
-        state.error_message = None # Clear previous errors
-        update_content()
+        state.error_message = None
 
+        user_id = GlobalAuthState.get_user_id()
+        if not user_id:
+            ui.notify(tr('User not found'), type='negative')
+            return
+
+        # Determine status based on role
+        status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
+
+        # Do the Supabase call BEFORE any UI rebuild
         try:
-            user_id = GlobalAuthState.get_user_id()
-            if not user_id:
-                state.edit_loading = False
-                state.error_message = "User not found"
-                update_content()
-                return
-
-            # Determine status based on role
-            status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
-
             if state.draft_id:
-                # Update existing draft and change status to pending/approved
                 result = update_correction(state.draft_id, {
                     'corrected_text': state.edit_text,
                     'notes': state.edit_notes,
                     'status': status
                 })
             else:
-                # Create new correction
                 result = create_correction(
                     author_id=user_id,
                     sys_id=state.current_page.sys_id,
@@ -1460,33 +1454,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     notes=state.edit_notes if state.edit_notes else '',
                     status=status
                 )
-
-            state.edit_loading = False
-
-            if "error" in result:
-                state.error_message = result["error"]
-                update_content()
-            else:
-                state.edit_mode = False
-                state.draft_saved = False
-                state.draft_id = None
-                ui.notify(tr('Correction submitted successfully'), type='positive')
-
-                # Reload page to see changes — wrap in try/except because
-                # load_page destroys the current slot context
-                try:
-                    load_page(direction=0)
-                except Exception:
-                    pass
         except Exception as e:
-            state.edit_loading = False
-            # Avoid error if the UI slot was already destroyed by page reload
-            try:
-                state.error_message = f"Error submitting: {str(e)}"
-                update_content()
-            except Exception:
-                pass
+            ui.notify(f'{tr("Error")}: {e}', type='negative')
             print(f"Submit error: {e}")
+            return
+
+        if "error" in result:
+            ui.notify(result["error"], type='negative')
+            return
+
+        # Success — update state and reload
+        state.edit_mode = False
+        state.draft_saved = False
+        state.draft_id = None
+        ui.notify(tr('Correction submitted successfully'), type='positive')
+        load_page(direction=0)
 
     def handle_save_draft():
         """Save draft locally (simulated for now, or use backend draft)."""
