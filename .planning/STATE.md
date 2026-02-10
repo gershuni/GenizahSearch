@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Users can search the Genizah corpus using Responsa Project-style syntax and a tabular query builder
-**Current focus:** v5.7.0 Responsa Search -- Phase 15 (Search UI)
+**Current focus:** v5.7.0 Responsa Search -- Phase 16 (Tabular Builder)
 
 ## Current Position
 
-Phase: 15 of 17 (Search UI) -- COMPLETE
-Plan: 4 of 4 complete
-Status: **Phase 15 COMPLETE — all plans executed, all UAT bugs fixed. Ready for Phase 16 (Tabular Builder)**
-Last activity: 2026-02-10 -- Phase 15 complete with 14 commits (4 plans + 6 bug fixes + 4 features)
+Phase: 16 of 17 (Tabular Builder)
+Plan: 1 of 3 complete
+Status: **Phase 16 in progress -- Plan 01 (Core Engine Extensions) complete, ready for Plan 02 (Web Builder)**
+Last activity: 2026-02-10 -- 16-01 complete: gap parsing, syntax generation, per-pair regex gaps
 
-Progress: [##########__________] 62% (6/8 plans across phases 14-17)
+Progress: [############________] 64% (7/11 plans across phases 14-17)
 
 ## Milestone History
 
@@ -65,6 +65,10 @@ Recent decisions affecting current work:
 - [Phase 15]: R shortcut for Responsa mode, live shortcut detection (prefix+space) for all modes
 - [Phase 15]: Sofit-to-normal conversion before suffix expansion (ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ)
 - [Phase 15]: Flex spacing splits added to Tantivy query (not just regex)
+- [Phase 16]: Tabular builder state format: components [{words: [{text, mods}]}], distances, scope
+- [Phase 16]: [N] gap notation for per-pair distances; distance 0 = no bracket token
+- [Phase 16]: Negated words extracted separately, not in syntax string
+- [Phase 16]: generate_tabular_syntax() modifier order: plene -> prefix -> suffix -> wildcard_prefix -> wildcard_suffix
 
 ### Data State
 
@@ -97,6 +101,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Phase 15 fully complete
+Stopped at: Completed 16-01-PLAN.md (Core Engine Extensions)
 Resume file: None
-Notes: Phase 15 complete. 14 commits: dropdown mode (web+desktop), 6 bug fixes (variants, flex spacing, sofit, shortcuts, combined operators, prefix bypass), R shortcut, live shortcut detection, Hebrew translations. 99 tests passing. Next: Phase 16 (Tabular Builder).
+Notes: Phase 16 Plan 01 complete. 2 TDD commits: gap parsing, syntax generation, per-pair regex gaps. 124 Responsa tests passing. Next: 16-02 (Web Tabular Builder).
