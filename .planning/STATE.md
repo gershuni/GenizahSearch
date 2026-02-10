@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Phase: 17 of 17 (Integration Testing) -- COMPLETE
 Plan: 5 of 5 complete (includes 3 UAT gap closure plans: 17-03, 17-04, 17-05)
-Status: **Phase 17 COMPLETE — all tests + UAT gap fixes delivered. Desktop tabular RTL fixed (17-05).**
-Last activity: 2026-02-10 - Executed 17-05 desktop tabular RTL fix (c52f740)
+Status: **Phase 17 COMPLETE — all tests + UAT gap fixes delivered. Sofit wildcard + explosion cascade + ValueError UI fixed (17-04).**
+Last activity: 2026-02-10 - Executed 17-04 wildcard sofit fix + explosion guard cascade + ValueError UI (b04c787)
 
 Progress: [####################] 100% (14/14 plans across phases 14-17)
 
@@ -81,6 +81,9 @@ Recent decisions affecting current work:
 - [Phase 17]: Parametrized all 16 checkbox combinations for parity testing (not just sampling a few)
 - [Phase 17]: Used real expansion functions for explosion guard edge case tests (not mocked)
 - [Phase 17]: Desktop tabular builder RTL is unconditional (no CURRENT_LANG check) -- Hebrew search text always RTL
+- [Phase 17]: Sofit-to-normal in wildcard regex uses character class [sofit|normal] (matches both forms)
+- [Phase 17]: Explosion guard cascade expanded: variants basic -> off -> JA off -> plene off -> suffixes off -> prefixes off
+- [Phase 17]: ValueError from explosion guard surfaced via sentinel dict pattern in web UI
 
 ### Data State
 
@@ -109,6 +112,9 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 - ~~BUG (Prefix shortcuts in Responsa)~~: **FIXED** (dfe9914) — responsa_mode=True passed to parse_query_syntax
 - ~~BUG (Sofit letters before suffixes)~~: **FIXED** (f1553a4) — ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ conversion
 - ~~BUG (#% combined operators)~~: **FIXED** (cd7be21) — any-order parsing with while loop
+- ~~BUG (Suffix wildcard sofit mismatch)~~: **FIXED** (3cc1cb9) — [sofit|normal] char class in _build_wildcard_regex
+- ~~BUG (Explosion guard incomplete cascade)~~: **FIXED** (3cc1cb9) — 6-step cascade (plene, suffixes, prefixes added)
+- ~~BUG (Silent ValueError in web UI)~~: **FIXED** (b04c787) — ValueError surfaced via ui.notify warning toast
 
 ### Future Improvements
 
@@ -124,6 +130,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 17-05-PLAN.md (desktop tabular RTL fix)
+Stopped at: Completed 17-04-PLAN.md (wildcard sofit + explosion guard + ValueError UI)
 Resume file: None
-Notes: Phase 17 fully complete including UAT gap closure plans (17-03 through 17-05). Desktop tabular builder now unconditionally RTL (c52f740). All Responsa tests passing.
+Notes: Phase 17 fully complete including UAT gap closure plans (17-03 through 17-05). 17-04 fixed sofit wildcard regex, expanded explosion guard cascade (6 steps), surfaced ValueError in web UI. 216 Responsa tests passing.
