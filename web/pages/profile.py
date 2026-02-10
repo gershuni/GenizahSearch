@@ -8,7 +8,7 @@ Edit user profile details and change password.
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog
-from web.supabase_client import update_profile, get_client
+from web.supabase_client import update_profile, get_user_client
 from web.components.typography import h1, h2, h3
 
 
@@ -145,8 +145,8 @@ async def create_profile_page():
                         return
 
                     try:
-                        # Use Supabase to update password
-                        client = get_client()
+                        # Use per-user client so password is set for the correct user
+                        client = get_user_client()
                         response = client.auth.update_user({'password': new_password_input.value})
 
                         if response and response.user:
