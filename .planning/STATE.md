@@ -107,6 +107,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Phase 16 fully complete and verified
+Stopped at: Completed quick-8 (fix web corrections singleton Supabase client)
 Resume file: None
-Notes: Phase 16 complete. 8 commits: core extensions (gap parsing, syntax generation, per-pair regex), web dialog, desktop QDialog, verification. 124 Responsa tests passing. Human verification needed for visual/interaction aspects. Next: Phase 17 (Integration Testing).
+Notes: Quick task 8 complete. Per-user Supabase client for 28 write functions, session token storage in all login paths, desktop error messages improved. 135 Responsa tests passing. Next: Phase 17 (Integration Testing).
