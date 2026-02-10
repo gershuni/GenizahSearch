@@ -43,7 +43,7 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 - [x] **Phase 14: Responsa Core Engine** - Parse Responsa syntax, expand prefixes/JA, integrate with Tantivy and Regex (completed 2026-02-09)
 - [x] **Phase 15: Search UI (Both Apps)** - Responsa as dropdown mode with sub-options and syntax legend (completed 2026-02-10)
 - [x] **Phase 16: Tabular Query Builder** - Expansion panel (web) and QDialog (desktop) for visual query construction (completed 2026-02-10)
-- [x] **Phase 17: Integration Testing & Polish** - Cross-app verification, edge cases, performance testing (completed 2026-02-10, UAT gap closure in progress)
+- [x] **Phase 17: Integration Testing & Polish** - Cross-app verification, edge cases, performance testing (completed 2026-02-10)
 
 ## Phase Details
 
@@ -121,9 +121,9 @@ Plans:
 Plans:
 - [x] 17-01-PLAN.md -- Cross-app parity tests (XAPP-01) and edge case tests
 - [x] 17-02-PLAN.md -- Non-Responsa mode regression tests and performance benchmarks
-- [ ] 17-03-PLAN.md -- Gap closure: Web UI fixes (R+Space shortcut, large result set cap, filter limits)
-- [ ] 17-04-PLAN.md -- Gap closure: Core engine fixes (wildcard sofit conversion, explosion guard cascade expansion, web error surfacing)
-- [ ] 17-05-PLAN.md -- Gap closure: Desktop tabular builder unconditional RTL
+- [x] 17-03-PLAN.md -- Gap closure: Web UI fixes (R+Space shortcut, large result set cap, filter limits)
+- [x] 17-04-PLAN.md -- Gap closure: Core engine fixes (wildcard sofit conversion, explosion guard cascade expansion, web error surfacing)
+- [x] 17-05-PLAN.md -- Gap closure: Desktop tabular builder unconditional RTL
 
 ## Progress
 
@@ -134,7 +134,7 @@ Plans:
 | 14. Responsa Core Engine | v5.7.0 | 2/2 | Complete | 2026-02-09 |
 | 15. Search UI (Both Apps) | v5.7.0 | 4/4 | Complete | 2026-02-10 |
 | 16. Tabular Query Builder | v5.7.0 | 3/3 | Complete | 2026-02-10 |
-| 17. Integration Testing & Polish | v5.7.0 | 2/5 | UAT gap closure | 2026-02-10 |
+| 17. Integration Testing & Polish | v5.7.0 | 5/5 | Complete | 2026-02-10 |
 
 ---
 *Roadmap created: 2026-02-09*
