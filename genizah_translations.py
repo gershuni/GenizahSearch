@@ -2274,6 +2274,10 @@ TRANSLATIONS = {
     "Plene/defective spelling tooltip": "כתיב מלא/חסר (ו/י)",
     "Negation tooltip": "שלילה — הוצא מילה זו",
 
+    # --- Wildcard rewrite notice ---
+    "*word* rewritten as #word# (prefix + suffix expansion)":
+        "*word* שוכתב כ-#word# (הרחבת קידומות + סיומות)",
+
     # --- Explosion guard warnings ---
     "Variant mode downgraded to basic (30 pairs)": "מצב וריאנטים הורד לרמה בסיסית (30 זוגות)",
     "Spelling variants disabled": "וריאנטים כתיביים בוטלו",

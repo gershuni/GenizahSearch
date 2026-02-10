@@ -5527,6 +5527,27 @@ class SearchEngine:
             bidirectional = responsa_options.get('bidirectional', False)
             variant_mode = responsa_options.get('variant_mode', 'exact')
 
+            # Rewrite simple *word* patterns to #word# (prefix+suffix expansion).
+            # Both-side wildcards can't be executed as true substring searches in
+            # Tantivy, so we convert to grammatical expansion which is more useful.
+            rewritten_patterns = []
+            for comp in components:
+                if (comp.wildcard == 'pattern' and comp.wildcard_pattern
+                        and comp.wildcard_pattern.startswith('*')
+                        and comp.wildcard_pattern.endswith('*')
+                        and comp.wildcard_pattern.count('*') == 2):
+                    stem = comp.wildcard_pattern.strip('*')
+                    if stem:
+                        rewritten_patterns.append(f'*{stem}*')
+                        comp.words = [stem]
+                        comp.wildcard = None
+                        comp.wildcard_pattern = None
+                        comp.grammatical_prefixes = True
+                        comp.grammatical_suffixes = True
+            if rewritten_patterns:
+                rewrite_msg = tr("*word* rewritten as #word# (prefix + suffix expansion)")
+                responsa_warning = rewrite_msg
+
             # Apply explosion guard (estimates before materializing)
             _components, guard_warning, actual_opts = _apply_explosion_guard(
                 components,
@@ -5536,7 +5557,7 @@ class SearchEngine:
                 variant_mode=variant_mode,
             )
             if guard_warning:
-                responsa_warning = guard_warning
+                responsa_warning = f"{responsa_warning}; {guard_warning}" if responsa_warning else guard_warning
                 variants_on = actual_opts['variants_on']
                 ja_on = actual_opts['ja_on']
                 variant_mode = actual_opts['variant_mode']
@@ -5565,21 +5586,6 @@ class SearchEngine:
             # Build per-component dicts with expanded terms
             component_dicts = []
             for comp in positive_components:
-                # Pattern wildcards (*word*): extract stem fragments for Tantivy,
-                # skip the expansion pipeline (asterisks would confuse it).
-                if comp.wildcard == 'pattern' and comp.wildcard_pattern:
-                    stems = [p for p in comp.wildcard_pattern.split('*') if p]
-                    component_dicts.append({
-                        'tantivy_terms': stems,
-                        'regex_terms': stems,
-                        'original_words': comp.words,
-                        'wildcard': comp.wildcard,
-                        'wildcard_pattern': comp.wildcard_pattern,
-                        'flex_patterns': [],
-                        'inline_pattern': comp.inline_pattern,
-                    })
-                    continue
-
                 # Start with component.words
                 expanded_words = list(comp.words)
 
