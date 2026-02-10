@@ -19,6 +19,19 @@ CREATE POLICY "Users can delete own comments" ON comments
 FOR DELETE TO authenticated
 USING (auth.uid() = author_id);
 
+-- Allow admins to update any comment
+DROP POLICY IF EXISTS "Admins can update any comment" ON comments;
+CREATE POLICY "Admins can update any comment" ON comments
+FOR UPDATE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))
+WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
+-- Allow admins to delete any comment
+DROP POLICY IF EXISTS "Admins can delete any comment" ON comments;
+CREATE POLICY "Admins can delete any comment" ON comments
+FOR DELETE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
 -- ============================================
 -- CORRECTIONS TABLE (uses author_id)
 -- ============================================
@@ -36,6 +49,19 @@ DROP POLICY IF EXISTS "Users can delete own corrections" ON corrections;
 CREATE POLICY "Users can delete own corrections" ON corrections
 FOR DELETE TO authenticated
 USING (auth.uid() = author_id);
+
+-- Allow admins to update any correction (for approval/rejection)
+DROP POLICY IF EXISTS "Admins can update any correction" ON corrections;
+CREATE POLICY "Admins can update any correction" ON corrections
+FOR UPDATE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))
+WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
+-- Allow admins to delete any correction
+DROP POLICY IF EXISTS "Admins can delete any correction" ON corrections;
+CREATE POLICY "Admins can delete any correction" ON corrections
+FOR DELETE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
 
 -- ============================================
 -- DISCOVERIES TABLE (uses author_id)
@@ -55,6 +81,19 @@ CREATE POLICY "Users can delete own discoveries" ON discoveries
 FOR DELETE TO authenticated
 USING (auth.uid() = author_id);
 
+-- Allow admins to update any discovery
+DROP POLICY IF EXISTS "Admins can update any discovery" ON discoveries;
+CREATE POLICY "Admins can update any discovery" ON discoveries
+FOR UPDATE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))
+WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
+-- Allow admins to delete any discovery
+DROP POLICY IF EXISTS "Admins can delete any discovery" ON discoveries;
+CREATE POLICY "Admins can delete any discovery" ON discoveries
+FOR DELETE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
 -- ============================================
 -- FRAGMENT_JOINS TABLE (uses author_id)
 -- ============================================
@@ -72,6 +111,19 @@ DROP POLICY IF EXISTS "Users can delete own joins" ON fragment_joins;
 CREATE POLICY "Users can delete own joins" ON fragment_joins
 FOR DELETE TO authenticated
 USING (auth.uid() = author_id);
+
+-- Allow admins to update any join
+DROP POLICY IF EXISTS "Admins can update any join" ON fragment_joins;
+CREATE POLICY "Admins can update any join" ON fragment_joins
+FOR UPDATE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'))
+WITH CHECK (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
+
+-- Allow admins to delete any join
+DROP POLICY IF EXISTS "Admins can delete any join" ON fragment_joins;
+CREATE POLICY "Admins can delete any join" ON fragment_joins
+FOR DELETE TO authenticated
+USING (auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin'));
 
 -- ============================================
 -- USER_LISTS TABLE

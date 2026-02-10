@@ -11,7 +11,7 @@ from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.state import state
 from web.components.typography import h1, h2, h3
-from web.supabase_client import get_client
+from web.supabase_client import get_client, get_user_client
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -80,7 +80,7 @@ def get_all_corrections_count():
 def update_correction_status(correction_id: int, status: str, review_notes: str = None, rejection_reason: str = None):
     """Update correction status in Supabase."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {'status': status}
         if review_notes:
             data['notes'] = review_notes
@@ -103,7 +103,7 @@ def update_correction_status(correction_id: int, status: str, review_notes: str 
 def update_user_role(user_id: str, new_role: str):
     """Update user role in Supabase profiles."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('profiles').update({'role': new_role}).eq('id', user_id).execute()
         return {'success': True} if response.data else {'error': 'Update failed'}
     except Exception as e:
@@ -115,7 +115,7 @@ def delete_user(user_id: str):
     # Note: Deleting auth users requires the service role key
     # For now, we'll just mark them or remove from profiles
     try:
-        client = get_client()
+        client = get_user_client()
         # Delete profile (user can't access anything without profile)
         response = client.table('profiles').delete().eq('id', user_id).execute()
         return {'success': True}
