@@ -5227,6 +5227,7 @@ class SearchEngine:
         - / = Regex
         - $ = Title
         - # = Shelfmark
+        - R = responsa
         """
         if responsa_mode:
             return None, query
@@ -5242,6 +5243,7 @@ class SearchEngine:
             ('/', 'Regex'),
             ('$', 'Title'),
             ('#', 'Shelfmark'),
+            ('R', 'responsa'),
         ]
 
         for prefix, mode in prefix_map:

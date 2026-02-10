@@ -58,7 +58,7 @@ TRANSLATIONS = {
 
     # --- Main Search Tab ---
     "Search terms, title or shelfmark...": "מילות חיפוש, כותרת או מספר מדף...",
-    "Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\n\nExample: ?שלום": "קיצורי דרך לחיפוש:\n= = חיפוש מדויק\n? = וריאנטים (השתמש בכפתורים לבחירת רמה)\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\n\nדוגמה: ?שלום",
+    "Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום": "קיצורי דרך לחיפוש:\n= = חיפוש מדויק\n? = וריאנטים (השתמש בכפתורים לבחירת רמה)\n~ = חיפוש מטושטש (Fuzzy)\n/ = ביטוי רגולרי (Regex)\n$ = חיפוש כותרת\n# = חיפוש מספר מדף\nR = מצב פרויקט השו\"ת\n\nדוגמה: ?שלום",
     "Query:": "שאילתא:",
     "Mode:": "מצב:",
     "Gap:": "מרחק:",
