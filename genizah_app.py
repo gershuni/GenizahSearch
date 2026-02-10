@@ -6127,16 +6127,18 @@ class GenizahGUI(QMainWindow):
         row2 = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
-        self.MODE_PGP_TAGS = 6  # Index of PGP Tags mode
+        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
+        self.MODE_RESPONSA = 2  # Index of Responsa mode
+        self.MODE_PGP_TAGS = 7  # Index of PGP Tags mode (shifted by Responsa insertion)
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
-        self.mode_combo.setItemData(2, tr("Fuzzy search: Levenshtein distance"))
-        self.mode_combo.setItemData(3, tr("Regex: Use AI Assistant for complex patterns"))
-        self.mode_combo.setItemData(4, tr("Search in Title metadata"))
-        self.mode_combo.setItemData(5, tr("Search in Shelfmark metadata"))
-        self.mode_combo.setItemData(6, tr("Search by topic tags from the Princeton Geniza Project"))
+        self.mode_combo.setItemData(2, tr("Responsa-style grammatical expansion for Hebrew search"))
+        self.mode_combo.setItemData(3, tr("Fuzzy search: Levenshtein distance"))
+        self.mode_combo.setItemData(4, tr("Regex: Use AI Assistant for complex patterns"))
+        self.mode_combo.setItemData(5, tr("Search in Title metadata"))
+        self.mode_combo.setItemData(6, tr("Search in Shelfmark metadata"))
+        self.mode_combo.setItemData(7, tr("Search by topic tags from the Princeton Geniza Project"))
         self.mode_combo.currentIndexChanged.connect(self._on_search_mode_changed)
 
         # Variant controls container (visible only in Variants mode)
@@ -6289,14 +6291,8 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
-        # Responsa active label (amber indicator when mode combo is hidden)
-        self.lbl_responsa_active = QLabel(tr("Responsa Mode"))
-        self.lbl_responsa_active.setStyleSheet("color: #f39c12; font-weight: bold;")
-        self.lbl_responsa_active.setVisible(False)
-
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
-        row2.addWidget(self.lbl_responsa_active)
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
@@ -6304,47 +6300,37 @@ class GenizahGUI(QMainWindow):
         row2.addStretch()
         row2.addWidget(btn_help)
 
-        # --- Responsa Controls Row ---
-        self._pre_responsa_mode_idx = 0  # Remembers mode before Responsa was toggled ON
-        self._updating_responsa_mode = False  # Guard against circular triggers
+        # --- Responsa Sub-Options Row (visible only when Responsa mode is selected) ---
+        self.responsa_sub_row = QWidget()
+        responsa_sub_layout = QHBoxLayout(self.responsa_sub_row)
+        responsa_sub_layout.setContentsMargins(0, 2, 0, 2)
+        responsa_sub_layout.setSpacing(12)
 
-        self.responsa_row = QWidget()
-        responsa_layout = QHBoxLayout(self.responsa_row)
-        responsa_layout.setContentsMargins(0, 2, 0, 2)
-        responsa_layout.setSpacing(12)
-
-        # Responsa Mode master toggle
-        self.chk_responsa_mode = QCheckBox(tr("Responsa Mode"))
-        self.chk_responsa_mode.setToolTip(tr("Enable Responsa-style grammatical expansion for Hebrew search"))
-        self.chk_responsa_mode.toggled.connect(self._on_responsa_mode_toggled)
-        responsa_layout.addWidget(self.chk_responsa_mode)
-
-        # Sub-checkboxes (hidden initially)
         self.chk_responsa_variants = QCheckBox(tr("Variants"))
         self.chk_responsa_variants.setToolTip(tr("Include spelling variant pairs"))
-        self.chk_responsa_variants.setVisible(False)
-        responsa_layout.addWidget(self.chk_responsa_variants)
+        responsa_sub_layout.addWidget(self.chk_responsa_variants)
 
         self.chk_responsa_ja = QCheckBox(tr("Judeo-Arabic"))
         self.chk_responsa_ja.setToolTip(tr("Expand with Judeo-Arabic article forms (al-)"))
-        self.chk_responsa_ja.setVisible(False)
-        responsa_layout.addWidget(self.chk_responsa_ja)
+        responsa_sub_layout.addWidget(self.chk_responsa_ja)
 
         self.chk_responsa_flex = QCheckBox(tr("Flex Spacing"))
         self.chk_responsa_flex.setToolTip(tr("Allow flexible spacing between characters (helps with OCR text)"))
-        self.chk_responsa_flex.setVisible(False)
-        responsa_layout.addWidget(self.chk_responsa_flex)
+        responsa_sub_layout.addWidget(self.chk_responsa_flex)
 
-        # Bidirectional Gap checkbox (near gap area conceptually, in Responsa row)
         self.chk_bidirectional = QCheckBox(tr("Bidirectional"))
         self.chk_bidirectional.setToolTip(tr("Search for words in either order"))
-        self.chk_bidirectional.setVisible(False)
-        responsa_layout.addWidget(self.chk_bidirectional)
+        responsa_sub_layout.addWidget(self.chk_bidirectional)
 
-        responsa_layout.addStretch()
+        # Syntax legend label
+        syntax_legend = QLabel("  #word " + tr("prefix") + "  |  word# " + tr("suffix") + "  |  #word# " + tr("both") + "  |  %word " + tr("plene") + "  |  *word " + tr("wildcard") + "  |  (a/b) " + tr("OR"))
+        syntax_legend.setStyleSheet("font-size: 10px; color: #7f8c8d;")
+        responsa_sub_layout.addWidget(syntax_legend)
 
-        # Responsa row visible by default in Exact mode (index 0)
-        self.responsa_row.setVisible(True)
+        responsa_sub_layout.addStretch()
+
+        # Initially hidden (shown when Responsa mode selected)
+        self.responsa_sub_row.setVisible(False)
 
         # Lazily load PGP tags in background
         self._pgp_tags_worker = PGPTagsWorker()
@@ -6353,7 +6339,7 @@ class GenizahGUI(QMainWindow):
 
         top_layout.addWidget(self.search_row1_container)
         top_layout.addLayout(row2)
-        top_layout.addWidget(self.responsa_row)
+        top_layout.addWidget(self.responsa_sub_row)
         layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
@@ -12362,7 +12348,7 @@ class GenizahGUI(QMainWindow):
         if not self.ai_mgr.api_key:
             QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
         d = AIDialog(self, self.ai_mgr)
-        if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(3)  # Regex mode
+        if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(4)  # Regex mode (index shifted by Responsa insertion)
 
     def open_search_settings(self):
         """Open the Search Settings dialog for variant configuration."""
@@ -12377,54 +12363,26 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'variant_slider_widget'):
                 self.variant_slider_widget.setVisible(use_slider)
 
-    def _on_responsa_mode_toggled(self, checked):
-        """Toggle Responsa sub-checkboxes and mode combo visibility."""
-        if self._updating_responsa_mode:
-            return
-        self._updating_responsa_mode = True
-        try:
-            if checked:
-                self._pre_responsa_mode_idx = self.mode_combo.currentIndex()
-                self.mode_combo.setVisible(False)
-                self.lbl_responsa_active.setVisible(True)
-            else:
-                self.mode_combo.setVisible(True)
-                self.lbl_responsa_active.setVisible(False)
-                self.mode_combo.setCurrentIndex(self._pre_responsa_mode_idx)
-            # Sub-checkboxes visible only when master ON
-            self.chk_responsa_variants.setVisible(checked)
-            self.chk_responsa_ja.setVisible(checked)
-            self.chk_responsa_flex.setVisible(checked)
-            self.chk_bidirectional.setVisible(checked)
-        finally:
-            self._updating_responsa_mode = False
-
     def _on_search_mode_changed(self, index):
         """Show/hide variant controls and swap query/tag input based on selected mode."""
         is_exact = (index == 0)
         is_variants = (index == 1)
-        is_pgp_tags = (index == self.MODE_PGP_TAGS)
-        is_responsa_eligible = is_exact or is_variants
+        is_responsa = (index == self.MODE_RESPONSA)  # 2
+        is_pgp_tags = (index == self.MODE_PGP_TAGS)  # 7
 
         if hasattr(self, 'variant_controls_container'):
             self.variant_controls_container.setVisible(is_variants and not is_pgp_tags)
         if is_variants:
             self._update_variant_count_preview()
 
-        # Show/hide Responsa row based on mode eligibility
-        if hasattr(self, 'responsa_row'):
-            self.responsa_row.setVisible(is_responsa_eligible and not is_pgp_tags)
-            # If leaving eligible mode while Responsa is ON, turn it off
-            if not is_responsa_eligible and hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
-                self.chk_responsa_mode.setChecked(False)
+        # Show/hide Responsa sub-options based on mode
+        if hasattr(self, 'responsa_sub_row'):
+            self.responsa_sub_row.setVisible(is_responsa)
 
-        # PGP Tags mode: hide row1 entirely, show tag combo in row2, hide search params
+        # PGP Tags mode: hide row1, show tag combo, hide search params
         if hasattr(self, 'tag_search_combo'):
-            # Row1: hide entire query row (input, Search button, AI button)
             self.search_row1_container.setVisible(not is_pgp_tags)
-            # Row2: show tag combo after Mode dropdown
             self.tag_search_combo.setVisible(is_pgp_tags)
-            # Row2: hide search params (Gap, Exclude, settings, Lab, Deep) in tag mode
             self.search_params_container.setVisible(not is_pgp_tags)
 
     def _on_comp_mode_changed(self, index):
@@ -12730,8 +12688,8 @@ class GenizahGUI(QMainWindow):
 
         if mode_override:
             # Map mode string back to combo index
-            # modes list must match the order in init_ui (simplified to single Variants mode)
-            modes = ['literal', 'variants', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+            # modes list must match the order in init_ui (Responsa at index 2)
+            modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
             # Handle 'exact' vs 'literal' naming difference if present
             core_mode = mode_override
             if core_mode == 'exact': core_mode = 'literal'
@@ -12747,8 +12705,12 @@ class GenizahGUI(QMainWindow):
                 pass # Mode not found in UI list
 
         mode_idx = self.mode_combo.currentIndex()
-        modes = ['literal', 'variants', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-        mode = modes[mode_idx]
+        # Map combo index to mode string (Responsa uses 'exact' as base mode)
+        if mode_idx == self.MODE_RESPONSA:
+            mode = 'exact'  # Base mode; Responsa pipeline takes over via responsa_options
+        else:
+            modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+            mode = modes[mode_idx] if mode_idx < len(modes) else 'literal'
 
         # Update variant level and max changes from UI before search
         if mode == 'variants' and self.var_mgr:
@@ -12782,16 +12744,16 @@ class GenizahGUI(QMainWindow):
         self.result_row_by_sys_id = {}
         self.hovered_row = -1
 
-        # Build Responsa options if Responsa Mode is active
+        # Build Responsa options if Responsa mode is selected in combo
         responsa_options = None
-        if hasattr(self, 'chk_responsa_mode') and self.chk_responsa_mode.isChecked():
+        if self.mode_combo.currentIndex() == self.MODE_RESPONSA:
             responsa_options = {
                 'responsa_mode': True,
                 'variants': self.chk_responsa_variants.isChecked(),
                 'ja': self.chk_responsa_ja.isChecked(),
                 'flex_spacing': self.chk_responsa_flex.isChecked(),
                 'bidirectional': self.chk_bidirectional.isChecked(),
-                'variant_mode': ['exact', 'variants'][self._pre_responsa_mode_idx] if self._pre_responsa_mode_idx <= 1 else 'exact',
+                'variant_mode': 'exact',
             }
 
         if self.btn_lab_mode_toggle.isChecked():
