@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Phase: 17 of 17 (Integration Testing) -- COMPLETE
 Plan: 5 of 5 complete (includes 3 UAT gap closure plans: 17-03, 17-04, 17-05)
-Status: **Phase 17 COMPLETE — all tests + UAT gap fixes delivered. Sofit wildcard + explosion cascade + ValueError UI fixed (17-04).**
-Last activity: 2026-02-10 - Executed 17-04 wildcard sofit fix + explosion guard cascade + ValueError UI (b04c787)
+Status: **Phase 17 COMPLETE — all tests + UAT gap fixes delivered. All 5 plans including 17-03 web UI fixes now executed.**
+Last activity: 2026-02-10 - Executed 17-03 web UI bug fixes: R+Space shortcut + WebSocket crash cap (a5dab11)
 
 Progress: [####################] 100% (14/14 plans across phases 14-17)
 
@@ -84,6 +84,8 @@ Recent decisions affecting current work:
 - [Phase 17]: Sofit-to-normal in wildcard regex uses character class [sofit|normal] (matches both forms)
 - [Phase 17]: Explosion guard cascade expanded: variants basic -> off -> JA off -> plene off -> suffixes off -> prefixes off
 - [Phase 17]: ValueError from explosion guard surfaced via sentinel dict pattern in web UI
+- [Phase 17]: NiceGUI programmatic .value changes don't fire Vue events -- explicit on_mode_change() call needed
+- [Phase 17]: All render_results callers must use [:200] cap + strip full_text for WebSocket safety
 
 ### Data State
 
@@ -115,6 +117,8 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 - ~~BUG (Suffix wildcard sofit mismatch)~~: **FIXED** (3cc1cb9) — [sofit|normal] char class in _build_wildcard_regex
 - ~~BUG (Explosion guard incomplete cascade)~~: **FIXED** (3cc1cb9) — 6-step cascade (plene, suffixes, prefixes added)
 - ~~BUG (Silent ValueError in web UI)~~: **FIXED** (b04c787) — ValueError surfaced via ui.notify warning toast
+- ~~BUG (R+Space shortcut missing sub-options)~~: **FIXED** (783b28f) — explicit on_mode_change() call after programmatic value set
+- ~~BUG (WebSocket crash on large Responsa results)~~: **FIXED** (a5dab11) — capped storage/render to 200, stripped full_text
 
 ### Future Improvements
 
@@ -130,6 +134,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 17-04-PLAN.md (wildcard sofit + explosion guard + ValueError UI)
+Stopped at: Completed 17-03-PLAN.md (R+Space shortcut fix + WebSocket crash cap)
 Resume file: None
-Notes: Phase 17 fully complete including UAT gap closure plans (17-03 through 17-05). 17-04 fixed sofit wildcard regex, expanded explosion guard cascade (6 steps), surfaced ValueError in web UI. 216 Responsa tests passing.
+Notes: Phase 17 fully complete -- all 5 plans executed with SUMMARYs. 17-03 fixed shortcut sub-options visibility and capped all render_results callers to 200 with full_text stripping. 135 Responsa tests passing.
