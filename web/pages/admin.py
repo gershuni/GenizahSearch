@@ -26,13 +26,30 @@ def get_shelfmark_for_id(sys_id: str) -> tuple:
 
 
 def get_pending_corrections():
-    """Get pending corrections from Supabase."""
+    """Get pending corrections from Supabase.
+
+    Uses separate queries for corrections and profiles because there is no
+    direct FK between corrections.author_id and profiles.id (both reference
+    auth.users(id) independently).
+    """
     try:
         client = get_client()
-        response = client.table('corrections').select(
-            '*, profiles(username, full_name)'
-        ).eq('status', 'pending').order('created_at', desc=True).execute()
-        return response.data or []
+        response = client.table('corrections').select('*').eq(
+            'status', 'pending'
+        ).order('created_at', desc=True).execute()
+        corrections = response.data or []
+        if not corrections:
+            return []
+        # Enrich with profile data
+        author_ids = list(set(c.get('author_id') for c in corrections if c.get('author_id')))
+        if author_ids:
+            profiles_resp = client.table('profiles').select(
+                'id, username, full_name'
+            ).in_('id', author_ids).execute()
+            profiles_map = {p['id']: p for p in (profiles_resp.data or [])}
+            for c in corrections:
+                c['profiles'] = profiles_map.get(c.get('author_id'), {})
+        return corrections
     except Exception as e:
         print(f"Error fetching pending corrections: {e}")
         return []

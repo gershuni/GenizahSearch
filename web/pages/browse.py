@@ -1470,6 +1470,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.edit_mode = False
                 state.draft_saved = False
                 state.draft_id = None
+                ui.notify(tr('Correction submitted successfully'), type='positive')
 
                 # Reload page to see changes
                 load_page(direction=0)
