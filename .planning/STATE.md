@@ -112,6 +112,7 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ### Future Improvements
 
 - **Show user's pending corrections in browse page**: When a logged-in user views a page they previously submitted a correction for (pending/draft), show an indicator and display their corrected text instead of the AI transcription. Also add a badge in the menu showing how many pending corrections the user has.
+- **Remove AI search component**: The AI-assisted regex builder is barely used and Responsa mode makes it virtually obsolete. Remove the AI component entirely.
 
 ### Quick Tasks Completed
 
