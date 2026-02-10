@@ -868,9 +868,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             filtered.append(res)
 
-        render_results(filtered)
-        results_count.text = f"{len(filtered)} / {len(search_state.results)} {tr('Results')}"
-        ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+        render_results(filtered[:200])
+        shown = min(len(filtered), 200)
+        results_count.text = f"{shown} / {len(search_state.results)} {tr('Results')}"
+        if len(filtered) > 200:
+            ui.notify(f"{tr('Showing first 200 of')} {len(filtered)} {tr('filtered results')}", type='info')
+        else:
+            ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
 
     def clear_filters():
         """Clear all filters and show all results."""
@@ -879,7 +883,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filter_snippet.value = ''
 
         if search_state.results:
-            render_results(search_state.results)
+            render_results(search_state.results[:200])
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             ui.notify(tr('Filters cleared'), type='info')
 
@@ -895,8 +899,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Deselect all
             search_state.selected_indices.clear()
 
-        # Re-render to update checkboxes
-        current_results = list(search_state.results)  # Keep current filtered view
+        # Re-render to update checkboxes (capped to 200 for WebSocket safety)
+        current_results = list(search_state.results[:200])
         render_results(current_results)
         update_selection_ui()
 
@@ -1715,10 +1719,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
-        # Batch lookup for transcription availability
+        # Batch lookup for transcription availability (cap to displayed results)
+        displayed_results = results[:200]
         result_sys_ids = [
             r.get('display', {}).get('id')
-            for r in results
+            for r in displayed_results
             if r.get('display', {}).get('id')
         ]
         search_state.transcription_sys_ids = await run.io_bound(
@@ -1736,7 +1741,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.results = results
 
         try:
-            app.storage.user['search_results'] = results
+            # Cap stored results to prevent WebSocket overload (18K+ results = 50-100MB JSON)
+            capped = results[:200]
+            # Strip full_text from stored results (only needed for display, not persistence)
+            storage_results = []
+            for r in capped:
+                sr = dict(r)
+                sr.pop('full_text', None)
+                display = sr.get('display')
+                if display and isinstance(display, dict):
+                    d = dict(display)
+                    d.pop('full_text', None)
+                    sr['display'] = d
+                storage_results.append(sr)
+            app.storage.user['search_results'] = storage_results
         except Exception:
             pass
 
