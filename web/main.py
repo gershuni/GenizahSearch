@@ -2039,11 +2039,17 @@ async def auth_callback_route(code: str = None):
         error_label = ui.label('').classes('text-red-500 mt-4 hidden')
         home_btn = ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2 hidden')
 
-    async def complete_login(user, profile):
+    async def complete_login(user, profile, session=None):
         """Store user in session and redirect."""
         app.storage.user[GlobalAuthState.USER_KEY] = user
         if profile:
             app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+        # Store session tokens for per-user Supabase client
+        if session:
+            app.storage.user['auth_session'] = {
+                'access_token': session.get('access_token'),
+                'refresh_token': session.get('refresh_token'),
+            }
         status_label.text = 'Login successful! Redirecting...'
         await asyncio.sleep(0.5)
         ui.navigate.to('/')
@@ -2070,7 +2076,7 @@ async def auth_callback_route(code: str = None):
             user = result.get('user')
             if user:
                 profile = get_profile(user['id'])
-                await complete_login(user, profile)
+                await complete_login(user, profile, session=result.get('session'))
             else:
                 show_error('Login failed - no user returned')
             return
@@ -2128,7 +2134,7 @@ async def auth_callback_route(code: str = None):
         user = result.get('user')
         if user:
             profile = get_profile(user['id'])
-            await complete_login(user, profile)
+            await complete_login(user, profile, session=result.get('session'))
         else:
             show_error('Login failed - no user returned')
 

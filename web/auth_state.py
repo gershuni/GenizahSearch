@@ -99,6 +99,7 @@ class GlobalAuthState:
         """Clear authentication (logout)."""
         app.storage.user.pop(cls.USER_KEY, None)
         app.storage.user.pop(cls.PROFILE_KEY, None)
+        app.storage.user.pop('auth_session', None)
         # Also sign out from Supabase client
         try:
             supabase_sign_out()
@@ -134,6 +135,14 @@ async def do_login(email: str, password: str) -> Dict:
 
     if "error" in result:
         return result
+
+    # Store session tokens for per-user Supabase client
+    session = result.get('session', {})
+    if session:
+        app.storage.user['auth_session'] = {
+            'access_token': session.get('access_token'),
+            'refresh_token': session.get('refresh_token'),
+        }
 
     user = result.get('user')
     if not user:

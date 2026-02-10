@@ -721,6 +721,13 @@ def init_api_routes():
                 nicegui_app.storage.user[GlobalAuthState.USER_KEY] = user
                 if profile:
                     nicegui_app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
+                # Store session tokens for per-user Supabase client
+                session = result.get('session', {})
+                if session:
+                    nicegui_app.storage.user['auth_session'] = {
+                        'access_token': session.get('access_token'),
+                        'refresh_token': session.get('refresh_token'),
+                    }
 
                 return JSONResponse({'success': True, 'user': user})
 

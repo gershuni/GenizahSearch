@@ -43,6 +43,37 @@ def get_client() -> Client:
     return _client
 
 
+def get_user_client() -> Client:
+    """Get a per-user Supabase client authenticated with the current user's session tokens.
+
+    This creates a NEW client for each call, authenticated as the specific user,
+    ensuring that RLS policies see the correct auth.uid(). This is critical for
+    multi-user scenarios where multiple users are logged in on the same NiceGUI server.
+
+    Falls back to the singleton client if no user session tokens are available.
+    """
+    try:
+        from nicegui import app as _app
+        auth_session = _app.storage.user.get('auth_session', {})
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+
+        if access_token and refresh_token:
+            try:
+                user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+                user_client.auth.set_session(access_token, refresh_token)
+                return user_client
+            except Exception as e:
+                print(f"[get_user_client] Failed to set user session (tokens may be expired): {e}")
+                return get_client()
+        else:
+            print("[get_user_client] No auth_session tokens in user storage, falling back to singleton")
+            return get_client()
+    except Exception as e:
+        print(f"[get_user_client] Error creating per-user client: {e}")
+        return get_client()
+
+
 def reset_client():
     """Reset the client (useful for testing or re-authentication)."""
     global _client
@@ -298,7 +329,7 @@ def get_profile(user_id: str) -> Optional[Dict]:
 def update_profile(user_id: str, data: Dict) -> Dict:
     """Update a user's profile."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('profiles').update(data).eq('id', user_id).execute()
         if response.data:
             return {'success': True, 'profile': response.data[0]}
@@ -357,7 +388,7 @@ def create_list(user_id: str, name: str, name_en: str = None, color: str = '#FFD
                 project_id: int = None, is_default: bool = False) -> Dict:
     """Create a new list."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'user_id': user_id,
             'name': name,
@@ -380,7 +411,7 @@ def create_list(user_id: str, name: str, name_en: str = None, color: str = '#FFD
 def update_list(list_id: int, data: Dict) -> Dict:
     """Update a list."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('user_lists').update(data).eq('id', list_id).execute()
         if response.data:
             return {'success': True, 'list': response.data[0]}
@@ -397,7 +428,7 @@ def delete_list(list_id: int, permanent: bool = False) -> Dict:
         permanent: If True, permanently delete (no recovery). Default is soft delete.
     """
     try:
-        client = get_client()
+        client = get_user_client()
         if permanent:
             # Permanent delete - also deletes items via CASCADE
             client.table('user_lists').delete().eq('id', list_id).execute()
@@ -422,7 +453,7 @@ def delete_list(list_id: int, permanent: bool = False) -> Dict:
 def restore_list(list_id: int) -> Dict:
     """Restore a soft-deleted list from trash."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('user_lists').update({
             'deleted_at': None
         }).eq('id', list_id).execute()
@@ -439,7 +470,7 @@ def restore_list(list_id: int) -> Dict:
 def empty_trash(user_id: str) -> Dict:
     """Permanently delete all soft-deleted lists for a user."""
     try:
-        client = get_client()
+        client = get_user_client()
         # Get all deleted lists
         deleted = get_deleted_lists(user_id)
         count = len(deleted)
@@ -470,7 +501,7 @@ def add_list_item(list_id: int, sys_id: str, shelfmark: str = None, title: str =
                   fl_id: str = None, note: str = '', tags: List[str] = None) -> Dict:
     """Add an item to a list."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'list_id': list_id,
             'sys_id': sys_id,
@@ -491,7 +522,7 @@ def add_list_item(list_id: int, sys_id: str, shelfmark: str = None, title: str =
 def update_list_item(item_id: int, data: Dict) -> Dict:
     """Update a list item."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('list_items').update(data).eq('id', item_id).execute()
         if response.data:
             return {'success': True, 'item': response.data[0]}
@@ -503,7 +534,7 @@ def update_list_item(item_id: int, data: Dict) -> Dict:
 def delete_list_item(item_id: int) -> Dict:
     """Delete a list item."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('list_items').delete().eq('id', item_id).execute()
         return {'success': True}
     except Exception as e:
@@ -529,7 +560,7 @@ def add_recent_item(user_id: str, sys_id: str, shelfmark: str = None,
                     title: str = None, fl_id: str = None) -> Dict:
     """Add an item to recent history."""
     try:
-        client = get_client()
+        client = get_user_client()
 
         # Remove existing entry for this sys_id (to move it to top)
         client.table('recent_items').delete().eq('user_id', user_id).eq('sys_id', sys_id).execute()
@@ -574,7 +605,7 @@ def get_projects(user_id: str) -> List[Dict]:
 def create_project(user_id: str, name: str, color: str = '#4CAF50') -> Dict:
     """Create a new project."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'user_id': user_id,
             'name': name,
@@ -591,7 +622,7 @@ def create_project(user_id: str, name: str, color: str = '#4CAF50') -> Dict:
 def update_project(project_id: int, data: Dict) -> Dict:
     """Update a project."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('projects').update(data).eq('id', project_id).execute()
         if response.data:
             return {'success': True, 'project': response.data[0]}
@@ -603,7 +634,7 @@ def update_project(project_id: int, data: Dict) -> Dict:
 def delete_project(project_id: int) -> Dict:
     """Delete a project."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('projects').delete().eq('id', project_id).execute()
         return {'success': True}
     except Exception as e:
@@ -659,7 +690,7 @@ def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: 
                       status: str = 'pending') -> Dict:
     """Create a new correction."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'author_id': author_id,
             'sys_id': sys_id,
@@ -681,7 +712,7 @@ def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: 
 def update_correction(correction_id: int, data: Dict) -> Dict:
     """Update a correction."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('corrections').update(data).eq('id', correction_id).execute()
         if response.data:
             return {'success': True, 'correction': response.data[0]}
@@ -719,7 +750,7 @@ def create_comment(author_id: str, sys_id: str, content: str, shelfmark: str = N
                    parent_id: int = None) -> Dict:
     """Create a new comment."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'author_id': author_id,
             'sys_id': sys_id,
@@ -773,7 +804,7 @@ def create_discovery(user_id: str, title: str, content: str, type: str = 'discov
     stored in this array.
     """
     try:
-        client = get_client()
+        client = get_user_client()
 
         # Build shelfmarks array from the various inputs
         shelfmarks = []
@@ -846,7 +877,7 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
                          notes: str = '', evidence: str = '') -> Dict:
     """Create a new fragment join."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'user_id': user_id,
             'fragment_a_sys_id': fragment_a_sys_id,
@@ -869,7 +900,7 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
 def delete_fragment_join(join_id: int) -> Dict:
     """Delete a fragment join."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('fragment_joins').delete().eq('id', join_id).execute()
         return {'success': True}
     except Exception as e:
@@ -883,7 +914,7 @@ def delete_fragment_join(join_id: int) -> Dict:
 def delete_comment(comment_id: int) -> Dict:
     """Delete a comment."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('comments').delete().eq('id', comment_id).execute()
         return {'success': True}
     except Exception as e:
@@ -893,7 +924,7 @@ def delete_comment(comment_id: int) -> Dict:
 def delete_correction(correction_id: int) -> Dict:
     """Delete a correction."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('corrections').delete().eq('id', correction_id).execute()
         return {'success': True}
     except Exception as e:
@@ -903,7 +934,7 @@ def delete_correction(correction_id: int) -> Dict:
 def delete_discovery(discovery_id: int) -> Dict:
     """Delete a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         client.table('discoveries').delete().eq('id', discovery_id).execute()
         return {'success': True}
     except Exception as e:
@@ -913,7 +944,7 @@ def delete_discovery(discovery_id: int) -> Dict:
 def update_discovery(discovery_id: int, data: Dict) -> Dict:
     """Update a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('discoveries').update(data).eq('id', discovery_id).execute()
         if response.data:
             return {'success': True, 'discovery': response.data[0]}
@@ -943,7 +974,7 @@ def create_discovery_response(discovery_id: int, user_id: str, content: str,
                                is_anonymous: bool = False) -> Dict:
     """Create a response to a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         data = {
             'discovery_id': discovery_id,
             'user_id': user_id,
@@ -965,7 +996,7 @@ def create_discovery_response(discovery_id: int, user_id: str, content: str,
 def vote_discovery(discovery_id: int, user_id: str, vote_type: str) -> Dict:
     """Vote on a discovery (up or down)."""
     try:
-        client = get_client()
+        client = get_user_client()
         # Check if user already voted
         existing = client.table('discovery_votes').select('*').eq(
             'discovery_id', discovery_id
@@ -999,7 +1030,7 @@ def vote_discovery(discovery_id: int, user_id: str, vote_type: str) -> Dict:
 def toggle_discovery_answered(discovery_id: int, answered: bool) -> Dict:
     """Toggle answered status of a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('discoveries').update({
             'is_answered': answered
         }).eq('id', discovery_id).execute()
@@ -1013,7 +1044,7 @@ def toggle_discovery_answered(discovery_id: int, answered: bool) -> Dict:
 def toggle_discovery_pin(discovery_id: int, pinned: bool) -> Dict:
     """Toggle pinned status of a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('discoveries').update({
             'is_pinned': pinned
         }).eq('id', discovery_id).execute()
@@ -1027,7 +1058,7 @@ def toggle_discovery_pin(discovery_id: int, pinned: bool) -> Dict:
 def toggle_discovery_hidden(discovery_id: int, hidden: bool) -> Dict:
     """Toggle hidden status of a discovery."""
     try:
-        client = get_client()
+        client = get_user_client()
         response = client.table('discoveries').update({
             'is_hidden': hidden
         }).eq('id', discovery_id).execute()
