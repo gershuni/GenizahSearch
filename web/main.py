@@ -1827,7 +1827,7 @@ def dashboard_page():
 @ui.page('/search')
 def search_page_route(
     q: str = None, tag: str = None,
-    responsa: int = None, variants: int = None,
+    mode: str = None, variants: int = None,
     ja: int = None, flex_spaces: int = None,
     bidirectional: int = None
 ):
@@ -1842,7 +1842,7 @@ def search_page_route(
         from web.pages.search import create_search_page
         create_search_page(
             initial_query=q, initial_tag=tag,
-            initial_responsa=responsa, initial_variants=variants,
+            initial_mode=mode, initial_variants=variants,
             initial_ja=ja, initial_flex_spaces=flex_spaces,
             initial_bidirectional=bidirectional
         )
