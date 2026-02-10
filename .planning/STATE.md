@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Users can search the Genizah corpus using Responsa Project-style syntax and a tabular query builder
-**Current focus:** v5.7.0 Responsa Search -- Phase 16 (Tabular Builder)
+**Current focus:** v5.7.0 Responsa Search -- Phase 16 complete, ready for Phase 17
 
 ## Current Position
 
-Phase: 16 of 17 (Tabular Builder)
+Phase: 16 of 17 (Tabular Builder) -- COMPLETE
 Plan: 3 of 3 complete
-Status: **Phase 16 complete -- All 3 plans done (Core Engine, Web Builder, Desktop Builder)**
-Last activity: 2026-02-10 -- 16-02 re-committed: web query builder dialog properly committed (1ef7365)
+Status: **Phase 16 COMPLETE — verified 6/6 must-haves. Ready for Phase 17 (Integration Testing)**
+Last activity: 2026-02-10 -- Phase 16 execution complete with verification passed
 
 Progress: [##################__] 82% (9/11 plans across phases 14-17)
 
@@ -107,6 +107,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Re-committed 16-02-PLAN.md (Web Tabular Builder)
+Stopped at: Phase 16 fully complete and verified
 Resume file: None
-Notes: 16-02 web query builder re-committed (prior session left uncommitted changes). Phase 16 fully committed now. 124 Responsa tests passing. Next: Phase 17 (Integration Testing).
+Notes: Phase 16 complete. 8 commits: core extensions (gap parsing, syntax generation, per-pair regex), web dialog, desktop QDialog, verification. 124 Responsa tests passing. Human verification needed for visual/interaction aspects. Next: Phase 17 (Integration Testing).

@@ -41,8 +41,8 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 **Phase Numbering:** Continues from v5.6.0 milestone (Phase 12). Phases 14-17.
 
 - [x] **Phase 14: Responsa Core Engine** - Parse Responsa syntax, expand prefixes/JA, integrate with Tantivy and Regex (completed 2026-02-09)
-- [ ] **Phase 15: Search UI (Both Apps)** - Responsa as dropdown mode with sub-options and syntax legend (gap closure in progress)
-- [ ] **Phase 16: Tabular Query Builder** - Expansion panel (web) and QDialog (desktop) for visual query construction
+- [x] **Phase 15: Search UI (Both Apps)** - Responsa as dropdown mode with sub-options and syntax legend (completed 2026-02-10)
+- [x] **Phase 16: Tabular Query Builder** - Expansion panel (web) and QDialog (desktop) for visual query construction (completed 2026-02-10)
 - [ ] **Phase 17: Integration Testing & Polish** - Cross-app verification, edge cases, performance testing
 
 ## Phase Details
@@ -85,8 +85,8 @@ Plans:
 Plans:
 - [x] 15-01-PLAN.md -- Web UI: Responsa checkboxes (original approach, superseded by 15-03)
 - [x] 15-02-PLAN.md -- Desktop UI: Responsa checkboxes (original approach, superseded by 15-04)
-- [ ] 15-03-PLAN.md -- Gap closure: Web Responsa as dropdown mode with sub-options and syntax legend
-- [ ] 15-04-PLAN.md -- Gap closure: Desktop Responsa as combo mode with sub-options and syntax legend
+- [x] 15-03-PLAN.md -- Gap closure: Web Responsa as dropdown mode with sub-options and syntax legend
+- [x] 15-04-PLAN.md -- Gap closure: Desktop Responsa as combo mode with sub-options and syntax legend
 
 ### Phase 16: Tabular Query Builder
 **Goal**: Users can visually construct Responsa queries using a tabular interface with 2-4 component columns, which generates syntax text inserted into the search field
@@ -102,9 +102,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 16-01-PLAN.md -- TDD: Parser extension for [N] gap notation + generate_tabular_syntax() + per-pair gap regex
-- [ ] 16-02-PLAN.md -- Web query builder dialog (NiceGUI) with button, components, modifiers, preview
-- [ ] 16-03-PLAN.md -- Desktop query builder QDialog (PyQt6) with button, components, modifiers, preview
+- [x] 16-01-PLAN.md -- TDD: Parser extension for [N] gap notation + generate_tabular_syntax() + per-pair gap regex
+- [x] 16-02-PLAN.md -- Web query builder dialog (NiceGUI) with button, components, modifiers, preview
+- [x] 16-03-PLAN.md -- Desktop query builder QDialog (PyQt6) with button, components, modifiers, preview
 
 ### Phase 17: Integration Testing & Polish
 **Goal**: Both apps produce identical results for Responsa queries, edge cases are handled, and performance is verified on the full corpus
@@ -125,8 +125,8 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 14. Responsa Core Engine | v5.7.0 | 2/2 | Complete | 2026-02-09 |
-| 15. Search UI (Both Apps) | v5.7.0 | 2/4 | Gap closure | - |
-| 16. Tabular Query Builder | v5.7.0 | 0/3 | Planned | - |
+| 15. Search UI (Both Apps) | v5.7.0 | 4/4 | Complete | 2026-02-10 |
+| 16. Tabular Query Builder | v5.7.0 | 3/3 | Complete | 2026-02-10 |
 | 17. Integration Testing & Polish | v5.7.0 | 0/? | Not started | - |
 
 ---
