@@ -6839,6 +6839,13 @@ class GenizahGUI(QMainWindow):
         syntax_legend.setStyleSheet("font-size: 10px; color: #7f8c8d;")
         responsa_sub_layout.addWidget(syntax_legend)
 
+        # Query Builder button
+        self.btn_query_builder = QPushButton(tr("Query Builder"))
+        self.btn_query_builder.setToolTip(tr("Open the tabular query builder"))
+        self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        self.btn_query_builder.clicked.connect(self._open_query_builder)
+        responsa_sub_layout.addWidget(self.btn_query_builder)
+
         responsa_sub_layout.addStretch()
 
         # Initially hidden (shown when Responsa mode selected)
@@ -13217,6 +13224,26 @@ class GenizahGUI(QMainWindow):
                 self.lab_panel_search.setVisible(checked)
 
         self.update_lab_ui_state(checked)
+
+    def _open_query_builder(self):
+        """Open the tabular query builder dialog."""
+        dlg = TabularQueryBuilderDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            syntax = dlg.get_syntax()
+            negated = dlg.get_negated_words()
+            if syntax.strip():
+                # One-way sync: builder -> text field
+                self.query_input.setText(syntax)
+                # Add negated words to exclude input (append to existing)
+                if negated:
+                    existing_exclude = self.exclude_input.text().strip()
+                    exclude_parts = existing_exclude.split() if existing_exclude else []
+                    for w in negated:
+                        if w not in exclude_parts:
+                            exclude_parts.append(w)
+                    self.exclude_input.setText(' '.join(exclude_parts))
+                # Auto-trigger search
+                self.start_search()
 
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
