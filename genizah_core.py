@@ -4287,14 +4287,15 @@ def _parse_single_token(token: str) -> ResponsaComponent:
     """
     original = token
 
-    # Strip leading % for plene/defective
-    has_percent = token.startswith('%')
-    if has_percent:
-        token = token[1:]
-
-    # Check for leading #
-    has_leading_hash = token.startswith('#')
-    if has_leading_hash:
+    # Strip leading operators (% and #) in any order
+    # Supports: %#word, #%word, %word, #word
+    has_percent = False
+    has_leading_hash = False
+    while token and token[0] in ('%', '#'):
+        if token[0] == '%':
+            has_percent = True
+        elif token[0] == '#':
+            has_leading_hash = True
         token = token[1:]
 
     # Check for trailing # (suffix expansion)
