@@ -4361,11 +4361,10 @@ class TabularQueryBuilderDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(tr("Query Builder"))
+        self.setWindowTitle(tr("Tabular Search"))
         self.setMinimumSize(750, 500)
         self.resize(800, 550)
-        if CURRENT_LANG == 'he':
-            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self._syntax = ''
         self._negated_words = []
@@ -4381,6 +4380,10 @@ class TabularQueryBuilderDialog(QDialog):
         self._distance_spinners = []  # QSpinBox list
         self._component_widgets = []  # List of component UI widget groups
         self._distance_containers = []  # Container widgets for distance spinners
+
+        # Dark mode detection
+        palette = self.palette()
+        self._is_dark = palette.color(palette.ColorRole.Window).lightness() < 128
 
         self._setup_ui()
         self._initialize_components()
@@ -4434,28 +4437,28 @@ class TabularQueryBuilderDialog(QDialog):
         mod_row = QHBoxLayout()
         mod_row.addWidget(QLabel(tr("Modifiers") + ":"))
 
-        self.chk_prefix = QCheckBox("# _")
-        self.chk_prefix.setToolTip(tr("Prefixes") + " — " + "קידומות דקדוקיות (ו/ה/ב/כ/ל/מ/ש)")
+        self.chk_prefix = QCheckBox(tr("Prefixes #_"))
+        self.chk_prefix.setToolTip(tr("Grammatical prefixes tooltip"))
         mod_row.addWidget(self.chk_prefix)
 
-        self.chk_suffix = QCheckBox("_ #")
-        self.chk_suffix.setToolTip(tr("Suffixes") + " — " + "סיומות דקדוקיות")
+        self.chk_suffix = QCheckBox(tr("Suffixes _#"))
+        self.chk_suffix.setToolTip(tr("Grammatical suffixes tooltip"))
         mod_row.addWidget(self.chk_suffix)
 
-        self.chk_wild_start = QCheckBox("* _")
-        self.chk_wild_start.setToolTip(tr("Wildcard Start") + " — " + "מילים שמסתיימות ב...")
+        self.chk_wild_start = QCheckBox(tr("Wildcard *_"))
+        self.chk_wild_start.setToolTip(tr("Words ending with..."))
         mod_row.addWidget(self.chk_wild_start)
 
-        self.chk_wild_end = QCheckBox("_ *")
-        self.chk_wild_end.setToolTip(tr("Wildcard End") + " — " + "מילים שמתחילות ב...")
+        self.chk_wild_end = QCheckBox(tr("Wildcard _*"))
+        self.chk_wild_end.setToolTip(tr("Words starting with..."))
         mod_row.addWidget(self.chk_wild_end)
 
-        self.chk_plene = QCheckBox("%")
-        self.chk_plene.setToolTip(tr("Plene/Defective") + " — " + "כתיב מלא/חסר (ו/י)")
+        self.chk_plene = QCheckBox(tr("Plene/Defective %"))
+        self.chk_plene.setToolTip(tr("Plene/defective spelling tooltip"))
         mod_row.addWidget(self.chk_plene)
 
-        self.chk_negation = QCheckBox("\u2715")  # ✕
-        self.chk_negation.setToolTip(tr("Exclude") + " — " + "שלילה — הוצא מילה זו")
+        self.chk_negation = QCheckBox(tr("Negation −"))
+        self.chk_negation.setToolTip(tr("Negation tooltip"))
         mod_row.addWidget(self.chk_negation)
 
         mod_row.addStretch()
@@ -4466,18 +4469,37 @@ class TabularQueryBuilderDialog(QDialog):
                      self.chk_wild_end, self.chk_plene, self.chk_negation]:
             chk.stateChanged.connect(self._on_modifier_changed)
 
+        # --- Search Options Row ---
+        opts_row = QHBoxLayout()
+        opts_row.addWidget(QLabel(tr("Search Options") + ":"))
+        self.chk_opt_variants = QCheckBox(tr("Variants"))
+        self.chk_opt_ja = QCheckBox(tr("Judeo-Arabic"))
+        self.chk_opt_flex = QCheckBox(tr("Flex Spacing"))
+        self.chk_opt_bidir = QCheckBox(tr("Bidirectional"))
+        opts_row.addWidget(self.chk_opt_variants)
+        opts_row.addWidget(self.chk_opt_ja)
+        opts_row.addWidget(self.chk_opt_flex)
+        opts_row.addWidget(self.chk_opt_bidir)
+        opts_row.addStretch()
+        main_layout.addLayout(opts_row)
+
         # --- Preview Row ---
         preview_row = QHBoxLayout()
         preview_row.addWidget(QLabel(tr("Preview") + ":"))
         self._preview_label = QLabel("")
+        if self._is_dark:
+            preview_bg = '#2d2d2d'
+            preview_border = '#555'
+        else:
+            preview_bg = '#f8f9fa'
+            preview_border = '#dee2e6'
         self._preview_label.setStyleSheet(
-            "font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; "
-            "padding: 4px 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; "
-            "min-height: 22px;"
+            f"font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; "
+            f"padding: 4px 8px; background: {preview_bg}; border: 1px solid {preview_border}; border-radius: 4px; "
+            f"min-height: 22px;"
         )
         self._preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        if CURRENT_LANG == 'he':
-            self._preview_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self._preview_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         preview_row.addWidget(self._preview_label, 1)
         main_layout.addLayout(preview_row)
 
@@ -4490,10 +4512,10 @@ class TabularQueryBuilderDialog(QDialog):
         btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
-        btn_apply = QPushButton(tr("Apply"))
-        btn_apply.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px 20px;")
-        btn_apply.clicked.connect(self._apply)
-        btn_row.addWidget(btn_apply)
+        btn_search = QPushButton(tr("Search"))
+        btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px 20px;")
+        btn_search.clicked.connect(self._apply)
+        btn_row.addWidget(btn_search)
         main_layout.addLayout(btn_row)
 
     def _initialize_components(self):
@@ -4515,8 +4537,14 @@ class TabularQueryBuilderDialog(QDialog):
         # UI
         frame = QFrame()
         frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        if self._is_dark:
+            frame_bg = '#2a2a2a'
+            frame_border = '#555'
+        else:
+            frame_bg = '#fafafa'
+            frame_border = '#bdc3c7'
         frame.setStyleSheet(
-            "QFrame { border: 1px solid #bdc3c7; border-radius: 6px; background: #fafafa; }"
+            f"QFrame {{ border: 1px solid {frame_border}; border-radius: 6px; background: {frame_bg}; }}"
         )
         frame_layout = QVBoxLayout(frame)
         frame_layout.setSpacing(4)
@@ -4524,36 +4552,55 @@ class TabularQueryBuilderDialog(QDialog):
 
         # Title
         title_label = QLabel(tr("Component") + f" {index + 1}")
-        title_label.setStyleSheet("font-weight: bold; font-size: 12px; border: none; background: transparent;")
+        title_color = '#ddd' if self._is_dark else '#333'
+        title_label.setStyleSheet(f"font-weight: bold; font-size: 12px; border: none; background: transparent; color: {title_color};")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         frame_layout.addWidget(title_label)
 
-        # Word inputs
+        # Word inputs and modifier indicators
         inputs = []
+        indicators = []
+        ind_color = '#7cabd4' if self._is_dark else '#2980b9'
         for wi in range(self._max_words_per_component):
             inp = QLineEdit()
             inp.setPlaceholderText(tr("Word") + f" {wi + 1}")
             inp.setMinimumWidth(120)
-            inp.setStyleSheet("border: 1px solid #ccc; border-radius: 3px; padding: 3px; background: white;")
-            if CURRENT_LANG == 'he':
-                inp.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            if self._is_dark:
+                inp_bg = '#3a3a3a'
+                inp_border = '#666'
+                inp_color = '#eee'
+            else:
+                inp_bg = 'white'
+                inp_border = '#ccc'
+                inp_color = '#333'
+            inp.setStyleSheet(f"border: 1px solid {inp_border}; border-radius: 3px; padding: 3px; background: {inp_bg}; color: {inp_color};")
+            inp.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             inp.installEventFilter(self)
             inp.textChanged.connect(self._on_word_text_changed)
             frame_layout.addWidget(inp)
+            # Modifier indicator label below input
+            mod_ind = QLabel("")
+            mod_ind.setStyleSheet(f"font-size: 9px; color: {ind_color}; border: none; background: transparent; margin-top: -2px;")
+            mod_ind.setVisible(False)
+            frame_layout.addWidget(mod_ind)
+            indicators.append(mod_ind)
             inputs.append(inp)
             # Hide extra word slots
             if wi >= self._initial_words_visible:
                 inp.setVisible(False)
+                mod_ind.setVisible(False)
 
         # Add word button
         btn_add_word = QPushButton("+ " + tr("Add Word"))
-        btn_add_word.setStyleSheet("font-size: 10px; border: none; color: #2980b9; background: transparent;")
+        add_word_color = '#5dade2' if self._is_dark else '#2980b9'
+        btn_add_word.setStyleSheet(f"font-size: 10px; border: none; color: {add_word_color}; background: transparent;")
         btn_add_word.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         frame_layout.addWidget(btn_add_word)
 
         # Remove button (only for components 3+)
         btn_remove = QPushButton(tr("Remove"))
-        btn_remove.setStyleSheet("font-size: 10px; color: #c0392b; border: none; background: transparent;")
+        remove_color = '#e74c3c' if self._is_dark else '#c0392b'
+        btn_remove.setStyleSheet(f"font-size: 10px; color: {remove_color}; border: none; background: transparent;")
         btn_remove.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         btn_remove.setVisible(index >= self._initial_components)
         frame_layout.addWidget(btn_remove)
@@ -4563,6 +4610,7 @@ class TabularQueryBuilderDialog(QDialog):
         comp_widget = {
             'frame': frame,
             'inputs': inputs,
+            'indicators': indicators,
             'btn_add_word': btn_add_word,
             'btn_remove': btn_remove,
             'title_label': title_label,
@@ -4587,7 +4635,8 @@ class TabularQueryBuilderDialog(QDialog):
         container_layout.addStretch()
 
         dist_label = QLabel(tr("Distance"))
-        dist_label.setStyleSheet("font-size: 10px; color: #7f8c8d;")
+        dist_color = '#aab' if self._is_dark else '#7f8c8d'
+        dist_label.setStyleSheet(f"font-size: 10px; color: {dist_color};")
         dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(dist_label)
 
@@ -4600,7 +4649,8 @@ class TabularQueryBuilderDialog(QDialog):
         container_layout.addWidget(spinner)
 
         words_label = QLabel(tr("words"))
-        words_label.setStyleSheet("font-size: 9px; color: #95a5a6;")
+        words_sub_color = '#999' if self._is_dark else '#95a5a6'
+        words_label.setStyleSheet(f"font-size: 9px; color: {words_sub_color};")
         words_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(words_label)
 
@@ -4726,6 +4776,22 @@ class TabularQueryBuilderDialog(QDialog):
         finally:
             self._updating_modifiers = False
 
+    _MOD_DISPLAY = {
+        'prefix': '#_', 'suffix': '_#',
+        'wildcard_prefix': '*_', 'wildcard_suffix': '_*',
+        'plene': '%', 'negation': '−',
+    }
+
+    def _update_mod_indicator(self, ci, wi):
+        """Update the modifier indicator label for a specific word."""
+        if ci < len(self._component_widgets) and wi < len(self._component_widgets[ci].get('indicators', [])):
+            mods = self._component_data[ci]['words'][wi]['mods']
+            parts = [v for k, v in self._MOD_DISPLAY.items() if mods.get(k)]
+            text = ' '.join(parts)
+            ind = self._component_widgets[ci]['indicators'][wi]
+            ind.setText(text)
+            ind.setVisible(bool(text))
+
     def _on_modifier_changed(self):
         """Save modifier state to the active word's data."""
         if self._updating_modifiers or self._active_word is None:
@@ -4742,6 +4808,7 @@ class TabularQueryBuilderDialog(QDialog):
             'negation': self.chk_negation.isChecked(),
         }
         self._component_data[ci]['words'][wi]['mods'] = mods
+        self._update_mod_indicator(ci, wi)
         self._update_preview()
 
     def _on_word_text_changed(self, text):
@@ -6835,12 +6902,12 @@ class GenizahGUI(QMainWindow):
         responsa_sub_layout.addWidget(self.chk_bidirectional)
 
         # Syntax legend label
-        syntax_legend = QLabel("  #word " + tr("prefix") + "  |  word# " + tr("suffix") + "  |  #word# " + tr("both") + "  |  %word " + tr("plene") + "  |  *word " + tr("wildcard") + "  |  (a/b) " + tr("OR"))
+        syntax_legend = QLabel("  #מילה " + tr("prefix") + "  |  מילה# " + tr("suffix") + "  |  %מילה " + tr("plene") + "  |  *מילה " + tr("wildcard") + "  |  (א/ב) " + tr("OR") + "  |  -מילה " + tr("Exclude"))
         syntax_legend.setStyleSheet("font-size: 10px; color: #7f8c8d;")
         responsa_sub_layout.addWidget(syntax_legend)
 
-        # Query Builder button
-        self.btn_query_builder = QPushButton(tr("Query Builder"))
+        # Tabular Search button
+        self.btn_query_builder = QPushButton(tr("Tabular Search"))
         self.btn_query_builder.setToolTip(tr("Open the tabular query builder"))
         self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         self.btn_query_builder.clicked.connect(self._open_query_builder)
@@ -13228,9 +13295,19 @@ class GenizahGUI(QMainWindow):
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
         dlg = TabularQueryBuilderDialog(self)
+        # Sync search options into dialog from outer checkboxes
+        dlg.chk_opt_variants.setChecked(self.chk_responsa_variants.isChecked())
+        dlg.chk_opt_ja.setChecked(self.chk_responsa_ja.isChecked())
+        dlg.chk_opt_flex.setChecked(self.chk_responsa_flex.isChecked())
+        dlg.chk_opt_bidir.setChecked(self.chk_bidirectional.isChecked())
         if dlg.exec() == QDialog.DialogCode.Accepted:
             syntax = dlg.get_syntax()
             negated = dlg.get_negated_words()
+            # Sync search options back to outer checkboxes
+            self.chk_responsa_variants.setChecked(dlg.chk_opt_variants.isChecked())
+            self.chk_responsa_ja.setChecked(dlg.chk_opt_ja.isChecked())
+            self.chk_responsa_flex.setChecked(dlg.chk_opt_flex.isChecked())
+            self.chk_bidirectional.setChecked(dlg.chk_opt_bidir.isChecked())
             if syntax.strip():
                 # One-way sync: builder -> text field
                 self.query_input.setText(syntax)
