@@ -321,6 +321,35 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 
+                        # --- Live shortcut detection: switch mode when user types prefix + space ---
+                        _shortcut_prefixes = [
+                            ('???', 'variants_maximum'),
+                            ('??', 'variants_extended'),
+                            ('R', 'responsa'),
+                            ('?', 'variants'),
+                            ('=', 'exact'),
+                            ('~', 'fuzzy'),
+                            ('/', 'Regex'),
+                            ('$', 'Title'),
+                            ('#', 'Shelfmark'),
+                        ]
+
+                        def on_query_input_change():
+                            val = query_input.value or ''
+                            # Check if text starts with a shortcut followed by a space
+                            for prefix, target_mode in _shortcut_prefixes:
+                                if val.startswith(prefix + ' ') or val == prefix + ' ':
+                                    # Strip the prefix and leading space
+                                    clean = val[len(prefix):].lstrip()
+                                    query_input.value = clean
+                                    # Switch mode (map variant subtypes for slider)
+                                    if use_slider and target_mode in ('variants_extended', 'variants_maximum'):
+                                        mode_select.value = 'variants'
+                                    else:
+                                        mode_select.value = target_mode
+                                    break
+                        query_input.on('update:model-value', on_query_input_change)
+
                         # Save query on change
                         def save_query():
                             app.storage.user['search_query'] = query_input.value or ''

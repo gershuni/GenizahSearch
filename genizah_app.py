@@ -6106,7 +6106,7 @@ class GenizahGUI(QMainWindow):
         self.query_input = QLineEdit(); self.query_input.setPlaceholderText(tr("Search terms, title or shelfmark..."))
         self.query_input.setToolTip(tr("Search Shortcuts:\n= = Exact match\n? = Variants (use buttons to select level)\n~ = Fuzzy search\n/ = Regex\n$ = Title search\n# = Shelfmark search\nR = Responsa mode\n\nExample: ?שלום"))
         self.query_input.returnPressed.connect(self.toggle_search)
-        self.query_input.textChanged.connect(self._update_variant_count_preview)
+        self.query_input.textChanged.connect(self._on_query_text_changed)
 
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
@@ -12571,6 +12571,42 @@ class GenizahGUI(QMainWindow):
             self.variant_slider.setValue(value)
             self.variant_slider_label.setText(str(value))
             self.variant_slider.blockSignals(False)
+
+    # Shortcut prefixes: longest first to avoid partial matches (??? before ??)
+    _SHORTCUT_PREFIXES = [
+        ('???', 'variants_maximum'),
+        ('??', 'variants_extended'),
+        ('R', 'responsa'),
+        ('?', 'variants'),
+        ('=', 'literal'),
+        ('~', 'fuzzy'),
+        ('/', 'Regex'),
+        ('$', 'Title'),
+        ('#', 'Shelfmark'),
+    ]
+
+    def _on_query_text_changed(self):
+        """Handle live text changes: detect shortcut prefixes and update variant preview."""
+        text = self.query_input.text()
+        # Check for shortcut prefix followed by space
+        for prefix, target_mode in self._SHORTCUT_PREFIXES:
+            if text.startswith(prefix + ' ') or text == prefix + ' ':
+                clean = text[len(prefix):].lstrip()
+                # Block signals to avoid recursive textChanged
+                self.query_input.blockSignals(True)
+                self.query_input.setText(clean)
+                self.query_input.blockSignals(False)
+                # Switch mode combo
+                modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+                if target_mode in ('variants_extended', 'variants_maximum'):
+                    target_mode = 'variants'
+                try:
+                    combo_idx = modes.index(target_mode)
+                    self.mode_combo.setCurrentIndex(combo_idx)
+                except ValueError:
+                    pass
+                break
+        self._update_variant_count_preview()
 
     def _update_variant_count_preview(self):
         """Update the variant count label based on current query and slider value."""
