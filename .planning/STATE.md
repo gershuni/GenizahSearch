@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Users can search the Genizah corpus using Responsa Project-style syntax and a tabular query builder
-**Current focus:** v5.7.0 Responsa Search -- Phase 16 complete, ready for Phase 17
+**Current focus:** v5.7.0 Responsa Search -- ALL PHASES COMPLETE (14-17)
 
 ## Current Position
 
-Phase: 16 of 17 (Tabular Builder) -- COMPLETE
-Plan: 3 of 3 complete
-Status: **Phase 16 COMPLETE — verified 6/6 must-haves. Ready for Phase 17 (Integration Testing)**
-Last activity: 2026-02-10 - Completed quick task 8: Fix web corrections singleton Supabase client bug + improve desktop login errors
+Phase: 17 of 17 (Integration Testing) -- COMPLETE
+Plan: 2 of 2 complete
+Status: **Phase 17 COMPLETE — regression tests + performance benchmarks delivered. All 170 Responsa tests passing.**
+Last activity: 2026-02-10 - Completed 17-02: Regression & Performance Testing
 
-Progress: [##################__] 82% (9/11 plans across phases 14-17)
+Progress: [####################] 100% (11/11 plans across phases 14-17)
 
 ## Milestone History
 
@@ -75,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 16]: Web builder uses pre-created hidden elements with visibility toggling (not dynamic creation)
 - [Phase 16]: Web builder uses closure factory pattern for proper loop variable capture in event handlers
 - [Phase 16]: Web builder negated words stored on SearchUIState, merged into exclude_words in execute_search
+- [Phase 17]: Behavioral regex testing: assert match/reject instead of pattern string equality (per research Pitfall 4)
+- [Phase 17]: Dual performance threshold: 5s UAT target + 10s automated ceiling to prevent flaky CI
+- [Phase 17]: 30 regression tests for non-Responsa modes (exceeded plan's 8-10 target for deeper coverage)
 
 ### Data State
 
@@ -117,6 +120,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed quick-8 (fix web corrections singleton Supabase client)
+Stopped at: Completed 17-02 (Regression & Performance Testing) -- Phase 17 complete
 Resume file: None
-Notes: Quick task 8 complete. Per-user Supabase client for 28 write functions, session token storage in all login paths, desktop error messages improved. 135 Responsa tests passing. Next: Phase 17 (Integration Testing).
+Notes: Phase 17 complete. 35 new tests added (30 regression + 5 performance). Total: 170 Responsa tests passing. All phases 14-17 of v5.7.0 milestone delivered. Ready for UAT and release.
