@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 Phase: 16 of 17 (Tabular Builder) -- COMPLETE
 Plan: 3 of 3 complete
 Status: **Phase 16 COMPLETE — verified 6/6 must-haves. Ready for Phase 17 (Integration Testing)**
-Last activity: 2026-02-10 -- Phase 16 execution complete with verification passed
+Last activity: 2026-02-10 - Completed quick task 8: Fix web corrections singleton Supabase client bug + improve desktop login errors
 
 Progress: [##################__] 82% (9/11 plans across phases 14-17)
 
@@ -103,6 +103,12 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 - ~~BUG (Prefix shortcuts in Responsa)~~: **FIXED** (dfe9914) — responsa_mode=True passed to parse_query_syntax
 - ~~BUG (Sofit letters before suffixes)~~: **FIXED** (f1553a4) — ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ conversion
 - ~~BUG (#% combined operators)~~: **FIXED** (cd7be21) — any-order parsing with while loop
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 8 | Fix web corrections singleton Supabase client bug + improve desktop login errors | 2026-02-10 | 787c236 | [8-fix-web-corrections-singleton-supabase-c](./quick/8-fix-web-corrections-singleton-supabase-c/) |
 
 ## Session Continuity
 
