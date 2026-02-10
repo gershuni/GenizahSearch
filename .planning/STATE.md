@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 ## Current Position
 
 Phase: 15 of 17 (Search UI) -- COMPLETE
-Plan: 2 of 2 complete
-Status: **Phase 15 complete (both web and desktop Responsa checkboxes), ready for Phase 16 (Tabular Builder)**
-Last activity: 2026-02-09 -- Plan 15-02 (Desktop Responsa Checkboxes) complete
+Plan: 4 of 4 complete
+Status: **Phase 15 complete (web+desktop dropdown mode, gap closure plans 03+04 done), ready for Phase 16 (Tabular Builder)**
+Last activity: 2026-02-10 -- Plan 15-04 (Desktop Responsa Dropdown Mode) complete
 
-Progress: [########____________] 50% (4/8 plans across phases 14-17)
+Progress: [##########__________] 62% (6/8 plans across phases 14-17)
 
 ## Milestone History
 
@@ -54,13 +54,14 @@ Recent decisions affecting current work:
 - responsa_options dict: {responsa_mode, variants, ja, flex_spacing, bidirectional, variant_mode}
 - Web Responsa checkbox order: Responsa Mode | Variants | JA | Flex Spacing
 - Bidirectional Gap in Advanced Options (not main row)
-- Amber badge indicator when Responsa mode hides mode dropdown
 - Mobile Responsa controls: icon button with ui.menu popup
 - URL state: history.replaceState with ?responsa=1&variants=1&ja=1&flex_spaces=1&bidirectional=1
-- Desktop Responsa row after row2 in create_search_tab layout
-- Desktop Bidirectional in Responsa row (not near gap input)
-- Desktop amber label indicator matches web pattern
 - Desktop no QSettings persistence for Responsa checkboxes
+- Desktop+Web: Responsa as combo mode option (dropdown), not separate checkbox row
+- Desktop: Responsa at combo index 2, all subsequent modes shifted +1
+- Desktop: Responsa base mode is 'exact', pipeline via responsa_options dict
+- Desktop: Old amber label, master toggle, _on_responsa_mode_toggled removed
+- [Phase 15]: Responsa is a first-class dropdown mode, not a separate checkbox toggle (15-03)
 
 ### Data State
 
@@ -87,7 +88,7 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 
 ## Session Continuity
 
-Last session: 2026-02-09
-Stopped at: Completed 15-02-PLAN.md (Desktop Responsa Checkboxes)
+Last session: 2026-02-10
+Stopped at: Completed 15-04-PLAN.md (Desktop Responsa Dropdown Mode)
 Resume file: None
-Notes: Phase 15 complete. Both web (15-01) and desktop (15-02) have Responsa checkbox rows with master toggle, sub-options, mode interaction, explosion warning, and expanded term count. SearchThread extended with backward-compatible responsa_options parameter. 99 tests passing. Next: Phase 16 (Tabular Builder).
+Notes: Phase 15 fully complete. Gap closure plans 15-03 (Web) and 15-04 (Desktop) replaced checkbox row approach with combo dropdown mode. Desktop: "Responsa (R)" at combo index 2, sub-options row with syntax legend, old toggle/amber label removed. 99 tests passing. Next: Phase 16 (Tabular Builder).
