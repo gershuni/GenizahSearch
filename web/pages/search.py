@@ -15,7 +15,7 @@ from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
 from web.services import get_service, BrowsePage
-from genizah_core import SearchEngine, get_library_display
+from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from web.components.translate_button import create_translatable_text
 from urllib.parse import quote
@@ -48,6 +48,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.update_timer = None  # Track timer to prevent duplicates
             self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
             self.displayed_results = []  # Currently rendered subset (may be filtered)
+            self.builder_negated_words: list = []  # Words negated via Query Builder
 
     search_state = SearchUIState()
 
@@ -506,6 +507,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label('%word').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Plene/defective variants'))
                         ui.label('*word / word*').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Wildcard (prefix or suffix)'))
                         ui.label('(a/b)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR alternatives'))
+
+                    # Query Builder button (pushed to right side)
+                    ui.space()
+                    builder_btn = ui.button(tr('Query Builder'), icon='grid_view',
+                        on_click=lambda: open_query_builder()).classes('ml-auto').props('outline dense')
 
                 # Initially hide if mode is not responsa
                 responsa_sub_row.set_visibility(saved_mode == 'responsa')
@@ -1127,6 +1133,381 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.update_timer.deactivate()
     search_state.update_timer = ui.timer(0.5, update_progress_ui)
 
+    def open_query_builder():
+        """Open the tabular query builder dialog for composing Responsa queries visually."""
+
+        # === Builder State ===
+        _updating_modifiers = {'flag': False}  # Guard to prevent on_change loops when updating checkboxes
+
+        def make_word(text=''):
+            return {'text': text, 'mods': {
+                'prefix': False, 'suffix': False,
+                'wildcard_prefix': False, 'wildcard_suffix': False,
+                'plene': False, 'negation': False
+            }}
+
+        def make_component():
+            return {'words': [make_word(), make_word(), make_word(), make_word()]}
+
+        builder_state = {
+            'components': [make_component(), make_component()],
+            'distances': [0],
+            'scope': 'word_range',
+            'active_word': None,  # (comp_idx, word_idx) tuple
+            'num_components': 2,
+        }
+
+        # UI element references
+        comp_cards = []  # List of component card containers
+        word_inputs = []  # word_inputs[comp_idx][word_idx] = ui.input element
+        word_containers = []  # word_containers[comp_idx][word_idx] = container element
+        add_word_btns = []  # Per-component add word buttons
+        distance_spinners = []  # Distance column containers between components
+        distance_number_els = []  # The actual ui.number elements for distance
+        remove_comp_btns = []  # Remove buttons per component
+        visible_words = []  # visible_words[comp_idx] = number of visible word slots
+        preview_label_ref = {'el': None}
+        scope_toggle_ref = {'el': None}
+        add_comp_btn_ref = {'el': None}
+
+        # Modifier checkbox references
+        mod_cbs = {}
+
+        # === Core Functions ===
+        def update_preview():
+            """Regenerate preview text from current builder state."""
+            comps = []
+            for ci in range(builder_state['num_components']):
+                comp = builder_state['components'][ci]
+                words = []
+                for wi in range(visible_words[ci] if ci < len(visible_words) else 2):
+                    w = comp['words'][wi]
+                    words.append({'text': w['text'], 'mods': dict(w['mods'])})
+                comps.append({'words': words})
+            dists = builder_state['distances'][:builder_state['num_components'] - 1]
+            try:
+                syntax, neg = generate_tabular_syntax(comps, dists, builder_state['scope'])
+                if preview_label_ref['el']:
+                    if syntax.strip():
+                        neg_text = f"  [- {' '.join(neg)}]" if neg else ""
+                        preview_label_ref['el'].text = syntax + neg_text
+                    else:
+                        preview_label_ref['el'].text = tr('No words entered')
+            except Exception:
+                if preview_label_ref['el']:
+                    preview_label_ref['el'].text = ''
+
+        def on_word_focus(comp_idx, word_idx):
+            """Track the active word and update modifier checkboxes to reflect its state."""
+            builder_state['active_word'] = (comp_idx, word_idx)
+            _updating_modifiers['flag'] = True
+            try:
+                mods = builder_state['components'][comp_idx]['words'][word_idx]['mods']
+                for key, cb in mod_cbs.items():
+                    cb.set_value(mods.get(key, False))
+            finally:
+                _updating_modifiers['flag'] = False
+
+        def on_modifier_change(modifier_name, value):
+            """Save modifier change to the currently active word."""
+            if _updating_modifiers['flag']:
+                return
+            aw = builder_state['active_word']
+            if aw is None:
+                return
+            ci, wi = aw
+            builder_state['components'][ci]['words'][wi]['mods'][modifier_name] = value
+            update_preview()
+
+        def on_word_text_change(comp_idx, word_idx, value):
+            """Update builder state when word text changes."""
+            builder_state['components'][comp_idx]['words'][word_idx]['text'] = value or ''
+            update_preview()
+
+        def on_distance_change(pair_idx, value):
+            """Update distance between component pair."""
+            while len(builder_state['distances']) <= pair_idx:
+                builder_state['distances'].append(0)
+            builder_state['distances'][pair_idx] = int(value or 0)
+            update_preview()
+
+        def on_scope_change(value):
+            """Toggle scope and show/hide distance spinners."""
+            builder_state['scope'] = value
+            show_dists = (value == 'word_range')
+            for ds in distance_spinners:
+                ds.set_visibility(show_dists)
+            update_preview()
+
+        def add_word_slot(comp_idx):
+            """Show the next hidden word slot in a component."""
+            if comp_idx >= len(visible_words):
+                return
+            if visible_words[comp_idx] < 4:
+                wi = visible_words[comp_idx]
+                visible_words[comp_idx] += 1
+                if comp_idx < len(word_containers) and wi < len(word_containers[comp_idx]):
+                    word_containers[comp_idx][wi].set_visibility(True)
+                # Hide the + button if we've reached 4
+                if visible_words[comp_idx] >= 4 and comp_idx < len(add_word_btns):
+                    add_word_btns[comp_idx].set_visibility(False)
+
+        def remove_component(comp_idx):
+            """Remove a component (only 3rd and 4th can be removed)."""
+            n = builder_state['num_components']
+            if n <= 2 or comp_idx < 2:
+                return
+            # Hide this component card
+            if comp_idx < len(comp_cards):
+                comp_cards[comp_idx].set_visibility(False)
+            # Hide the distance spinner before this component
+            dist_idx = comp_idx - 1
+            if dist_idx < len(distance_spinners):
+                distance_spinners[dist_idx].set_visibility(False)
+            # Clear word data
+            builder_state['components'][comp_idx] = make_component()
+            builder_state['num_components'] -= 1
+            # Show add component button if under max
+            if add_comp_btn_ref['el'] and builder_state['num_components'] < 4:
+                add_comp_btn_ref['el'].set_visibility(True)
+            update_preview()
+
+        def add_component():
+            """Add a new component (up to 4)."""
+            n = builder_state['num_components']
+            if n >= 4:
+                return
+            # Show the next hidden component card
+            if n < len(comp_cards):
+                comp_cards[n].set_visibility(True)
+                visible_words[n] = 2  # Reset to 2 visible words
+                # Show first 2 word slots, hide 3rd and 4th
+                for wi in range(4):
+                    if n < len(word_containers) and wi < len(word_containers[n]):
+                        word_containers[n][wi].set_visibility(wi < 2)
+                if n < len(add_word_btns):
+                    add_word_btns[n].set_visibility(True)
+            # Show the distance spinner before this new component
+            dist_idx = n - 1
+            if dist_idx < len(distance_spinners):
+                distance_spinners[dist_idx].set_visibility(True)
+            # Ensure distance list is long enough
+            while len(builder_state['distances']) <= dist_idx:
+                builder_state['distances'].append(0)
+            # Show remove button for this component
+            if n < len(remove_comp_btns):
+                remove_comp_btns[n].set_visibility(True)
+            builder_state['num_components'] = n + 1
+            # Hide add button if at max
+            if add_comp_btn_ref['el'] and builder_state['num_components'] >= 4:
+                add_comp_btn_ref['el'].set_visibility(False)
+            update_preview()
+
+        def clear_all():
+            """Reset all inputs without closing the dialog."""
+            for ci in range(4):
+                for wi in range(4):
+                    builder_state['components'][ci]['words'][wi] = make_word()
+                    if ci < len(word_inputs) and wi < len(word_inputs[ci]):
+                        word_inputs[ci][wi].set_value('')
+            # Reset distances
+            for i in range(3):
+                builder_state['distances'][i] = 0
+                if i < len(distance_number_els):
+                    distance_number_els[i].set_value(0)
+            # Reset scope
+            builder_state['scope'] = 'word_range'
+            if scope_toggle_ref['el']:
+                scope_toggle_ref['el'].set_value('word_range')
+            # Reset to 2 components, 2 words each
+            for ci in range(4):
+                if ci < len(comp_cards):
+                    comp_cards[ci].set_visibility(ci < 2)
+                visible_words[ci] = 2
+                for wi in range(4):
+                    if ci < len(word_containers) and wi < len(word_containers[ci]):
+                        word_containers[ci][wi].set_visibility(ci < 2 and wi < 2)
+                if ci < len(add_word_btns):
+                    add_word_btns[ci].set_visibility(ci < 2)
+                if ci < len(remove_comp_btns):
+                    remove_comp_btns[ci].set_visibility(False)
+            builder_state['num_components'] = 2
+            builder_state['active_word'] = None
+            # Show only the first distance spinner (between comp 0 and 1, word_range is default scope)
+            for i, ds in enumerate(distance_spinners):
+                ds.set_visibility(i < 1)
+            # Reset modifier checkboxes
+            _updating_modifiers['flag'] = True
+            for cb in mod_cbs.values():
+                cb.set_value(False)
+            _updating_modifiers['flag'] = False
+            if add_comp_btn_ref['el']:
+                add_comp_btn_ref['el'].set_visibility(True)
+            update_preview()
+
+        async def on_apply():
+            """Generate syntax, populate search field, close dialog, trigger search."""
+            comps = []
+            for ci in range(builder_state['num_components']):
+                comp = builder_state['components'][ci]
+                words = []
+                for wi in range(visible_words[ci] if ci < len(visible_words) else 2):
+                    w = comp['words'][wi]
+                    words.append({'text': w['text'], 'mods': dict(w['mods'])})
+                comps.append({'words': words})
+            dists = builder_state['distances'][:builder_state['num_components'] - 1]
+            syntax, neg = generate_tabular_syntax(comps, dists, builder_state['scope'])
+            if not syntax.strip():
+                ui.notify(tr('No words entered'), type='warning')
+                return
+            # Set negated words on search state for execute_search to pick up
+            search_state.builder_negated_words = neg
+            # Set query and close dialog
+            query_input.set_value(syntax)
+            builder_dialog.close()
+            # Trigger search
+            await execute_search()
+
+        # === Build the Dialog UI ===
+        with ui.dialog() as builder_dialog, ui.card().classes('p-4 q-pa-md builder-dialog-card').style(
+            'min-width: min(700px, 95vw); max-width: 900px; direction: rtl;'
+        ):
+            # Title
+            with ui.row().classes('w-full items-center justify-between mb-2'):
+                ui.label(tr('Query Builder')).classes('text-lg font-bold').style('color: var(--primary-600);')
+                ui.button(icon='close', on_click=builder_dialog.close).props('flat round dense')
+
+            # Scope Toggle
+            scope_toggle = ui.toggle(
+                {'word_range': tr('Word Range'), 'within_document': tr('Within Document')},
+                value='word_range',
+                on_change=lambda e: on_scope_change(e.value)
+            ).classes('mb-3')
+            scope_toggle_ref['el'] = scope_toggle
+
+            # Pre-create all 4 components and 3 distance spinners (hide extras)
+            # Ensure builder_state has 4 components and 3 distances
+            while len(builder_state['components']) < 4:
+                builder_state['components'].append(make_component())
+            while len(builder_state['distances']) < 3:
+                builder_state['distances'].append(0)
+
+            # Components container (RTL: component 1 on right)
+            with ui.row().classes('w-full gap-3 flex-wrap justify-end items-start') as comps_row:
+                for ci in range(4):
+                    # Distance spinner BEFORE component (except for first component)
+                    if ci > 0:
+                        with ui.column().classes('items-center justify-center gap-0').style('min-width: 60px;') as dist_col:
+                            ui.label(tr('Distance')).classes('text-xs').style('color: var(--text-muted);')
+                            dist_num = ui.number(
+                                value=0, min=0, max=50
+                            ).classes('w-16').props('outlined dense')
+
+                            def _make_dist_handler(dn, idx):
+                                def handler():
+                                    on_distance_change(idx, dn.value)
+                                return handler
+                            dist_num.on('update:model-value', _make_dist_handler(dist_num, ci - 1))
+                        dist_col.set_visibility(ci < 2)  # Only show first distance initially
+                        distance_spinners.append(dist_col)
+                        distance_number_els.append(dist_num)
+
+                    # Component card
+                    with ui.card().classes('p-3').style(
+                        'border: 1px solid #e0e0e0; border-radius: 8px; min-width: 150px; flex: 1;'
+                    ) as comp_card:
+                        with ui.row().classes('w-full items-center justify-between mb-1'):
+                            ui.label(f"{tr('Component')} {ci+1}").classes('text-sm font-medium')
+                            # Remove button (only for 3rd and 4th components)
+                            rm_btn = ui.button(icon='close', on_click=lambda _, c=ci: remove_component(c)).props(
+                                'flat round dense size=xs color=red'
+                            )
+                            rm_btn.set_visibility(False)  # Hidden initially
+                            remove_comp_btns.append(rm_btn)
+
+                        comp_word_inputs = []
+                        comp_word_containers = []
+
+                        for wi in range(4):
+                            with ui.row().classes('w-full items-center gap-1') as word_row:
+                                inp = ui.input(
+                                    placeholder=f"\u05de\u05d9\u05dc\u05d4 {wi+1}"  # "מילה N"
+                                ).classes('flex-grow').props('outlined dense').style('direction: rtl;')
+                                inp.on('focus', lambda _, c=ci, w=wi: on_word_focus(c, w))
+
+                                def _make_text_handler(input_el, c_idx, w_idx):
+                                    def handler():
+                                        on_word_text_change(c_idx, w_idx, input_el.value)
+                                    return handler
+                                inp.on('update:model-value', _make_text_handler(inp, ci, wi))
+                            word_row.set_visibility(wi < 2)  # First 2 visible
+                            comp_word_inputs.append(inp)
+                            comp_word_containers.append(word_row)
+
+                        word_inputs.append(comp_word_inputs)
+                        word_containers.append(comp_word_containers)
+
+                        # Add Word button
+                        aw_btn = ui.button(tr('Add Word'), icon='add', on_click=lambda _, c=ci: add_word_slot(c)).props(
+                            'outline dense size=sm'
+                        ).classes('mt-1')
+                        add_word_btns.append(aw_btn)
+
+                    comp_card.set_visibility(ci < 2)  # Only first 2 visible
+                    comp_cards.append(comp_card)
+
+            visible_words.extend([2, 2, 2, 2])  # Initial visible word count per component
+
+            # Add Component button
+            add_comp_btn = ui.button(tr('Add Component'), icon='add',
+                on_click=lambda: add_component()).props('outline dense').classes('mt-2')
+            add_comp_btn_ref['el'] = add_comp_btn
+
+            # === Shared Modifier Checkboxes Row ===
+            with ui.row().classes('w-full gap-3 mt-3 items-center flex-wrap'):
+                ui.label(tr('Modifiers') + ':').classes('text-sm font-medium')
+                prefix_cb = ui.checkbox('# _').tooltip(tr('Prefixes') + ' \u2014 \u05e7\u05d9\u05d3\u05d5\u05de\u05d5\u05ea \u05d3\u05e7\u05d3\u05d5\u05e7\u05d9\u05d5\u05ea (\u05d5/\u05d4/\u05d1/\u05db/\u05dc/\u05de/\u05e9)')
+                suffix_cb = ui.checkbox('_ #').tooltip(tr('Suffixes') + ' \u2014 \u05e1\u05d9\u05d5\u05de\u05d5\u05ea \u05d3\u05e7\u05d3\u05d5\u05e7\u05d9\u05d5\u05ea')
+                wild_start_cb = ui.checkbox('* _').tooltip(tr('Wildcard Start') + ' \u2014 \u05de\u05d9\u05dc\u05d9\u05dd \u05e9\u05de\u05e1\u05ea\u05d9\u05d9\u05de\u05d5\u05ea \u05d1...')
+                wild_end_cb = ui.checkbox('_ *').tooltip(tr('Wildcard End') + ' \u2014 \u05de\u05d9\u05dc\u05d9\u05dd \u05e9\u05de\u05ea\u05d7\u05d9\u05dc\u05d5\u05ea \u05d1...')
+                plene_cb = ui.checkbox('%').tooltip(tr('Plene/Defective') + ' \u2014 \u05db\u05ea\u05d9\u05d1 \u05de\u05dc\u05d0/\u05d7\u05e1\u05e8 (\u05d5/\u05d9)')
+                negation_cb = ui.checkbox('\u2715').tooltip(tr('Exclude') + ' \u2014 \u05e9\u05dc\u05d9\u05dc\u05d4, \u05d4\u05d5\u05e6\u05d0 \u05de\u05d9\u05dc\u05d4 \u05d6\u05d5')
+
+                mod_cbs['prefix'] = prefix_cb
+                mod_cbs['suffix'] = suffix_cb
+                mod_cbs['wildcard_prefix'] = wild_start_cb
+                mod_cbs['wildcard_suffix'] = wild_end_cb
+                mod_cbs['plene'] = plene_cb
+                mod_cbs['negation'] = negation_cb
+
+                def _make_mod_handler(cb_el, mod_name):
+                    def handler():
+                        on_modifier_change(mod_name, cb_el.value)
+                    return handler
+                prefix_cb.on('update:model-value', _make_mod_handler(prefix_cb, 'prefix'))
+                suffix_cb.on('update:model-value', _make_mod_handler(suffix_cb, 'suffix'))
+                wild_start_cb.on('update:model-value', _make_mod_handler(wild_start_cb, 'wildcard_prefix'))
+                wild_end_cb.on('update:model-value', _make_mod_handler(wild_end_cb, 'wildcard_suffix'))
+                plene_cb.on('update:model-value', _make_mod_handler(plene_cb, 'plene'))
+                negation_cb.on('update:model-value', _make_mod_handler(negation_cb, 'negation'))
+
+            # === Live Preview ===
+            with ui.row().classes('w-full mt-3 items-center'):
+                ui.label(tr('Preview') + ':').classes('text-sm font-medium')
+                preview_label = ui.label(tr('No words entered')).classes('text-sm font-mono').style(
+                    'direction: rtl; color: var(--primary-600);'
+                )
+                preview_label_ref['el'] = preview_label
+
+            # === Bottom Buttons ===
+            with ui.row().classes('w-full justify-between mt-4'):
+                ui.button(tr('Clear All'), on_click=clear_all, icon='delete_sweep').props('flat')
+                with ui.row().classes('gap-2'):
+                    ui.button(tr('Cancel'), on_click=builder_dialog.close).props('flat')
+                    ui.button(tr('Apply'), on_click=on_apply, icon='check').props('color=primary')
+
+        builder_dialog.open()
+
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
@@ -1190,8 +1571,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.progress = current / total
                 search_state.status = f"{current} / {total}"
 
-        # Get NOT filter words
+        # Get NOT filter words (merge manual filter + builder negated words)
         not_words = not_filter.value.split() if not_filter.value else []
+        if search_state.builder_negated_words:
+            not_words = not_words + search_state.builder_negated_words
 
         # Build Responsa options dict from mode selection
         responsa_options = None
