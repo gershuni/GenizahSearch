@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 ## Current Position
 
 Phase: 17 of 17 (Integration Testing) -- COMPLETE
-Plan: 2 of 2 complete
-Status: **Phase 17 COMPLETE — parity, edge case, regression tests + performance benchmarks delivered. All 186 Responsa tests passing.**
-Last activity: 2026-02-10 - Re-executed 17-01 with edge case tests (880fd7f)
+Plan: 5 of 5 complete (includes 3 UAT gap closure plans: 17-03, 17-04, 17-05)
+Status: **Phase 17 COMPLETE — all tests + UAT gap fixes delivered. Desktop tabular RTL fixed (17-05).**
+Last activity: 2026-02-10 - Executed 17-05 desktop tabular RTL fix (c52f740)
 
-Progress: [####################] 100% (11/11 plans across phases 14-17)
+Progress: [####################] 100% (14/14 plans across phases 14-17)
 
 ## Milestone History
 
@@ -80,6 +80,7 @@ Recent decisions affecting current work:
 - [Phase 17]: 30 regression tests for non-Responsa modes (exceeded plan's 8-10 target for deeper coverage)
 - [Phase 17]: Parametrized all 16 checkbox combinations for parity testing (not just sampling a few)
 - [Phase 17]: Used real expansion functions for explosion guard edge case tests (not mocked)
+- [Phase 17]: Desktop tabular builder RTL is unconditional (no CURRENT_LANG check) -- Hebrew search text always RTL
 
 ### Data State
 
@@ -123,6 +124,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Re-executed 17-01 with edge case tests added (880fd7f)
+Stopped at: Completed 17-05-PLAN.md (desktop tabular RTL fix)
 Resume file: None
-Notes: Phase 17 complete. 51 parity+edge case tests (17-01) + 35 regression+performance tests (17-02) = 86 new tests. Total: 186 Responsa tests passing (135 existing + 51 new). All phases 14-17 of v5.7.0 milestone delivered. Ready for UAT and release.
+Notes: Phase 17 fully complete including UAT gap closure plans (17-03 through 17-05). Desktop tabular builder now unconditionally RTL (c52f740). All Responsa tests passing.
