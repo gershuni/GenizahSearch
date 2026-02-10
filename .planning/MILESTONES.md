@@ -45,3 +45,29 @@
 **Git tag:** v5.6.0
 
 ---
+
+## v5.7.0 Responsa Search (Shipped: 2026-02-10)
+
+**Delivered:** Added Responsa Project-style advanced search to both web and desktop apps -- syntax parsing with wildcards, grammatical prefix/suffix expansion, Judeo-Arabic article forms, flexible spacing, bidirectional gap search, tabular query builder, and combinatorial explosion guards.
+
+**Phases completed:** 14-17 (14 plans total, including 5 gap closure plans)
+
+**Key accomplishments:**
+- Responsa query parser with full syntax: `#`prefix, suffix`#`, `*`wildcards, `(%/%)` plene/defective, `(a/b)` OR groups, `[N]` gap notation
+- Hebrew grammatical expansion (24 prefix forms + 25 suffix forms per word) with sofit letter conversion
+- Judeo-Arabic definite article expansion (8 forms per word) with simplified al- model
+- Combinatorial explosion guard with 6-step cascade (MAX_EXPANDED_TERMS=500)
+- Responsa as first-class dropdown mode in both web and desktop, with sub-option checkboxes and syntax legend
+- Tabular query builder dialogs (NiceGUI + PyQt6) with 2-4 components, per-word modifiers, live preview, one-way sync
+- 221 automated Responsa tests: parity (all 16 checkbox combos), regression (30 non-Responsa modes), edge cases, performance
+
+**Stats:**
+- 71 files modified
+- +12,670 / -213 lines
+- 4 phases (14-17), 14 plans, 2 days (Feb 9 -> Feb 10, 2026)
+- 25/25 requirements satisfied (audit passed)
+
+**Git tag:** v5.7.0
+
+---
+

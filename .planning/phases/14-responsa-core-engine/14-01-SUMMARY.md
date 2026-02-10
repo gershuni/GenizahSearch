@@ -7,9 +7,11 @@ tags: [responsa, hebrew-nlp, query-parser, prefix-expansion, judeo-arabic, explo
 # Dependency graph
 requires: []
 provides:
-  - ResponsaComponent dataclass for structured Responsa query tokens
-  - parse_responsa_query() tokenizer for Responsa syntax
+  - ResponsaComponent dataclass for structured Responsa query tokens (with suffix/plene fields)
+  - parse_responsa_query() tokenizer for Responsa syntax (including word#, #word#, %word)
   - expand_grammatical_prefixes() with 24 Hebrew prefix forms
+  - expand_grammatical_suffixes() with 25 Hebrew suffix forms
+  - expand_plene_defective() for plene/defective spelling variants (bidirectional ו/י)
   - expand_judeo_arabic() with simplified 8-form model
   - _apply_explosion_guard() with MAX_EXPANDED_TERMS=500 cascade
 affects: [14-02-PLAN, phase-15-search-ui, phase-16-tabular-builder]
@@ -52,12 +54,14 @@ completed: 2026-02-09
 - **Files modified:** 2
 
 ## Accomplishments
-- ResponsaComponent dataclass providing structured IR for all Responsa query syntax elements
-- parse_responsa_query() correctly handles: plain words, suffix/prefix wildcards, character patterns, # prefix, OR groups, hash+OR, inline alternations, multi-component queries
+- ResponsaComponent dataclass providing structured IR for all Responsa query syntax elements (including suffix/plene/defective fields)
+- parse_responsa_query() correctly handles: plain words, suffix/prefix wildcards, character patterns, #prefix, suffix#, #both#, %plene/defective, OR groups, hash+OR, inline alternations, multi-component queries, combined operators (%#word#)
 - expand_grammatical_prefixes() generates 24 unique prefixed forms per Hebrew word
+- expand_grammatical_suffixes() generates 25 unique suffixed forms per Hebrew stem (Bar-Ilan style)
+- expand_plene_defective() generates bidirectional ו/י spelling variants (removal + addition)
 - expand_judeo_arabic() generates 8 forms per word using simplified model (no sun letter assimilation per user directive)
-- _apply_explosion_guard() enforces MAX_EXPANDED_TERMS=500 with 4-step cascade: downgrade variants -> disable variants -> disable JA -> raise error
-- 37 comprehensive tests all passing
+- _apply_explosion_guard() enforces MAX_EXPANDED_TERMS=500 with 4-step cascade (now counts suffix/plene expansion in estimates)
+- 68 comprehensive tests all passing (31 new tests for suffix/plene/% features)
 
 ## Task Commits
 
