@@ -104,6 +104,10 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 - ~~BUG (Sofit letters before suffixes)~~: **FIXED** (f1553a4) — ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ conversion
 - ~~BUG (#% combined operators)~~: **FIXED** (cd7be21) — any-order parsing with while loop
 
+### Future Improvements
+
+- **Show user's pending corrections in browse page**: When a logged-in user views a page they previously submitted a correction for (pending/draft), show an indicator and display their corrected text instead of the AI transcription. Also add a badge in the menu showing how many pending corrections the user has.
+
 ### Quick Tasks Completed
 
 | # | Description | Date | Commit | Directory |
