@@ -10,7 +10,7 @@ Requirements for Responsa Search milestone. Each maps to roadmap phases.
 ### Core Engine
 
 - [ ] **CORE-01**: `parse_responsa_query()` parses Responsa syntax (`*` wildcards, `#` prefixes, `(/)` OR, inline alternatives) into structured `ResponsaComponent` list
-- [ ] **CORE-02**: `expand_grammatical_prefixes(word)` expands Hebrew grammatical prefixes (ו,ה,ב,כ,ל,מ,ש) producing ~10 forms per word
+- [ ] **CORE-02**: `expand_grammatical_prefixes(word)` expands Hebrew grammatical prefixes (single + compound: ו,ה,ב,כ,ל,מ,ש,וה,וב,...) producing ~25 forms per word
 - [ ] **CORE-03**: `expand_judeo_arabic(word)` expands definite article (אל-) with sun letter assimilation and preposition combinations, producing 8-14 forms per word
 - [ ] **CORE-04**: `build_tantivy_query()` supports Responsa components as Tantivy OR groups with boosting (exact terms boosted ^5)
 - [ ] **CORE-05**: `build_regex_pattern()` supports wildcards (`\S*`), alternations, and flexible spacing (`\s*` per char on original terms only)
