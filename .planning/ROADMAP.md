@@ -41,7 +41,7 @@ Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
 **Phase Numbering:** Continues from v5.6.0 milestone (Phase 12). Phases 14-17.
 
 - [x] **Phase 14: Responsa Core Engine** - Parse Responsa syntax, expand prefixes/JA, integrate with Tantivy and Regex (completed 2026-02-09)
-- [x] **Phase 15: Search UI (Both Apps)** - Checkboxes, mode switching, wiring to core engine (completed 2026-02-09)
+- [ ] **Phase 15: Search UI (Both Apps)** - Responsa as dropdown mode with sub-options and syntax legend (gap closure in progress)
 - [ ] **Phase 16: Tabular Query Builder** - Expansion panel (web) and QDialog (desktop) for visual query construction
 - [ ] **Phase 17: Integration Testing & Polish** - Cross-app verification, edge cases, performance testing
 
@@ -67,28 +67,30 @@ Plans:
 - [x] 14-02-PLAN.md -- TDD: Wire Responsa components into build_tantivy_query, build_regex_pattern, parse_query_syntax, execute_search
 
 ### Phase 15: Search UI (Both Apps)
-**Goal**: Both web and desktop apps have Responsa checkboxes that control search behavior, with proper mode interaction and state management
+**Goal**: Both web and desktop apps have Responsa mode accessible via the Mode dropdown, with sub-option checkboxes and syntax legend when active
 **Depends on**: Phase 14 (core engine must be functional)
 **Requirements**: WEB-01, WEB-02, WEB-03, WEB-06, WEB-07, DESK-01, DESK-02, DESK-03, DESK-06, DESK-07, DESK-08
 **Success Criteria** (what must be TRUE):
-  1. Web search page shows Responsa Mode, Variants, Judeo-Arabic, Flexible Spacing checkboxes; Bidirectional Gap in Advanced Options
-  2. Desktop search tab shows equivalent checkboxes in a new row
-  3. When Responsa Mode checked, mode dropdown hides in both apps; when unchecked, dropdown returns
-  4. Searching with Responsa Mode ON + `#שלום` finds results with Hebrew prefix forms (ושלום, השלום, etc.)
-  5. Searching with JA checkbox ON + `#כלמה` finds results with Judeo-Arabic article forms (אלכלמה, etc.)
-  6. URL in web reflects checkbox state: `?responsa=1&variants=1&ja=1&flex_spaces=1`
-  7. In PGP Tags mode, all Responsa checkboxes are hidden (not disabled)
+  1. Web Mode dropdown includes "Responsa (R)" after Variants; selecting it shows sub-options and syntax legend
+  2. Desktop Mode combo includes "Responsa (R)" after Variants; selecting it shows sub-options and syntax legend
+  3. Sub-options include Variants, Judeo-Arabic, Flex Spacing, and Bidirectional checkboxes
+  4. Searching with Responsa mode + `#word` syntax finds results with Hebrew prefix forms
+  5. Searching with JA checkbox ON + `#word` finds results with Judeo-Arabic article forms
+  6. URL in web reflects mode state: `?mode=responsa&variants=1&ja=1&flex_spaces=1`
+  7. Selecting PGP Tags or other modes hides Responsa sub-options
   8. Desktop checkboxes reset to defaults on app startup
   9. SearchThread receives `responsa_options` parameter without breaking existing callers
-**Plans:** 2 plans
+**Plans:** 4 plans
 
 Plans:
-- [x] 15-01-PLAN.md -- Web UI: Responsa checkboxes, mode interaction, URL state, explosion warning, expanded term count, core expanded count addition
-- [x] 15-02-PLAN.md -- Desktop UI: SearchThread extension, Responsa checkboxes, mode interaction, warning display, expanded term count
+- [x] 15-01-PLAN.md -- Web UI: Responsa checkboxes (original approach, superseded by 15-03)
+- [x] 15-02-PLAN.md -- Desktop UI: Responsa checkboxes (original approach, superseded by 15-04)
+- [ ] 15-03-PLAN.md -- Gap closure: Web Responsa as dropdown mode with sub-options and syntax legend
+- [ ] 15-04-PLAN.md -- Gap closure: Desktop Responsa as combo mode with sub-options and syntax legend
 
 ### Phase 16: Tabular Query Builder
 **Goal**: Users can visually construct Responsa queries using a tabular interface with 2-3 component columns, which generates syntax text inserted into the search field
-**Depends on**: Phase 15 (checkboxes must be wired to core engine)
+**Depends on**: Phase 15 (Responsa mode must be wired to core engine)
 **Requirements**: WEB-04, WEB-05, DESK-04, DESK-05
 **Success Criteria** (what must be TRUE):
   1. Web has a collapsible expansion panel with 2-3 component columns, each with word inputs and distance controls
@@ -107,7 +109,7 @@ Plans:
   2. Combinatorial explosion guard triggers correctly for complex queries (verified with test cases)
   3. Search performance is acceptable: Responsa query with variants + JA completes in <5 seconds on full corpus
   4. Edge cases handled: empty query, single-character terms with flex spacing (min 3 chars), `#` in Shelfmark mode vs Responsa mode
-  5. Existing search modes (Exact, Variants, Fuzzy, Regex, Shelfmark, Title, PGP Tags) all work unchanged when Responsa checkbox is OFF
+  5. Existing search modes (Exact, Variants, Fuzzy, Regex, Shelfmark, Title, PGP Tags) all work unchanged when Responsa mode is OFF
 **Plans:** TBD
 
 ## Progress
@@ -117,7 +119,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 14. Responsa Core Engine | v5.7.0 | 2/2 | Complete | 2026-02-09 |
-| 15. Search UI (Both Apps) | v5.7.0 | 2/2 | Complete | 2026-02-09 |
+| 15. Search UI (Both Apps) | v5.7.0 | 2/4 | Gap closure | - |
 | 16. Tabular Query Builder | v5.7.0 | 0/? | Not started | - |
 | 17. Integration Testing & Polish | v5.7.0 | 0/? | Not started | - |
 
