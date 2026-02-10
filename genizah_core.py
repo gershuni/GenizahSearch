@@ -4453,11 +4453,24 @@ def expand_judeo_arabic(word: str) -> List[str]:
     return result
 
 
+
+# Hebrew final-letter to regular-letter mapping (sofit → normal)
+_SOFIT_TO_NORMAL = {
+    'ם': 'מ',
+    'ן': 'נ',
+    'ץ': 'צ',
+    'ף': 'פ',
+    'ך': 'כ',
+}
+
+
 def expand_grammatical_suffixes(word: str) -> List[str]:
     """Expand a Hebrew word with all grammatical suffix combinations.
 
     Uses the GRAMMATICAL_SUFFIXES constant to generate ~25 forms by
-    appending each suffix to the given word.
+    appending each suffix to the given word. When a suffix is added,
+    final letters (sofit) at the end of the base word are converted
+    to their regular forms (e.g., שלום# → שלומה, שלומות, not שלוםה).
 
     Args:
         word: Base Hebrew word (without any suffix)
@@ -4468,7 +4481,11 @@ def expand_grammatical_suffixes(word: str) -> List[str]:
     seen = set()
     result = []
     for suffix in GRAMMATICAL_SUFFIXES:
-        form = word + suffix
+        if suffix and word and word[-1] in _SOFIT_TO_NORMAL:
+            # Convert final letter to regular form before appending suffix
+            form = word[:-1] + _SOFIT_TO_NORMAL[word[-1]] + suffix
+        else:
+            form = word + suffix
         if form not in seen:
             seen.add(form)
             result.append(form)
