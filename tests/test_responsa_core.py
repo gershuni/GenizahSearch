@@ -624,20 +624,24 @@ class TestApplyExplosionGuard:
 
         1 word * 24 prefixes * 25 suffixes * 5 variants = 3000 >> 500.
         After disabling variants: 1 * 24 * 25 = 600 > 500 still.
-        So this should raise ValueError since even without variants/JA it exceeds 500.
+        With expanded cascade, the guard disables suffixes (bringing to 24*1=24)
+        instead of raising ValueError.
         """
         components = [
             ResponsaComponent(words=["שלום"], grammatical_prefixes=True, grammatical_suffixes=True),
         ]
         var_mgr = self._make_mock_var_mgr(variants_per_term=5)
-        with pytest.raises(ValueError, match="500|limit"):
-            _apply_explosion_guard(
-                components,
-                variants_on=True,
-                ja_on=False,
-                var_mgr=var_mgr,
-                variant_mode='variants'
-            )
+        expanded, warning, actual_opts = _apply_explosion_guard(
+            components,
+            variants_on=True,
+            ja_on=False,
+            var_mgr=var_mgr,
+            variant_mode='variants'
+        )
+        # Cascade should have disabled suffixes instead of erroring
+        assert warning is not None, "Should have triggered cascade warning"
+        assert "suffix" in warning.lower(), f"Warning should mention suffix disabling, got: {warning}"
+        assert expanded[0].grammatical_suffixes is False
 
     def test_suffixes_with_manageable_count(self):
         """Suffix expansion only (no prefixes) stays under limit without cascading."""
@@ -837,8 +841,8 @@ class TestGenerateTabularSyntax:
         assert 'word1' in syntax
         assert 'word2' in syntax
 
-    def test_negated_words_extracted(self):
-        """Word with negation=True -> word NOT in syntax string, but in returned negated_words."""
+    def test_negated_words_extracted_and_inline(self):
+        """Word with negation=True -> -word in syntax AND in returned negated_words."""
         components = [
             {'words': [
                 {'text': 'good', 'mods': {}},
@@ -847,8 +851,8 @@ class TestGenerateTabularSyntax:
             {'words': [{'text': 'other', 'mods': {}}]},
         ]
         syntax, negated = generate_tabular_syntax(components, [1])
-        assert 'bad' not in syntax
-        assert 'bad' in negated
+        assert '-bad' in syntax  # negated word embedded as -word
+        assert 'bad' in negated  # also extracted for backward compat
         assert 'good' in syntax
 
     def test_distance_zero_no_bracket(self):
@@ -861,3 +865,119 @@ class TestGenerateTabularSyntax:
         assert '[0]' not in syntax
         assert 'word1' in syntax
         assert 'word2' in syntax
+
+
+# ============================================================================
+# Negation with -word syntax (parse_responsa_query)
+# ============================================================================
+
+class TestNegationParsing:
+    """Tests for -word negation syntax in Responsa parser."""
+
+    def test_simple_negation(self):
+        """-word should produce a negated component."""
+        components = parse_responsa_query("שלום -רע")
+        assert len(components) == 2
+        assert components[0].negated is False
+        assert components[0].words == ["שלום"]
+        assert components[1].negated is True
+        assert components[1].words == ["רע"]
+
+    def test_negation_with_prefix(self):
+        """-#word should be negated with grammatical prefixes."""
+        components = parse_responsa_query("-#שלום")
+        assert len(components) == 1
+        assert components[0].negated is True
+        assert components[0].grammatical_prefixes is True
+        assert components[0].words == ["שלום"]
+
+    def test_negation_with_suffix(self):
+        """-word# should be negated with grammatical suffixes."""
+        components = parse_responsa_query("-שלום#")
+        assert len(components) == 1
+        assert components[0].negated is True
+        assert components[0].grammatical_suffixes is True
+        assert components[0].words == ["שלום"]
+
+    def test_negation_with_plene(self):
+        """-%word should be negated with plene/defective expansion."""
+        components = parse_responsa_query("-%שלום")
+        assert len(components) == 1
+        assert components[0].negated is True
+        assert components[0].plene_defective is True
+        assert components[0].words == ["שלום"]
+
+    def test_negation_with_wildcard_suffix(self):
+        """-word* should be negated with wildcard suffix."""
+        components = parse_responsa_query("-שלום*")
+        assert len(components) == 1
+        assert components[0].negated is True
+        assert components[0].wildcard == 'suffix'
+
+    def test_negation_with_or_group(self):
+        """-(word1/word2) should be negated OR group."""
+        components = parse_responsa_query("-(טוב/רע)")
+        assert len(components) == 1
+        assert components[0].negated is True
+        assert set(components[0].words) == {"טוב", "רע"}
+
+    def test_negation_mixed_query(self):
+        """Multiple components with some negated."""
+        components = parse_responsa_query("שלום עולם -רע -חטא")
+        positive = [c for c in components if not c.negated]
+        negated = [c for c in components if c.negated]
+        assert len(positive) == 2
+        assert len(negated) == 2
+        assert positive[0].words == ["שלום"]
+        assert positive[1].words == ["עולם"]
+        negated_words = [c.words[0] for c in negated]
+        assert "רע" in negated_words
+        assert "חטא" in negated_words
+
+    def test_lone_minus_ignored(self):
+        """A lone '-' should not crash the parser."""
+        components = parse_responsa_query("שלום - עולם")
+        # The lone '-' is either skipped or treated as empty; 2 real components
+        real_comps = [c for c in components if c.words and c.words[0].strip()]
+        assert len(real_comps) >= 2
+
+    def test_negation_in_component_dataclass(self):
+        """ResponsaComponent dataclass supports negated field."""
+        comp = ResponsaComponent(words=["test"], negated=True)
+        assert comp.negated is True
+        comp2 = ResponsaComponent(words=["test"])
+        assert comp2.negated is False
+
+    def test_generate_tabular_syntax_negation_inline(self):
+        """Tabular builder emits -word inline for negated words."""
+        components = [
+            {'words': [
+                {'text': 'שלום', 'mods': {}},
+                {'text': 'רע', 'mods': {'negation': True}},
+            ]},
+            {'words': [{'text': 'עולם', 'mods': {}}]},
+        ]
+        syntax, negated = generate_tabular_syntax(components, [3])
+        assert '-רע' in syntax  # inline negation
+        assert 'רע' in negated  # also in extracted list
+        assert 'שלום' in syntax
+        assert 'עולם' in syntax
+
+    def test_negation_roundtrip(self):
+        """Syntax with -word should roundtrip through parser."""
+        # Generate syntax with negation
+        components = [
+            {'words': [{'text': 'שלום', 'mods': {}}]},
+            {'words': [{'text': 'רע', 'mods': {'negation': True}}]},
+        ]
+        syntax, neg = generate_tabular_syntax(components, [])
+        assert '-רע' in syntax
+
+        # Parse it back
+        parsed = parse_responsa_query(syntax)
+        positive = [c for c in parsed if not c.negated]
+        negated = [c for c in parsed if c.negated]
+        assert len(positive) >= 1
+        assert any('שלום' in c.words for c in positive)
+        assert len(negated) >= 1
+        assert any('רע' in c.words for c in negated)

@@ -329,9 +329,10 @@ class TestExplosionGuardEndToEnd:
         )
         assert warning is not None, "Should have triggered cascade warning"
 
-    def test_prefix_plus_suffix_exceeds_500_raises_error(self):
+    def test_prefix_plus_suffix_cascades_down_instead_of_error(self):
         """1 word with #prefix + #suffix (both) -> 24 prefixes * 25 suffixes = 600
-        which exceeds 500 even without variants. Should raise ValueError."""
+        which exceeds 500 even without variants. With expanded cascade, the guard
+        should disable suffixes (bringing it to 24*5=120) instead of raising ValueError."""
         components = [
             ResponsaComponent(
                 words=["shalom"],
@@ -341,14 +342,20 @@ class TestExplosionGuardEndToEnd:
         ]
         var_mgr = self._make_mock_var_mgr(variants_per_term=5)
 
-        with pytest.raises(ValueError, match="500|limit"):
-            _apply_explosion_guard(
-                components,
-                variants_on=True,
-                ja_on=False,
-                var_mgr=var_mgr,
-                variant_mode='variants'
-            )
+        expanded, warning, actual_opts = _apply_explosion_guard(
+            components,
+            variants_on=True,
+            ja_on=False,
+            var_mgr=var_mgr,
+            variant_mode='variants'
+        )
+        # Cascade should have disabled suffixes (and possibly variants) instead of erroring
+        assert warning is not None, "Should have triggered cascade warning"
+        assert "suffix" in warning.lower() or "Grammatical suffix" in warning, (
+            f"Warning should mention suffix disabling, got: {warning}"
+        )
+        # The component's grammatical_suffixes should be False after cascade
+        assert expanded[0].grammatical_suffixes is False
 
     def test_two_words_prefix_only_no_variants_under_limit(self):
         """2 words with #prefix only, variants=False, ja=False ->

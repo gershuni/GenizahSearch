@@ -4197,6 +4197,7 @@ class ResponsaComponent:
     wildcard: Optional[str] = None          # None, 'suffix', 'prefix', 'pattern'
     wildcard_pattern: Optional[str] = None  # raw pattern for character patterns like *a*b*c*
     inline_pattern: Optional[str] = None    # for inline alternations like word(a/b)word
+    negated: bool = False                   # True if prefixed with - (exclude from results)
 
 
 def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
@@ -4303,7 +4304,8 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
 
     Returns:
         Tuple of (syntax_str, negated_words) where negated_words is a list of
-        words marked for exclusion (NOT embedded in syntax).
+        words marked for exclusion. Negated words are ALSO embedded in the syntax
+        as -word for display, but extracted separately for backward compatibility.
     """
     parts = []
     negated_words = []
@@ -4317,9 +4319,10 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
                 continue
             mods = word_info.get('mods', {})
 
-            # Check negation -- extract and skip from syntax
+            # Check negation -- embed as -word in syntax AND extract
             if mods.get('negation'):
                 negated_words.append(text)
+                words_with_mods.append(f'-{text}')
                 continue
 
             decorated = text
@@ -4404,6 +4407,12 @@ def _parse_single_token(token: str) -> ResponsaComponent:
     """
     original = token
 
+    # Check for leading - (negation)
+    has_negation = False
+    if token.startswith('-') and len(token) > 1:
+        has_negation = True
+        token = token[1:]
+
     # Strip leading operators (% and #) in any order
     # Supports: %#word, #%word, %word, #word
     has_percent = False
@@ -4445,6 +4454,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
                 grammatical_suffixes=trailing_hash_or,
                 plene_defective=has_percent,
                 wildcard=wildcard,
+                negated=has_negation,
             )
 
     # Check for inline alternation: text(a/b)text  (parentheses not at start)
@@ -4459,6 +4469,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
                 grammatical_suffixes=has_trailing_hash,
                 plene_defective=has_percent,
                 inline_pattern=token,
+                negated=has_negation,
             )
 
     # Wildcard detection
@@ -4479,6 +4490,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
                 plene_defective=has_percent,
                 wildcard=wildcard,
                 wildcard_pattern=wildcard_pattern,
+                negated=has_negation,
             )
         elif token.endswith('*') and not token.startswith('*'):
             wildcard = 'suffix'
@@ -4496,6 +4508,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
                 plene_defective=has_percent,
                 wildcard=wildcard,
                 wildcard_pattern=wildcard_pattern,
+                negated=has_negation,
             )
 
     return ResponsaComponent(
@@ -4504,6 +4517,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
         grammatical_suffixes=has_trailing_hash,
         plene_defective=has_percent,
         wildcard=wildcard,
+        negated=has_negation,
     )
 
 
@@ -4731,7 +4745,10 @@ def _apply_explosion_guard(
       1. Downgrade variant mode to 'variants' (basic, 30 pairs)
       2. Disable variants entirely
       3. Disable Judeo-Arabic expansion
-      4. If still over limit, raise ValueError
+      4. Disable plene/defective on all components
+      5. Disable grammatical suffixes on all components
+      6. Disable grammatical prefixes on all components
+      7. If still over limit, raise ValueError
 
     Args:
         components: List of ResponsaComponent objects from parse_responsa_query
@@ -4742,7 +4759,8 @@ def _apply_explosion_guard(
 
     Returns:
         Tuple of (components, warning_message, actual_options_dict)
-        - components: The original components (unchanged)
+        - components: The components (may be modified in-place if cascade steps 4-6
+          disabled plene_defective, grammatical_suffixes, or grammatical_prefixes)
         - warning_message: str describing what was downgraded, or None if no changes
         - actual_options: dict with keys 'variants_on', 'ja_on', 'variant_mode'
           reflecting the actual options after any downgrades
@@ -4803,7 +4821,49 @@ def _apply_explosion_guard(
                 'variant_mode': current_variant_mode,
             }
 
-    # Cascade 4: Still over limit -- nothing left to downgrade
+    # Cascade 4: Disable plene/defective on all components
+    any_plene = any(c.plene_defective for c in components)
+    if any_plene:
+        for c in components:
+            c.plene_defective = False
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Plene/defective expansion disabled")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 5: Disable grammatical suffixes on all components
+    any_suffixes = any(c.grammatical_suffixes for c in components)
+    if any_suffixes:
+        for c in components:
+            c.grammatical_suffixes = False
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Grammatical suffix expansion disabled")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 6: Disable grammatical prefixes on all components
+    any_prefixes = any(c.grammatical_prefixes for c in components)
+    if any_prefixes:
+        for c in components:
+            c.grammatical_prefixes = False
+        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
+        warnings.append("Grammatical prefix expansion disabled")
+        if count <= limit:
+            return components, '; '.join(warnings), {
+                'variants_on': current_variants_on,
+                'ja_on': current_ja_on,
+                'variant_mode': current_variant_mode,
+            }
+
+    # Cascade 7: Still over limit -- nothing left to downgrade
     raise ValueError(
         f"Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
         f"Please simplify your query by using fewer OR-group alternatives or "
@@ -4846,11 +4906,25 @@ def _build_wildcard_regex(component: dict) -> str:
 
     if wildcard == 'suffix':
         # Suffix wildcard: term\S*
+        # For Hebrew suffix wildcards, the trailing letter may be a sofit (final-form)
+        # letter. When followed by \S*, the sofit form will never match text where
+        # the stem continues with more letters (Hebrew uses normal form mid-word).
+        # Replace trailing sofit with a character class matching BOTH forms.
+        # Example: שלום -> שלו[םמ]\S* (matches both standalone שלום and continuation שלומ-)
         regex_terms = component.get('regex_terms', [])
         if regex_terms:
             # Sort by length descending, escape
             sorted_terms = sorted(set(regex_terms), key=len, reverse=True)
-            escaped = [re.escape(t) + r'\S*' for t in sorted_terms]
+            escaped = []
+            for t in sorted_terms:
+                if t and t[-1] in _SOFIT_TO_NORMAL:
+                    # Replace trailing sofit with char class matching both forms
+                    normal = _SOFIT_TO_NORMAL[t[-1]]
+                    sofit = t[-1]
+                    base = re.escape(t[:-1])
+                    escaped.append(f'{base}[{sofit}{normal}]' + r'\S*')
+                else:
+                    escaped.append(re.escape(t) + r'\S*')
             return f"({'|'.join(escaped)})"
         return ''
 
@@ -4993,6 +5067,18 @@ class SearchEngine:
                         clean_vars.append(f'"{t_clean}"^3')
                     else:
                         clean_vars.append(f'"{t_clean}"')
+
+                # For suffix wildcards, also add sofit-converted stem for better Tantivy recall.
+                # E.g., for שלום* the Tantivy query should also include שלומ so that
+                # documents containing only derived forms (e.g., שלומו) are found.
+                wildcard = comp.get('wildcard')
+                if wildcard == 'suffix':
+                    for w in comp.get('original_words', []):
+                        if w and w[-1] in _SOFIT_TO_NORMAL:
+                            converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
+                            if converted not in seen:
+                                seen.add(converted)
+                                clean_vars.append(f'"{converted}"^3')
 
                 # Flex spacing: add split alternatives so Tantivy finds
                 # documents where a word appears with spaces (e.g., "בן דוד"
@@ -5455,9 +5541,30 @@ class SearchEngine:
                 ja_on = actual_opts['ja_on']
                 variant_mode = actual_opts['variant_mode']
 
-            # d. Build per-component dicts with expanded terms
+            # d. Separate negated components from positive ones
+            positive_components = [c for c in components if not c.negated]
+            negated_components = [c for c in components if c.negated]
+
+            # Extract negated words and add to exclude_words
+            if negated_components:
+                negated_word_list = []
+                for nc in negated_components:
+                    for w in nc.words:
+                        negated_word_list.append(w)
+                        # Also expand plene/defective for negated words
+                        if nc.plene_defective:
+                            negated_word_list.extend(expand_plene_defective(w))
+                if negated_word_list:
+                    if exclude_words is None:
+                        exclude_words = []
+                    exclude_words = list(exclude_words) + negated_word_list
+
+            if not positive_components:
+                return []
+
+            # Build per-component dicts with expanded terms
             component_dicts = []
-            for comp in components:
+            for comp in positive_components:
                 # Start with component.words
                 expanded_words = list(comp.words)
 
