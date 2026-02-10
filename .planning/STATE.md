@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 Phase: 16 of 17 (Tabular Builder)
 Plan: 3 of 3 complete
 Status: **Phase 16 complete -- All 3 plans done (Core Engine, Web Builder, Desktop Builder)**
-Last activity: 2026-02-10 -- 16-03 complete: desktop TabularQueryBuilderDialog with full UI
+Last activity: 2026-02-10 -- 16-02 re-committed: web query builder dialog properly committed (1ef7365)
 
 Progress: [##################__] 82% (9/11 plans across phases 14-17)
 
@@ -72,6 +72,9 @@ Recent decisions affecting current work:
 - [Phase 16]: Desktop builder uses eventFilter for QLineEdit focus tracking (select-and-modify pattern)
 - [Phase 16]: Desktop builder dialog opens fresh each time (no state persistence)
 - [Phase 16]: Desktop uses query_input (not search_input) matching existing codebase naming
+- [Phase 16]: Web builder uses pre-created hidden elements with visibility toggling (not dynamic creation)
+- [Phase 16]: Web builder uses closure factory pattern for proper loop variable capture in event handlers
+- [Phase 16]: Web builder negated words stored on SearchUIState, merged into exclude_words in execute_search
 
 ### Data State
 
@@ -104,6 +107,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 16-03-PLAN.md (Desktop Tabular Builder)
+Stopped at: Re-committed 16-02-PLAN.md (Web Tabular Builder)
 Resume file: None
-Notes: Phase 16 complete. All 3 plans done. Desktop TabularQueryBuilderDialog with eventFilter focus tracking, 2-4 components, select-and-modify modifiers, live preview, one-way sync to search. 124 Responsa tests passing. Next: Phase 17 (Integration Testing).
+Notes: 16-02 web query builder re-committed (prior session left uncommitted changes). Phase 16 fully committed now. 124 Responsa tests passing. Next: Phase 17 (Integration Testing).
