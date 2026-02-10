@@ -1171,7 +1171,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'ja': responsa_ja_cb.value,
                 'flex_spacing': responsa_flex_cb.value,
                 'bidirectional': bidirectional_cb.value,
-                'variant_mode': 'exact',  # Base mode for Responsa (no separate variant level)
+                'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
             }
 
         def run_core_search():

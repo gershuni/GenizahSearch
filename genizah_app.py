@@ -12753,7 +12753,7 @@ class GenizahGUI(QMainWindow):
                 'ja': self.chk_responsa_ja.isChecked(),
                 'flex_spacing': self.chk_responsa_flex.isChecked(),
                 'bidirectional': self.chk_bidirectional.isChecked(),
-                'variant_mode': 'exact',
+                'variant_mode': 'variants' if self.chk_responsa_variants.isChecked() else 'exact',
             }
 
         if self.btn_lab_mode_toggle.isChecked():
