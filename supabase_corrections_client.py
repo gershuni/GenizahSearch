@@ -580,8 +580,23 @@ class SupabaseCorrectionsClient:
             return False, "Login failed"
 
         except AuthApiError as e:
-            return False, str(e)
+            error_msg = str(e).lower()
+            if 'invalid login credentials' in error_msg:
+                return False, "Invalid email or password. Please check your credentials and try again."
+            elif 'email not confirmed' in error_msg:
+                return False, "Email not confirmed. Please check your inbox for a confirmation link."
+            elif 'user not found' in error_msg:
+                return False, "No account found with this email. Please register first at genizahsearch.com."
+            elif 'too many requests' in error_msg or 'rate limit' in error_msg:
+                return False, "Too many login attempts. Please wait a few minutes and try again."
+            elif 'network' in error_msg or 'connection' in error_msg:
+                return False, "Network error. Please check your internet connection."
+            else:
+                return False, f"Login failed: {str(e)}"
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'connection' in error_msg or 'timeout' in error_msg or 'resolve' in error_msg:
+                return False, "Cannot reach server. Please check your internet connection and try again."
             return False, f"Login error: {str(e)}"
 
     def register(
