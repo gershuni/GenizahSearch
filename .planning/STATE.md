@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Phase: 17 of 17 (Integration Testing) -- COMPLETE
 Plan: 2 of 2 complete
-Status: **Phase 17 COMPLETE — regression tests + performance benchmarks delivered. All 170 Responsa tests passing.**
-Last activity: 2026-02-10 - Completed 17-02: Regression & Performance Testing
+Status: **Phase 17 COMPLETE — parity, edge case, regression tests + performance benchmarks delivered. All 186 Responsa tests passing.**
+Last activity: 2026-02-10 - Re-executed 17-01 with edge case tests (880fd7f)
 
 Progress: [####################] 100% (11/11 plans across phases 14-17)
 
@@ -78,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 17]: Behavioral regex testing: assert match/reject instead of pattern string equality (per research Pitfall 4)
 - [Phase 17]: Dual performance threshold: 5s UAT target + 10s automated ceiling to prevent flaky CI
 - [Phase 17]: 30 regression tests for non-Responsa modes (exceeded plan's 8-10 target for deeper coverage)
+- [Phase 17]: Parametrized all 16 checkbox combinations for parity testing (not just sampling a few)
+- [Phase 17]: Used real expansion functions for explosion guard edge case tests (not mocked)
 
 ### Data State
 
@@ -120,6 +122,6 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 17-02 (Regression & Performance Testing) -- Phase 17 complete
+Stopped at: Re-executed 17-01 with edge case tests added (880fd7f)
 Resume file: None
-Notes: Phase 17 complete. 35 new tests added (30 regression + 5 performance). Total: 170 Responsa tests passing. All phases 14-17 of v5.7.0 milestone delivered. Ready for UAT and release.
+Notes: Phase 17 complete. 51 parity+edge case tests (17-01) + 35 regression+performance tests (17-02) = 86 new tests. Total: 186 Responsa tests passing (135 existing + 51 new). All phases 14-17 of v5.7.0 milestone delivered. Ready for UAT and release.
