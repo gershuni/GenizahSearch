@@ -2234,4 +2234,27 @@ TRANSLATIONS = {
     "View All Fragments": "הצג את כל הקטעים",
     "All Fragments": "כל הקטעים",
     "Full PGP Transcription": "תמלול PGP מלא",
+
+    # --- Tabular Query Builder ---
+    "Query Builder": "בונה שאילתות",
+    "Word Range": "טווח מילים",
+    "Within Document": "בתוך מסמך",
+    "Component": "רכיב",
+    "Distance": "מרחק",
+    "Prefixes": "קידומות",
+    "Suffixes": "סיומות",
+    "Wildcard Start": "תחילית *",
+    "Wildcard End": "סיומת *",
+    "Plene/Defective": "מלא/חסר",
+    "Exclude": "שלילה",
+    "Clear All": "ניקוי הכל",
+    "Add Word": "הוסף מילה",
+    "Add Component": "הוסף רכיב",
+    "Scope": "טווח",
+    "Modifiers": "שינויים",
+    "No words entered": "לא הוזנו מילים",
+
+    # --- Query Builder (Desktop) ---
+    "Word": "מילה",
+    "Open the tabular query builder": "פתח את בונה השאילתות הטבלאי",
 }

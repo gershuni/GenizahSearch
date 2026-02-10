@@ -40,7 +40,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -4350,6 +4350,518 @@ def _set_label_with_tooltip(label, text, max_chars=100):
     truncated, full = _truncate_title(text, max_chars)
     label.setText(truncated or '')
     label.setToolTip(full or '')
+
+
+class TabularQueryBuilderDialog(QDialog):
+    """Tabular Query Builder for Responsa syntax composition.
+
+    Provides a visual interface for composing Responsa queries using
+    2-4 component columns with per-word modifiers and distance controls.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Query Builder"))
+        self.setMinimumSize(750, 500)
+        self.resize(800, 550)
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        self._syntax = ''
+        self._negated_words = []
+        self._active_word = None  # (comp_idx, word_idx)
+        self._updating_modifiers = False
+        self._max_components = 4
+        self._max_words_per_component = 4
+        self._initial_words_visible = 2
+        self._initial_components = 2
+
+        # Internal state
+        self._component_data = []  # List of component state dicts
+        self._distance_spinners = []  # QSpinBox list
+        self._component_widgets = []  # List of component UI widget groups
+        self._distance_containers = []  # Container widgets for distance spinners
+
+        self._setup_ui()
+        self._initialize_components()
+
+    def _setup_ui(self):
+        """Build the complete dialog UI."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(8)
+
+        # --- Scope Row ---
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel(tr("Scope") + ":"))
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        self._scope_group = QButtonGroup(self)
+        self._rb_word_range = QRadioButton(tr("Word Range"))
+        self._rb_word_range.setChecked(True)
+        self._rb_within_doc = QRadioButton(tr("Within Document"))
+        self._scope_group.addButton(self._rb_word_range, 0)
+        self._scope_group.addButton(self._rb_within_doc, 1)
+        scope_row.addWidget(self._rb_word_range)
+        scope_row.addWidget(self._rb_within_doc)
+        scope_row.addStretch()
+        self._scope_group.idToggled.connect(self._on_scope_changed)
+        main_layout.addLayout(scope_row)
+
+        # --- Components Area (scrollable) ---
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumHeight(250)
+
+        self._components_container = QWidget()
+        self._components_layout = QHBoxLayout(self._components_container)
+        self._components_layout.setSpacing(6)
+        self._components_layout.setContentsMargins(4, 4, 4, 4)
+        scroll.setWidget(self._components_container)
+        main_layout.addWidget(scroll)
+
+        # --- Add Component Button ---
+        self._btn_add_component = QPushButton("+ " + tr("Add Component"))
+        self._btn_add_component.setFixedWidth(160)
+        self._btn_add_component.clicked.connect(self._add_component)
+        add_comp_row = QHBoxLayout()
+        add_comp_row.addWidget(self._btn_add_component)
+        add_comp_row.addStretch()
+        main_layout.addLayout(add_comp_row)
+
+        # --- Modifiers Row ---
+        mod_row = QHBoxLayout()
+        mod_row.addWidget(QLabel(tr("Modifiers") + ":"))
+
+        self.chk_prefix = QCheckBox("# _")
+        self.chk_prefix.setToolTip(tr("Prefixes") + " — " + "קידומות דקדוקיות (ו/ה/ב/כ/ל/מ/ש)")
+        mod_row.addWidget(self.chk_prefix)
+
+        self.chk_suffix = QCheckBox("_ #")
+        self.chk_suffix.setToolTip(tr("Suffixes") + " — " + "סיומות דקדוקיות")
+        mod_row.addWidget(self.chk_suffix)
+
+        self.chk_wild_start = QCheckBox("* _")
+        self.chk_wild_start.setToolTip(tr("Wildcard Start") + " — " + "מילים שמסתיימות ב...")
+        mod_row.addWidget(self.chk_wild_start)
+
+        self.chk_wild_end = QCheckBox("_ *")
+        self.chk_wild_end.setToolTip(tr("Wildcard End") + " — " + "מילים שמתחילות ב...")
+        mod_row.addWidget(self.chk_wild_end)
+
+        self.chk_plene = QCheckBox("%")
+        self.chk_plene.setToolTip(tr("Plene/Defective") + " — " + "כתיב מלא/חסר (ו/י)")
+        mod_row.addWidget(self.chk_plene)
+
+        self.chk_negation = QCheckBox("\u2715")  # ✕
+        self.chk_negation.setToolTip(tr("Exclude") + " — " + "שלילה — הוצא מילה זו")
+        mod_row.addWidget(self.chk_negation)
+
+        mod_row.addStretch()
+        main_layout.addLayout(mod_row)
+
+        # Connect modifier checkboxes
+        for chk in [self.chk_prefix, self.chk_suffix, self.chk_wild_start,
+                     self.chk_wild_end, self.chk_plene, self.chk_negation]:
+            chk.stateChanged.connect(self._on_modifier_changed)
+
+        # --- Preview Row ---
+        preview_row = QHBoxLayout()
+        preview_row.addWidget(QLabel(tr("Preview") + ":"))
+        self._preview_label = QLabel("")
+        self._preview_label.setStyleSheet(
+            "font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; "
+            "padding: 4px 8px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; "
+            "min-height: 22px;"
+        )
+        self._preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        if CURRENT_LANG == 'he':
+            self._preview_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        preview_row.addWidget(self._preview_label, 1)
+        main_layout.addLayout(preview_row)
+
+        # --- Buttons Row ---
+        btn_row = QHBoxLayout()
+        btn_clear = QPushButton(tr("Clear All"))
+        btn_clear.clicked.connect(self._clear_all)
+        btn_row.addWidget(btn_clear)
+        btn_row.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_apply = QPushButton(tr("Apply"))
+        btn_apply.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px 20px;")
+        btn_apply.clicked.connect(self._apply)
+        btn_row.addWidget(btn_apply)
+        main_layout.addLayout(btn_row)
+
+    def _initialize_components(self):
+        """Create the initial 2 components with distance spinner between them."""
+        for i in range(self._initial_components):
+            self._create_component(i)
+            if i < self._initial_components - 1:
+                self._create_distance_spinner(i)
+        self._update_add_component_visibility()
+
+    def _create_component(self, index):
+        """Create a component card (QFrame with word inputs)."""
+        # Data
+        comp_data = {
+            'words': [{'text': '', 'mods': {}} for _ in range(self._max_words_per_component)]
+        }
+        self._component_data.append(comp_data)
+
+        # UI
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        frame.setStyleSheet(
+            "QFrame { border: 1px solid #bdc3c7; border-radius: 6px; background: #fafafa; }"
+        )
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.setSpacing(4)
+        frame_layout.setContentsMargins(8, 6, 8, 6)
+
+        # Title
+        title_label = QLabel(tr("Component") + f" {index + 1}")
+        title_label.setStyleSheet("font-weight: bold; font-size: 12px; border: none; background: transparent;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        frame_layout.addWidget(title_label)
+
+        # Word inputs
+        inputs = []
+        for wi in range(self._max_words_per_component):
+            inp = QLineEdit()
+            inp.setPlaceholderText(tr("Word") + f" {wi + 1}")
+            inp.setMinimumWidth(120)
+            inp.setStyleSheet("border: 1px solid #ccc; border-radius: 3px; padding: 3px; background: white;")
+            if CURRENT_LANG == 'he':
+                inp.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            inp.installEventFilter(self)
+            inp.textChanged.connect(self._on_word_text_changed)
+            frame_layout.addWidget(inp)
+            inputs.append(inp)
+            # Hide extra word slots
+            if wi >= self._initial_words_visible:
+                inp.setVisible(False)
+
+        # Add word button
+        btn_add_word = QPushButton("+ " + tr("Add Word"))
+        btn_add_word.setStyleSheet("font-size: 10px; border: none; color: #2980b9; background: transparent;")
+        btn_add_word.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        frame_layout.addWidget(btn_add_word)
+
+        # Remove button (only for components 3+)
+        btn_remove = QPushButton(tr("Remove"))
+        btn_remove.setStyleSheet("font-size: 10px; color: #c0392b; border: none; background: transparent;")
+        btn_remove.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_remove.setVisible(index >= self._initial_components)
+        frame_layout.addWidget(btn_remove)
+
+        frame_layout.addStretch()
+
+        comp_widget = {
+            'frame': frame,
+            'inputs': inputs,
+            'btn_add_word': btn_add_word,
+            'btn_remove': btn_remove,
+            'title_label': title_label,
+            'visible_words': self._initial_words_visible,
+        }
+        self._component_widgets.append(comp_widget)
+
+        # Connect buttons with closure over index
+        ci = len(self._component_widgets) - 1
+        btn_add_word.clicked.connect(lambda checked=False, idx=ci: self._show_next_word(idx))
+        btn_remove.clicked.connect(lambda checked=False, idx=ci: self._remove_component(idx))
+
+        self._components_layout.addWidget(frame)
+        self._update_add_word_visibility(ci)
+
+    def _create_distance_spinner(self, pair_index):
+        """Create a distance spinner between components pair_index and pair_index+1."""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(2, 0, 2, 0)
+        container_layout.setSpacing(2)
+        container_layout.addStretch()
+
+        dist_label = QLabel(tr("Distance"))
+        dist_label.setStyleSheet("font-size: 10px; color: #7f8c8d;")
+        dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container_layout.addWidget(dist_label)
+
+        spinner = QSpinBox()
+        spinner.setRange(0, 50)
+        spinner.setValue(0)
+        spinner.setFixedWidth(60)
+        spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spinner.valueChanged.connect(lambda v: self._update_preview())
+        container_layout.addWidget(spinner)
+
+        words_label = QLabel(tr("words"))
+        words_label.setStyleSheet("font-size: 9px; color: #95a5a6;")
+        words_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container_layout.addWidget(words_label)
+
+        container_layout.addStretch()
+
+        self._distance_spinners.append(spinner)
+        self._distance_containers.append(container)
+
+        # Insert in layout before the next component
+        # The layout has: comp0, dist0, comp1, dist1, comp2, ...
+        # We insert at position 2*pair_index + 1
+        insert_pos = 2 * pair_index + 1
+        self._components_layout.insertWidget(insert_pos, container)
+
+        # Hide if scope is Within Document
+        if self._rb_within_doc.isChecked():
+            container.setVisible(False)
+
+    def _update_add_word_visibility(self, comp_idx):
+        """Show/hide the + button based on how many word slots are visible."""
+        if comp_idx >= len(self._component_widgets):
+            return
+        cw = self._component_widgets[comp_idx]
+        visible_count = cw['visible_words']
+        cw['btn_add_word'].setVisible(visible_count < self._max_words_per_component)
+
+    def _update_add_component_visibility(self):
+        """Show/hide the + Component button based on current count."""
+        active_count = len(self._component_widgets)
+        self._btn_add_component.setVisible(active_count < self._max_components)
+
+    def _show_next_word(self, comp_idx):
+        """Reveal the next hidden word input in the given component."""
+        if comp_idx >= len(self._component_widgets):
+            return
+        cw = self._component_widgets[comp_idx]
+        visible = cw['visible_words']
+        if visible < self._max_words_per_component:
+            cw['inputs'][visible].setVisible(True)
+            cw['visible_words'] = visible + 1
+            self._update_add_word_visibility(comp_idx)
+
+    def _add_component(self):
+        """Add a new component (up to max 4)."""
+        current_count = len(self._component_widgets)
+        if current_count >= self._max_components:
+            return
+        # Add distance spinner before the new component
+        self._create_distance_spinner(current_count - 1)
+        self._create_component(current_count)
+        self._update_add_component_visibility()
+        self._update_preview()
+
+    def _remove_component(self, comp_idx):
+        """Remove a component (cannot go below 2)."""
+        if len(self._component_widgets) <= self._initial_components:
+            return
+        if comp_idx < self._initial_components:
+            return
+
+        # Remove the component widget
+        cw = self._component_widgets.pop(comp_idx)
+        cw['frame'].setParent(None)
+        cw['frame'].deleteLater()
+
+        # Remove component data
+        self._component_data.pop(comp_idx)
+
+        # Remove the distance spinner before this component
+        dist_idx = comp_idx - 1
+        if dist_idx >= 0 and dist_idx < len(self._distance_spinners):
+            self._distance_spinners.pop(dist_idx)
+            container = self._distance_containers.pop(dist_idx)
+            container.setParent(None)
+            container.deleteLater()
+
+        # Reset active word if it was in the removed component
+        if self._active_word and self._active_word[0] >= len(self._component_widgets):
+            self._active_word = None
+
+        # Renumber component titles
+        for i, cw in enumerate(self._component_widgets):
+            cw['title_label'].setText(tr("Component") + f" {i + 1}")
+            cw['btn_remove'].setVisible(i >= self._initial_components)
+
+        # Reconnect button lambdas (re-bind indices)
+        for i, cw in enumerate(self._component_widgets):
+            try:
+                cw['btn_add_word'].clicked.disconnect()
+            except TypeError:
+                pass
+            try:
+                cw['btn_remove'].clicked.disconnect()
+            except TypeError:
+                pass
+            cw['btn_add_word'].clicked.connect(lambda checked=False, idx=i: self._show_next_word(idx))
+            cw['btn_remove'].clicked.connect(lambda checked=False, idx=i: self._remove_component(idx))
+
+        self._update_add_component_visibility()
+        self._update_preview()
+
+    def _on_scope_changed(self, button_id, checked):
+        """Toggle distance spinner visibility based on scope."""
+        if not checked:
+            return
+        show_distances = (button_id == 0)  # 0 = Word Range
+        for container in self._distance_containers:
+            container.setVisible(show_distances)
+        self._update_preview()
+
+    def _on_word_focus(self, comp_idx, word_idx):
+        """Handle focus on a word input -- update modifier checkboxes."""
+        self._active_word = (comp_idx, word_idx)
+        self._updating_modifiers = True
+        try:
+            mods = self._component_data[comp_idx]['words'][word_idx].get('mods', {})
+            self.chk_prefix.setChecked(mods.get('prefix', False))
+            self.chk_suffix.setChecked(mods.get('suffix', False))
+            self.chk_wild_start.setChecked(mods.get('wildcard_prefix', False))
+            self.chk_wild_end.setChecked(mods.get('wildcard_suffix', False))
+            self.chk_plene.setChecked(mods.get('plene', False))
+            self.chk_negation.setChecked(mods.get('negation', False))
+        finally:
+            self._updating_modifiers = False
+
+    def _on_modifier_changed(self):
+        """Save modifier state to the active word's data."""
+        if self._updating_modifiers or self._active_word is None:
+            return
+        ci, wi = self._active_word
+        if ci >= len(self._component_data):
+            return
+        mods = {
+            'prefix': self.chk_prefix.isChecked(),
+            'suffix': self.chk_suffix.isChecked(),
+            'wildcard_prefix': self.chk_wild_start.isChecked(),
+            'wildcard_suffix': self.chk_wild_end.isChecked(),
+            'plene': self.chk_plene.isChecked(),
+            'negation': self.chk_negation.isChecked(),
+        }
+        self._component_data[ci]['words'][wi]['mods'] = mods
+        self._update_preview()
+
+    def _on_word_text_changed(self, text):
+        """Sync QLineEdit text back to component data and update preview."""
+        sender = self.sender()
+        if sender is None:
+            return
+        for ci, cw in enumerate(self._component_widgets):
+            for wi, inp in enumerate(cw['inputs']):
+                if inp is sender:
+                    self._component_data[ci]['words'][wi]['text'] = text
+                    self._update_preview()
+                    return
+
+    def _update_preview(self):
+        """Regenerate syntax from current state and update preview label."""
+        # Build components list in generate_tabular_syntax format
+        components = []
+        for ci, comp in enumerate(self._component_data):
+            words = []
+            for wi, word_data in enumerate(comp['words']):
+                # Only include words from visible slots
+                if ci < len(self._component_widgets) and wi < self._component_widgets[ci]['visible_words']:
+                    words.append({
+                        'text': word_data.get('text', ''),
+                        'mods': word_data.get('mods', {}),
+                    })
+            components.append({'words': words})
+
+        # Build distances list
+        distances = [s.value() for s in self._distance_spinners]
+
+        # Get scope
+        scope = 'word_range' if self._rb_word_range.isChecked() else 'within_document'
+
+        try:
+            syntax, negated = generate_tabular_syntax(components, distances, scope)
+            self._syntax = syntax
+            self._negated_words = negated
+        except Exception:
+            self._syntax = ''
+            self._negated_words = []
+
+        self._preview_label.setText(self._syntax if self._syntax else "")
+
+    def _clear_all(self):
+        """Reset all inputs, modifiers, spinners, and components to initial state."""
+        # Remove extra components (keep only initial 2)
+        while len(self._component_widgets) > self._initial_components:
+            idx = len(self._component_widgets) - 1
+            cw = self._component_widgets.pop(idx)
+            cw['frame'].setParent(None)
+            cw['frame'].deleteLater()
+            self._component_data.pop(idx)
+
+        # Remove extra distance spinners
+        while len(self._distance_spinners) > self._initial_components - 1:
+            self._distance_spinners.pop()
+            container = self._distance_containers.pop()
+            container.setParent(None)
+            container.deleteLater()
+
+        # Reset remaining components
+        for ci, cw in enumerate(self._component_widgets):
+            for wi, inp in enumerate(cw['inputs']):
+                inp.blockSignals(True)
+                inp.clear()
+                inp.blockSignals(False)
+                inp.setVisible(wi < self._initial_words_visible)
+            cw['visible_words'] = self._initial_words_visible
+            self._update_add_word_visibility(ci)
+            # Reset data
+            self._component_data[ci] = {
+                'words': [{'text': '', 'mods': {}} for _ in range(self._max_words_per_component)]
+            }
+
+        # Reset spinners
+        for spinner in self._distance_spinners:
+            spinner.blockSignals(True)
+            spinner.setValue(0)
+            spinner.blockSignals(False)
+
+        # Reset modifiers
+        self._active_word = None
+        self._updating_modifiers = True
+        for chk in [self.chk_prefix, self.chk_suffix, self.chk_wild_start,
+                     self.chk_wild_end, self.chk_plene, self.chk_negation]:
+            chk.setChecked(False)
+        self._updating_modifiers = False
+
+        # Reset scope
+        self._rb_word_range.setChecked(True)
+
+        self._update_add_component_visibility()
+        self._update_preview()
+
+    def _apply(self):
+        """Generate final syntax and accept the dialog."""
+        self._update_preview()
+        self.accept()
+
+    def get_syntax(self) -> str:
+        """Return the generated Responsa syntax string."""
+        self._update_preview()
+        return self._syntax
+
+    def get_negated_words(self) -> list:
+        """Return list of words marked for exclusion."""
+        self._update_preview()
+        return self._negated_words
+
+    def eventFilter(self, obj, event):
+        """Catch focus events on word inputs to update modifier checkboxes."""
+        if event.type() == QEvent.Type.FocusIn:
+            for ci, comp in enumerate(self._component_widgets):
+                for wi, inp in enumerate(comp['inputs']):
+                    if inp is obj:
+                        self._on_word_focus(ci, wi)
+                        return super().eventFilter(obj, event)
+        return super().eventFilter(obj, event)
 
 
 class GenizahGUI(QMainWindow):
