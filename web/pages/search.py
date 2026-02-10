@@ -348,6 +348,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         mode_select.value = 'variants'
                                     else:
                                         mode_select.value = target_mode
+                                    # Explicitly trigger mode change handler — programmatic
+                                    # value assignment doesn't fire Vue 'update:model-value'
+                                    on_mode_change()
                                     break
                         query_input.on('update:model-value', on_query_input_change)
 
