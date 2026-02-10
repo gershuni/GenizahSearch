@@ -4237,9 +4237,126 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
     for token in tokens:
         if not token:
             continue
+        # Skip [N] gap tokens — they are handled by extract_per_pair_gaps()
+        if _GAP_TOKEN_RE.match(token):
+            continue
         components.append(_parse_single_token(token))
 
     return components
+
+
+# Regex for matching [N] gap tokens like [3], [0], [15]
+_GAP_TOKEN_RE = re.compile(r'^\[(\d+)\]$')
+
+
+def extract_per_pair_gaps(query_str: str) -> List[Optional[int]]:
+    """Extract per-pair gap values from [N] tokens in a Responsa query.
+
+    Returns list of gap values (one per adjacent component pair).
+    None means "use global gap value" for that pair.
+
+    Examples:
+        "word1 [3] word2"       -> [3]
+        "word1 [3] word2 [5] word3" -> [3, 5]
+        "word1 word2"           -> [None]
+        "word1 [2] word2 word3" -> [2, None]
+    """
+    if not query_str or not query_str.strip():
+        return []
+
+    tokens = _tokenize_responsa_query(query_str.strip())
+    gaps = []
+    last_was_component = False
+    component_count = 0
+
+    for token in tokens:
+        if not token:
+            continue
+        gap_match = _GAP_TOKEN_RE.match(token)
+        if gap_match:
+            gap_value = int(gap_match.group(1))
+            if last_was_component and len(gaps) == component_count - 1:
+                gaps.append(gap_value)
+            last_was_component = False
+        else:
+            if last_was_component and len(gaps) < component_count:
+                gaps.append(None)
+            component_count += 1
+            last_was_component = True
+
+    # Fill remaining gaps with None
+    while len(gaps) < component_count - 1:
+        gaps.append(None)
+
+    return gaps
+
+
+def generate_tabular_syntax(components, distances, scope='word_range'):
+    """Generate Responsa syntax string from tabular builder state.
+
+    Args:
+        components: List of dicts with 'words' key, where words is a list of
+                   {'text': str, 'mods': dict} dicts. Mods keys: prefix, suffix,
+                   wildcard_prefix, wildcard_suffix, plene, negation
+        distances: List of ints (len = len(components) - 1), gap between adjacent pairs
+        scope: 'word_range' or 'within_document'
+
+    Returns:
+        Tuple of (syntax_str, negated_words) where negated_words is a list of
+        words marked for exclusion (NOT embedded in syntax).
+    """
+    parts = []
+    negated_words = []
+    valid_component_index = 0
+
+    for i, comp in enumerate(components):
+        words_with_mods = []
+        for word_info in comp.get('words', []):
+            text = word_info.get('text', '').strip()
+            if not text:
+                continue
+            mods = word_info.get('mods', {})
+
+            # Check negation -- extract and skip from syntax
+            if mods.get('negation'):
+                negated_words.append(text)
+                continue
+
+            decorated = text
+            # Apply modifiers in order: plene, then prefix/suffix, then wildcards
+            if mods.get('plene'):
+                decorated = '%' + decorated
+            if mods.get('prefix'):
+                decorated = '#' + decorated
+            if mods.get('suffix'):
+                decorated = decorated + '#'
+            if mods.get('wildcard_prefix'):
+                decorated = '*' + decorated
+            if mods.get('wildcard_suffix'):
+                decorated = decorated + '*'
+
+            words_with_mods.append(decorated)
+
+        if not words_with_mods:
+            continue  # Skip empty components
+
+        if len(words_with_mods) > 1:
+            part = f"({'/'.join(words_with_mods)})"
+        else:
+            part = words_with_mods[0]
+
+        # Add distance notation between components (only for word_range scope)
+        if valid_component_index > 0 and scope == 'word_range':
+            # Get the distance for the gap BEFORE this component
+            dist_idx = valid_component_index - 1
+            dist = distances[dist_idx] if dist_idx < len(distances) else 0
+            if dist > 0:
+                parts.append(f'[{dist}]')
+
+        parts.append(part)
+        valid_component_index += 1
+
+    return ' '.join(parts), negated_words
 
 
 def _tokenize_responsa_query(query: str) -> List[str]:
@@ -4945,22 +5062,12 @@ class SearchEngine:
 
         return " AND ".join(parts)
 
-    def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None):
+    def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None, per_pair_gaps=None):
         # --- Responsa branch ---
         if responsa_components is not None:
             opts = responsa_options or {}
             flex_spacing = opts.get('flex_spacing', False)
             bidirectional = opts.get('bidirectional', False)
-
-            # Build separator
-            if max_gap == 0:
-                if flex_spacing:
-                    # Flex: zero or more non-word chars (allows adjacent/joined words)
-                    sep = r'[^\w\u0590-\u05FF\']*'
-                else:
-                    sep = r'[^\w\u0590-\u05FF\']+'
-            else:
-                sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
 
             parts = []
             for comp in responsa_components:
@@ -5009,12 +5116,34 @@ class SearchEngine:
             if not parts:
                 return None
 
+            def _make_sep_for_gap(gap_val, flex):
+                """Build regex separator for a specific gap value."""
+                if gap_val == 0:
+                    if flex:
+                        return r'[^\w\u0590-\u05FF\']*'
+                    else:
+                        return r'[^\w\u0590-\u05FF\']+'
+                else:
+                    return rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{gap_val}}}[^\w\u0590-\u05FF\']+'
+
+            def _join_parts_with_gaps(parts_list, gaps_list, default_gap, flex):
+                """Join regex parts with per-pair or uniform gap separators."""
+                if len(parts_list) == 1:
+                    return parts_list[0]
+                result = parts_list[0]
+                for i in range(1, len(parts_list)):
+                    gap = gaps_list[i-1] if gaps_list and i-1 < len(gaps_list) and gaps_list[i-1] is not None else default_gap
+                    result += _make_sep_for_gap(gap, flex) + parts_list[i]
+                return result
+
+            forward = _join_parts_with_gaps(parts, per_pair_gaps, max_gap, flex_spacing)
+
             if bidirectional and len(parts) >= 2:
-                forward = sep.join(parts)
-                backward = sep.join(reversed(parts))
+                reversed_gaps = list(reversed(per_pair_gaps)) if per_pair_gaps else per_pair_gaps
+                backward = _join_parts_with_gaps(list(reversed(parts)), reversed_gaps, max_gap, flex_spacing)
                 pattern_str = f"({forward})|({backward})"
             else:
-                pattern_str = sep.join(parts)
+                pattern_str = forward
 
             try:
                 return re.compile(pattern_str, re.IGNORECASE)
@@ -5302,6 +5431,9 @@ class SearchEngine:
             if not components:
                 return []
 
+            # b2. Extract per-pair gap values from [N] tokens
+            per_pair_gaps = extract_per_pair_gaps(query_str)
+
             # c. Expand each component
             variants_on = responsa_options.get('variants', False)
             ja_on = responsa_options.get('ja', False)
@@ -5398,6 +5530,7 @@ class SearchEngine:
                 terms=None, mode=mode, max_gap=gap,
                 responsa_components=component_dicts,
                 responsa_options=responsa_options,
+                per_pair_gaps=per_pair_gaps,
             )
         else:
             # --- Existing path (unchanged) ---
