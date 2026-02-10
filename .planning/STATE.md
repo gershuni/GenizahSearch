@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-09)
 
 Phase: 15 of 17 (Search UI) -- COMPLETE
 Plan: 4 of 4 complete
-Status: **Phase 15 complete (web+desktop dropdown mode, gap closure plans 03+04 done), ready for Phase 16 (Tabular Builder)**
-Last activity: 2026-02-10 -- Plan 15-04 (Desktop Responsa Dropdown Mode) complete
+Status: **Phase 15 COMPLETE — all plans executed, all UAT bugs fixed. Ready for Phase 16 (Tabular Builder)**
+Last activity: 2026-02-10 -- Phase 15 complete with 14 commits (4 plans + 6 bug fixes + 4 features)
 
 Progress: [##########__________] 62% (6/8 plans across phases 14-17)
 
@@ -62,6 +62,9 @@ Recent decisions affecting current work:
 - Desktop: Responsa base mode is 'exact', pipeline via responsa_options dict
 - Desktop: Old amber label, master toggle, _on_responsa_mode_toggled removed
 - [Phase 15]: Responsa is a first-class dropdown mode, not a separate checkbox toggle (15-03)
+- [Phase 15]: R shortcut for Responsa mode, live shortcut detection (prefix+space) for all modes
+- [Phase 15]: Sofit-to-normal conversion before suffix expansion (ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ)
+- [Phase 15]: Flex spacing splits added to Tantivy query (not just regex)
 
 ### Data State
 
@@ -85,10 +88,15 @@ Comprehensive Responsa search planning at docs/plans/responsa-search/:
 
 - Recto/verso section headers stripped during parsing (v1 tech debt, not blocking)
 - Phase 13 (Transcription Search) deferred -- needs server-side index architecture
+- ~~BUG (Flex Spacing + Tantivy)~~: **FIXED** (8ded7a0) — split alternatives added to Tantivy query
+- ~~BUG (Variants checkbox)~~: **FIXED** (216dde5) — variant_mode was 'exact', now 'variants' when checked
+- ~~BUG (Prefix shortcuts in Responsa)~~: **FIXED** (dfe9914) — responsa_mode=True passed to parse_query_syntax
+- ~~BUG (Sofit letters before suffixes)~~: **FIXED** (f1553a4) — ם→מ, ן→נ, ץ→צ, ף→פ, ך→כ conversion
+- ~~BUG (#% combined operators)~~: **FIXED** (cd7be21) — any-order parsing with while loop
 
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: Completed 15-04-PLAN.md (Desktop Responsa Dropdown Mode)
+Stopped at: Phase 15 fully complete
 Resume file: None
-Notes: Phase 15 fully complete. Gap closure plans 15-03 (Web) and 15-04 (Desktop) replaced checkbox row approach with combo dropdown mode. Desktop: "Responsa (R)" at combo index 2, sub-options row with syntax legend, old toggle/amber label removed. 99 tests passing. Next: Phase 16 (Tabular Builder).
+Notes: Phase 15 complete. 14 commits: dropdown mode (web+desktop), 6 bug fixes (variants, flex spacing, sofit, shortcuts, combined operators, prefix bypass), R shortcut, live shortcut detection, Hebrew translations. 99 tests passing. Next: Phase 16 (Tabular Builder).
