@@ -50,6 +50,7 @@ def get_user_client() -> Client:
     ensuring that RLS policies see the correct auth.uid(). This is critical for
     multi-user scenarios where multiple users are logged in on the same NiceGUI server.
 
+    After set_session, updates stored tokens in case they were refreshed.
     Falls back to the singleton client if no user session tokens are available.
     """
     try:
@@ -61,13 +62,22 @@ def get_user_client() -> Client:
         if access_token and refresh_token:
             try:
                 user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-                user_client.auth.set_session(access_token, refresh_token)
+                resp = user_client.auth.set_session(access_token, refresh_token)
+                # Update stored tokens — set_session may have refreshed them
+                if resp and resp.session:
+                    _app.storage.user['auth_session'] = {
+                        'access_token': resp.session.access_token,
+                        'refresh_token': resp.session.refresh_token,
+                    }
                 return user_client
             except Exception as e:
-                print(f"[get_user_client] Failed to set user session (tokens may be expired): {e}")
+                print(f"[get_user_client] set_session failed: {e}")
+                # Try re-login via singleton as last resort
                 return get_client()
         else:
-            print("[get_user_client] No auth_session tokens in user storage, falling back to singleton")
+            # No tokens stored — user may have logged in before token storage was deployed.
+            # Try to use the singleton, which may still hold their session from sign_in.
+            print("[get_user_client] No auth_session tokens in user storage — user should re-login")
             return get_client()
     except Exception as e:
         print(f"[get_user_client] Error creating per-user client: {e}")

@@ -1460,7 +1460,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             return
 
         if "error" in result:
-            ui.notify(result["error"], type='negative')
+            error_msg = result["error"]
+            if '42501' in str(error_msg) or 'row-level security' in str(error_msg).lower():
+                ui.notify(tr('Session expired. Please log out and log back in, then try again.'),
+                          type='negative', timeout=10000)
+            else:
+                ui.notify(error_msg, type='negative')
             return
 
         # Success — update state and reload
@@ -1502,7 +1507,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             )
 
         if "error" in result:
-            ui.notify(result["error"], type='negative')
+            error_msg = result["error"]
+            if '42501' in str(error_msg) or 'row-level security' in str(error_msg).lower():
+                ui.notify(tr('Session expired. Please log out and log back in, then try again.'),
+                          type='negative', timeout=10000)
+            else:
+                ui.notify(error_msg, type='negative')
         else:
             state.draft_saved = True
             correction = result.get('correction', {})
