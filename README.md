@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.6
+# Genizah Search Pro 5.7
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,37 +8,35 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.6?
+## What's New in Version 5.7?
 
-### Princeton Geniza Project (PGP) Integration
+### Responsa Search
 
-Full integration of the Princeton Geniza Project corpus — 35,839 curated documents with transcriptions, translations, and scholarly metadata — across both web and desktop apps.
+Advanced search inspired by the Responsa Project, with Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder — in both web and desktop apps.
 
-* **PGP Transcriptions:** View scholarly editions and English translations alongside manuscript images
-* **Per-source directionality:** Hebrew/Arabic editions displayed RTL, English translations LTR
-* **PGP Joins:** Princeton-identified fragment connections visible in the Joins system
-* **PGP Badges:** Visual indicators in search results for manuscripts linked to PGP documents
+* **Responsa syntax:** `#word` prefix expansion, `word#` suffix expansion, `*word`/`word*` wildcards, `%word` plene/defective variants, `(a/b)` OR alternatives, `[N]` gap notation
+* **Hebrew grammatical expansion:** 24 prefix forms + 25 suffix forms per word, with sofit letter conversion
+* **Judeo-Arabic article expansion:** 8 forms per word using simplified al- model
+* **Flexible spacing:** Tolerates OCR-introduced space errors in manuscripts
+* **Bidirectional gap:** Search for words in either order
+* **Explosion guard:** Smart downgrade cascade when queries expand beyond 500 terms
+* **"Responsa (R)" mode:** First-class option in the Mode dropdown with sub-option checkboxes (Variants, JA, Flex Spacing, Bidirectional)
 
-### Virtual Reading Desk
+### Tabular Query Builder
 
-A synchronized multi-manuscript viewer for studying related fragments side by side.
+A visual interface for building Responsa queries without memorizing syntax.
 
-* **Stacked images + stacked texts:** Images in the viewer pane, transcriptions in the text pane
-* **Fragment-level sync scrolling:** Scroll to a fragment's text and its image scrolls into view
-* **Per-fragment version selector:** Choose between different editions and translations for each fragment
-* **Image controls:** Zoom, rotate, and pan for each manuscript image independently
+* **2-4 component columns:** Each with word inputs and per-word modifier checkboxes
+* **Per-word modifiers:** Prefix (#), suffix (#), wildcard (*), plene (%), negation
+* **Distance control:** Gap spinners between components with [N] notation
+* **Live preview:** See the generated Responsa syntax update in real time
+* **One-way sync:** "Apply" inserts syntax into the search field and triggers search
 
-### PGP Tag Search
+### Previous Features (v5.0–v5.6)
 
-Browse and search the Genizah by Princeton's thematic classification.
-
-* **"PGP Tags" search mode:** Select from the Mode dropdown in both web and desktop
-* **251 tags with Hebrew translations:** Curated bilingual display organized in 16 thematic categories
-* **Categories:** Document Types, Law & Society, Medicine, Trade, India Book, People, and more
-* **Tag navigation:** Click any tag in result dialogs or browse pages to find related manuscripts
-
-### Previous Features (v5.0–v5.5)
-
+* **Princeton Geniza Project (PGP):** 35,839 curated documents with transcriptions, translations, and metadata
+* **Virtual Reading Desk:** Multi-manuscript synchronized viewer for related fragments
+* **PGP Tag Search:** 251 tags in 16 categories for thematic browsing
 * **Web Platform:** [genizahsearch.com](https://genizahsearch.com) — full-featured web access from any browser
 * **Community Features:** Discoveries, comments, corrections — collaborate with researchers worldwide
 * **Cross-Paragraph Search:** Find text spanning paragraph boundaries, filtering out common citations
@@ -92,7 +90,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.6.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.7.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -128,47 +126,45 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.6 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.7 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.6 כוללת **שילוב נתוני PGP**, **שולחן קריאה וירטואלי**, **חיפוש תגיות**, ושיפורים רבים בממשק.
+גרסה 5.7 כוללת **חיפוש רספונסה** — חיפוש מתקדם בסגנון פרויקט השו"ת עם תחביר ייעודי, הרחבה דקדוקית, תמיכה בערבית-יהודית, ובונה שאילתות טבלאי.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.6?
+## מה חדש בגרסה 5.7?
 
-### שילוב פרויקט הגניזה של פרינסטון (PGP)
+### חיפוש רספונסה
 
-שילוב מלא של מאגר פרויקט הגניזה של פרינסטון — 35,839 מסמכים אצורים עם תעתיקים, תרגומים ומטא-דאטה מחקרי — בווב ובאפליקציית שולחן העבודה.
+חיפוש מתקדם בהשראת פרויקט השו"ת, עם תחביר ייעודי, הרחבה דקדוקית, תמיכה בערבית-יהודית ובונה שאילתות חזותי — בווב ובאפליקציית שולחן העבודה.
 
-* **תעתיקי PGP:** צפייה במהדורות מדעיות ותרגומים לאנגלית לצד תמונות כתבי היד
-* **כיווניות לפי מקור:** מהדורות בעברית/ערבית מוצגות מימין לשמאל, תרגומים לאנגלית משמאל לימין
-* **צירופי PGP:** חיבורים בין קטעים שזוהו בפרינסטון מוצגים במערכת הצירופים
-* **תגי PGP:** סימון ויזואלי בתוצאות החיפוש לכתבי יד המקושרים למסמכי PGP
+* **תחביר רספונסה:** `word#` הרחבת תחיליות, `#word` הרחבת סיומות, `*word`/`word*` תווים כלליים, `%word` מלא/חסר, `(a/b)` חלופות, `[N]` מרווח
+* **הרחבה דקדוקית עברית:** 24 צורות תחילית + 25 צורות סיומת למילה, עם המרת אותיות סופיות
+* **הרחבת ערבית-יהודית:** 8 צורות למילה עם מודל אל- מפושט
+* **רווח גמיש:** סבילות לשגיאות רווח מ-OCR בכתבי היד
+* **חיפוש דו-כיווני:** חיפוש מילים בכל סדר
+* **מגן פיצוץ:** שרשרת הורדה חכמה כשהשאילתות מתרחבות מעל 500 מונחים
+* **מצב "רספונסה (R)":** אפשרות מלאה בתפריט Mode עם תת-אפשרויות (וריאנטים, ע"י, רווח גמיש, דו-כיווני)
 
-### שולחן קריאה וירטואלי
+### בונה שאילתות טבלאי
 
-צפיין מסונכרן לעיון בקטעים קשורים זה לצד זה.
+ממשק חזותי לבניית שאילתות רספונסה ללא צורך בשינון תחביר.
 
-* **תמונות + טקסטים:** תמונות בחלון הצפייה, תעתיקים בחלון הטקסט
-* **גלילה מסונכרנת ברמת הקטע:** גלילה לטקסט של קטע מגלילה גם את תמונתו
-* **בחירת גרסה לכל קטע:** בחירה בין מהדורות ותרגומים שונים לכל קטע
-* **כלי תמונה:** זום, סיבוב וגרירה לכל תמונת כתב יד בנפרד
+* **2-4 עמודות רכיבים:** כל אחת עם שדות מילים ותיבות סימון למשתני מילה
+* **משתנים למילה:** תחילית (#), סיומת (#), תו כללי (*), מלא (%), שלילה
+* **בקרת מרחק:** ספינרים למרחק בין רכיבים עם סימון [N]
+* **תצוגה מקדימה חיה:** צפייה בתחביר הרספונסה שנוצר בזמן אמת
+* **סנכרון חד-כיווני:** "החל" מכניס את התחביר לשדה החיפוש ומפעיל חיפוש
 
-### חיפוש תגיות PGP
+### תכונות מגרסאות קודמות (5.0–5.6)
 
-עיון וחיפוש בגניזה לפי סיווג נושאי של פרינסטון.
-
-* **מצב חיפוש "תגיות PGP":** בחירה מתפריט Mode בווב ובאפליקציה
-* **251 תגיות עם תרגום לעברית:** תצוגה דו-לשונית מאורגנת ב-16 קטגוריות
-* **קטגוריות:** סוגי מסמכים, משפט וחברה, רפואה, מסחר, ספר הודו, אנשים ועוד
-* **ניווט לפי תגית:** לחיצה על תגית מציגה כתבי יד קשורים
-
-### תכונות מגרסאות קודמות (5.0–5.5)
-
+* **פרויקט הגניזה של פרינסטון (PGP):** 35,839 מסמכים אצורים עם תעתיקים, תרגומים ומטא-דאטה
+* **שולחן קריאה וירטואלי:** צפיין מסונכרן לקטעים קשורים זה לצד זה
+* **חיפוש תגיות PGP:** 251 תגיות ב-16 קטגוריות לעיון נושאי
 * **פלטפורמת אינטרנט:** [genizahsearch.com](https://genizahsearch.com) — גישה מלאה מכל דפדפן
 * **תכונות קהילה:** גילויים, הערות, תיקונים — שיתוף פעולה עם חוקרים ברחבי העולם
 * **חיפוש חוצה-פסקאות:** איתור טקסט החוצה גבולות פסקאות, סינון ציטוטים נפוצים
@@ -222,7 +218,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.6.0_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.7.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 

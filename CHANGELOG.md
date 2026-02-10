@@ -4,6 +4,47 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.7.0] - 2026-02-10
+
+### Milestone: Responsa Search
+
+Advanced search capabilities inspired by the Responsa Project, available in both web and desktop apps. Researchers can now use Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder to search the Genizah corpus with fine-grained control.
+
+#### Responsa Core Engine (Phase 14)
+- **Responsa syntax**: `#word` (prefix expansion), `word#` (suffix expansion), `#word#` (both), `*word`/`word*` (wildcards), `%word` (plene/defective variants), `(a/b)` (OR alternatives), `[N]` (gap notation)
+- **Hebrew grammatical expansion**: 24 prefix forms (single + compound: ו,ה,ב,כ,ל,מ,ש + combinations) and 25 suffix forms per word
+- **Judeo-Arabic article expansion**: 8 forms per word using simplified al- model (no sun letter assimilation)
+- **Plene/defective variants**: Bidirectional ו/י insertion/removal for spelling variations
+- **Sofit letter conversion**: Final forms (ם,ן,ץ,ף,ך) normalized before suffix expansion
+- **Combinatorial explosion guard**: MAX_EXPANDED_TERMS=500 with 6-step downgrade cascade (variants basic -> off -> JA off -> plene off -> suffixes off -> prefixes off -> error)
+- All Responsa logic in shared `genizah_core.py` -- no search logic in UI code
+
+#### Search UI (Phase 15)
+- **Responsa as dropdown mode**: "Responsa (R)" appears as a first-class option in the Mode dropdown/combo in both apps
+- **Sub-option checkboxes**: Variants, Judeo-Arabic, Flexible Spacing, Bidirectional Gap -- visible only when Responsa mode is selected
+- **Syntax legend**: Quick reference for Responsa operators shown below the search field
+- **Keyboard shortcut**: Type `R ` (R+Space) to switch to Responsa mode
+- **URL state persistence**: Web URLs include `?mode=responsa&variants=1&ja=1&flex_spaces=1&bidirectional=1`
+- **PGP Tags interaction**: Responsa sub-options hidden when PGP Tags mode is active
+- **Desktop defaults**: Checkboxes reset to defaults on each app startup
+
+#### Tabular Query Builder (Phase 16)
+- **Visual query construction**: Dialog with 2-4 component columns for building complex Responsa queries without memorizing syntax
+- **Per-word modifiers**: Checkboxes for prefix (#), suffix (#), wildcard (*), plene (%), and negation per word
+- **Distance control**: Per-pair gap spinners with [N] notation between components
+- **Live preview**: Real-time syntax preview updates as you modify the query
+- **One-way sync**: "Apply" inserts generated syntax into the search field and triggers search
+- **Web**: Dialog opened via "Query Builder" button in Responsa sub-row
+- **Desktop**: QDialog opened via "Query Builder" button with full RTL layout
+
+#### Integration Testing & Polish (Phase 17)
+- **221 automated Responsa tests**: 68 core engine + 31 parity + 20 edge cases + 30 regression + 5 performance + 36 additional
+- **Cross-app parity**: All 16 checkbox combinations verified to produce identical results
+- **Non-Responsa regression**: 30 tests confirming all existing search modes (Exact, Variants, Fuzzy, Regex, Shelfmark, Title, PGP Tags) work unchanged
+- **Bug fixes**: R+Space shortcut sub-options visibility, WebSocket crash on large results (200 cap), sofit-aware wildcard regex, explosion guard cascade expanded from 3 to 6 steps, ValueError surfaced to user via toast notification, desktop tabular builder unconditional RTL
+
+---
+
 ## [5.6.1] - 2026-02-10
 
 ### Bug Fixes — User Authentication & Corrections

@@ -29,7 +29,7 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
-APP_VERSION = "5.1"
+APP_VERSION = "5.7"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)

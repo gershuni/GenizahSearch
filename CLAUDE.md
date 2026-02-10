@@ -178,6 +178,8 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- February 2026: v5.7.0 Responsa Search -- syntax parsing, grammatical expansion, Judeo-Arabic, tabular query builder (both apps)
+- February 2026: v5.6.0 Desktop Parity -- PGP integration, Virtual Reading Desk, 35K documents imported
 - February 2026: Added library_code column to libraries.csv with holding institution info
 - January 2026: Migrated from FastAPI to Supabase
 - January 2026: Documentation reorganized into `docs/` subdirectories
