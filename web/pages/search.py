@@ -501,16 +501,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.row().classes('items-center gap-1 ml-4'):
                         ui.icon('help_outline').classes('text-sm').style('color: var(--text-muted);')
                         ui.label(tr('Syntax:')).classes('text-xs font-medium').style('color: var(--text-muted);')
-                        ui.label('#word').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Prefix expansion (e.g., #word adds prefix forms)'))
-                        ui.label('word#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Suffix expansion'))
-                        ui.label('#word#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Both prefix and suffix expansion'))
-                        ui.label('%word').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Plene/defective variants'))
-                        ui.label('*word / word*').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Wildcard (prefix or suffix)'))
-                        ui.label('(a/b)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR alternatives'))
+                        ui.label('#מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('prefix'))
+                        ui.label('מילה#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('suffix'))
+                        ui.label('%מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('plene'))
+                        ui.label('*מילה / מילה*').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
+                        ui.label('(א/ב)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR'))
+                        ui.label('-מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Exclude'))
 
-                    # Query Builder button (pushed to right side)
+                    # Tabular Search button (pushed to right side)
                     ui.space()
-                    builder_btn = ui.button(tr('Query Builder'), icon='grid_view',
+                    builder_btn = ui.button(tr('Tabular Search'), icon='grid_view',
                         on_click=lambda: open_query_builder()).classes('ml-auto').props('outline dense')
 
                 # Initially hide if mode is not responsa
@@ -1172,6 +1172,47 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Modifier checkbox references
         mod_cbs = {}
+        # Per-word modifier indicator labels: mod_indicators[comp_idx][word_idx] = ui.label element
+        mod_indicators = []
+
+        # Modifier display names (Hebrew)
+        MOD_DISPLAY = {
+            'prefix': '#_',
+            'suffix': '_#',
+            'wildcard_prefix': '*_',
+            'wildcard_suffix': '_*',
+            'plene': '%',
+            'negation': '−',
+        }
+
+        def _build_mod_indicator_text(mods):
+            """Build a short string showing active modifiers for a word."""
+            parts = []
+            for key in ['prefix', 'suffix', 'wildcard_prefix', 'wildcard_suffix', 'plene', 'negation']:
+                if mods.get(key):
+                    parts.append(MOD_DISPLAY[key])
+            return ' '.join(parts)
+
+        def _update_mod_indicator(comp_idx, word_idx):
+            """Update the modifier indicator label for a specific word."""
+            if comp_idx < len(mod_indicators) and word_idx < len(mod_indicators[comp_idx]):
+                mods = builder_state['components'][comp_idx]['words'][word_idx]['mods']
+                text = _build_mod_indicator_text(mods)
+                indicator = mod_indicators[comp_idx][word_idx]
+                indicator.text = text
+                indicator.set_visibility(bool(text))
+
+        def _update_active_word_highlight(new_comp=None, new_word=None):
+            """Apply/remove highlight border on word inputs to show which word is selected."""
+            # Remove highlight from all
+            for ci_list in word_inputs:
+                for inp in ci_list:
+                    inp.props(remove='color=primary')
+                    inp.classes(remove='ring-2 ring-primary')
+            # Add highlight to the new active word
+            if new_comp is not None and new_word is not None:
+                if new_comp < len(word_inputs) and new_word < len(word_inputs[new_comp]):
+                    word_inputs[new_comp][new_word].props('color=primary')
 
         # === Core Functions ===
         def update_preview():
@@ -1207,6 +1248,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     cb.set_value(mods.get(key, False))
             finally:
                 _updating_modifiers['flag'] = False
+            _update_active_word_highlight(comp_idx, word_idx)
 
         def on_modifier_change(modifier_name, value):
             """Save modifier change to the currently active word."""
@@ -1217,6 +1259,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return
             ci, wi = aw
             builder_state['components'][ci]['words'][wi]['mods'][modifier_name] = value
+            _update_mod_indicator(ci, wi)
             update_preview()
 
         def on_word_text_change(comp_idx, word_idx, value):
@@ -1310,6 +1353,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     builder_state['components'][ci]['words'][wi] = make_word()
                     if ci < len(word_inputs) and wi < len(word_inputs[ci]):
                         word_inputs[ci][wi].set_value('')
+                    # Hide modifier indicators
+                    if ci < len(mod_indicators) and wi < len(mod_indicators[ci]):
+                        mod_indicators[ci][wi].text = ''
+                        mod_indicators[ci][wi].set_visibility(False)
             # Reset distances
             for i in range(3):
                 builder_state['distances'][i] = 0
@@ -1360,8 +1407,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if not syntax.strip():
                 ui.notify(tr('No words entered'), type='warning')
                 return
-            # Set negated words on search state for execute_search to pick up
+            # Set negated words on search state and show in exclude field
             search_state.builder_negated_words = neg
+            if neg:
+                current_not = not_filter.value.strip() if not_filter.value else ''
+                new_not = (current_not + ' ' + ' '.join(neg)).strip() if current_not else ' '.join(neg)
+                not_filter.set_value(new_not)
             # Set query and close dialog
             query_input.set_value(syntax)
             builder_dialog.close()
@@ -1374,7 +1425,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         ):
             # Title
             with ui.row().classes('w-full items-center justify-between mb-2'):
-                ui.label(tr('Query Builder')).classes('text-lg font-bold').style('color: var(--primary-600);')
+                ui.label(tr('Tabular Search')).classes('text-lg font-bold').style('color: var(--primary-600);')
                 ui.button(icon='close', on_click=builder_dialog.close).props('flat round dense')
 
             # Scope Toggle
@@ -1428,24 +1479,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         comp_word_inputs = []
                         comp_word_containers = []
 
+                        comp_mod_indicators = []
                         for wi in range(4):
-                            with ui.row().classes('w-full items-center gap-1') as word_row:
-                                inp = ui.input(
-                                    placeholder=f"\u05de\u05d9\u05dc\u05d4 {wi+1}"  # "מילה N"
-                                ).classes('flex-grow').props('outlined dense').style('direction: rtl;')
-                                inp.on('focus', lambda _, c=ci, w=wi: on_word_focus(c, w))
+                            with ui.column().classes('w-full gap-0') as word_row:
+                                with ui.row().classes('w-full items-center gap-1'):
+                                    inp = ui.input(
+                                        placeholder=f"\u05de\u05d9\u05dc\u05d4 {wi+1}"  # "מילה N"
+                                    ).classes('flex-grow').props('outlined dense').style('direction: rtl;')
+                                    inp.on('focus', lambda _, c=ci, w=wi: on_word_focus(c, w))
 
-                                def _make_text_handler(input_el, c_idx, w_idx):
-                                    def handler():
-                                        on_word_text_change(c_idx, w_idx, input_el.value)
-                                    return handler
-                                inp.on('update:model-value', _make_text_handler(inp, ci, wi))
+                                    def _make_text_handler(input_el, c_idx, w_idx):
+                                        def handler(e):
+                                            val = e.args if hasattr(e, 'args') else e
+                                            on_word_text_change(c_idx, w_idx, val if isinstance(val, str) else (str(val) if val is not None else ''))
+                                        return handler
+                                    inp.on('update:model-value', _make_text_handler(inp, ci, wi))
+                                # Modifier indicator label (hidden until modifiers are set)
+                                mod_ind = ui.label('').classes('text-xs').style(
+                                    'color: var(--primary-600); direction: ltr; margin-top: -2px; padding-right: 4px;'
+                                )
+                                mod_ind.set_visibility(False)
+                                comp_mod_indicators.append(mod_ind)
                             word_row.set_visibility(wi < 2)  # First 2 visible
                             comp_word_inputs.append(inp)
                             comp_word_containers.append(word_row)
 
                         word_inputs.append(comp_word_inputs)
                         word_containers.append(comp_word_containers)
+                        mod_indicators.append(comp_mod_indicators)
 
                         # Add Word button
                         aw_btn = ui.button(tr('Add Word'), icon='add', on_click=lambda _, c=ci: add_word_slot(c)).props(
@@ -1466,12 +1527,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # === Shared Modifier Checkboxes Row ===
             with ui.row().classes('w-full gap-3 mt-3 items-center flex-wrap'):
                 ui.label(tr('Modifiers') + ':').classes('text-sm font-medium')
-                prefix_cb = ui.checkbox('# _').tooltip(tr('Prefixes') + ' \u2014 \u05e7\u05d9\u05d3\u05d5\u05de\u05d5\u05ea \u05d3\u05e7\u05d3\u05d5\u05e7\u05d9\u05d5\u05ea (\u05d5/\u05d4/\u05d1/\u05db/\u05dc/\u05de/\u05e9)')
-                suffix_cb = ui.checkbox('_ #').tooltip(tr('Suffixes') + ' \u2014 \u05e1\u05d9\u05d5\u05de\u05d5\u05ea \u05d3\u05e7\u05d3\u05d5\u05e7\u05d9\u05d5\u05ea')
-                wild_start_cb = ui.checkbox('* _').tooltip(tr('Wildcard Start') + ' \u2014 \u05de\u05d9\u05dc\u05d9\u05dd \u05e9\u05de\u05e1\u05ea\u05d9\u05d9\u05de\u05d5\u05ea \u05d1...')
-                wild_end_cb = ui.checkbox('_ *').tooltip(tr('Wildcard End') + ' \u2014 \u05de\u05d9\u05dc\u05d9\u05dd \u05e9\u05de\u05ea\u05d7\u05d9\u05dc\u05d5\u05ea \u05d1...')
-                plene_cb = ui.checkbox('%').tooltip(tr('Plene/Defective') + ' \u2014 \u05db\u05ea\u05d9\u05d1 \u05de\u05dc\u05d0/\u05d7\u05e1\u05e8 (\u05d5/\u05d9)')
-                negation_cb = ui.checkbox('\u2715').tooltip(tr('Exclude') + ' \u2014 \u05e9\u05dc\u05d9\u05dc\u05d4, \u05d4\u05d5\u05e6\u05d0 \u05de\u05d9\u05dc\u05d4 \u05d6\u05d5')
+                prefix_cb = ui.checkbox(tr('Prefixes #_')).tooltip(tr('Grammatical prefixes tooltip'))
+                suffix_cb = ui.checkbox(tr('Suffixes _#')).tooltip(tr('Grammatical suffixes tooltip'))
+                wild_start_cb = ui.checkbox(tr('Wildcard *_')).tooltip(tr('Words ending with...'))
+                wild_end_cb = ui.checkbox(tr('Wildcard _*')).tooltip(tr('Words starting with...'))
+                plene_cb = ui.checkbox(tr('Plene/Defective %')).tooltip(tr('Plene/defective spelling tooltip'))
+                negation_cb = ui.checkbox(tr('Negation −')).tooltip(tr('Negation tooltip'))
 
                 mod_cbs['prefix'] = prefix_cb
                 mod_cbs['suffix'] = suffix_cb
@@ -1491,6 +1552,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 plene_cb.on('update:model-value', _make_mod_handler(plene_cb, 'plene'))
                 negation_cb.on('update:model-value', _make_mod_handler(negation_cb, 'negation'))
 
+            # === Search Options Row (synced with outer Responsa checkboxes) ===
+            with ui.row().classes('w-full gap-3 mt-2 items-center flex-wrap'):
+                ui.label(tr('Search Options') + ':').classes('text-sm font-medium')
+                bld_variants_cb = ui.checkbox(tr('Variants'), value=responsa_variants_cb.value)
+                bld_ja_cb = ui.checkbox(tr('Judeo-Arabic'), value=responsa_ja_cb.value)
+                bld_flex_cb = ui.checkbox(tr('Flex Spacing'), value=responsa_flex_cb.value)
+                bld_bidir_cb = ui.checkbox(tr('Bidirectional Gap'), value=bidirectional_cb.value)
+
+                # Two-way sync: builder checkboxes ↔ outer Responsa checkboxes
+                def _sync_to_outer(outer_cb, bld_cb):
+                    def handler():
+                        outer_cb.set_value(bld_cb.value)
+                    return handler
+                bld_variants_cb.on('update:model-value', _sync_to_outer(responsa_variants_cb, bld_variants_cb))
+                bld_ja_cb.on('update:model-value', _sync_to_outer(responsa_ja_cb, bld_ja_cb))
+                bld_flex_cb.on('update:model-value', _sync_to_outer(responsa_flex_cb, bld_flex_cb))
+                bld_bidir_cb.on('update:model-value', _sync_to_outer(bidirectional_cb, bld_bidir_cb))
+
             # === Live Preview ===
             with ui.row().classes('w-full mt-3 items-center'):
                 ui.label(tr('Preview') + ':').classes('text-sm font-medium')
@@ -1504,7 +1583,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ui.button(tr('Clear All'), on_click=clear_all, icon='delete_sweep').props('flat')
                 with ui.row().classes('gap-2'):
                     ui.button(tr('Cancel'), on_click=builder_dialog.close).props('flat')
-                    ui.button(tr('Apply'), on_click=on_apply, icon='check').props('color=primary')
+                    ui.button(tr('Search'), on_click=on_apply, icon='search').props('color=primary')
 
         builder_dialog.open()
 
@@ -1608,6 +1687,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         exclude_words=not_words,
                         responsa_options=responsa_options
                     )
+            except ValueError as e:
+                # Explosion guard or other validation error — surface to user
+                error_msg = str(e)
+                print(f"Search Validation Error: {error_msg}")
+                return {'error': error_msg}
             except Exception as e:
                 print(f"Search Error: {e}")
                 import traceback
@@ -1615,6 +1699,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return []
 
         results = await run.io_bound(run_core_search)
+
+        # Handle validation errors from explosion guard (returned as sentinel dict
+        # because run_core_search runs in io_bound thread and cannot call ui.notify)
+        if isinstance(results, dict) and 'error' in results:
+            error_msg = results['error']
+            ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_state.progress = 0
+            results_count.text = f"0 {tr('Results')}"
+            render_results([])
+            return
 
         # Batch lookup for transcription availability
         result_sys_ids = [
