@@ -1472,12 +1472,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.draft_id = None
                 ui.notify(tr('Correction submitted successfully'), type='positive')
 
-                # Reload page to see changes
-                load_page(direction=0)
+                # Reload page to see changes — wrap in try/except because
+                # load_page destroys the current slot context
+                try:
+                    load_page(direction=0)
+                except Exception:
+                    pass
         except Exception as e:
             state.edit_loading = False
-            state.error_message = f"Error submitting: {str(e)}"
-            update_content()
+            # Avoid error if the UI slot was already destroyed by page reload
+            try:
+                state.error_message = f"Error submitting: {str(e)}"
+                update_content()
+            except Exception:
+                pass
             print(f"Submit error: {e}")
 
     def handle_save_draft():
