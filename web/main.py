@@ -25,7 +25,7 @@ from nicegui import ui, app, run
 from web.state import state
 from web.api import init_api_routes
 from web.translations import tr, is_rtl, get_dir, set_language, get_language
-from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, Config
+from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, Config
 
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
@@ -2176,10 +2176,7 @@ async def initialize_engine():
             state.searcher = SearchEngine(state.meta_mgr, state.var_mgr)
             state.indexer = Indexer(state.meta_mgr)
 
-            # 5. AI
-            state.ai_mgr = AIManager()
-
-            # 6. Start background loading
+            # 5. Start background loading
             state.meta_mgr.start_background_loading()
 
             print("Engine initialization complete.")

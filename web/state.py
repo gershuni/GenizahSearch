@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any, Union
-from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager
+from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 
 class AppState:
@@ -17,8 +17,6 @@ class AppState:
         self.searcher: Optional[SearchEngine] = None
         self.lab_engine: Optional[LabEngine] = None
         self.indexer: Optional[Indexer] = None
-        self.ai_mgr: Optional[AIManager] = None
-
         # Local lists manager (for per-device storage / anonymous users)
         self._local_lists_mgr: Optional[ListsManager] = None
 
