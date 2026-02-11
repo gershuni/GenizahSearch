@@ -293,7 +293,7 @@ Select **PGP Tags** from the search Mode dropdown to browse manuscripts by topic
         ui.markdown('''
 A side-by-side view that allows you to examine multiple manuscripts together, with synchronized images and a version selector for each fragment.
 
-The Reading Desk is useful for any researcher who wants to compare manuscripts\u2014whether they are fragments belonging to the same PGP document (e.g., recto and verso of different leaves) or independent manuscripts you wish to examine in parallel.
+The Reading Desk is useful for any researcher who wants to view multiple shelfmarks together\u2014whether they are fragments that join into a single document (according to PGP or other joins) or any collection of manuscripts you wish to examine side by side.
 
 **How to use:**
 - Click the **Add to Reading Desk** button on the Browse Manuscript page
@@ -631,7 +631,7 @@ def _create_hebrew_content():
         ui.markdown('''
 תצוגה מקבילה המאפשרת עיון במספר כתבי יד זה לצד זה, עם תמונות מסונכרנות ובורר גרסאות לכל קטע בנפרד.
 
-שולחן הקריאה שימושי לכל חוקר המעוניין להשוות כתבי יד — בין אם מדובר בקטעים השייכים לאותו מסמך PGP (למשל: recto ו-verso של דפים שונים) ובין אם בכתבי יד בלתי-תלויים שברצונכם לעיין בהם במקביל.
+שולחן הקריאה שימושי לכל חוקר המעוניין לצפות בכמה מספרי מדף יחד — בין אם מדובר בקטעים המצטרפים למסמך אחד (על פי PGP או צירופים אחרים) ובין אם בכל אוסף כתבי יד שברצונכם לעיין בהם ברצף.
 
 **כיצד להשתמש:**
 - לחצו על כפתור **הוספה לשולחן הקריאה** בעמוד עיון בכתב יד
