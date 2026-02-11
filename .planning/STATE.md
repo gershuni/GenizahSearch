@@ -57,6 +57,10 @@ Progress: [█████░░░░░] 50%
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Recto/verso section headers stripped during parsing (v1 tech debt, not blocking)
 
+### Roadmap Evolution
+
+- Phase 21 added: Debug PGP integration
+
 ### Future Improvements
 
 - Search WITH JA diacritical marks (intentional marked-letter matching)
@@ -66,6 +70,6 @@ Progress: [█████░░░░░] 50%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 19-03-PLAN.md (Apostrophe Variant Normalization) -- Phase 19 fully complete
+Stopped at: Completed quick task 9 (Fix Tabular Query Builder Checkboxes Invisible in Dark Mode)
 Resume file: None
-Notes: Phase 19 complete (3 plans, ~6 min total). UAT gap closed -- all 5 tests pass. Ready for Phase 20.
+Notes: Quick task 9 complete (2 tasks, ~1 min). Dark-mode checkbox CSS fixes and theme-aware border variable. Ready for Phase 20.
