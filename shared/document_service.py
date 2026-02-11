@@ -196,11 +196,30 @@ def parse_transcription_sections(transcription: str) -> dict:
         return {'recto': [], 'verso': []}
 
     # Pattern matches section headers at start of line
-    # Handles: Recto, Verso, Recto - right margin, Verso, address, etc.
-    # The marker itself is on its own line or followed by colon/newline
+    # Handles all known marker variants:
+    #   bare: Recto\n, Verso\n
+    #   period: Verso.\n, Recto.\n
+    #   period+qualifier: Verso. Address.\n
+    #   parenthetical: Verso (address)\n, Verso (upside down)\n
+    #   dash/comma: Recto - right margin\n
+    #   space+word: Recto Margin\n
+    # Uses explicit [Rr]ecto/[Vv]erso (not IGNORECASE) to avoid matching
+    # content lines like "recto text..." which start with the keyword.
+    # \b word boundary prevents matching "Rectory" etc.
     section_pattern = re.compile(
-        r'^(Recto|Verso)(?:\s*[-,]\s*[^\n]+)?[:\s]*\n',
-        re.MULTILINE | re.IGNORECASE
+        r'^([Rr]ecto|[Vv]erso)\b'
+        r'(?:'
+        r'[.\s]*'                            # optional periods/spaces after keyword
+        r'(?:'
+        r'[-,]\s*[^\n]{0,40}'               # dash/comma modifier
+        r'|'
+        r'\([^\n)]{0,40}\)'                  # parenthetical modifier
+        r'|'
+        r'[A-Z][a-z]*(?:\.[^\n]{0,30})?'    # capitalized qualifier word(s)
+        r')?'
+        r')?'
+        r'\s*\n',
+        re.MULTILINE
     )
 
     # Find all section markers with their positions
