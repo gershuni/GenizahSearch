@@ -296,3 +296,128 @@ class TestParseHtmlSections:
         assert 'text & more > less' in text
         # &hellip; decodes to Unicode horizontal ellipsis character
         assert '\u2026' in text
+
+
+class TestParseTranscriptionSections:
+    """Tests for parse_transcription_sections regex fallback -- all marker variants."""
+
+    def test_bare_markers(self):
+        """Basic 'Recto\\n' / 'Verso\\n' markers (regression, should pass already)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nVerso\nverso text"
+        result = parse_transcription_sections(text)
+        assert len(result['recto']) > 0
+        assert 'recto text' in result['recto'][0]
+        assert len(result['verso']) > 0
+        assert 'verso text' in result['verso'][0]
+
+    def test_period_marker(self):
+        """'Verso.' with trailing period (268 corpus occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nVerso.\nverso text"
+        result = parse_transcription_sections(text)
+        assert len(result['verso']) > 0
+        assert 'verso text' in result['verso'][0]
+
+    def test_period_address_marker(self):
+        """'Verso. Address.' with period and qualifier (68 occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nVerso. Address.\naddress text"
+        result = parse_transcription_sections(text)
+        assert len(result['verso']) > 0
+        assert 'address text' in result['verso'][0]
+
+    def test_parenthetical_marker(self):
+        """'Verso (address)' with parenthetical qualifier (12 occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nVerso (address)\naddress text"
+        result = parse_transcription_sections(text)
+        assert len(result['verso']) > 0
+        assert 'address text' in result['verso'][0]
+
+    def test_space_modifier_marker(self):
+        """'Recto Margin' with space-separated modifier (12 occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nRecto Margin\nmargin text\nVerso\nverso text"
+        result = parse_transcription_sections(text)
+        # "Recto Margin" should be a recto sub-section
+        recto_combined = '\n'.join(result['recto'])
+        assert 'margin text' in recto_combined
+        assert len(result['verso']) > 0
+        assert 'verso text' in result['verso'][0]
+
+    def test_upside_down_marker(self):
+        """'Verso (upside down)' with parenthetical (7 occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto\nrecto text\nVerso (upside down)\nupside down text"
+        result = parse_transcription_sections(text)
+        assert len(result['verso']) > 0
+        assert 'upside down text' in result['verso'][0]
+
+    def test_recto_period_marker(self):
+        """'Recto.' with trailing period (7 occurrences)."""
+        from shared.document_service import parse_transcription_sections
+        text = "Recto.\nrecto text\nVerso\nverso text"
+        result = parse_transcription_sections(text)
+        assert len(result['recto']) > 0
+        assert 'recto text' in result['recto'][0]
+
+    def test_case_insensitive(self):
+        """Lowercase 'verso.' matches."""
+        from shared.document_service import parse_transcription_sections
+        text = "recto\nrecto text\nverso.\nverso text"
+        result = parse_transcription_sections(text)
+        assert len(result['verso']) > 0
+        assert 'verso text' in result['verso'][0]
+
+    def test_preamble_assigned_to_recto(self):
+        """Text before first marker goes to recto."""
+        from shared.document_service import parse_transcription_sections
+        text = "preamble text\nRecto\nrecto text\nVerso\nverso text"
+        result = parse_transcription_sections(text)
+        recto_combined = '\n'.join(result['recto'])
+        assert 'preamble text' in recto_combined
+
+    def test_empty_input(self):
+        """Empty string returns empty recto/verso lists."""
+        from shared.document_service import parse_transcription_sections
+        result = parse_transcription_sections('')
+        assert result == {'recto': [], 'verso': []}
+
+    def test_no_markers(self):
+        """Text without markers returns all as recto."""
+        from shared.document_service import parse_transcription_sections
+        result = parse_transcription_sections('some plain text without markers')
+        assert len(result['recto']) > 0
+        assert 'some plain text without markers' in result['recto'][0]
+        assert result['verso'] == []
+
+    def test_get_section_for_page_with_period_marker(self):
+        """get_section_for_page correctly splits with period marker."""
+        from shared.document_service import get_section_for_page
+        text = "Recto\nrecto content here\nVerso.\nverso content here"
+        page1 = get_section_for_page(text, 1)
+        page2 = get_section_for_page(text, 2)
+        assert 'recto content here' in page1
+        assert 'verso content here' in page2
+
+    def test_no_false_positive_on_content_line(self):
+        """Long content line starting with 'Verso' should NOT be a marker."""
+        from shared.document_service import parse_transcription_sections
+        # A content line >60 chars after "Verso" should not match
+        long_line = "Verso is a concept in poetry that refers to the left-hand page of a manuscript or printed book and is distinct from recto"
+        text = f"Recto\nrecto text\n{long_line}\nmore text"
+        result = parse_transcription_sections(text)
+        # The long line should NOT create a verso section
+        assert result['verso'] == []
+
+    def test_word_boundary(self):
+        """'Rectory' should NOT match as recto marker."""
+        from shared.document_service import parse_transcription_sections
+        text = "Rectory\nsome text about a rectory"
+        result = parse_transcription_sections(text)
+        # No markers matched, so all goes to recto as plain text
+        recto_combined = '\n'.join(result['recto'])
+        assert 'Rectory' in recto_combined
+        # There should only be one recto entry (the full text, no split)
+        assert len(result['recto']) == 1
