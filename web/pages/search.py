@@ -2262,7 +2262,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             is_translation = 'Translation' in (src.get('doc_relation') or '')
                             if src.get('content'):
                                 if not is_translation and not source_page:
-                                    src['content'] = get_section_for_page(src['content'], current_p_num)
+                                    src['content'] = get_section_for_page(src['content'], current_p_num, src.get('sections'))
                             page_sources.append(src)
                     all_sources = page_sources if page_sources else None
 

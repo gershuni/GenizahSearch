@@ -496,7 +496,7 @@ class PGPSourceWorker(QThread):
                     if not source_page:
                         content = source.get('content')
                         if content:
-                            source['content'] = get_section_for_page(content, self.page_num)
+                            source['content'] = get_section_for_page(content, self.page_num, source.get('sections'))
                     page_sources.append(source)
                     continue
 
@@ -506,7 +506,7 @@ class PGPSourceWorker(QThread):
                     if not source_page:
                         content = source.get('content')
                         if content:
-                            source['content'] = get_section_for_page(content, self.page_num)
+                            source['content'] = get_section_for_page(content, self.page_num, source.get('sections'))
                     page_sources.append(source)
 
             # Get document metadata

@@ -254,33 +254,49 @@ def parse_transcription_sections(transcription: str) -> dict:
     return sections
 
 
-def get_section_for_page(transcription: str, page_num: int) -> Optional[str]:
+def get_section_for_page(transcription: str, page_num: int, sections: list = None) -> Optional[str]:
     """
     Get the appropriate transcription section for a page number.
+
+    When structured sections are available (from pgp-text HTML import),
+    uses canvas_num matching for reliable page mapping.
+    Falls back to regex-based parsing when sections are not available.
 
     Args:
         transcription: Full transcription text
         page_num: Page number (1 = recto, 2 = verso for single-fragment docs)
+        sections: Optional structured sections from document_sources.sections JSONB.
+                  List of dicts with canvas_url, canvas_num, label, text.
+                  When provided, uses canvas_num matching instead of regex parsing.
 
     Returns:
         Section text for the page, None if no content exists for this page,
         or full transcription if no recto/verso markers found at all.
     """
-    sections = parse_transcription_sections(transcription)
+    # Path 1: Structured sections (reliable canvas-based lookup)
+    if sections:
+        for section in sections:
+            if section.get('canvas_num') == page_num:
+                return section.get('text')
+        # page_num beyond available canvases -- return full transcription
+        return transcription
+
+    # Path 2: Regex fallback (existing logic)
+    parsed = parse_transcription_sections(transcription)
 
     # Check if the transcription has any recto/verso markers
-    has_recto = bool(sections.get('recto'))
-    has_verso = bool(sections.get('verso'))
+    has_recto = bool(parsed.get('recto'))
+    has_verso = bool(parsed.get('verso'))
 
     # Map page number to section type
     # For single-fragment: page 1 = recto, page 2 = verso
     if page_num == 1:
-        section_list = sections.get('recto', [])
+        section_list = parsed.get('recto', [])
         # If document has verso-only content, return None for recto page
         if not section_list and has_verso:
             return None
     elif page_num == 2:
-        section_list = sections.get('verso', [])
+        section_list = parsed.get('verso', [])
         # If document has recto-only content, return None for verso page
         if not section_list and has_recto:
             return None

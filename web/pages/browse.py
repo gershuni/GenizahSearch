@@ -904,7 +904,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # (meaning it might contain both recto and verso in one document)
                                     # If source has page_info, the content is already page-specific
                                     if not is_translation and not source_page:
-                                        source['content'] = get_section_for_page(source['content'], page.p_num)
+                                        source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
                                     # Sources with page_info or translations keep full content
                                 page_sources.append(source)
 
@@ -3660,7 +3660,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     is_translation = 'Translation' in (source.get('doc_relation') or '')
                                     if source.get('content'):
                                         if not is_translation and not source_page:
-                                            source['content'] = get_section_for_page(source['content'], page.p_num)
+                                            source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
                                     page_sources.append(source)
                             state.all_sources = page_sources if page_sources else None
 
