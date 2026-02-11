@@ -79,10 +79,10 @@ structural HTML section parser for PGP transcriptions.
   2. The function returns corrections with statuses `draft`, `pending`, and `under_review` (all pre-approval states)
   3. When no user is authenticated, the function returns no pending corrections (empty result)
   4. When a different user is authenticated, they do not see another user's pending corrections
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 22-01: TBD
+- [ ] 22-01-PLAN.md -- Shared corrections service function + tests
 
 ### Phase 23: Web Pending Corrections Display
 **Goal**: Logged-in users see their own pending corrections as a selectable, visually distinct version in the web app's version selector
@@ -124,10 +124,10 @@ Phases execute in numeric order: 22 -> 23 -> 24
 | 8-12 | v5.6.0 | 25/25 | Complete | 2026-02-09 |
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
-| 22. Data Layer | v5.7.3 | 0/TBD | Not started | - |
+| 22. Data Layer | v5.7.3 | 0/1 | Planned | - |
 | 23. Web Display | v5.7.3 | 0/TBD | Not started | - |
 | 24. Desktop Display | v5.7.3 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after v5.7.3 roadmap creation*
+*Last updated: 2026-02-11 after Phase 22 planning*
