@@ -75,6 +75,7 @@ Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 |---|-------------|------|--------|-----------|
 | 9 | Fix tabular query builder checkboxes invisible in dark mode | 2026-02-11 | 313a9db | [9-fix-tabular-query-builder-checkboxes-inv](./quick/9-fix-tabular-query-builder-checkboxes-inv/) |
 | 10 | Fix desktop community tab corrections SupabaseCorrectionsClient error | 2026-02-11 | 9ef0ac7 | [10-fix-desktop-community-tab-corrections-su](./quick/10-fix-desktop-community-tab-corrections-su/) |
+| 11 | Fix profile page showing 0 reputation and 0 corrections | 2026-02-11 | 575ba11 | [11-fix-profile-page-showing-0-reputation-an](./quick/11-fix-profile-page-showing-0-reputation-an/) |
 
 ### Future Improvements
 
@@ -85,6 +86,6 @@ Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 21-01-PLAN.md (HTML parser and regex fix)
+Stopped at: Completed quick-11 (profile page reputation/corrections fix)
 Resume file: None
-Notes: Plan 21-01 complete (2 tasks, 4 TDD commits). 28 new tests, full suite 438 passed. Next: 21-02 (import script).
+Notes: Quick task 11 complete (3 bugs fixed: wrong field name, missing count query, missing reputation increment). Next: 21-02 (import script).
