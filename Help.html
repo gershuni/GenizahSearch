@@ -119,7 +119,7 @@
     <h3>Search Modes</h3>
     <ul>
         <li><b>Exact:</b> Matches only the exact word as typed.</li>
-        <li><b>Variants (?, ??, ???):</b> Accounts for common letter substitutions in these texts. Three levels are available: <b>?</b> (basic — e.g., Dalet/Resh, He/Het, Vav/Yod), <b>??</b> (extended — adds Qof/Kaf, Tet/Tav, etc.), and <b>???</b> (maximum — broadest flexibility). Higher levels may return less relevant results ("noise") and take longer. Use the <b>Num Changes</b> control to limit the number of character substitutions per word. You can switch between a dropdown and a slider for variant selection in the General Settings.</li>
+        <li><b>Variants (?):</b> Accounts for common letter substitutions in these texts. After selecting Variants mode, choose a level: <b>Basic</b> (e.g., Dalet/Resh, He/Het, Vav/Yod), <b>Extended</b> (adds Qof/Kaf, Tet/Tav, etc.), or <b>Maximum</b> (broadest flexibility). Higher levels may return less relevant results ("noise") and take longer. Use the <b>Num Changes</b> control to limit the number of character substitutions per word.</li>
         <li><b>Responsa Project (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, offering both a textual syntax with operators for prefixes, suffixes, plene/defective spelling, wildcards, and proximity gaps, and an intuitive tabular search interface that builds the query for you. See <a href="#responsa">Responsa-Style Search</a> below.</li>
         <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with decoding errors.</li>
         <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
@@ -429,7 +429,7 @@
     <h3>סוגי חיפוש</h3>
     <ul>
         <li><b>מדויק:</b> מוצא רק את המילה בדיוק כפי שנכתבה.</li>
-        <li><b>וריאנטים (?, ??, ???):</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו. שלוש רמות זמינות: <b>?</b> (בסיסי — למשל ד/ר, ה/ח, ו/י), <b>??</b> (מורחב — מוסיף ק/כ, ט/ת וכו'), ו-<b>???</b> (מקסימלי — הגמישות הרחבה ביותר). רמות גבוהות יותר עלולות להחזיר תוצאות פחות רלוונטיות ("רעש") ולקחת יותר זמן. השתמשו בבקרת <b>מספר שינויים</b> כדי להגביל את מספר חילופי התווים למילה. ניתן לעבור בין תפריט נפתח למחוון לבחירת רמת הוריאנטים בהגדרות הכלליות.</li>
+        <li><b>וריאנטים (?):</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו. לאחר בחירת מצב וריאנטים, בחרו רמה: <b>בסיסי</b> (למשל ד/ר, ה/ח, ו/י), <b>מורחב</b> (מוסיף ק/כ, ט/ת וכו'), או <b>מקסימלי</b> (הגמישות הרחבה ביותר). רמות גבוהות יותר עלולות להחזיר תוצאות פחות רלוונטיות ("רעש") ולקחת יותר זמן. השתמשו בבקרת <b>מספר שינויים</b> כדי להגביל את מספר חילופי התווים למילה.</li>
         <li><b>פרויקט השו"ת (R):</b> תחביר חיפוש בהשראת פרויקט השו"ת של אוניברסיטת בר-אילן, המציע הן תחביר טקסטואלי עם אופרטורים לתחיליות, סיומות, כתיב מלא/חסר, תווים כלליים ומרווחים, והן ממשק חיפוש טבלאי אינטואיטיבי שבונה את השאילתא עבורכם. ראו <a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a> להלן.</li>
         <li><b>עמום:</b> משתמש במרחק לווינשטיין (<bdi dir="ltr">Levenshtein distance</bdi>) למציאת מילים דומות גם אם יש שגיאות פענוח.</li>
         <li><b>ביטוי רגולרי (<bdi dir="ltr">Regex</bdi>):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code><bdi dir="ltr">\bא[א-ת]{3}\b</bdi></code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li>
