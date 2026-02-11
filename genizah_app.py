@@ -12102,7 +12102,7 @@ class GenizahGUI(QMainWindow):
 
         if not skip_api_calls:
             try:
-                corrections, total = self.corrections_client.search_corrections(page_size=20)
+                corrections, total = self.corrections_client.get_all_corrections(page_size=20)
                 cache_data = [{'id': c.id, 'shelfmark': c.shelfmark, 'system_id': c.system_id, 'author_username': c.author_username, 'status': c.status, 'page_number': c.page_number} for c in corrections]
                 self.corrections_client.set_cached_data('all_corrections', cache_data)
                 self.all_corrections_list.clear()
