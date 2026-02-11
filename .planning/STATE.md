@@ -2,17 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-11)
+See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration
+**Current focus:** v5.8.0 FJMS Integration -- Phase 25 (Data Infrastructure)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: --
-Status: Defining requirements
-Last activity: 2026-02-12 -- Milestone v5.8.0 started
+Phase: 25 of 28 (Data Infrastructure) -- first of 4 in v5.8.0
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-02-12 -- Roadmap created for v5.8.0
+
+Progress: [░░░░░░░░░░] 0% (0/6 plans)
 
 ## Performance Metrics
 
@@ -30,44 +32,32 @@ Last activity: 2026-02-12 -- Milestone v5.8.0 started
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-
-## Milestone History
-
-- **v5.7.3 Pending Corrections Visibility** -- Shipped 2026-02-11 (git tag v5.7.3)
-- **v5.7.2 Cleanup, Normalization & Sections** -- Shipped 2026-02-11 (git tag v5.7.2)
-- **v5.7.0 Responsa Search** -- Shipped 2026-02-10 (git tag v5.7.0)
-- **v5.6.0 Desktop Parity** -- Shipped 2026-02-09 (git tag v5.6.0)
-- **v1 External Data Integration** -- Shipped 2026-02-07 (git tag v5.5.0)
+| v5.8.0 | 25-28 | 0/6 | -- |
 
 ## Accumulated Context
 
 ### Decisions
 
-(Cleared at milestone boundary -- see PROJECT.md Key Decisions for history)
+- SQLite sidecar (`fjms_enrichment.db`) chosen over CSV+dict, Supabase, Tantivy (see FIST_STORAGE_ARCHITECTURE_DECISION.md)
+- FTS5 schema included in sidecar now, UI deferred to future milestone
+- Phase ordering: Data infra -> Joins -> Domains -> Catalog (user priority)
+- AlmaId maps directly to libraries.csv system_number (no normalization needed)
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
-- Recto/verso section headers stripped during parsing (v1 tech debt, not blocking)
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 9 | Fix tabular query builder checkboxes invisible in dark mode | 2026-02-11 | 313a9db | [9-fix-tabular-query-builder-checkboxes-inv](./quick/9-fix-tabular-query-builder-checkboxes-inv/) |
-| 10 | Fix desktop community tab corrections SupabaseCorrectionsClient error | 2026-02-11 | 9ef0ac7 | [10-fix-desktop-community-tab-corrections-su](./quick/10-fix-desktop-community-tab-corrections-su/) |
-| 11 | Fix profile page showing 0 reputation and 0 corrections | 2026-02-11 | 575ba11 | [11-fix-profile-page-showing-0-reputation-an](./quick/11-fix-profile-page-showing-0-reputation-an/) |
-| 12 | Fix leaderboard 0 points and desktop contributor names | 2026-02-11 | f3cf437 | [12-fix-leaderboard-0-points-and-desktop-con](./quick/12-fix-leaderboard-0-points-and-desktop-con/) |
+- FIST.db is 13 GB; export script must be efficient with targeted queries
+- Thread-safe SQLite for NiceGUI web app (concurrent requests) -- needs `check_same_thread=False`
 
 ### Future Improvements
 
-- Search WITH JA diacritical marks (intentional marked-letter matching)
+- FTS5 catalog search UI (schema ready, deferred to future milestone)
 - NLI joins import (~424K PartOf relationships)
 - Transcription search (Phase 13, needs server-side index architecture)
 
 ## Session Continuity
 
-Last session: 2026-02-11
-Stopped at: Completed quick-12 (leaderboard 0 points + desktop contributor names)
+Last session: 2026-02-12
+Stopped at: Roadmap created for v5.8.0 FJMS Integration
 Resume file: None
-Notes: Quick task 12 fixed leaderboard field names and desktop profile batch lookup.
+Notes: 4 phases, 6 plans, 19 requirements. Ready for `/gsd:plan-phase 25`.

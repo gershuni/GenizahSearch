@@ -68,31 +68,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Pending | Pending |
-| DATA-02 | Pending | Pending |
-| DATA-03 | Pending | Pending |
-| DATA-04 | Pending | Pending |
-| DATA-05 | Pending | Pending |
-| JOIN-01 | Pending | Pending |
-| JOIN-02 | Pending | Pending |
-| JOIN-03 | Pending | Pending |
-| JOIN-04 | Pending | Pending |
-| JOIN-05 | Pending | Pending |
-| DOM-01 | Pending | Pending |
-| DOM-02 | Pending | Pending |
-| DOM-03 | Pending | Pending |
-| DOM-04 | Pending | Pending |
-| CAT-01 | Pending | Pending |
-| CAT-02 | Pending | Pending |
-| CAT-03 | Pending | Pending |
-| CAT-04 | Pending | Pending |
-| CAT-05 | Pending | Pending |
+| DATA-01 | Phase 25 | Pending |
+| DATA-02 | Phase 25 | Pending |
+| DATA-03 | Phase 25 | Pending |
+| DATA-04 | Phase 25 | Pending |
+| DATA-05 | Phase 25 | Pending |
+| JOIN-01 | Phase 26 | Pending |
+| JOIN-02 | Phase 26 | Pending |
+| JOIN-03 | Phase 26 | Pending |
+| JOIN-04 | Phase 26 | Pending |
+| JOIN-05 | Phase 26 | Pending |
+| DOM-01 | Phase 27 | Pending |
+| DOM-02 | Phase 27 | Pending |
+| DOM-03 | Phase 27 | Pending |
+| DOM-04 | Phase 27 | Pending |
+| CAT-01 | Phase 28 | Pending |
+| CAT-02 | Phase 28 | Pending |
+| CAT-03 | Phase 28 | Pending |
+| CAT-04 | Phase 28 | Pending |
+| CAT-05 | Phase 28 | Pending |
 
 **Coverage:**
-- v5.8.0 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18
+- v5.8.0 requirements: 19 total
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after initial definition*
+*Last updated: 2026-02-12 after roadmap creation (traceability complete)*
