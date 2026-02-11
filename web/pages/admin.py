@@ -95,6 +95,24 @@ def update_correction_status(correction_id: int, status: str, review_notes: str 
             data['reviewed_at'] = datetime.now(timezone.utc).isoformat()
 
         response = client.table('corrections').update(data).eq('id', correction_id).execute()
+
+        # Increment author reputation when approving correction
+        if status == 'approved' and response.data:
+            try:
+                correction = response.data[0]
+                author_id = correction.get('author_id')
+
+                if author_id:
+                    # Get current reputation
+                    profile_response = client.table('profiles').select('reputation').eq('id', author_id).single().execute()
+                    current_reputation = profile_response.data.get('reputation', 0) if profile_response.data else 0
+
+                    # Increment reputation by 1
+                    client.table('profiles').update({'reputation': current_reputation + 1}).eq('id', author_id).execute()
+            except Exception as e:
+                print(f"Warning: Failed to update reputation for correction {correction_id}: {e}")
+                # Don't fail the approval if reputation update fails
+
         return {'success': True} if response.data else {'error': 'Update failed'}
     except Exception as e:
         return {'error': str(e)}
