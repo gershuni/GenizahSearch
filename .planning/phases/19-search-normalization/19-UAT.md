@@ -1,9 +1,9 @@
 ---
 status: complete
 phase: 19-search-normalization
-source: 19-01-SUMMARY.md, 19-02-SUMMARY.md
+source: 19-01-SUMMARY.md, 19-02-SUMMARY.md, 19-03-SUMMARY.md
 started: 2026-02-11T08:00:00Z
-updated: 2026-02-11T08:10:00Z
+updated: 2026-02-11T08:25:00Z
 ---
 
 ## Current Test
@@ -18,9 +18,9 @@ result: pass
 
 ### 2. Geresh/gershayim in query return same results
 expected: Search with Hebrew geresh (׳) or gershayim (״) in query returns identical results to query without them -- these punctuation marks are stripped automatically
-result: issue
+result: pass (fixed in 19-03)
 reported: "If I search הקב'ה I get 503 results. הקבה - 11006 results."
-severity: major
+resolution: Added ASCII apostrophe (U+0027) and curly quotes (U+2018, U+2019) to COMBINING_DIACRITICALS_PATTERN
 
 ### 3. Highlighting works through combining marks in source text
 expected: When search results contain source text with combining marks between base letters, the matched text is still highlighted correctly (marks don't break the highlight span)
@@ -37,19 +37,11 @@ result: pass
 ## Summary
 
 total: 5
-passed: 4
-issues: 1
+passed: 5
+issues: 0
 pending: 0
 skipped: 0
 
 ## Gaps
 
-- truth: "Search with geresh/gershayim returns identical results to query without them"
-  status: failed
-  reason: "User reported: If I search הקב'ה I get 503 results. הקבה - 11006 results."
-  severity: major
-  test: 2
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+None -- all gaps closed by 19-03 (apostrophe variant normalization).

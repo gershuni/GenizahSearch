@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 ## Current Position
 
 Phase: 19 of 20 (Search Normalization) -- COMPLETE
-Plan: 2 of 2 in current phase -- ALL DONE
-Status: Phase 19 complete (both plans executed)
-Last activity: 2026-02-11 -- Completed 19-02 (Search Pipeline Integration)
+Plan: 3 of 3 in current phase -- ALL DONE
+Status: Phase 19 complete (all 3 plans executed, UAT gap closed)
+Last activity: 2026-02-11 -- Completed 19-03 (Apostrophe Variant Normalization)
 
 Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 60 (across all milestones)
+- Total plans completed: 61 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~7.5 hours
 
@@ -42,6 +42,7 @@ Progress: [█████░░░░░] 50%
 
 ### Decisions
 
+- [19-03] Added 3 apostrophe variants (U+0027, U+2018, U+2019) to normalization patterns -- no index rebuild needed
 - [19-02] Regex mode exempted from diacritics stripping -- users control their regex patterns directly
 - [19-02] Wildcard/flex-spacing patterns not wrapped with mark tolerance -- custom regex where marks would confuse semantics
 - [19-02] No UI code changes needed -- both web and desktop inherit mark-tolerance via pattern strings
@@ -65,6 +66,6 @@ Progress: [█████░░░░░] 50%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 19-02-PLAN.md (Search Pipeline Integration) -- Phase 19 complete
+Stopped at: Completed 19-03-PLAN.md (Apostrophe Variant Normalization) -- Phase 19 fully complete
 Resume file: None
-Notes: Phase 19 complete (2 plans, ~4 min total). Search normalization fully wired. Ready for Phase 20 or UAT.
+Notes: Phase 19 complete (3 plans, ~6 min total). UAT gap closed -- all 5 tests pass. Ready for Phase 20.
