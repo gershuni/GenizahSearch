@@ -6,6 +6,7 @@ Shows connected fragments for a manuscript and allows creating new joins.
 Uses the simplified pairwise joins model with connected components.
 """
 
+import asyncio
 from nicegui import ui
 from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
@@ -294,7 +295,9 @@ def create_joins_button(
         except RuntimeError:
             pass  # Parent element was deleted (NiceGUI timer lifecycle)
 
-    ui.timer(0.1, _safe_load_count, once=True)
+    # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
+    # when content_container.clear() destroys the timer's parent element
+    asyncio.get_event_loop().call_later(0.1, _safe_load_count)
 
     return btn
 

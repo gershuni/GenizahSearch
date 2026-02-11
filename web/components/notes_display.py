@@ -419,6 +419,8 @@ def create_notes_button(
             except RuntimeError:
                 pass  # Parent element was deleted (NiceGUI timer lifecycle)
 
-        ui.timer(0.1, _safe_check, once=True)
+        # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
+        # when content_container.clear() destroys the timer's parent element
+        asyncio.get_event_loop().call_later(0.1, _safe_check)
 
     return container

@@ -9,6 +9,7 @@ Allows users to switch between different versions of a transcription:
 - User corrections (approved)
 """
 
+import asyncio
 from nicegui import ui
 from web.translations import tr
 from web.supabase_client import get_corrections
@@ -190,7 +191,9 @@ def create_version_selector(
             except RuntimeError:
                 pass  # Parent element was deleted (NiceGUI timer lifecycle)
 
-        ui.timer(0.1, _safe_load, once=True)
+        # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
+        # when content_container.clear() destroys the timer's parent element
+        asyncio.get_event_loop().call_later(0.1, _safe_load)
 
         with ui.button(icon='history').props(f'flat dense size={size}').tooltip(tr('Version History')) as btn:
             menu = ui.menu()
