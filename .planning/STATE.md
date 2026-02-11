@@ -5,16 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone
+**Current focus:** v5.7.3 Pending Corrections Visibility
 
 ## Current Position
 
-Phase: None (between milestones)
-Plan: N/A
-Status: v5.7.2 milestone complete, ready for next milestone
-Last activity: 2026-02-11 - Completed v5.7.2 milestone archival
-
-Progress: All milestones complete through v5.7.2
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-11 — Milestone v5.7.3 started
 
 ## Performance Metrics
 

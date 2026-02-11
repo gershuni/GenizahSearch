@@ -46,7 +46,14 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(No active milestone -- start next with `/gsd:new-milestone`)
+## Current Milestone: v5.7.3 Pending Corrections Visibility
+
+**Goal:** Let users see their own pending (unapproved) corrections as a selectable version in the version selector while browsing manuscripts.
+
+**Target features:**
+- User's pending corrections appear as a version source in the version selector
+- Only the submitter sees their own pending corrections (auth-aware)
+- Works in both web and desktop apps
 
 ### Out of Scope
 
@@ -134,4 +141,4 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Author_slug matching for section import | Prevents broadcasting sections to wrong sources | Good |
 
 ---
-*Last updated: 2026-02-11 after v5.7.2 milestone*
+*Last updated: 2026-02-11 after starting v5.7.3 milestone*
