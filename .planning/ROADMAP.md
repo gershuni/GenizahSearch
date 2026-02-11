@@ -94,10 +94,10 @@ Plans:
   3. User can select a pending correction and see its full text displayed, same as selecting an approved correction
   4. When the user is not logged in, no pending corrections appear in the version selector
   5. When the user has no pending corrections for the current page, the version selector looks and behaves exactly as before
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 23-01: TBD
+- [ ] 23-01-PLAN.md -- Add pending corrections to web version selector with visual distinction + tests
 
 ### Phase 24: Desktop Pending Corrections Display
 **Goal**: Logged-in users see their own pending corrections as a selectable, visually distinct version in the desktop app's version selector
