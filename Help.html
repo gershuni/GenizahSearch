@@ -123,7 +123,6 @@
         <li><b>Responsa Project (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, offering both a textual syntax with operators for prefixes, suffixes, plene/defective spelling, wildcards, and proximity gaps, and an intuitive tabular search interface that builds the query for you. See <a href="#responsa">Responsa-Style Search</a> below.</li>
         <li><b>Fuzzy:</b> Uses Levenshtein distance to find similar words even with decoding errors.</li>
         <li><b>Regex:</b> Advanced search for experienced users. For example, <code>\bא[א-ת]{3}\b</code> finds 4-letter words starting with Aleph.</li>
-        <li><b>AI Assistant (&#129302;):</b> Click the AI button to open a chat interface that helps generate regex patterns. Describe what you're looking for in plain language, and the AI will create the appropriate regex. Supports Google Gemini, OpenAI, and Anthropic Claude (configure your API key in the Settings tab).</li>
         <li><b>Title:</b> Searches within the catalog titles of compositions. Example: searching "Mishneh Torah" will retrieve all manuscripts identified as Maimonides' Mishneh Torah.</li>
         <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
         <li><b>PGP Tags:</b> Browse manuscripts by topic tags from the Princeton Geniza Project. Tags are organized into categories and displayed with Hebrew translations. See <a href="#pgp">PGP Data</a> below.</li>
@@ -429,7 +428,7 @@
     <h3>סוגי חיפוש</h3>
     <ul>
         <li><b>מדויק:</b> מוצא רק את המילה בדיוק כפי שנכתבה.</li>
-        <li><b>וריאנטים (?):</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו. לאחר בחירת מצב וריאנטים, בחרו רמה: <b>בסיסי</b> (למשל ד/ר, ה/ח, ו/י), <b>מורחב</b> (מוסיף ק/כ, ט/ת וכו'), או <b>מקסימלי</b> (הגמישות הרחבה ביותר). רמות גבוהות יותר עלולות להחזיר תוצאות פחות רלוונטיות ("רעש") ולקחת יותר זמן. השתמשו בבקרת <b>מספר שינויים</b> כדי להגביל את מספר חילופי התווים למילה.</li>
+        <li><b>וריאנטים (?):</b> מתחשב בחילופי אותיות נפוצים בטקסטים אלו. לאחר בחירת מצב וריאנטים, בחרו רמה: <b>בסיסי</b> (למשל ד/ר, ה/ח, ו/י), <b>מורחב</b> (מוסיף ק/כ, ט/ת וכו'), או <b>מרבי</b> (הגמישות הרחבה ביותר). רמות גבוהות יותר עלולות להחזיר תוצאות פחות רלוונטיות ("רעש") ולקחת יותר זמן. השתמשו בבקרת <b>מספר שינויים</b> כדי להגביל את מספר חילופי התווים למילה.</li>
         <li><b>פרויקט השו"ת (R):</b> תחביר חיפוש בהשראת פרויקט השו"ת של אוניברסיטת בר-אילן, המציע הן תחביר טקסטואלי עם אופרטורים לתחיליות, סיומות, כתיב מלא/חסר, תווים כלליים ומרווחים, והן ממשק חיפוש טבלאי אינטואיטיבי שבונה את השאילתא עבורכם. ראו <a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a> להלן.</li>
         <li><b>עמום:</b> משתמש במרחק לווינשטיין (<bdi dir="ltr">Levenshtein distance</bdi>) למציאת מילים דומות גם אם יש שגיאות פענוח.</li>
         <li><b>ביטוי רגולרי (<bdi dir="ltr">Regex</bdi>):</b> חיפוש מתקדם למשתמשים מנוסים. לדוגמה, <code><bdi dir="ltr">\bא[א-ת]{3}\b</bdi></code> ימצא מילים בנות 4 אותיות המתחילות ב-א'.</li>

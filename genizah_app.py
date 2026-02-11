@@ -1,4 +1,4 @@
-"""PyQt6 GUI for Genizah search, browsing, and AI assistance."""
+"""PyQt6 GUI for Genizah search and browsing."""
 
 # genizah_app.py
 import sys
@@ -40,7 +40,7 @@ from collections import defaultdict
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, AIManager, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -54,7 +54,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, AIWorkerThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -1971,69 +1971,6 @@ class HelpDialog(QDialog):
             self.text.setHtml(notice)
         if anchor:
             QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
-
-class AIDialog(QDialog):
-    """Chat interface for requesting regex suggestions from the AI manager."""
-    def __init__(self, parent, ai_mgr):
-        super().__init__(parent)
-        self.setWindowTitle(tr("AI Regex Assistant ({})").format(ai_mgr.provider))
-        self.resize(600, 500)
-        self.ai_mgr = ai_mgr
-        self.generated_regex = ""
-        
-        layout = QVBoxLayout()
-        self.chat_display = QTextBrowser()
-        self.chat_display.setOpenExternalLinks(True)
-        layout.addWidget(self.chat_display)
-        
-        input_layout = QHBoxLayout()
-        self.prompt_input = QLineEdit()
-        self.prompt_input.setPlaceholderText(tr("Describe pattern (e.g. 'Word starting with Aleph')..."))
-        self.prompt_input.returnPressed.connect(self.send_request)
-        self.btn_send = QPushButton(tr("Send"))
-        self.btn_send.clicked.connect(self.send_request)
-        input_layout.addWidget(self.prompt_input)
-        input_layout.addWidget(self.btn_send)
-        layout.addLayout(input_layout)
-        
-        self.lbl_preview = QLabel(tr("Generated Regex will appear here."))
-        self.lbl_preview.setStyleSheet("font-weight: bold; color: #2980b9; padding: 10px; background: #ecf0f1;")
-        self.lbl_preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.lbl_preview)
-        
-        self.btn_use = QPushButton(tr("Use this Regex"))
-        self.btn_use.clicked.connect(self.accept)
-        self.btn_use.setEnabled(False)
-        self.btn_use.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        layout.addWidget(self.btn_use)
-        self.setLayout(layout)
-        self.append_chat("System", tr("Hello! I can help you build Regex for Hebrew manuscripts."))
-
-    def append_chat(self, sender, text):
-        sender_tr = tr(sender)
-        color = "blue" if sender == "System" else "green" if sender == "You" else "black"
-        self.chat_display.append(f"<b style='color:{color}'>{sender_tr}:</b> {text}<br>")
-
-    def send_request(self):
-        text = self.prompt_input.text().strip()
-        if not text: return
-        self.append_chat("You", text)
-        self.prompt_input.clear(); self.prompt_input.setEnabled(False); self.btn_send.setEnabled(False)
-        self.lbl_preview.setText(tr("Thinking..."))
-        self.worker = AIWorkerThread(self.ai_mgr, text)
-        self.worker.finished_signal.connect(self.on_response)
-        self.worker.start()
-
-    def on_response(self, data, err):
-        self.prompt_input.setEnabled(True); self.btn_send.setEnabled(True); self.prompt_input.setFocus()
-        if err:
-            self.append_chat("Error", err); self.lbl_preview.setText(tr("Error."))
-            return
-        regex = data.get("regex", "")
-        self.append_chat("Gemini", f"{data.get('explanation', '')}<br><code>{regex}</code>")
-        self.lbl_preview.setText(regex)
-        self.generated_regex = regex
-        self.btn_use.setEnabled(True)
 
 class ExcludeDialog(QDialog):
     """Collect system IDs or shelfmarks that should be excluded from searches."""
@@ -4952,7 +4889,6 @@ class GenizahGUI(QMainWindow):
         self.var_mgr = None
         self.searcher = None
         self.indexer = None
-        self.ai_mgr = None
         self.lab_engine = None
         self.lists_mgr = None
         self.joins_mgr = None
@@ -5042,13 +4978,12 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
 
-    def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer, ai_mgr):
+    def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer):
         try:
             self.meta_mgr = meta_mgr
             self.var_mgr = var_mgr
             self.searcher = searcher
             self.indexer = indexer
-            self.ai_mgr = ai_mgr
 
             # Init Lists Manager
             self.lists_mgr = ListsManager(self.meta_mgr)
@@ -5078,18 +5013,10 @@ class GenizahGUI(QMainWindow):
             os.makedirs(Config.REPORTS_DIR, exist_ok=True)
             self.browse_thumb_resolved.connect(self._on_browse_thumb_resolved)
 
-            # Update Settings Tab with loaded AI config
-            if self.ai_mgr:
-                self.combo_provider.setCurrentText(self.ai_mgr.provider)
-                self.txt_model.setText(self.ai_mgr.model_name)
-                self.txt_api_key.setText(self.ai_mgr.api_key)
-
             # Enable UI interactions
             self.btn_search.setEnabled(True)
-            self.btn_ai.setEnabled(True)
             self.btn_comp_run.setEnabled(True)
             self.btn_browse_go.setEnabled(True)
-            self.btn_save_ai.setEnabled(True)
             self.btn_build_index.setEnabled(True)
             
             self.status_label.setText(tr("Components loaded. Ready."))
@@ -6691,16 +6618,10 @@ class GenizahGUI(QMainWindow):
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
         self.btn_search.setEnabled(False)
 
-        self.btn_ai = QPushButton(tr("🤖 AI Assistant")); self.btn_ai.setStyleSheet("background-color: #8e44ad; color: white;")
-        self.btn_ai.setToolTip(tr("Generate Regex with Gemini AI"))
-        self.btn_ai.clicked.connect(self.open_ai)
-        self.btn_ai.setEnabled(False)
-
         self.query_label = QLabel(tr("Query:"))
         row1.addWidget(self.query_label)
         row1.addWidget(self.query_input)
         row1.addWidget(self.btn_search)
-        row1.addWidget(self.btn_ai)
 
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
@@ -6714,7 +6635,7 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
         self.mode_combo.setItemData(2, tr("Responsa-style grammatical expansion for Hebrew search"))
         self.mode_combo.setItemData(3, tr("Fuzzy search: Levenshtein distance"))
-        self.mode_combo.setItemData(4, tr("Regex: Use AI Assistant for complex patterns"))
+        self.mode_combo.setItemData(4, tr("Regex: Advanced pattern matching"))
         self.mode_combo.setItemData(5, tr("Search in Title metadata"))
         self.mode_combo.setItemData(6, tr("Search in Shelfmark metadata"))
         self.mode_combo.setItemData(7, tr("Search by topic tags from the Princeton Geniza Project"))
@@ -12642,35 +12563,6 @@ class GenizahGUI(QMainWindow):
         dl.addWidget(self.btn_build_index)
         self.index_progress = QProgressBar(); dl.addWidget(self.index_progress)
         gb_data.setLayout(dl); layout.addWidget(gb_data)
-        
-        gb_ai = QGroupBox(tr("AI Configuration"))
-        al = QVBoxLayout()
-
-        row1 = QHBoxLayout()
-        self.combo_provider = QComboBox()
-        self.combo_provider.addItems(["Google Gemini", "OpenAI", "Anthropic Claude"])
-        self.combo_provider.setCurrentText(self.ai_mgr.provider if self.ai_mgr else "Google Gemini")
-        self.combo_provider.currentTextChanged.connect(self._on_provider_changed)
-
-        self.txt_model = QLineEdit(); self.txt_model.setText(self.ai_mgr.model_name if self.ai_mgr else "gemini-3-flash-preview")
-        self.txt_model.setPlaceholderText(tr("Model:") + " (e.g. gemini-3-flash-preview)")
-
-        row1.addWidget(QLabel(tr("Provider:"))); row1.addWidget(self.combo_provider)
-        row1.addWidget(QLabel(tr("Model:"))); row1.addWidget(self.txt_model)
-
-        row2 = QHBoxLayout()
-        self.txt_api_key = QLineEdit(); self.txt_api_key.setText(self.ai_mgr.api_key if self.ai_mgr else ""); self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.txt_api_key.setPlaceholderText(tr("API Key:"))
-
-        self.btn_save_ai = QPushButton(tr("Save Settings"))
-        self.btn_save_ai.clicked.connect(self.save_ai_settings)
-        self.btn_save_ai.setEnabled(False)
-
-        row2.addWidget(QLabel(tr("API Key:"))); row2.addWidget(self.txt_api_key)
-        row2.addWidget(self.btn_save_ai)
-
-        al.addLayout(row1); al.addLayout(row2)
-        gb_ai.setLayout(al); layout.addWidget(gb_ai)
 
         # Application / Updates
         gb_app = QGroupBox(tr("Application"))
@@ -12748,25 +12640,6 @@ class GenizahGUI(QMainWindow):
         panel.setLayout(layout)
         return panel
 
-    def _on_provider_changed(self, text):
-        if text == "Google Gemini":
-            self.txt_model.setText("gemini-2.0-flash")
-        elif text == "OpenAI":
-            self.txt_model.setText("gpt-4o")
-        elif text == "Anthropic Claude":
-            self.txt_model.setText("claude-3-5-sonnet-20240620")
-
-    def save_ai_settings(self):
-        if not self.ai_mgr: return
-        provider = self.combo_provider.currentText()
-        model = self.txt_model.text().strip()
-        key = self.txt_api_key.text().strip()
-        if not key:
-            QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings."))
-            return
-        self.ai_mgr.save_config(provider, model, key)
-        QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(provider))
-
     def copy_citation(self):
         citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
         QApplication.clipboard().setText(citation)
@@ -12788,7 +12661,7 @@ class GenizahGUI(QMainWindow):
 
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns (Use AI mode for help, or consult your preferable AI engine).</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
@@ -12800,7 +12673,7 @@ class GenizahGUI(QMainWindow):
 
     def get_settings_help_text(self):
         if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
-        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates.</li><li><b>AI Settings:</b> Configure provider, model, and key for regex assistance.</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
+        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates.</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
 
     def _build_help_fallback_html(self):
         sections = [
@@ -12927,15 +12800,8 @@ class GenizahGUI(QMainWindow):
             }, indent=2, ensure_ascii=False)
             return f"\n[LAB MODE CONFIGURATION]\n{settings_dump}\n================================================================================\n"
         return ""
-    
-    # --- LOGIC ---
-    def open_ai(self):
-        if not self.ai_mgr: return
-        if not self.ai_mgr.api_key:
-            QMessageBox.warning(self, tr("Missing Key"), tr("Please configure your AI Provider & Key in Settings.")); return
-        d = AIDialog(self, self.ai_mgr)
-        if d.exec(): self.query_input.setText(d.generated_regex); self.mode_combo.setCurrentIndex(4)  # Regex mode (index shifted by Responsa insertion)
 
+    # --- LOGIC ---
     def open_search_settings(self):
         """Open the Search Settings dialog for variant configuration."""
         if not self.lab_engine:
@@ -13240,7 +13106,6 @@ class GenizahGUI(QMainWindow):
         # Search Tab
         if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
         if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
-        if hasattr(self, 'btn_ai'): self.btn_ai.setEnabled(not checked)
         if hasattr(self, 'chk_lab_deep'): self.chk_lab_deep.setEnabled(checked)
 
         # Composition Tab
