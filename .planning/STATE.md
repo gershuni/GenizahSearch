@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 
 ## Current Position
 
-Phase: 19 of 20 (Search Normalization)
-Plan: 1 of 2 in current phase
-Status: Plan 19-01 complete, 19-02 remaining
-Last activity: 2026-02-11 -- Completed 19-01 (Core Normalization Functions)
+Phase: 19 of 20 (Search Normalization) -- COMPLETE
+Plan: 2 of 2 in current phase -- ALL DONE
+Status: Phase 19 complete (both plans executed)
+Last activity: 2026-02-11 -- Completed 19-02 (Search Pipeline Integration)
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -42,6 +42,9 @@ Progress: [███░░░░░░░] 25%
 
 ### Decisions
 
+- [19-02] Regex mode exempted from diacritics stripping -- users control their regex patterns directly
+- [19-02] Wildcard/flex-spacing patterns not wrapped with mark tolerance -- custom regex where marks would confuse semantics
+- [19-02] No UI code changes needed -- both web and desktop inherit mark-tolerance via pattern strings
 - [19-01] Placed normalization functions between expand_judeo_arabic and _SOFIT_TO_NORMAL for logical grouping
 - [19-01] Used regex token splitting to handle escape sequences as single units in make_mark_tolerant_pattern
 - [18-01] Removed all AI support infrastructure (constants, imports, signals) not just named classes
@@ -62,6 +65,6 @@ Progress: [███░░░░░░░] 25%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 19-01-PLAN.md (Core Normalization Functions)
+Stopped at: Completed 19-02-PLAN.md (Search Pipeline Integration) -- Phase 19 complete
 Resume file: None
-Notes: Plan 19-01 complete (TDD, 2 min). Ready for 19-02 (search pipeline integration).
+Notes: Phase 19 complete (2 plans, ~4 min total). Search normalization fully wired. Ready for Phase 20 or UAT.
