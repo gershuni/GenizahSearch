@@ -72,6 +72,28 @@ class TestStripSearchDiacritics:
         """Digits, spaces, and punctuation are preserved."""
         assert strip_search_diacritics("abc 123 !@#") == "abc 123 !@#"
 
+    def test_removes_ascii_apostrophe(self):
+        """ASCII apostrophe (U+0027) is stripped."""
+        # Example: הקב'ה → הקבה
+        assert strip_search_diacritics("הקב'ה") == "הקבה"
+
+    def test_removes_left_curly_quote(self):
+        """Left curly single quote (U+2018) is stripped."""
+        assert strip_search_diacritics("הקב\u2018ה") == "הקבה"
+
+    def test_removes_right_curly_quote(self):
+        """Right curly single quote (U+2019) is stripped."""
+        assert strip_search_diacritics("הקב\u2019ה") == "הקבה"
+
+    def test_all_apostrophe_variants_normalize_identically(self):
+        """ASCII apostrophe, curly quotes, geresh, and gershayim all normalize to same base form."""
+        base = "הקבה"
+        assert strip_search_diacritics("הקב'ה") == base       # ASCII apostrophe
+        assert strip_search_diacritics("הקב\u05F3ה") == base   # Hebrew geresh
+        assert strip_search_diacritics("הקב\u05F4ה") == base   # Hebrew gershayim
+        assert strip_search_diacritics("הקב\u2018ה") == base   # Left curly quote
+        assert strip_search_diacritics("הקב\u2019ה") == base   # Right curly quote
+
 
 # ============================================================================
 # make_mark_tolerant_pattern
@@ -120,3 +142,19 @@ class TestMakeMarkTolerantPattern:
         pattern = make_mark_tolerant_pattern(re.escape("hello"))
         compiled = re.compile(pattern)
         assert compiled.search("hello")
+
+    def test_matches_text_with_apostrophe_variants(self):
+        """Pattern matches text containing ASCII apostrophe, curly quotes, or Hebrew marks."""
+        # Pattern built from base form should match all variants
+        pattern = make_mark_tolerant_pattern(re.escape("הקבה"))
+        assert re.search(pattern, "הקבה")        # base form
+        assert re.search(pattern, "הקב'ה")       # ASCII apostrophe
+        assert re.search(pattern, "הקב\u05F3ה")  # Hebrew geresh
+        assert re.search(pattern, "הקב\u2019ה")  # Right curly quote
+
+    def test_mark_tolerant_with_latin_apostrophe(self):
+        """Pattern matches Latin text with apostrophe variants inserted."""
+        pattern = make_mark_tolerant_pattern(re.escape("dont"))
+        assert re.search(pattern, "dont")
+        assert re.search(pattern, "don't")        # ASCII apostrophe
+        assert re.search(pattern, "don\u2019t")   # Curly quote
