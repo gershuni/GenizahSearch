@@ -1,0 +1,56 @@
+# Requirements: GenizahSearch
+
+**Defined:** 2026-02-11
+**Core Value:** Researchers can find what they need in the Genizah corpus
+
+## v5.7.3 Requirements
+
+Requirements for pending corrections visibility. Each maps to roadmap phases.
+
+### Corrections Visibility
+
+- [ ] **CORR-01**: User can see their own pending corrections in the version selector when browsing a manuscript page
+- [ ] **CORR-02**: User's pending corrections are visually distinct from approved corrections (different styling/label)
+- [ ] **CORR-03**: Only the submitter sees their own pending corrections (not visible to other users)
+- [ ] **CORR-04**: User can select a pending correction to view its text, same as approved corrections
+- [ ] **CORR-05**: Pending corrections visibility works in the web app
+- [ ] **CORR-06**: Pending corrections visibility works in the desktop app
+
+**Notes:**
+- "Pending" includes statuses: `draft`, `pending`, `under_review` (all pre-approval states)
+- Corrections are page-level (filtered by `page_number`)
+- Approved/rejected/merged corrections already handled by existing system
+
+## Future Requirements
+
+None deferred from this milestone.
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Editing pending corrections from version selector | Existing edit flow in "My Edits" page is sufficient |
+| Showing other users' pending corrections | Privacy — only submitter sees their own |
+| Notification when correction is approved/rejected | Separate feature, not part of visibility |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CORR-01 | — | Pending |
+| CORR-02 | — | Pending |
+| CORR-03 | — | Pending |
+| CORR-04 | — | Pending |
+| CORR-05 | — | Pending |
+| CORR-06 | — | Pending |
+
+**Coverage:**
+- v5.7.3 requirements: 6 total
+- Mapped to phases: 0
+- Unmapped: 6 ⚠️
+
+---
+*Requirements defined: 2026-02-11*
+*Last updated: 2026-02-11 after initial definition*
