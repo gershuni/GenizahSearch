@@ -14,37 +14,18 @@ from web.components.typography import h1, h2, h3
 def create_help_page():
     """Create the comprehensive Help Center page with bilingual content."""
 
-    lang = get_language()
-    is_hebrew = lang == 'he'
-
-    # Language toggle state
-    show_hebrew = {'value': is_hebrew}
+    is_hebrew = get_language() == 'he'
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-6 fade-in p-4'):
 
-        # === Language Toggle ===
-        with ui.row().classes('w-full items-center justify-between mb-4'):
-            h1(
-                'מרכז עזרה' if show_hebrew['value'] else 'Help Center',
-                classes='text-3xl font-bold',
-                style='color: var(--text-primary);'
-            )
+        h1(
+            'מרכז עזרה' if is_hebrew else 'Help Center',
+            classes='text-3xl font-bold mb-4',
+            style='color: var(--text-primary);'
+        )
 
-            def toggle_language():
-                show_hebrew['value'] = not show_hebrew['value']
-                ui.navigate.reload()  # Reload to switch content
-
-            ui.button(
-                'English' if show_hebrew['value'] else 'עברית',
-                icon='translate',
-                on_click=toggle_language
-            ).props('flat dense')
-
-        # === Content Container ===
-        content_container = ui.column().classes('w-full gap-6')
-
-        with content_container:
-            if show_hebrew['value']:
+        with ui.column().classes('w-full gap-6'):
+            if is_hebrew:
                 _create_hebrew_content()
             else:
                 _create_english_content()
@@ -118,7 +99,7 @@ The application fetches metadata and images from:
             ('Regex (/)', 'Advanced search for experienced users. Example: \\b\u05d0[\u05d0-\u05ea]{3}\\b finds 4-letter words starting with Aleph. You can use your preferred AI engine to help build a regex pattern suited to your needs.'),
             ('Title ($)', 'Searches within the catalog titles of compositions.'),
             ('Shelfmark (#)', 'Fast search for shelfmarks (e.g., "T-S NS 13.15").'),
-            ('\U0001F195 PGP Tags', 'Browse manuscripts by topic tags from the Princeton Geniza Project (PGP).'),
+            ('\U0001F195 PGP Tags', 'Browse manuscripts by topic tags from the Princeton Geniza Project (PGP). See [PGP Data](#help-pgp) below.'),
         ]
 
         with ui.column().classes('gap-3 mb-4'):
@@ -460,7 +441,7 @@ def _create_hebrew_content():
             ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם.'),
             ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים.'),
             ('מספר מדף (#)', 'חיפוש מהיר של מספרי מדף (למשל: "T-S NS 13.15").'),
-            ('\U0001F195 תגיות PGP', 'עיון לפי נושאים בכתבי יד שקוטלגו על ידי פרויקט הגניזה של פרינסטון (Princeton Geniza Project).'),
+            ('\U0001F195 תגיות PGP', 'עיון לפי נושאים בכתבי יד שקוטלגו על ידי פרויקט הגניזה של פרינסטון (Princeton Geniza Project). ראו [מידע PGP](#help-pgp) להלן.'),
         ]
 
         with ui.column().classes('gap-3 mb-4 w-full'):
