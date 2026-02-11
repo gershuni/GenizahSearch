@@ -49,7 +49,25 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(No active requirements -- ready for next milestone)
+<!-- Current milestone: v5.8.0 FJMS Integration -->
+
+- [ ] Export FJMS domain classifications, scientific joins, and catalog records into SQLite sidecar
+- [ ] Domain-based filtering in search results (both apps)
+- [ ] Domain display on browse page (both apps)
+- [ ] FJMS join group display with scholar attribution on browse page (both apps)
+- [ ] Catalog enrichment display (titles, authors, dates) on browse page (both apps)
+- [ ] FTS5 schema in sidecar (UI deferred)
+
+## Current Milestone: v5.8.0 FJMS Integration
+
+**Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
+
+**Target features:**
+- SQLite sidecar (`fjms_enrichment.db`) with domains, joins, catalog tables + FTS5 index
+- Domain filtering in search (filter results by Piyyut, Bible, Letters, etc.)
+- Domain badges on browse page
+- Join group display with scholar attribution and links to related fragments
+- Catalog enrichment: FJMS titles, authors, dates, descriptions alongside PGP metadata
 
 ### Out of Scope
 
@@ -139,6 +157,8 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Client-as-parameter for corrections service | Enables both web and desktop to pass their own authenticated client | Good |
 | Shared+shim pattern for corrections (like document_service) | Consistent import pattern, backward-compatible | Good |
 | asyncio.call_later replaces ui.timer for one-shot loads | Avoids NiceGUI parent_slot crash on container clear | Good |
+| SQLite sidecar for FJMS data (not CSV+dict or Supabase) | Read-only reference data, reverse lookups for domain filtering, no memory overhead, both apps | -- |
+| FTS5 schema now, UI deferred | Low-cost to include in schema, catalog search UI needs separate UX design | -- |
 
 ---
-*Last updated: 2026-02-11 after v5.7.3 milestone*
+*Last updated: 2026-02-12 after v5.8.0 milestone start*

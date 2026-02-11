@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone
+**Current focus:** v5.8.0 FJMS Integration
 
 ## Current Position
 
-Phase: None (between milestones)
-Plan: N/A
-Status: v5.7.3 shipped and tagged -- ready for next milestone
-Last activity: 2026-02-11 -- Completed quick task 12: Fix leaderboard 0 points and desktop contributor name showing User
+Phase: Not started (defining requirements)
+Plan: --
+Status: Defining requirements
+Last activity: 2026-02-12 -- Milestone v5.8.0 started
 
 ## Performance Metrics
 
