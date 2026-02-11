@@ -24,7 +24,7 @@ class TestParseBoundaries:
 
     def test_paragraph_boundaries(self):
         """Test parsing boundaries with paragraph breaks."""
-        text = "First paragraph.\n\nSecond paragraph.\n\nThird."
+        text = "First paragraph here.\n\nSecond paragraph here.\n\nThird part here."
         boundaries = parse_boundaries(text, '\n\n')
         assert len(boundaries) == 2
 
@@ -42,7 +42,7 @@ class TestParseBoundaries:
 
     def test_line_break_boundaries(self):
         """Test parsing boundaries with line breaks."""
-        text = "Line one\nLine two\nLine three"
+        text = "Line one here now\nLine two here now\nLine three here now"
         boundaries = parse_boundaries(text, '\n')
         assert len(boundaries) == 2
 
