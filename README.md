@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.7
+# Genizah Search Pro 5.7.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,14 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.7?
+## What's New in Version 5.7.2?
+
+### v5.7.2: Cleanup, Normalization & Sections
+
+* **AI Search removed:** Deprecated AI feature code fully removed from both apps
+* **Unicode search normalization:** Diacritical marks, geresh, and apostrophe variants stripped at query time with mark-tolerant highlighting
+* **Full green test suite:** 447 tests passing, 0 failures
+* **Structured PGP sections:** Recto/verso/margin sections parsed from HTML and stored as JSONB, displayed alongside manuscript images
 
 ### Responsa Search
 
@@ -125,7 +132,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.7 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.7.2 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 

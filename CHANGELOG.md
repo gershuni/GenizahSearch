@@ -4,12 +4,36 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [5.7.1] - 2026-02-11
+## [5.7.2] - 2026-02-11
 
 ### Cleanup & Polish
 
 - Removed deprecated AI Search feature code (AIManager, AIDialog, AIWorkerThread, Settings panel, button, help references)
 - Removed `google-genai` dependency
+
+### Search Normalization
+
+- Combining diacritical marks (U+0300-U+036F) stripped from search queries at query time
+- Hebrew geresh (U+05F3) and gershayim (U+05F4) stripped from search queries
+- ASCII apostrophe and curly quote variants normalized in search
+- Mark-tolerant search highlighting (matches through interleaved combining marks in source text)
+- All existing search modes unaffected (normalization globally safe)
+- Regex mode exempt from normalization (users control their own patterns)
+
+### Test Suite
+
+- Fixed 17 pre-existing test failures (export filenames, boundary search, responsa integration, shelfmark normalization)
+- Deleted 3 obsolete backend test files (test_api_flow.py, test_corrections_api.py, test_corrections_integration.py)
+- Full green suite: 447 tests passing, 0 failures
+
+### PGP Transcription Sections
+
+- Structural HTML section parser for PGP transcriptions from pgp-text repository
+- Canvas-based parsing (h3 inside data-canvas divs) replaces fragile regex-only approach
+- New `sections` JSONB column on document_sources with `source_language` and `source_direction`
+- Recto/verso/margin sections correctly display alongside manuscript images in both apps
+- Language-based translation ordering (Hebrew first, English second) consistent across both apps
+- Import script: clones pgp-text repo, parses HTML, populates structured section data
 
 ## [5.7.0] - 2026-02-10
 
