@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 Phase: 19 of 20 (Search Normalization) -- COMPLETE
 Plan: 3 of 3 in current phase -- ALL DONE
 Status: Phase 19 complete (all 3 plans executed, UAT gap closed)
-Last activity: 2026-02-11 -- Completed 19-03 (Apostrophe Variant Normalization)
+Last activity: 2026-02-11 - Completed quick task 9: Fix tabular query builder checkboxes invisible in dark mode
 
 Progress: [█████░░░░░] 50%
 
@@ -60,6 +60,12 @@ Progress: [█████░░░░░] 50%
 ### Roadmap Evolution
 
 - Phase 21 added: Debug PGP integration
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 9 | Fix tabular query builder checkboxes invisible in dark mode | 2026-02-11 | 313a9db | [9-fix-tabular-query-builder-checkboxes-inv](./quick/9-fix-tabular-query-builder-checkboxes-inv/) |
 
 ### Future Improvements
 
