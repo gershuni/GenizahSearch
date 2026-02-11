@@ -39,7 +39,13 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(No active requirements -- next milestone not yet defined)
+#### Current Milestone: v5.7.1 Cleanup & Polish
+
+**Goal:** Remove dead code, fix diacritics normalization for JA search, and resolve all pre-existing test failures.
+
+- [ ] Remove AI Search component (desktop + web + help docs)
+- [ ] JA diacritics normalization (combining marks + geresh/apostrophes stripped, mark-tolerant highlighting)
+- [ ] Fix/delete all pre-existing test failures (export filenames, boundary search, obsolete backend tests)
 
 ### Out of Scope
 
@@ -129,4 +135,4 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
 
 ---
-*Last updated: 2026-02-10 after v5.7.0 milestone*
+*Last updated: 2026-02-11 after v5.7.1 milestone start*

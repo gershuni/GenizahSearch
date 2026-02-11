@@ -2,17 +2,17 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-10)
+See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone
+**Current focus:** v5.7.1 Cleanup & Polish
 
 ## Current Position
 
-Phase: None (between milestones)
-Plan: N/A
-Status: **v5.7.0 shipped. Ready for next milestone.**
-Last activity: 2026-02-10 - Completed v5.7.0 Responsa Search milestone
+Phase: Not started (defining requirements)
+Plan: --
+Status: Defining requirements
+Last activity: 2026-02-11 -- Milestone v5.7.1 started
 
 ## Milestone History
 
@@ -46,14 +46,12 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - Recto/verso section headers stripped during parsing (v1 tech debt, not blocking)
 - Phase 13 (Transcription Search) deferred -- needs server-side index architecture
-- 13 pre-existing test failures (boundary_search, export_service, shelfmark_normalization -- not regressions)
-- JA diacritic dots normalization -- todo captured, not yet addressed
 
 ### Future Improvements
 
 - **Show user's pending corrections in browse page**: indicator + corrected text display
-- **Remove AI search component**: obsoleted by Responsa mode
-- **JA diacritic dots normalization**: normalize dots above/below Hebrew letters in search
+- **Search WITH JA diacritical marks**: allow intentional searching for marked letters (deferred from v5.7.1)
+- **NLI joins import**: ~424K PartOf relationships
 
 ### Quick Tasks Completed
 
@@ -63,7 +61,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ## Session Continuity
 
-Last session: 2026-02-10
-Stopped at: v5.7.0 milestone archived
+Last session: 2026-02-11
+Stopped at: v5.7.1 milestone initialization
 Resume file: None
-Notes: v5.7.0 shipped. Next step: /gsd:new-milestone to define next milestone scope.
+Notes: v5.7.1 Cleanup & Polish milestone started. Defining requirements.
