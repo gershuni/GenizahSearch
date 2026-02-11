@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.7.1 Cleanup & Polish -- Phase 20 (Test Suite Green) -- COMPLETE
+**Current focus:** Debug PGP Integration -- Phase 21 (Plan 1 of 3 complete)
 
 ## Current Position
 
-Phase: 20 of 20 (Test Suite Green) -- COMPLETE
-Plan: 2 of 2 in current phase -- ALL DONE
-Status: Phase 20 complete (all 2 plans executed, full test suite green: 410 passed, 0 failures)
-Last activity: 2026-02-11 - Completed quick task 10: Fix desktop community tab corrections SupabaseCorrectionsClient error
+Phase: 21 (Debug PGP Integration)
+Plan: 1 of 3 in current phase -- COMPLETE
+Status: Plan 21-01 complete (HTML parser + regex fix, 28 new tests, 438 total passing)
+Last activity: 2026-02-11 - Completed 21-01-PLAN.md (HTML parser and regex fix)
 
-Progress: [██████████] 100%
+Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 
 ## Performance Metrics
 
@@ -42,6 +42,9 @@ Progress: [██████████] 100%
 
 ### Decisions
 
+- [21-01] Used explicit [Rr]ecto/[Vv]erso casing instead of re.IGNORECASE to avoid false positives on content lines
+- [21-01] Structured regex alternation for marker modifiers instead of broad catch-all pattern
+- [21-01] HTML entity &hellip; decodes to Unicode U+2026, not ASCII dots
 - [20-02] Responsa tests use behavioral .search() assertions instead of literal substring checks in pattern strings
 - [20-02] Manchester shelfmark test expects no-match (substring matching not supported in prefix-based matcher)
 - [20-02] Removed "12.123" number-only test case (requires "ts" prefix for matching)
@@ -82,6 +85,6 @@ Progress: [██████████] 100%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 20-02-PLAN.md (Fix remaining test failures - responsa + shelfmark)
+Stopped at: Completed 21-01-PLAN.md (HTML parser and regex fix)
 Resume file: None
-Notes: Phase 20 complete (2 plans, 4 tasks total). Full test suite green: 410 passed, 5 skipped, 0 failures. v5.7.1 milestone complete.
+Notes: Plan 21-01 complete (2 tasks, 4 TDD commits). 28 new tests, full suite 438 passed. Next: 21-02 (import script).
