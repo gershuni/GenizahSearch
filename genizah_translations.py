@@ -2292,4 +2292,19 @@ TRANSLATIONS = {
         "השאילתא חורגת ממגבלת {limit} מונחים מורחבים (כ-{count} מונחים). "
         "אנא פשט את השאילתא על ידי הפחתת חלופות בקבוצות OR או "
         "הסרת הסימן # (קידומות דקדוקיות) ממונחים מסוימים.",
+
+    # --- What's New notifications ---
+    "New Features!": "תכונות חדשות!",
+    "Responsa-style search: advanced search with operators and an intuitive tabular query builder":
+        "חיפוש בסגנון פרויקט השו\"ת: חיפוש מתקדם עם אופרטורים וחיפוש טבלאי אינטואיטיבי",
+    "Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents":
+        "שילוב מידע מפרויקט הגניזה של פרינסטון (PGP) - מידע, תעתיקים ותרגומים למעל 35,000 מסמכים",
+    "Got it!": "הבנתי!",
+    "New: Responsa-style Search & 35,000+ PGP Documents":
+        "חדש: חיפוש בסגנון פרויקט השו\"ת ו-35,000+ מסמכי PGP",
+    "Learn More": "למידע נוסף",
+
+    # --- Feature discovery hints ---
+    "Try the Responsa-style search mode!": "נסו את מצב חיפוש בסגנון השו\"ת!",
+    "Try the Tabular Search!": "נסו את החיפוש הטבלאי!",
 }

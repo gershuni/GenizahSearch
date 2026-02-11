@@ -394,12 +394,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.column().classes('gap-1'):
                         h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
+                        # Highlight Responsa option for feature discovery (one-time)
+                        _highlight_responsa = not app.storage.user.get('hint_responsa_seen')
+                        _responsa_label = ('✨ ' if _highlight_responsa else '') + tr('Responsa') + ' (R)'
+
                         if use_slider:
                             # Slider mode: single variants option, level controlled by slider
                             mode_options = {
                                 'exact': tr('Exact') + ' (=)',
                                 'variants': tr('Variants') + ' (?)',
-                                'responsa': tr('Responsa') + ' (R)',
+                                'responsa': _responsa_label,
                                 'fuzzy': tr('Fuzzy') + ' (~)',
                                 'Regex': tr('Regex') + ' (/)',
                                 'Shelfmark': tr('Shelfmark') + ' (#)',
@@ -413,7 +417,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'variants': tr('Variants Basic') + ' (?)',
                                 'variants_extended': tr('Variants Extended') + ' (??)',
                                 'variants_maximum': tr('Variants Maximum') + ' (???)',
-                                'responsa': tr('Responsa') + ' (R)',
+                                'responsa': _responsa_label,
                                 'fuzzy': tr('Fuzzy') + ' (~)',
                                 'Regex': tr('Regex') + ' (/)',
                                 'Shelfmark': tr('Shelfmark') + ' (#)',
@@ -425,6 +429,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             mode_options,
                             value=saved_mode
                         ).classes('w-48').props('outlined dense')
+
+                        # Feature discovery glow on mode selector (one-time)
+                        _show_hints = not app.storage.user.get('hint_responsa_seen')
+                        if _show_hints and saved_mode != 'responsa':
+                            mode_select.classes('feature-glow')
+                            mode_select.style('position: relative;')
+                            with mode_select:
+                                ui.label(tr('Try the Responsa-style search mode!')).classes('feature-hint')
 
                     # Track current preset level based on mode
                     def get_level_from_mode(mode):
@@ -519,6 +531,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     builder_btn = ui.button(tr('Tabular Search'), icon='grid_view',
                         on_click=lambda: open_query_builder()).classes('ml-auto').props('outline dense')
 
+                    # Feature discovery glow on tabular button (one-time)
+                    if not app.storage.user.get('hint_tabular_seen'):
+                        builder_btn.classes('feature-glow')
+                        builder_btn.style('position: relative;')
+                        with builder_btn:
+                            _tabular_hint = ui.label(tr('Try the Tabular Search!')).classes('feature-hint')
+
                 # Initially hide if mode is not responsa
                 responsa_sub_row.set_visibility(saved_mode == 'responsa')
 
@@ -598,6 +617,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Responsa sub-options: visible only in Responsa mode
                 responsa_sub_row.set_visibility(is_responsa)
+
+                # Dismiss mode selector glow when user selects Responsa
+                if is_responsa and not app.storage.user.get('hint_responsa_seen'):
+                    app.storage.user['hint_responsa_seen'] = True
+                    mode_select._classes = [c for c in mode_select._classes if c != 'feature-glow']
+                    mode_select.update()
 
                 # Save mode to storage (don't persist pgp_tags)
                 if not is_tags:
@@ -1145,6 +1170,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def open_query_builder():
         """Open the tabular query builder dialog for composing Responsa queries visually."""
+        # Dismiss tabular button glow on first use
+        if not app.storage.user.get('hint_tabular_seen'):
+            app.storage.user['hint_tabular_seen'] = True
+            builder_btn._classes = [c for c in builder_btn._classes if c != 'feature-glow']
+            builder_btn.update()
 
         # === Builder State ===
         _updating_modifiers = {'flag': False}  # Guard to prevent on_change loops when updating checkboxes

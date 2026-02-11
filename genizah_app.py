@@ -285,6 +285,102 @@ class UpdateNotificationBar(QFrame):
         self.dismissed.emit(self.version_tag)
 
 
+class WhatsNewBar(QFrame):
+    """A notification bar showing new features after a version update."""
+
+    dismissed = pyqtSignal()
+    learn_more = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #d1fae5; color: #065f46; border-bottom: 1px solid #a7f3d0;")
+        self.setFixedHeight(40)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+
+        self.lbl_msg = QLabel()
+        self.lbl_msg.setStyleSheet("font-weight: bold; font-size: 13px; border: none; background: transparent;")
+
+        self.btn_learn_more = QPushButton(tr("Learn More"))
+        self.btn_learn_more.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 4px 8px;")
+        self.btn_learn_more.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_learn_more.clicked.connect(self.on_learn_more)
+
+        self.btn_dismiss = QPushButton("\u2715")
+        self.btn_dismiss.setToolTip(tr("Dismiss"))
+        self.btn_dismiss.setStyleSheet("""
+            QPushButton { background: transparent; color: #065f46; font-weight: bold; border: none; font-size: 16px; }
+            QPushButton:hover { color: #dc3545; }
+        """)
+        self.btn_dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dismiss.clicked.connect(self.on_dismiss)
+
+        layout.addWidget(self.lbl_msg)
+        layout.addStretch()
+        layout.addWidget(self.btn_learn_more)
+        layout.addSpacing(10)
+        layout.addWidget(self.btn_dismiss)
+
+        self.hide()
+
+    def show_whats_new(self, version: str):
+        self.lbl_msg.setText(tr("New: Responsa-style Search & 35,000+ PGP Documents"))
+        self.show()
+
+    def on_learn_more(self):
+        self.learn_more.emit()
+
+    def on_dismiss(self):
+        self.hide()
+        self.dismissed.emit()
+
+
+class WhatsNewDialog(QDialog):
+    """Dialog showing detailed What's New information."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("New Features!"))
+        self.setModal(True)
+        self.setFixedSize(500, 300)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        title = QLabel(tr("New Features!"))
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #065f46;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        features_html = (
+            "<ul style='font-size: 14px; line-height: 1.8;'>"
+            f"<li><b>{tr('Responsa-style search: advanced search with operators and an intuitive tabular query builder')}</b></li>"
+            f"<li><b>{tr('Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents')}</b></li>"
+            "</ul>"
+        )
+        features_label = QLabel(features_html)
+        features_label.setWordWrap(True)
+        features_label.setTextFormat(Qt.TextFormat.RichText)
+        features_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(features_label)
+
+        layout.addStretch()
+
+        btn_ok = QPushButton(tr("Got it!"))
+        btn_ok.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 8px 24px; font-size: 14px;")
+        btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ok.clicked.connect(self.accept)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_ok)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+
 class UpdateProgressDialog(QDialog):
     """Shows download progress and handles update installation."""
 
@@ -5043,6 +5139,11 @@ class GenizahGUI(QMainWindow):
             # Automatic Update Check
             self.check_updates_auto()
 
+            # Show What's New bar if version is new
+            cfg = load_app_config()
+            if cfg.get('whats_new_seen') != APP_VERSION:
+                self.whats_new_bar.show_whats_new(APP_VERSION)
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
 
@@ -5212,6 +5313,12 @@ class GenizahGUI(QMainWindow):
         self.update_bar.dismissed.connect(self.on_update_dismissed)
         self.update_bar.update_requested.connect(self.start_in_app_update)
         main_layout.addWidget(self.update_bar)
+
+        # What's New Bar (Hidden by default)
+        self.whats_new_bar = WhatsNewBar()
+        self.whats_new_bar.dismissed.connect(self.on_whats_new_dismissed)
+        self.whats_new_bar.learn_more.connect(self.show_whats_new_dialog)
+        main_layout.addWidget(self.whats_new_bar)
 
         main_layout.addWidget(self.tabs)
         self.setCentralWidget(central_widget)
@@ -6630,6 +6737,22 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
         self.MODE_RESPONSA = 2  # Index of Responsa mode
         self.MODE_PGP_TAGS = 7  # Index of PGP Tags mode (shifted by Responsa insertion)
+
+        # Feature discovery glow on mode combo (one-time hint)
+        self._mode_glow_active = False
+        cfg = load_app_config()
+        if not cfg.get('hint_responsa_seen'):
+            self._mode_glow_active = True
+            self._mode_glow_on = True
+            self.mode_combo.setToolTip(tr("Try the Responsa-style search mode!"))
+            self._mode_glow_timer = QTimer(self)
+            self._mode_glow_timer.timeout.connect(self._pulse_mode_glow)
+            self._mode_glow_timer.start(800)
+            self._pulse_mode_glow()
+            # Highlight the Responsa item inside the dropdown
+            from PyQt6.QtGui import QColor
+            self.mode_combo.model().item(self.MODE_RESPONSA).setBackground(QColor("#d1fae5"))
+            self.mode_combo.setItemText(self.MODE_RESPONSA, "\u2728 " + tr("Responsa (R)"))
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
@@ -6833,6 +6956,17 @@ class GenizahGUI(QMainWindow):
         self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         self.btn_query_builder.clicked.connect(self._open_query_builder)
         responsa_sub_layout.addWidget(self.btn_query_builder)
+
+        # Feature discovery glow on tabular button (one-time hint)
+        self._tabular_glow_active = False
+        if not cfg.get('hint_tabular_seen'):
+            self._tabular_glow_active = True
+            self._tabular_glow_on = True
+            self.btn_query_builder.setToolTip(tr("Try the Tabular Search!"))
+            self._tabular_glow_timer = QTimer(self)
+            self._tabular_glow_timer.timeout.connect(self._pulse_tabular_glow)
+            self._tabular_glow_timer.start(800)
+            self._pulse_tabular_glow()
 
         responsa_sub_layout.addStretch()
 
@@ -12831,11 +12965,52 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'responsa_sub_row'):
             self.responsa_sub_row.setVisible(is_responsa)
 
+        # Dismiss mode combo glow when user selects Responsa
+        if is_responsa and self._mode_glow_active:
+            self._stop_mode_glow()
+            save_app_config({'hint_responsa_seen': True})
+
         # PGP Tags mode: hide row1, show tag combo, hide search params
         if hasattr(self, 'tag_search_combo'):
             self.search_row1_container.setVisible(not is_pgp_tags)
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.search_params_container.setVisible(not is_pgp_tags)
+
+    def _pulse_mode_glow(self):
+        """Toggle glow border on mode combo for feature discovery."""
+        if self._mode_glow_on:
+            self.mode_combo.setStyleSheet("QComboBox { border: 2px solid #10b981; border-radius: 4px; }")
+        else:
+            self.mode_combo.setStyleSheet("")
+        self._mode_glow_on = not self._mode_glow_on
+
+    def _stop_mode_glow(self):
+        """Remove mode combo glow and item highlight."""
+        self._mode_glow_active = False
+        if hasattr(self, '_mode_glow_timer'):
+            self._mode_glow_timer.stop()
+        self.mode_combo.setStyleSheet("")
+        self.mode_combo.setToolTip(tr("Responsa-style grammatical expansion for Hebrew search"))
+        # Clear the green background and sparkle from the Responsa item
+        from PyQt6.QtGui import QBrush
+        self.mode_combo.model().item(self.MODE_RESPONSA).setBackground(QBrush())
+        self.mode_combo.setItemText(self.MODE_RESPONSA, tr("Responsa (R)"))
+
+    def _pulse_tabular_glow(self):
+        """Toggle glow border on tabular button for feature discovery."""
+        if self._tabular_glow_on:
+            self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px; border: 2px solid #10b981; border-radius: 4px;")
+        else:
+            self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        self._tabular_glow_on = not self._tabular_glow_on
+
+    def _stop_tabular_glow(self):
+        """Remove tabular button glow."""
+        self._tabular_glow_active = False
+        if hasattr(self, '_tabular_glow_timer'):
+            self._tabular_glow_timer.stop()
+        self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        self.btn_query_builder.setToolTip(tr("Open the tabular query builder"))
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -13159,6 +13334,10 @@ class GenizahGUI(QMainWindow):
 
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
+        # Dismiss tabular button glow on first use
+        if self._tabular_glow_active:
+            self._stop_tabular_glow()
+            save_app_config({'hint_tabular_seen': True})
         dlg = TabularQueryBuilderDialog(self)
         # Sync search options into dialog from outer checkboxes
         dlg.chk_opt_variants.setChecked(self.chk_responsa_variants.isChecked())
@@ -17902,6 +18081,17 @@ class GenizahGUI(QMainWindow):
     def on_update_dismissed(self, version):
         """Save dismissed version to config."""
         save_app_config({'last_dismissed_version': version})
+
+    def on_whats_new_dismissed(self):
+        """Save that user has seen What's New for this version."""
+        save_app_config({'whats_new_seen': APP_VERSION})
+
+    def show_whats_new_dialog(self):
+        """Show detailed What's New dialog."""
+        dlg = WhatsNewDialog(self)
+        dlg.exec()
+        self.on_whats_new_dismissed()
+        self.whats_new_bar.hide()
 
     def start_in_app_update(self, version: str, html_url: str, installer_url: str):
         """Start the in-app update process with progress dialog."""

@@ -30,6 +30,7 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 APP_VERSION = "5.7"
+WHATS_NEW_VERSION = "5.7"  # Bump when adding new "What's New" content
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1374,6 +1375,54 @@ COMMON_STYLES = '''
         0% { transform: translateX(-10%); opacity: 1; }
         100% { transform: translateX(0%); opacity: 0; }
     }
+
+    /* ========================================================================
+       Feature Discovery Glow
+       ======================================================================== */
+
+    @keyframes feature-glow {
+        0%, 100% { box-shadow: 0 0 4px 1px rgba(16, 185, 129, 0.3); }
+        50% { box-shadow: 0 0 12px 4px rgba(16, 185, 129, 0.6); }
+    }
+
+    .feature-glow {
+        animation: feature-glow 2s ease-in-out infinite;
+        border-radius: 8px;
+    }
+
+    .feature-hint {
+        position: absolute;
+        top: -28px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        background: #065f46;
+        color: white;
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 6px;
+        pointer-events: none;
+        animation: feature-hint-fade 4s ease-in-out forwards;
+        z-index: 100;
+    }
+
+    .feature-hint::after {
+        content: '';
+        position: absolute;
+        bottom: -5px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 5px solid #065f46;
+    }
+
+    @keyframes feature-hint-fade {
+        0% { opacity: 0; transform: translateX(-50%) translateY(4px); }
+        10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        80% { opacity: 1; }
+        100% { opacity: 0; }
+    }
 </style>
 '''
 
@@ -1593,6 +1642,29 @@ def create_layout():
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
     # Add ID for skip link target
     content_col.props('id=main-content')
+
+    # === "What's New" Banner (dismissible, shown once per version) ===
+    if app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
+        banner_dir = 'rtl' if rtl_mode else 'ltr'
+        with content_col:
+            with ui.card().classes('w-full mx-auto max-w-5xl p-4 border-l-4 mt-4').style(
+                f'background: var(--bg-tertiary); border-left-color: #10b981; direction: {banner_dir};'
+            ) as whats_new_banner:
+                with ui.row().classes('w-full items-start gap-4'):
+                    ui.icon('new_releases').classes('text-2xl mt-1').style('color: #10b981;')
+                    with ui.column().classes('flex-1 gap-2'):
+                        ui.label(tr("New Features!")).classes('text-base font-bold').style('color: var(--text-primary);')
+                        with ui.column().classes('gap-1'):
+                            with ui.row().classes('items-start gap-2'):
+                                ui.label('•').style('color: var(--text-secondary);')
+                                ui.label(tr('Responsa-style search: advanced search with operators and an intuitive tabular query builder')).classes('text-sm').style('color: var(--text-secondary);')
+                            with ui.row().classes('items-start gap-2'):
+                                ui.label('•').style('color: var(--text-secondary);')
+                                ui.label(tr('Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents')).classes('text-sm').style('color: var(--text-secondary);')
+                    def dismiss_whats_new():
+                        app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
+                        whats_new_banner.delete()
+                    ui.button(tr('Got it!'), icon='check', on_click=dismiss_whats_new).props('flat dense')
 
     def toggle_drawer():
         """Toggle drawer and save state."""
@@ -1885,6 +1957,13 @@ def lists_page_route():
     with content:
         from web.pages.lists import create_lists_page
         create_lists_page()
+
+@ui.page('/reset-hints')
+def reset_hints_route():
+    """Hidden utility route to reset all feature discovery hints."""
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
+        app.storage.user.pop(key, None)
+    ui.navigate.to('/')
 
 @ui.page('/settings')
 def settings_page_route():
