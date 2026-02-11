@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 Phase: 20 of 20 (Test Suite Green) -- COMPLETE
 Plan: 2 of 2 in current phase -- ALL DONE
 Status: Phase 20 complete (all 2 plans executed, full test suite green: 410 passed, 0 failures)
-Last activity: 2026-02-11 - Completed 20-02: Fix remaining test failures (responsa + shelfmark)
+Last activity: 2026-02-11 - Completed quick task 10: Fix desktop community tab corrections SupabaseCorrectionsClient error
 
 Progress: [██████████] 100%
 
@@ -71,6 +71,7 @@ Progress: [██████████] 100%
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 9 | Fix tabular query builder checkboxes invisible in dark mode | 2026-02-11 | 313a9db | [9-fix-tabular-query-builder-checkboxes-inv](./quick/9-fix-tabular-query-builder-checkboxes-inv/) |
+| 10 | Fix desktop community tab corrections SupabaseCorrectionsClient error | 2026-02-11 | 9ef0ac7 | [10-fix-desktop-community-tab-corrections-su](./quick/10-fix-desktop-community-tab-corrections-su/) |
 
 ### Future Improvements
 
