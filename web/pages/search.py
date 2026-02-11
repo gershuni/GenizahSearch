@@ -1505,7 +1505,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Component card
                     with ui.card().classes('p-3').style(
-                        'border: 1px solid #e0e0e0; border-radius: 8px; min-width: 150px; flex: 1;'
+                        'border: 1px solid var(--border-light); border-radius: 8px; min-width: 150px; flex: 1;'
                     ) as comp_card:
                         with ui.row().classes('w-full items-center justify-between mb-1'):
                             ui.label(f"{tr('Component')} {ci+1}").classes('text-sm font-medium')
