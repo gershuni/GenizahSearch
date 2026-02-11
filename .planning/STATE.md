@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 
 Phase: 21 (Debug PGP Integration) -- COMPLETE
 Plan: 4 of 4 in current phase -- COMPLETE
-Status: Phase 21 fully complete (HTML parser, import script, display pipeline, translation ordering fix)
-Last activity: 2026-02-11 - Completed plan 21-04: Desktop translation ordering fix (gap closure)
+Status: Phase 21 fully complete + sections import bug fixed (verified by user)
+Last activity: 2026-02-11 - Fixed cross-source section contamination in import + validation guard
 
 Progress: [██████████] 100% (plan 4 of 4 in phase 21)
 
@@ -42,6 +42,7 @@ Progress: [██████████] 100% (plan 4 of 4 in phase 21)
 
 ### Decisions
 
+- [21-04] Sections import was broadcasting one HTML file's text to ALL sources per PGPID -- fixed with author_slug matching + content validation guard
 - [21-04] Adopted web app language grouping pattern (version_selector.py:256-264) for desktop _populate_pgp_combo consistency
 - [21-03] Renamed local variable 'sections' to 'parsed' in regex fallback path to avoid shadowing new parameter
 - [21-03] Empty list sections=[] treated same as None (falsy) for regex fallback
@@ -89,6 +90,6 @@ Progress: [██████████] 100% (plan 4 of 4 in phase 21)
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 21-04-PLAN.md (Phase 21 fully complete with gap closure)
+Stopped at: Phase 21 complete, verified by user
 Resume file: None
-Notes: Phase 21 fully complete. All 4 plans done: HTML parser (01), import script (02), display pipeline (03), translation ordering fix (04). Desktop and web apps now have consistent Hebrew-first, English-second translation ordering.
+Notes: Phase 21 fully complete. All 4 plans + post-UAT sections import fix. Root cause was import_pgp_sections.py broadcasting sections to all sources; fixed with per-source matching + validation guard in get_section_for_page. 8,904 records reimported. 447 tests passing.
