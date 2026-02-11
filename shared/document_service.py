@@ -14,6 +14,8 @@ rather than raising exceptions.
 
 import re
 import json
+from html.parser import HTMLParser
+from html import unescape
 from typing import Optional, List, Dict, Any, Set
 from shared.supabase_provider import get_client
 
@@ -526,3 +528,169 @@ def get_all_distinct_tags() -> List[str]:
     except Exception as e:
         print(f"Error getting distinct tags: {e}")
         return []
+
+
+class PGPHTMLParser(HTMLParser):
+    """Parse PGP HTML into structured per-canvas sections.
+
+    Handles the pgp-text HTML structure where h3 elements are INSIDE
+    data-canvas divs, with multiple h3+ol sub-sections possible per canvas.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.sections = []          # Final list of canvas sections
+        self.language = None
+        self.direction = None
+
+        self._in_canvas_div = False
+        self._current_canvas_url = None
+        self._current_canvas_num = None
+        self._current_subsections = []  # [{label, lines}]
+        self._current_label = None
+        self._current_lines = []
+
+        self._in_h3 = False
+        self._h3_text = ''
+        self._in_li = False
+        self._in_p_inside_canvas = False
+        self._li_text = ''
+        self._p_text = ''
+        self._canvas_count = 0
+        self._div_depth = 0         # Track nested div depth inside canvas
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+
+        if tag == 'section':
+            self.language = attrs_dict.get('lang')
+            self.direction = attrs_dict.get('dir')
+
+        elif tag == 'div' and 'data-canvas' in attrs_dict:
+            self._canvas_count += 1
+            self._in_canvas_div = True
+            self._div_depth = 1
+            self._current_canvas_url = attrs_dict['data-canvas']
+            # Try to extract numeric canvas ID from URL
+            m = re.search(r'/canvas/(\d+)/?$', self._current_canvas_url)
+            self._current_canvas_num = int(m.group(1)) if m else self._canvas_count
+            self._current_subsections = []
+            self._current_label = None
+            self._current_lines = []
+
+        elif tag == 'div' and self._in_canvas_div:
+            self._div_depth += 1
+
+        elif tag == 'h3' and self._in_canvas_div:
+            self._in_h3 = True
+            self._h3_text = ''
+
+        elif tag == 'li' and self._in_canvas_div:
+            self._in_li = True
+            self._li_text = ''
+
+        elif tag == 'p' and self._in_canvas_div and not self._in_li:
+            # Standalone <p> in canvas div (not <li><p>)
+            self._in_p_inside_canvas = True
+            self._p_text = ''
+
+    def handle_data(self, data):
+        if self._in_h3:
+            self._h3_text += data
+        elif self._in_li:
+            self._li_text += data
+        elif self._in_p_inside_canvas:
+            self._p_text += data
+
+    def handle_endtag(self, tag):
+        if tag == 'h3' and self._in_h3:
+            self._in_h3 = False
+            # Save any accumulated lines under the previous label
+            if self._current_lines:
+                self._current_subsections.append({
+                    'label': self._current_label,
+                    'lines': self._current_lines[:]
+                })
+                self._current_lines = []
+            self._current_label = unescape(self._h3_text.strip())
+
+        elif tag == 'li' and self._in_li:
+            self._in_li = False
+            text = unescape(self._li_text.strip())
+            if text:
+                self._current_lines.append(text)
+
+        elif tag == 'p' and self._in_p_inside_canvas:
+            self._in_p_inside_canvas = False
+            text = unescape(self._p_text.strip())
+            if text and text != '...':
+                self._current_lines.append(text)
+
+        elif tag == 'div' and self._in_canvas_div:
+            self._div_depth -= 1
+            if self._div_depth <= 0:
+                # Closing the canvas div -- finalize
+                if self._current_lines:
+                    self._current_subsections.append({
+                        'label': self._current_label,
+                        'lines': self._current_lines[:]
+                    })
+
+                # Build merged text from all sub-sections
+                all_text_parts = []
+                for sub in self._current_subsections:
+                    if sub['label'] and len(self._current_subsections) > 1:
+                        all_text_parts.append(f"[{sub['label']}]")
+                    all_text_parts.extend(sub['lines'])
+
+                self.sections.append({
+                    'canvas_url': self._current_canvas_url,
+                    'canvas_num': self._current_canvas_num,
+                    'label': self._current_subsections[0]['label'] if self._current_subsections else None,
+                    'text': '\n'.join(all_text_parts),
+                    'subsections': self._current_subsections if len(self._current_subsections) > 1 else None,
+                })
+
+                self._in_canvas_div = False
+                self._current_canvas_url = None
+                self._current_canvas_num = None
+                self._current_subsections = []
+                self._current_label = None
+                self._current_lines = []
+
+    def handle_entityref(self, name):
+        self.handle_data(unescape(f'&{name};'))
+
+    def handle_charref(self, name):
+        self.handle_data(unescape(f'&#{name};'))
+
+
+def parse_html_sections(html_content: str) -> dict:
+    """
+    Parse PGP HTML into structured per-canvas sections.
+
+    Parses pgp-text HTML files that use <div data-canvas="..."> elements
+    to map transcription sections to IIIF canvas URLs. Handles h3 elements
+    INSIDE data-canvas divs, multiple sub-sections per canvas, and both
+    ol/li and standalone p text containers.
+
+    Args:
+        html_content: Raw HTML string from a pgp-text file
+
+    Returns:
+        Dict with:
+        - sections: list of {canvas_url, canvas_num, label, text, subsections}
+        - language: language code from section element (e.g. 'jrb', 'he', 'en')
+        - direction: text direction from section element ('rtl' or 'ltr')
+    """
+    if not html_content:
+        return {'sections': [], 'language': None, 'direction': None}
+
+    parser = PGPHTMLParser()
+    parser.feed(html_content)
+
+    return {
+        'sections': parser.sections,
+        'language': parser.language,
+        'direction': parser.direction,
+    }

@@ -292,5 +292,7 @@ class TestParseHtmlSections:
 </section>
 </body></html>"""
         result = parse_html_sections(html)
-        assert 'text & more > less' in result['sections'][0]['text']
-        assert '...' in result['sections'][0]['text']
+        text = result['sections'][0]['text']
+        assert 'text & more > less' in text
+        # &hellip; decodes to Unicode horizontal ellipsis character
+        assert '\u2026' in text
