@@ -65,7 +65,7 @@ structural HTML section parser for PGP transcriptions.
 **Milestone Goal:** Let users see their own pending (unapproved) corrections as a selectable version in the version selector while browsing manuscripts, in both web and desktop apps.
 
 - [x] **Phase 22: Pending Corrections Data Layer** - Shared service to fetch user's own pending corrections per page (completed 2026-02-11)
-- [ ] **Phase 23: Web Pending Corrections Display** - Web version selector shows pending corrections with visual distinction
+- [x] **Phase 23: Web Pending Corrections Display** - Web version selector shows pending corrections with visual distinction (completed 2026-02-11)
 - [ ] **Phase 24: Desktop Pending Corrections Display** - Desktop version selector shows pending corrections with visual distinction
 
 ## Phase Details
@@ -97,7 +97,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 23-01-PLAN.md -- Add pending corrections to web version selector with visual distinction + tests
+- [x] 23-01-PLAN.md -- Add pending corrections to web version selector with visual distinction + tests
 
 ### Phase 24: Desktop Pending Corrections Display
 **Goal**: Logged-in users see their own pending corrections as a selectable, visually distinct version in the desktop app's version selector
@@ -125,9 +125,9 @@ Phases execute in numeric order: 22 -> 23 -> 24
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22. Data Layer | v5.7.3 | 1/1 | Complete | 2026-02-11 |
-| 23. Web Display | v5.7.3 | 0/TBD | Not started | - |
+| 23. Web Display | v5.7.3 | 1/1 | Complete | 2026-02-11 |
 | 24. Desktop Display | v5.7.3 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 22 execution complete*
+*Last updated: 2026-02-11 after Phase 23 execution complete*
