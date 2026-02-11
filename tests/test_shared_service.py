@@ -421,3 +421,96 @@ class TestParseTranscriptionSections:
         assert 'Rectory' in recto_combined
         # There should only be one recto entry (the full text, no split)
         assert len(result['recto']) == 1
+
+
+class TestStructuredSectionsIntegration:
+    """Integration tests for structured sections display path (canvas-based lookup)."""
+
+    SECTIONS = [
+        {"canvas_url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS/canvas/1",
+         "canvas_num": 1, "label": None, "text": "structured recto line 1\nstructured recto line 2"},
+        {"canvas_url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS/canvas/2",
+         "canvas_num": 2, "label": "Verso.", "text": "structured verso line 1\nstructured verso line 2"},
+    ]
+
+    TRANSCRIPTION = "Recto\nregex recto text\nVerso\nregex verso text"
+
+    def test_structured_sections_canvas_lookup(self):
+        """Structured sections use canvas_num matching for page lookup."""
+        from shared.document_service import get_section_for_page
+        result1 = get_section_for_page(self.TRANSCRIPTION, 1, self.SECTIONS)
+        assert result1 == "structured recto line 1\nstructured recto line 2"
+        result2 = get_section_for_page(self.TRANSCRIPTION, 2, self.SECTIONS)
+        assert result2 == "structured verso line 1\nstructured verso line 2"
+
+    def test_structured_sections_override_regex(self):
+        """Structured sections take priority over regex-parsed text."""
+        from shared.document_service import get_section_for_page
+        # The transcription has recto/verso markers that regex would parse,
+        # but structured sections should be used instead
+        result = get_section_for_page(self.TRANSCRIPTION, 1, self.SECTIONS)
+        assert 'structured recto' in result
+        assert 'regex recto' not in result
+
+    def test_structured_sections_none_falls_back(self):
+        """sections=None falls back to regex parsing."""
+        from shared.document_service import get_section_for_page
+        text = "Recto\nrecto content here\nVerso.\nverso content here"
+        page1 = get_section_for_page(text, 1, None)
+        page2 = get_section_for_page(text, 2, None)
+        assert 'recto content here' in page1
+        assert 'verso content here' in page2
+
+    def test_structured_sections_empty_list_falls_back(self):
+        """sections=[] (empty list) falls back to regex parsing."""
+        from shared.document_service import get_section_for_page
+        text = "Recto\nrecto content here\nVerso.\nverso content here"
+        page1 = get_section_for_page(text, 1, [])
+        page2 = get_section_for_page(text, 2, [])
+        assert 'recto content here' in page1
+        assert 'verso content here' in page2
+
+    def test_structured_sections_page_beyond_range(self):
+        """Page beyond available canvases returns full transcription."""
+        from shared.document_service import get_section_for_page
+        result = get_section_for_page(self.TRANSCRIPTION, 3, self.SECTIONS)
+        assert result == self.TRANSCRIPTION
+
+    def test_structured_sections_multi_canvas(self):
+        """Three-canvas document returns correct margin text for page 3."""
+        from shared.document_service import get_section_for_page
+        sections_3 = self.SECTIONS + [
+            {"canvas_url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS/canvas/3",
+             "canvas_num": 3, "label": "Margin", "text": "margin notes here"},
+        ]
+        result = get_section_for_page(self.TRANSCRIPTION, 3, sections_3)
+        assert result == "margin notes here"
+
+    def test_source_dict_flow(self):
+        """Simulate full consumer flow: source dict with and without sections key."""
+        from shared.document_service import get_section_for_page
+
+        # Source WITH sections (structured path)
+        source_with = {
+            'content': self.TRANSCRIPTION,
+            'sections': self.SECTIONS,
+        }
+        result = get_section_for_page(source_with['content'], 1, source_with.get('sections'))
+        assert 'structured recto' in result
+
+        # Source WITHOUT sections key (regex fallback)
+        source_without = {
+            'content': "Recto\nfallback recto\nVerso\nfallback verso",
+        }
+        result = get_section_for_page(source_without['content'], 1, source_without.get('sections'))
+        assert 'fallback recto' in result
+
+    def test_backward_compatibility(self):
+        """Calling without sections argument preserves existing behavior."""
+        from shared.document_service import get_section_for_page
+        text = "Recto\nrecto text here\nVerso\nverso text here"
+        # Call without the third argument at all
+        page1 = get_section_for_page(text, 1)
+        page2 = get_section_for_page(text, 2)
+        assert 'recto text here' in page1
+        assert 'verso text here' in page2
